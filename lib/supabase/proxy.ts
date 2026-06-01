@@ -6,17 +6,37 @@ import {
   profileRoleToAppRole,
 } from '@/lib/roles'
 
+function missingSupabaseEnvResponse() {
+  return new NextResponse(
+    [
+      'Supabase environment variables are not configured.',
+      'Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY',
+      'in Vercel → Project → Settings → Environment Variables, then redeploy.',
+    ].join(' '),
+    {
+      status: 503,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    },
+  )
+}
+
 export async function updateSession(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error(
+      '[middleware] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY',
+    )
+    return missingSupabaseEnvResponse()
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
 
-  // With Fluid compute, don't put this client in a global environment
-  // variable. Always create a new one on each request.
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
+  try {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll()
@@ -33,92 +53,80 @@ export async function updateSession(request: NextRequest) {
           )
         },
       },
-    },
-  )
+    })
 
-  // Do not run code between createServerClient and
+    // Do not run code between createServerClient and
   // supabase.auth.getUser(). A simple mistake could make it very hard to debug
   // issues with users being randomly logged out.
 
   // IMPORTANT: If you remove getUser() and you use server-side rendering
   // with the Supabase client, your users may be randomly logged out.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
-  if (
-    // if the user is not logged in and the dashboard is accessed, redirect to the login page
-    request.nextUrl.pathname.startsWith('/dashboard') &&
-    !user
-  ) {
-    // no user, redirect to the login page
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth/login'
-    return NextResponse.redirect(url)
-  }
+    if (
+      request.nextUrl.pathname.startsWith('/dashboard') &&
+      !user
+    ) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/auth/login'
+      return NextResponse.redirect(url)
+    }
 
-  if (
-    request.nextUrl.pathname === '/auth/set-password' &&
-    !user
-  ) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth/login'
-    return NextResponse.redirect(url)
-  }
+    if (
+      request.nextUrl.pathname === '/auth/set-password' &&
+      !user
+    ) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/auth/login'
+      return NextResponse.redirect(url)
+    }
 
-  if (
-    request.nextUrl.pathname.startsWith('/auth/login') &&
-    user
-  ) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    const role = profileRoleToAppRole(profile?.role ?? 'member')
-    const url = request.nextUrl.clone()
-    url.pathname = getDefaultDashboardPath(role)
-    return NextResponse.redirect(url)
-  }
-
-  if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    let role = profileRoleToAppRole(profile?.role ?? null)
-
-    if (!profile?.role) {
-      const { data: legacy } = await supabase
-        .from('users')
+    if (
+      request.nextUrl.pathname.startsWith('/auth/login') &&
+      user
+    ) {
+      const { data: profile } = await supabase
+        .from('profiles')
         .select('role')
         .eq('id', user.id)
         .maybeSingle()
-      role = profileRoleToAppRole(legacy?.role ?? 'member')
-    }
 
-    if (!canAccessPath(role, request.nextUrl.pathname)) {
+      const role = profileRoleToAppRole(profile?.role ?? 'member')
       const url = request.nextUrl.clone()
-      url.pathname = role === 'member' || role === 'guardian' ? '/unauthorized' : '/unauthorized'
+      url.pathname = getDefaultDashboardPath(role)
       return NextResponse.redirect(url)
     }
+
+    if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      let role = profileRoleToAppRole(profile?.role ?? null)
+
+      if (!profile?.role) {
+        const { data: legacy } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle()
+        role = profileRoleToAppRole(legacy?.role ?? 'member')
+      }
+
+      if (!canAccessPath(role, request.nextUrl.pathname)) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/unauthorized'
+        return NextResponse.redirect(url)
+      }
+    }
+
+    return supabaseResponse
+  } catch (error) {
+    console.error('[middleware] updateSession failed:', error)
+    return supabaseResponse
   }
-
-  // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // If you're creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
-
-  return supabaseResponse
 }
