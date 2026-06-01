@@ -1,0 +1,41 @@
+import { getMembers } from '@/lib/actions/members'
+import { getInstructors } from '@/lib/actions/instructors'
+import Link from 'next/link'
+import { UserPlus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { MemberList } from './member-list'
+
+export default async function MembersPage() {
+  const [{ data: members }, instructors] = await Promise.all([
+    getMembers({ orderBy: 'created_at', orderAsc: false }),
+    getInstructors({ isActive: true }),
+  ])
+
+  return (
+    <div className="space-y-6 pt-12 lg:pt-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl lg:text-3xl font-bold">회원 관리</h1>
+          <p className="text-muted-foreground mt-1">
+            센터 회원을 등록하고 관리합니다.
+          </p>
+        </div>
+        <Button asChild size="lg">
+          <Link href="/dashboard/members/new">
+            <UserPlus className="mr-2 h-5 w-5" />
+            회원 추가
+          </Link>
+        </Button>
+      </div>
+      
+      <MemberList 
+        initialMembers={members} 
+        instructors={instructors.map(({ id, name, calendar_color }) => ({
+          id,
+          name,
+          calendar_color,
+        }))}
+      />
+    </div>
+  )
+}

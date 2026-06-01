@@ -1,0 +1,273 @@
+import type { Member } from '@/lib/types'
+import { INSTRUCTOR_CALENDAR_COLORS } from '@/lib/instructor-colors'
+
+export const MEMBER_SPORT_OPTIONS = [
+  '야구',
+  '축구',
+  '농구',
+  '테니스',
+  '골프',
+  '수영',
+  '헬스',
+] as const
+
+export const SPORT_OTHER = '기타'
+export const AUTO_INSTRUCTOR_ID = 'auto'
+
+export function parseMemberSport(sport?: string | null): {
+  preset: string
+  other: string
+} {
+  if (!sport) return { preset: '', other: '' }
+  if (sport === SPORT_OTHER) return { preset: SPORT_OTHER, other: '' }
+  if ((MEMBER_SPORT_OPTIONS as readonly string[]).includes(sport)) {
+    return { preset: sport, other: '' }
+  }
+  return { preset: SPORT_OTHER, other: sport }
+}
+
+export function resolveMemberSport(preset: string, other: string): string {
+  if (!preset) return ''
+  if (preset === SPORT_OTHER) return other.trim() || SPORT_OTHER
+  return preset
+}
+
+export function normalizePrimaryInstructorId(value?: string | null): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed || trimmed === AUTO_INSTRUCTOR_ID) return null
+  return trimmed
+}
+
+export function formatPrimaryInstructorName(
+  instructor?: { name: string } | null,
+): string {
+  return instructor?.name ?? '자율배정'
+}
+
+const TWO_DIGIT_YEAR_PIVOT = 30
+
+/** 2자리 연도 → 4자리 (00-30→2000년대, 31-99→1900년대) */
+export function expandTwoDigitYear(twoDigitYear: number): number {
+  if (twoDigitYear <= TWO_DIGIT_YEAR_PIVOT) return 2000 + twoDigitYear
+  return 1900 + twoDigitYear
+}
+
+/** 4자리 연도 → 2자리 문자열 */
+export function toTwoDigitYear(fullYear: number): string {
+  return String(fullYear % 100).padStart(2, '0')
+}
+
+export function parseBirthDateParts(birthDate?: string | null): {
+  year: string
+  month: string
+  day: string
+} {
+  if (!birthDate) return { year: '', month: '', day: '' }
+  const [y, m, d] = birthDate.split('-')
+  if (!y || !m || !d) return { year: '', month: '', day: '' }
+  const fullYear = parseInt(y, 10)
+  if (Number.isNaN(fullYear)) return { year: '', month: '', day: '' }
+  return {
+    year: toTwoDigitYear(fullYear),
+    month: m.padStart(2, '0'),
+    day: d.padStart(2, '0'),
+  }
+}
+
+/** 년(2자리)·월·일 → YYYY-MM-DD (유효하지 않으면 빈 문자열) */
+export function buildBirthDateFromParts(
+  year: string,
+  month: string,
+  day: string,
+): string {
+  const yy = year.trim()
+  const mm = month.trim()
+  const dd = day.trim()
+  if (!yy || !mm || !dd) return ''
+
+  const twoDigitYear = parseInt(yy, 10)
+  const monthNum = parseInt(mm, 10)
+  const dayNum = parseInt(dd, 10)
+  if (
+    Number.isNaN(twoDigitYear) ||
+    Number.isNaN(monthNum) ||
+    Number.isNaN(dayNum) ||
+    yy.length !== 2 ||
+    mm.length !== 2 ||
+    dd.length !== 2 ||
+    monthNum < 1 ||
+    monthNum > 12 ||
+    dayNum < 1 ||
+    dayNum > 31
+  ) {
+    return ''
+  }
+
+  const fullYear = expandTwoDigitYear(twoDigitYear)
+  const iso = `${fullYear}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+  const date = new Date(`${iso}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return ''
+  if (
+    date.getFullYear() !== fullYear ||
+    date.getMonth() + 1 !== monthNum ||
+    date.getDate() !== dayNum
+  ) {
+    return ''
+  }
+  return iso
+}
+
+/** 표시용: YY/MM/DD */
+export function formatBirthDateDisplay(birthDate?: string | null): string {
+  const { year, month, day } = parseBirthDateParts(birthDate)
+  if (!year || !month || !day) return '-'
+  return `${year}/${month}/${day}`
+}
+
+/** yymmdd(또는 YY/MM/DD) → YYYY-MM-DD — 6자리·각 부분 2자리일 때만 변환 */
+export function parseBirthDateSlash(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+
+  const slashParts = trimmed.split('/')
+  if (slashParts.length === 3) {
+    return buildBirthDateFromParts(slashParts[0], slashParts[1], slashParts[2])
+  }
+
+  const digits = trimmed.replace(/\D/g, '')
+  if (digits.length !== 6) return ''
+
+  return buildBirthDateFromParts(
+    digits.slice(0, 2),
+    digits.slice(2, 4),
+    digits.slice(4, 6),
+  )
+}
+
+/** ISO 날짜 → yymmdd 입력값 */
+export function toBirthDateSlashValue(birthDate?: string | null): string {
+  const { year, month, day } = parseBirthDateParts(birthDate)
+  if (!year && !month && !day) return ''
+  if (!year || !month || !day) return ''
+  return `${year}${month}${day}`
+}
+
+/** 입력 중 숫자만 받아 yymmdd (최대 6자리, 슬래시·0 자동 삽입 없음) */
+export function formatBirthDateSlashInput(raw: string): string {
+  return raw.replace(/\D/g, '').slice(0, 6)
+}
+
+/** 생년월일(YYYY-MM-DD)로 만 나이 계산 */
+export function calculateAgeFromBirthDate(birthDate: string): number | null {
+  if (!birthDate) return null
+
+  const birth = new Date(`${birthDate}T00:00:00`)
+  if (Number.isNaN(birth.getTime())) return null
+
+  const today = new Date()
+  let age = today.getFullYear() - birth.getFullYear()
+  const monthDiff = today.getMonth() - birth.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--
+  }
+  return age >= 0 ? age : null
+}
+
+/** 회원 나이 표시 (생년월일 우선 계산, 없으면 저장된 age) */
+export function getMemberAge(member: Pick<Member, 'age' | 'birth_date'>): number | null {
+  if (member.birth_date) {
+    return calculateAgeFromBirthDate(member.birth_date)
+  }
+  if (member.age != null && member.age >= 0) {
+    return member.age
+  }
+  return null
+}
+
+export function formatMemberAge(member: Pick<Member, 'age' | 'birth_date'>): string {
+  const age = getMemberAge(member)
+  return age != null ? `${age}세` : '-'
+}
+
+/** 캘린더용 나이+종목 (예: 39축구) */
+export function formatMemberCalendarMeta(
+  member: Pick<Member, 'age' | 'birth_date' | 'sport'> | null | undefined,
+): string {
+  if (!member) return ''
+  const age = getMemberAge(member)
+  const sport = member.sport?.trim()
+  if (age != null && sport) return `${age}${sport}`
+  if (age != null) return `${age}`
+  if (sport) return sport
+  return ''
+}
+
+/** 캘린더 블록 — 이름 / 나이종목 분리 표시 */
+export function getMemberCalendarDisplayParts(
+  member: Pick<Member, 'name' | 'age' | 'birth_date' | 'sport'> | null | undefined,
+): { name: string; meta: string } {
+  if (!member?.name) return { name: '회원', meta: '' }
+  return {
+    name: member.name,
+    meta: formatMemberCalendarMeta(member),
+  }
+}
+
+/** @deprecated use getMemberCalendarDisplayParts */
+export function getMemberCalendarCrowdedParts(
+  member: Pick<Member, 'name' | 'age' | 'birth_date' | 'sport'> | null | undefined,
+): string[] {
+  const { name, meta } = getMemberCalendarDisplayParts(member)
+  return meta ? [name, meta] : [name]
+}
+
+/** 캘린더 등에서 이름/나이종목 표시 (예: 이교직(39축구)) */
+export function formatMemberCalendarLabel(
+  member: Pick<Member, 'name' | 'age' | 'birth_date' | 'sport'> | null | undefined,
+): string {
+  if (!member?.name) return '회원'
+  const meta = formatMemberCalendarMeta(member)
+  return meta ? `${member.name}(${meta})` : member.name
+}
+
+/** 종목별 회원 특성 색상 (캘린더 검색 하이라이트 등) */
+export const MEMBER_SPORT_COLORS: Record<string, string> = {
+  야구: '#38BDF8',
+  축구: '#10B981',
+  농구: '#F59E0B',
+  테니스: '#FB7185',
+  골프: '#818CF8',
+  수영: '#A78BFA',
+  헬스: '#22D3EE',
+  기타: '#84CC16',
+}
+
+export function getMemberCharacteristicColor(
+  member: Pick<Member, 'id' | 'sport'>,
+): string {
+  const sport = member.sport?.trim()
+  if (sport && MEMBER_SPORT_COLORS[sport]) {
+    return MEMBER_SPORT_COLORS[sport]
+  }
+
+  let hash = 0
+  for (let i = 0; i < member.id.length; i++) {
+    hash = (hash + member.id.charCodeAt(i) * (i + 1)) % INSTRUCTOR_CALENDAR_COLORS.length
+  }
+  return INSTRUCTOR_CALENDAR_COLORS[hash]?.hex ?? INSTRUCTOR_CALENDAR_COLORS[0].hex
+}
+
+export function formatMemberAgeFromBirthDate(birthDate?: string): string {
+  if (!birthDate) return '-'
+  const age = calculateAgeFromBirthDate(birthDate)
+  return age != null ? `${age}세` : '-'
+}
+
+export function resolveMemberAgeAndBirthDate(birthDate?: string | null): {
+  birth_date: string | null
+  age: number | null
+} {
+  const birth_date = birthDate?.trim() || null
+  const age = birth_date ? calculateAgeFromBirthDate(birth_date) : null
+  return { birth_date, age }
+}

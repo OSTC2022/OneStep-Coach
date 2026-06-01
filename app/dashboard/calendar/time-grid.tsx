@@ -1,0 +1,895 @@
+'use client'
+
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { format } from 'date-fns'
+import { ko } from 'date-fns/locale'
+import { cn } from '@/lib/utils'
+import {
+  getCalendarBlockTextStyle,
+  getInstructorCalendarColor,
+  getLessonCalendarBlockBackgroundColor,
+  getLessonCalendarBlockStyle,
+  AUTO_INSTRUCTOR_CALENDAR_COLOR,
+  hexToRgba,
+} from '@/lib/instructor-colors'
+import { getDateColorClass, isKoreanHoliday } from '@/lib/korean-holidays'
+import {
+  CALENDAR_END_HOUR,
+  CALENDAR_START_HOUR,
+  DEFAULT_HOUR_HEIGHT,
+  HOUR_HEIGHT_ZOOM_STEP,
+  MAX_HOUR_HEIGHT,
+  MIN_HOUR_HEIGHT,
+  computeLessonColumnLayouts,
+  getEventStyle,
+  getGridHeight,
+  getLessonBlockHorizontalStyle,
+  getLessonCalendarDisplayParts,
+  getLessonCalendarLabel,
+  getLessonDurationMinutes,
+  isSameDay,
+  minutesToHeight,
+  minutesToTimeString,
+  minutesToTop,
+  parseTimeToMinutes,
+  toDateKey,
+  yToMinutes,
+  type LessonDraft,
+  type LessonEditAnchor,
+} from '@/lib/calendar-utils'
+import type { Lesson } from '@/lib/types'
+
+interface TimeGridProps {
+  dates: Date[]
+  lessons: Lesson[]
+  selectedDate?: Date
+  onSelectDate?: (date: Date) => void
+  onDragCreate: (draft: LessonDraft) => void
+  onLessonMove?: (
+    lessonId: string,
+    update: { date: string; startTime: string; endTime: string },
+  ) => void
+  onLessonEdit?: (lesson: Lesson, anchor?: LessonEditAnchor) => void
+  compactHeader?: boolean
+  className?: string
+  highlightedLessonIds?: string[]
+}
+
+const HOURS = Array.from(
+  { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR },
+  (_, i) => CALENDAR_START_HOUR + i,
+)
+
+type MoveDrag = {
+  lessons: Lesson[]
+  lesson: Lesson
+  durationMin: number
+  grabOffsetY: number
+  anchor: LessonEditAnchor
+}
+
+type LessonPress = {
+  lessons: Lesson[]
+  lesson: Lesson
+  col: number
+  grabOffsetY: number
+  startX: number
+  startY: number
+  originTop: number
+  anchor: LessonEditAnchor
+}
+
+type MovePreview = {
+  col: number
+  top: number
+}
+
+type ResizeDrag = {
+  lessons: Lesson[]
+  lesson: Lesson
+  col: number
+  edge: 'start' | 'end'
+  anchorStartMin: number
+  anchorEndMin: number
+}
+
+const MIN_LESSON_MINUTES = 15
+const CALENDAR_START_MINUTES = CALENDAR_START_HOUR * 60
+const CALENDAR_END_MINUTES = CALENDAR_END_HOUR * 60
+const DRAG_THRESHOLD = 6
+const CREATE_DRAG_THRESHOLD = 8
+
+const SLOT_INSET_PX = 4
+const SLOT_GAP_PX = 2
+
+type LessonLabelLayout = 'horizontal' | 'vertical'
+
+function getLessonLabelLayout({
+  columnCount,
+  blockHeight,
+  hourHeight,
+}: {
+  columnCount: number
+  blockHeight: number
+  hourHeight: number
+}): LessonLabelLayout {
+  if (columnCount > 1) return 'vertical'
+  if (blockHeight < 52) return 'vertical'
+  if (hourHeight <= 42) return 'vertical'
+  return 'horizontal'
+}
+
+function getLessonLabelFontSizes(
+  layout: LessonLabelLayout,
+  blockHeight: number,
+  name: string,
+  meta: string,
+  hasResizeHandles: boolean,
+  showTime: boolean,
+) {
+  const handleInset = hasResizeHandles ? 12 : 0
+  const contentHeight = Math.max(18, blockHeight - handleInset - 6)
+
+  if (layout === 'vertical') {
+    const maxChars = Math.max(name.length, meta.length, 2)
+    const size = Math.min(11, Math.max(8, (contentHeight / maxChars) * 0.92))
+    return {
+      name: size,
+      meta: Math.max(8, size - 0.5),
+      time: Math.max(8, size - 1),
+    }
+  }
+
+  const lineCount = 1 + (meta ? 1 : 0) + (showTime ? 1 : 0)
+  const size = Math.min(13, Math.max(9, (contentHeight / lineCount) * 0.42))
+  return {
+    name: size,
+    meta: Math.max(9, size - 0.5),
+    time: Math.max(8, size - 1),
+  }
+}
+
+function LessonBlockContent({
+  lesson,
+  start,
+  end,
+  columnCount,
+  blockHeight,
+  hourHeight,
+  hasResizeHandles,
+}: {
+  lesson: Lesson
+  start: string
+  end: string
+  columnCount: number
+  blockHeight: number
+  hourHeight: number
+  hasResizeHandles: boolean
+}) {
+  const { name, meta } = getLessonCalendarDisplayParts(lesson)
+  const fullLabel = getLessonCalendarLabel(lesson)
+  const layout = getLessonLabelLayout({ columnCount, blockHeight, hourHeight })
+  const showTime = Boolean(start) && layout === 'horizontal' && blockHeight >= 56 && !meta
+  const textStyle = getCalendarBlockTextStyle(getLessonCalendarBlockBackgroundColor(lesson))
+  const sizes = getLessonLabelFontSizes(
+    layout,
+    blockHeight,
+    name,
+    meta,
+    hasResizeHandles,
+    showTime,
+  )
+
+  if (layout === 'vertical') {
+    return (
+      <div className="pointer-events-none flex h-full min-h-0 max-h-full w-full select-none items-center justify-center gap-0.5 px-1 py-0.5">
+        <span
+          className="max-h-full shrink-0 font-bold leading-none [text-orientation:mixed] [writing-mode:vertical-rl]"
+          style={{ fontSize: sizes.name, ...textStyle }}
+          title={fullLabel}
+        >
+          {name}
+        </span>
+        {meta && (
+          <span
+            className="max-h-full shrink-0 font-semibold leading-none [text-orientation:mixed] [writing-mode:vertical-rl]"
+            style={{ fontSize: sizes.meta, ...textStyle }}
+            title={fullLabel}
+          >
+            {meta}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="pointer-events-none flex h-full min-h-0 max-h-full w-full select-none flex-col items-center justify-center gap-0.5 px-1.5 py-1 text-center">
+      <p
+        className="max-w-full font-bold leading-snug"
+        style={{ fontSize: sizes.name, ...textStyle }}
+        title={fullLabel}
+      >
+        {name}
+      </p>
+      {meta && (
+        <p
+          className="max-w-full font-semibold leading-snug"
+          style={{ fontSize: sizes.meta, ...textStyle }}
+          title={fullLabel}
+        >
+          {meta}
+        </p>
+      )}
+      {showTime && (
+        <p
+          className="max-w-full font-medium tabular-nums leading-snug opacity-90"
+          style={{ fontSize: sizes.time, ...textStyle }}
+        >
+          {start}{end ? ` – ${end}` : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function TimeGrid({
+  dates,
+  lessons,
+  selectedDate,
+  onSelectDate,
+  onDragCreate,
+  onLessonMove,
+  onLessonEdit,
+  compactHeader = false,
+  className,
+  highlightedLessonIds,
+}: TimeGridProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const highlightedSet = useMemo(
+    () => new Set(highlightedLessonIds ?? []),
+    [highlightedLessonIds],
+  )
+
+  useEffect(() => {
+    if (!highlightedLessonIds?.length) return
+    const targetId = highlightedLessonIds[0]
+    const timer = window.setTimeout(() => {
+      const el = scrollRef.current?.querySelector(
+        `[data-lesson-id="${targetId}"]`,
+      ) as HTMLElement | null
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 180)
+    return () => window.clearTimeout(timer)
+  }, [highlightedLessonIds, dates, lessons])
+  const [hourHeight, setHourHeight] = useState(DEFAULT_HOUR_HEIGHT)
+  const gridHeight = getGridHeight(hourHeight)
+  const minLessonHeight = Math.max(36, hourHeight * 0.45)
+  const columnRefs = useRef<(HTMLDivElement | null)[]>([])
+  const lessonDragStartedRef = useRef(false)
+  const [drag, setDrag] = useState<{
+    col: number
+    startY: number
+    currentY: number
+  } | null>(null)
+  const [lessonPress, setLessonPress] = useState<LessonPress | null>(null)
+  const [moveDrag, setMoveDrag] = useState<MoveDrag | null>(null)
+  const [movePreview, setMovePreview] = useState<MovePreview | null>(null)
+  const [resizeDrag, setResizeDrag] = useState<ResizeDrag | null>(null)
+  const [resizePreview, setResizePreview] = useState<{
+    startMin: number
+    endMin: number
+  } | null>(null)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    function handleWheel(e: WheelEvent) {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      setHourHeight((prev) => {
+        const delta = e.deltaY < 0 ? HOUR_HEIGHT_ZOOM_STEP : -HOUR_HEIGHT_ZOOM_STEP
+        return Math.max(MIN_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, prev + delta))
+      })
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [])
+
+  function getMinutesFromY(y: number) {
+    return yToMinutes(y, hourHeight)
+  }
+
+  function getLessonsForDate(date: Date) {
+    const key = toDateKey(date)
+    return lessons
+      .filter((l) => l.lesson_date === key)
+      .sort((a, b) =>
+        (a.start_time ?? '').localeCompare(b.start_time ?? ''),
+      )
+  }
+
+  function findColumnAt(clientX: number) {
+    return columnRefs.current.findIndex((colEl) => {
+      if (!colEl) return false
+      const rect = colEl.getBoundingClientRect()
+      return clientX >= rect.left && clientX <= rect.right
+    })
+  }
+
+  function getYInColumn(clientY: number, col: number) {
+    const colEl = columnRefs.current[col]
+    if (!colEl) return null
+    return clientY - colEl.getBoundingClientRect().top
+  }
+
+  function getPreviewFromPointer(clientX: number, clientY: number, grabOffsetY: number) {
+    const col = findColumnAt(clientX)
+    if (col === -1) return null
+    const y = getYInColumn(clientY, col)
+    if (y == null) return null
+    const top = y - grabOffsetY
+    return { col, top: Math.max(0, Math.min(gridHeight - 24, top)) }
+  }
+
+  function commitLessonUpdate(
+    lessonId: string,
+    col: number,
+    startMin: number,
+    endMin: number,
+  ) {
+    if (!onLessonMove) return
+    onLessonMove(lessonId, {
+      date: toDateKey(dates[col]),
+      startTime: minutesToTimeString(startMin),
+      endTime: minutesToTimeString(endMin),
+    })
+  }
+
+  function isLessonMoving(lesson: Lesson) {
+    return moveDrag?.lesson.id === lesson.id
+  }
+
+  function isLessonResizing(lesson: Lesson) {
+    return resizeDrag?.lesson.id === lesson.id
+  }
+
+  useEffect(() => {
+    if (!moveDrag) return
+
+    function handlePointerMove(e: PointerEvent) {
+      const preview = getPreviewFromPointer(
+        e.clientX,
+        e.clientY,
+        moveDrag.grabOffsetY,
+      )
+      if (preview) setMovePreview(preview)
+    }
+
+    function handlePointerUp(e: PointerEvent) {
+      const preview = getPreviewFromPointer(
+        e.clientX,
+        e.clientY,
+        moveDrag.grabOffsetY,
+      )
+      if (preview) {
+        const startMin = getMinutesFromY(preview.top)
+        const endMin = startMin + moveDrag.durationMin
+        const orig = moveDrag.lesson
+        const origCol = dates.findIndex((d) => toDateKey(d) === orig.lesson_date)
+        const origStart = parseTimeToMinutes(orig.start_time)
+        const moved = preview.col !== origCol || startMin !== origStart
+        if (moved) {
+          commitLessonUpdate(moveDrag.lesson.id, preview.col, startMin, endMin)
+        } else {
+          onLessonEdit?.(moveDrag.lesson, moveDrag.anchor)
+        }
+      }
+      lessonDragStartedRef.current = false
+      setMoveDrag(null)
+      setMovePreview(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [moveDrag, dates, gridHeight, hourHeight, onLessonMove, onLessonEdit])
+
+  useEffect(() => {
+    if (!lessonPress) return
+
+    function handlePointerMove(e: PointerEvent) {
+      if (lessonDragStartedRef.current) return
+      const dist = Math.hypot(
+        e.clientX - lessonPress.startX,
+        e.clientY - lessonPress.startY,
+      )
+      if (dist < DRAG_THRESHOLD) return
+      if (!onLessonMove) return
+
+      lessonDragStartedRef.current = true
+      setMoveDrag({
+        lessons: lessonPress.lessons,
+        lesson: lessonPress.lesson,
+        durationMin: getLessonDurationMinutes(lessonPress.lesson),
+        grabOffsetY: lessonPress.grabOffsetY,
+        anchor: lessonPress.anchor,
+      })
+      const preview = getPreviewFromPointer(
+        e.clientX,
+        e.clientY,
+        lessonPress.grabOffsetY,
+      )
+      setMovePreview(
+        preview ?? { col: lessonPress.col, top: lessonPress.originTop },
+      )
+      setLessonPress(null)
+    }
+
+    function handlePointerUp() {
+      if (lessonDragStartedRef.current) return
+      onLessonEdit?.(lessonPress.lesson, lessonPress.anchor)
+      setLessonPress(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [lessonPress, onLessonMove, onLessonEdit, gridHeight, hourHeight, dates])
+
+  useEffect(() => {
+    if (!resizeDrag) return
+
+    function handlePointerMove(e: PointerEvent) {
+      const y = getYInColumn(e.clientY, resizeDrag.col)
+      if (y == null) return
+
+      if (resizeDrag.edge === 'end') {
+        const nextEnd = Math.min(
+          CALENDAR_END_MINUTES,
+          Math.max(resizeDrag.anchorStartMin + MIN_LESSON_MINUTES, getMinutesFromY(y)),
+        )
+        setResizePreview({
+          startMin: resizeDrag.anchorStartMin,
+          endMin: nextEnd,
+        })
+        return
+      }
+
+      const nextStart = Math.max(
+        CALENDAR_START_MINUTES,
+        Math.min(resizeDrag.anchorEndMin - MIN_LESSON_MINUTES, getMinutesFromY(y)),
+      )
+      setResizePreview({
+        startMin: nextStart,
+        endMin: resizeDrag.anchorEndMin,
+      })
+    }
+
+    function handlePointerUp(e: PointerEvent) {
+      const y = getYInColumn(e.clientY, resizeDrag.col)
+      if (y != null) {
+        if (resizeDrag.edge === 'end') {
+          const endMin = Math.min(
+            CALENDAR_END_MINUTES,
+            Math.max(resizeDrag.anchorStartMin + MIN_LESSON_MINUTES, getMinutesFromY(y)),
+          )
+          commitLessonUpdate(
+            resizeDrag.lesson.id,
+            resizeDrag.col,
+            resizeDrag.anchorStartMin,
+            endMin,
+          )
+        } else {
+          const startMin = Math.max(
+            CALENDAR_START_MINUTES,
+            Math.min(resizeDrag.anchorEndMin - MIN_LESSON_MINUTES, getMinutesFromY(y)),
+          )
+          commitLessonUpdate(
+            resizeDrag.lesson.id,
+            resizeDrag.col,
+            startMin,
+            resizeDrag.anchorEndMin,
+          )
+        }
+      }
+      setResizeDrag(null)
+      setResizePreview(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [resizeDrag, dates, hourHeight, onLessonMove])
+
+  function handlePointerDown(
+    e: React.PointerEvent<HTMLDivElement>,
+    col: number,
+  ) {
+    if ((e.target as HTMLElement).closest('[data-lesson-event]')) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const y = e.clientY - rect.top
+    setDrag({ col, startY: y, currentY: y })
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  function handlePointerMove(
+    e: React.PointerEvent<HTMLDivElement>,
+    col: number,
+  ) {
+    if (!drag || drag.col !== col) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    setDrag({ ...drag, currentY: e.clientY - rect.top })
+  }
+
+  function handlePointerUp(
+    e: React.PointerEvent<HTMLDivElement>,
+    col: number,
+  ) {
+    if (!drag || drag.col !== col) return
+
+    const dragDistance = Math.abs(drag.currentY - drag.startY)
+    setDrag(null)
+    e.currentTarget.releasePointerCapture(e.pointerId)
+
+    if (dragDistance < CREATE_DRAG_THRESHOLD) return
+
+    const startMin = getMinutesFromY(Math.min(drag.startY, drag.currentY))
+    let endMin = getMinutesFromY(Math.max(drag.startY, drag.currentY))
+    if (endMin <= startMin) endMin = startMin + 30
+
+    onDragCreate({
+      date: toDateKey(dates[col]),
+      startTime: minutesToTimeString(startMin),
+      endTime: minutesToTimeString(endMin),
+    })
+  }
+
+  function handleLessonPointerDown(
+    e: React.PointerEvent<HTMLDivElement>,
+    lesson: Lesson,
+    col: number,
+  ) {
+    if ((e.target as HTMLElement).closest('[data-resize-handle]')) return
+    e.stopPropagation()
+    if (!onLessonMove && !onLessonEdit) return
+
+    const eventRect = e.currentTarget.getBoundingClientRect()
+    const grabOffsetY = e.clientY - eventRect.top
+    const { top } = getEventStyle(lesson, hourHeight)
+    const anchor: LessonEditAnchor = {
+      top: eventRect.top,
+      left: eventRect.left,
+      right: eventRect.right,
+      bottom: eventRect.bottom,
+    }
+    setLessonPress({
+      lessons: [lesson],
+      lesson,
+      col,
+      grabOffsetY,
+      startX: e.clientX,
+      startY: e.clientY,
+      originTop: top,
+      anchor,
+    })
+  }
+
+  function beginResize(
+    e: React.PointerEvent<HTMLDivElement>,
+    lesson: Lesson,
+    col: number,
+    edge: 'start' | 'end',
+  ) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!onLessonMove) return
+
+    const startMin = parseTimeToMinutes(lesson.start_time)
+    let endMin = lesson.end_time
+      ? parseTimeToMinutes(lesson.end_time)
+      : startMin + 60
+    if (endMin <= startMin) endMin = startMin + MIN_LESSON_MINUTES
+
+    setResizeDrag({
+      lessons: [lesson],
+      lesson,
+      col,
+      edge,
+      anchorStartMin: startMin,
+      anchorEndMin: endMin,
+    })
+    setResizePreview({ startMin, endMin })
+  }
+
+  const now = new Date()
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const nowTop = minutesToTop(nowMinutes, hourHeight)
+
+  const movePreviewHeight = moveDrag
+    ? Math.max(minutesToHeight(moveDrag.durationMin, hourHeight, minLessonHeight), minLessonHeight)
+    : minLessonHeight
+
+  const showMovePreview =
+    moveDrag &&
+    movePreview &&
+    (() => {
+      const orig = moveDrag.lesson
+      const origCol = dates.findIndex((d) => toDateKey(d) === orig.lesson_date)
+      const origStart = parseTimeToMinutes(orig.start_time)
+      const previewStart = getMinutesFromY(movePreview.top)
+      return movePreview.col !== origCol || previewStart !== origStart
+    })()
+
+  const createDragDistance =
+    drag != null ? Math.abs(drag.currentY - drag.startY) : 0
+
+  const createPreviewTimes =
+    drag && createDragDistance >= CREATE_DRAG_THRESHOLD
+      ? (() => {
+          const startMin = getMinutesFromY(Math.min(drag.startY, drag.currentY))
+          let endMin = getMinutesFromY(Math.max(drag.startY, drag.currentY))
+          if (endMin <= startMin) endMin = startMin + 30
+          return {
+            start: minutesToTimeString(startMin),
+            end: minutesToTimeString(endMin),
+          }
+        })()
+      : null
+
+  return (
+    <div className={cn('flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
+      <div className="flex border-b border-border bg-muted/30 shrink-0">
+        <div className="w-14 shrink-0 border-r border-border" />
+        {dates.map((date) => {
+          const isToday = isSameDay(date, now)
+          const isSelected = selectedDate ? isSameDay(date, selectedDate) : false
+          const dateColor = getDateColorClass(date)
+          const holiday = isKoreanHoliday(date)
+          const canSelect = Boolean(onSelectDate)
+
+          return (
+            <button
+              key={date.toISOString()}
+              type="button"
+              onClick={() => onSelectDate?.(date)}
+              className={cn(
+                'flex-1 min-w-0 border-r border-border py-2 text-center last:border-r-0 transition-colors',
+                canSelect && 'cursor-pointer hover:bg-muted/40',
+                isToday && !isSelected && 'bg-primary/5',
+                isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/40',
+              )}
+            >
+              {!compactHeader && dates.length > 1 && (
+                <p className={cn('text-[11px] font-medium', dateColor || 'text-muted-foreground')}>
+                  {format(date, 'EEE', { locale: ko })}
+                </p>
+              )}
+              <p
+                className={cn(
+                  'text-sm font-semibold tabular-nums',
+                  !isToday && !isSelected && dateColor,
+                  isToday &&
+                    !isSelected &&
+                    'inline-flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-primary/40',
+                  isSelected &&
+                    'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
+                  isToday &&
+                    isSelected &&
+                    'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
+                )}
+              >
+                {format(date, 'd')}
+              </p>
+              {holiday && !isSelected && (
+                <p className="text-[9px] font-medium text-red-500 mt-0.5">공휴일</p>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
+        <div className="pointer-events-none absolute right-2 top-2 z-30 rounded-md bg-background/80 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-sm">
+          Ctrl+휠 시간 확대/축소 · {Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)}%
+        </div>
+        <div className="flex min-w-[480px]">
+          <div className="w-14 shrink-0 border-r border-border relative" style={{ height: gridHeight }}>
+            {HOURS.map((hour) => (
+              <div
+                key={hour}
+                className="absolute right-2 -translate-y-1/2 text-[10px] text-muted-foreground tabular-nums"
+                style={{ top: (hour - CALENDAR_START_HOUR) * hourHeight }}
+              >
+                {String(hour).padStart(2, '0')}:00
+              </div>
+            ))}
+          </div>
+
+          {dates.map((date, col) => {
+            const dayLessons = getLessonsForDate(date)
+            const isToday = isSameDay(date, now)
+            const isDragging = drag?.col === col
+            const isMoveTarget = showMovePreview && movePreview?.col === col
+            const showCreatePreview =
+              isDragging &&
+              drag != null &&
+              createDragDistance >= CREATE_DRAG_THRESHOLD
+
+            return (
+              <div
+                key={date.toISOString()}
+                ref={(el) => {
+                  columnRefs.current[col] = el
+                }}
+                className={cn(
+                  'flex-1 min-w-0 relative border-r border-border last:border-r-0',
+                  isToday && 'bg-primary/[0.02]',
+                )}
+                style={{ height: gridHeight }}
+                onPointerDown={(e) => handlePointerDown(e, col)}
+                onPointerMove={(e) => handlePointerMove(e, col)}
+                onPointerUp={(e) => handlePointerUp(e, col)}
+              >
+                {HOURS.map((hour) => (
+                  <div
+                    key={hour}
+                    className="absolute inset-x-0 border-t border-border/60 pointer-events-none"
+                    style={{ top: (hour - CALENDAR_START_HOUR) * hourHeight }}
+                  />
+                ))}
+
+                {HOURS.map((hour) => (
+                  <div
+                    key={`${hour}-half`}
+                    className="absolute inset-x-0 border-t border-dashed border-border/30 pointer-events-none"
+                    style={{
+                      top: (hour - CALENDAR_START_HOUR) * hourHeight + hourHeight / 2,
+                    }}
+                  />
+                ))}
+
+                {isToday &&
+                  nowMinutes >= CALENDAR_START_HOUR * 60 &&
+                  nowMinutes <= CALENDAR_END_HOUR * 60 && (
+                    <div
+                      className="absolute inset-x-0 z-20 pointer-events-none flex items-center"
+                      style={{ top: nowTop }}
+                    >
+                      <div className="h-2 w-2 rounded-full bg-red-500 -ml-1 shrink-0" />
+                      <div className="flex-1 h-px bg-red-500" />
+                    </div>
+                  )}
+
+                {showCreatePreview && drag && createPreviewTimes && (
+                  <div
+                    className="absolute inset-x-1 z-10 rounded-md border-2 border-dashed border-primary bg-primary/10 pointer-events-none px-1.5 py-1"
+                    style={{
+                      top: Math.min(drag.startY, drag.currentY),
+                      height: Math.max(
+                        Math.abs(drag.currentY - drag.startY),
+                        24,
+                      ),
+                    }}
+                  >
+                    <p className="text-[10px] font-semibold text-primary truncate tabular-nums">
+                      {createPreviewTimes.start} – {createPreviewTimes.end}
+                    </p>
+                  </div>
+                )}
+
+                {isMoveTarget && movePreview && (
+                  <div
+                    className="absolute inset-x-1 z-30 rounded-md border-2 border-dashed border-primary bg-primary/10 pointer-events-none"
+                    style={{ top: movePreview.top, height: movePreviewHeight }}
+                  />
+                )}
+
+                {computeLessonColumnLayouts(dayLessons).map(
+                  ({ lesson, column, columnCount, startMin, endMin }) => {
+                    const isMoving = isLessonMoving(lesson)
+                    const isResizing = isLessonResizing(lesson)
+                    const lessonStartMin =
+                      isResizing && resizePreview ? resizePreview.startMin : startMin
+                    const lessonEndMin =
+                      isResizing && resizePreview ? resizePreview.endMin : endMin
+                    const blockTop = minutesToTop(lessonStartMin, hourHeight)
+                    const blockHeight = minutesToHeight(
+                      lessonEndMin - lessonStartMin,
+                      hourHeight,
+                      minLessonHeight,
+                    )
+                    const lessonStart = minutesToTimeString(lessonStartMin)
+                    const lessonEnd = minutesToTimeString(lessonEndMin)
+                    const horizontal = getLessonBlockHorizontalStyle(
+                      column,
+                      columnCount,
+                      SLOT_INSET_PX,
+                      SLOT_GAP_PX,
+                    )
+                    const memberLabel = getLessonCalendarLabel(lesson)
+                    const timeLabel = `${lessonStart}${lessonEnd ? ` – ${lessonEnd}` : ''}`
+                    const blockStyle = getLessonCalendarBlockStyle(lesson)
+                    const isHighlighted = highlightedSet.has(lesson.id)
+                    const highlightColor = lesson.instructor_id
+                      ? getInstructorCalendarColor(lesson.instructor)
+                      : AUTO_INSTRUCTOR_CALENDAR_COLOR
+
+                    return (
+                      <div
+                        key={lesson.id}
+                        data-lesson-event
+                        data-lesson-id={lesson.id}
+                        className={cn(
+                          'absolute z-[5] flex min-w-0 flex-col overflow-hidden rounded-md border touch-none',
+                          lesson.attendance_status === 'cancelled' && 'line-through opacity-80',
+                          isResizing && 'z-40 ring-2 ring-primary/70',
+                          isMoving && 'opacity-60 ring-2 ring-primary/60',
+                          isHighlighted && 'z-30',
+                          onLessonMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+                        )}
+                        style={{
+                          ...blockStyle,
+                          top: blockTop,
+                          height: blockHeight,
+                          left: horizontal.left,
+                          width: horizontal.width,
+                          ...(isHighlighted
+                            ? {
+                                borderColor: '#ffffff',
+                                borderWidth: 3,
+                                boxShadow: `0 0 0 3px ${highlightColor}, 0 0 0 5px rgba(255,255,255,0.9), 0 0 20px ${hexToRgba(highlightColor, 0.7)}`,
+                              }
+                            : {}),
+                        }}
+                        title={`${memberLabel} · ${timeLabel} · ${lesson.lesson_type}${onLessonMove ? ' · 드래그 이동 · 위·아래 드래그로 시간 조절' : ''}${onLessonEdit ? ' · 클릭 수정' : ''}`}
+                        onPointerDown={(e) => handleLessonPointerDown(e, lesson, col)}
+                      >
+                        {onLessonMove && (
+                          <div
+                            data-resize-handle
+                            className="relative z-10 h-1.5 shrink-0 cursor-ns-resize touch-none"
+                            onPointerDown={(e) => beginResize(e, lesson, col, 'start')}
+                          />
+                        )}
+                        <div className="flex min-h-0 flex-1 items-center justify-center">
+                          <LessonBlockContent
+                            lesson={lesson}
+                            start={lessonStart}
+                            end={lessonEnd}
+                            columnCount={columnCount}
+                            blockHeight={blockHeight}
+                            hourHeight={hourHeight}
+                            hasResizeHandles={Boolean(onLessonMove)}
+                          />
+                        </div>
+                        {onLessonMove && (
+                          <div
+                            data-resize-handle
+                            className="relative z-10 h-1.5 shrink-0 cursor-ns-resize touch-none"
+                            onPointerDown={(e) => beginResize(e, lesson, col, 'end')}
+                          />
+                        )}
+                      </div>
+                    )
+                  },
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
