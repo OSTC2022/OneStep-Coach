@@ -46,6 +46,8 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
   const {
     count: selectionCount,
     runDeleteSelected,
+    notifyLessonSaved,
+    lessonFormOpen,
     isDeleting,
   } = useCalendarSelection()
   const [open, setOpen] = useState(false)
@@ -61,6 +63,7 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
   const canSchedule = role === 'admin' || role === 'instructor'
   const onCalendarPage = pathname?.startsWith('/dashboard/calendar') ?? false
   const showSelectionDelete = onCalendarPage && selectionCount > 0
+  const hideScheduleFab = open || lessonFormOpen
 
   const loadFormData = useCallback(async () => {
     setIsLoadingData(true)
@@ -117,6 +120,9 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
   function handleSaved(lesson: Lesson) {
     setOpen(false)
     setDraft(null)
+    if (onCalendarPage) {
+      notifyLessonSaved(lesson)
+    }
     router.refresh()
     toast.success('일정이 등록되었습니다.', {
       description: `${lesson.lesson_date} ${lesson.start_time?.slice(0, 5) ?? ''}`.trim(),
@@ -153,26 +159,28 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
         </button>
       )}
 
-      <button
-        type="button"
-        aria-label="일정 등록"
-        onPointerDown={handleFabPointerDown}
-        onClick={handleOpen}
-        disabled={isLoadingData && !dataReady && !open}
-        className={cn(
-          'fixed z-[60] flex h-14 w-14 touch-manipulation select-none items-center justify-center rounded-full',
-          'bg-primary text-primary-foreground shadow-lg',
-          'active:scale-95 active:opacity-90 md:transition-transform md:hover:scale-105',
-          'bottom-6 right-6 md:bottom-8 md:right-8',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        )}
-      >
-        {isLoadingData && !open ? (
-          <Loader2 className="h-7 w-7 animate-spin" />
-        ) : (
-          <Plus className="h-7 w-7" strokeWidth={2.5} />
-        )}
-      </button>
+      {!hideScheduleFab && (
+        <button
+          type="button"
+          aria-label="일정 등록"
+          onPointerDown={handleFabPointerDown}
+          onClick={handleOpen}
+          disabled={isLoadingData && !dataReady}
+          className={cn(
+            'fixed z-[60] flex h-14 w-14 touch-manipulation select-none items-center justify-center rounded-full',
+            'bg-primary text-primary-foreground shadow-lg',
+            'active:scale-95 active:opacity-90 md:transition-transform md:hover:scale-105',
+            'bottom-6 right-6 md:bottom-8 md:right-8',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+          )}
+        >
+          {isLoadingData && !dataReady ? (
+            <Loader2 className="h-7 w-7 animate-spin" />
+          ) : (
+            <Plus className="h-7 w-7" strokeWidth={2.5} />
+          )}
+        </button>
+      )}
 
       <LessonCreateDialog
         open={open}

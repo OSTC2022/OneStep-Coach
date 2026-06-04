@@ -1,4 +1,5 @@
 import { filterAndSortKoreanNames } from '@/lib/korean-search'
+import { formatMemberCalendarLabel } from '@/lib/member-utils'
 
 const STORAGE_KEY = 'one-step-coach:member-search-recent'
 const DEFAULT_MAX = 10
@@ -11,6 +12,9 @@ export type MemberRecentSearchEntry = {
 export type MemberFocusPick = {
   id: string
   name: string
+  sport?: string | null
+  age?: number | null
+  birth_date?: string | null
 }
 
 export type RecentSearchRow = {
@@ -136,7 +140,9 @@ export function buildRecentSearchRows(
 ): RecentSearchRow[] {
   return getMemberRecentSearches(max).map((entry, index) => {
     const member = resolveMember(entry, allMembers)
-    const label = member?.name ?? entry.name.trim()
+    const label = member
+      ? formatMemberCalendarLabel(member)
+      : entry.name.trim()
     return {
       key: entry.id ?? `q-${entry.name}-${index}`,
       entry: member
@@ -157,6 +163,6 @@ export function buildDefaultMemberPickerRows(
     key: member.id,
     entry: { id: member.id, name: member.name },
     member,
-    label: member.name,
+    label: formatMemberCalendarLabel(member),
   }))
 }

@@ -223,7 +223,11 @@ export function LessonCreateDialog({
       setDate(lesson.lesson_date)
       setStartTime(toTimeInputValue(lesson.start_time))
       setEndTime(toTimeInputValue(lesson.end_time))
-      setCalendarDisplayText(resolveLessonTitle(lesson) ?? '')
+      const customTitle = resolveLessonTitle(lesson)
+      setCalendarDisplayText(
+        customTitle ??
+          (lesson.member ? formatMemberCalendarLabel(lesson.member) : ''),
+      )
       return
     }
 
@@ -255,11 +259,15 @@ export function LessonCreateDialog({
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [open, isPopup])
 
-  function handleMemberChange(nextMemberId: string) {
+  function handleMemberChange(
+    nextMemberId: string,
+    picked?: MemberOption,
+  ) {
     setMemberId(nextMemberId)
     if (!nextMemberId) return
 
     const member =
+      picked ??
       memberOptions.find((m) => m.id === nextMemberId) ??
       (lesson?.member?.id === nextMemberId ? lesson.member : undefined) ??
       sameSlotLessons.find((l) => getLessonMemberId(l) === nextMemberId)?.member

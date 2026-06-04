@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import type { Lesson } from '@/lib/types'
 
 type CalendarSelectionContextValue = {
   selectedIds: ReadonlySet<string>
@@ -18,6 +19,10 @@ type CalendarSelectionContextValue = {
   clear: () => void
   registerDeleteSelected: (handler: (() => void) | null) => void
   runDeleteSelected: () => void
+  registerLessonSaved: (handler: ((lesson: Lesson) => void) | null) => void
+  notifyLessonSaved: (lesson: Lesson) => void
+  lessonFormOpen: boolean
+  setLessonFormOpen: (open: boolean) => void
   isDeleting: boolean
   setIsDeleting: (value: boolean) => void
 }
@@ -29,7 +34,9 @@ const CalendarSelectionContext = createContext<CalendarSelectionContextValue | n
 export function CalendarSelectionProvider({ children }: { children: ReactNode }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const deleteSelectedRef = useRef<(() => void) | null>(null)
+  const lessonSavedRef = useRef<((lesson: Lesson) => void) | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [lessonFormOpen, setLessonFormOpen] = useState(false)
 
   const toggle = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -57,6 +64,17 @@ export function CalendarSelectionProvider({ children }: { children: ReactNode })
     deleteSelectedRef.current?.()
   }, [])
 
+  const registerLessonSaved = useCallback(
+    (handler: ((lesson: Lesson) => void) | null) => {
+      lessonSavedRef.current = handler
+    },
+    [],
+  )
+
+  const notifyLessonSaved = useCallback((lesson: Lesson) => {
+    lessonSavedRef.current?.(lesson)
+  }, [])
+
   const value = useMemo(
     () => ({
       selectedIds,
@@ -66,6 +84,10 @@ export function CalendarSelectionProvider({ children }: { children: ReactNode })
       clear,
       registerDeleteSelected,
       runDeleteSelected,
+      registerLessonSaved,
+      notifyLessonSaved,
+      lessonFormOpen,
+      setLessonFormOpen,
       isDeleting,
       setIsDeleting,
     }),
@@ -76,6 +98,9 @@ export function CalendarSelectionProvider({ children }: { children: ReactNode })
       clear,
       registerDeleteSelected,
       runDeleteSelected,
+      registerLessonSaved,
+      notifyLessonSaved,
+      lessonFormOpen,
       isDeleting,
     ],
   )

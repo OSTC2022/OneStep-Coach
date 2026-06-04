@@ -28,15 +28,33 @@ import {
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { filterAndSortKoreanNames } from '@/lib/korean-search'
+import { formatMemberCalendarMeta } from '@/lib/member-utils'
 
 export interface MemberSearchOption {
   id: string
   name: string
+  sport?: string | null
+  age?: number | null
+  birth_date?: string | null
+}
+
+function MemberOptionLabel({ member }: { member: MemberSearchOption }) {
+  const meta = formatMemberCalendarMeta(member)
+  return (
+    <span className="flex min-w-0 items-baseline gap-1.5">
+      <span className="truncate font-medium">{member.name}</span>
+      {meta ? (
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {meta}
+        </span>
+      ) : null}
+    </span>
+  )
 }
 
 interface MemberSearchSelectProps {
   value: string
-  onValueChange: (value: string) => void
+  onValueChange: (value: string, member?: MemberSearchOption) => void
   members: MemberSearchOption[]
   placeholder?: string
   disabledIds?: string[]
@@ -163,7 +181,7 @@ export function MemberSearchSelect({
       return
     }
     bumpAndRefresh({ id: member.id, name: member.name })
-    onValueChange(member.id)
+    onValueChange(member.id, member)
     setQuery(member.name)
     closePickers()
   }
@@ -178,7 +196,7 @@ export function MemberSearchSelect({
         closePickers()
         return
       }
-      onValueChange(row.member.id)
+      onValueChange(row.member.id, row.member)
       setQuery(row.member.name)
       closePickers()
       return
@@ -312,7 +330,7 @@ export function MemberSearchSelect({
                   )}
                   onClick={() => selectMember(m)}
                 >
-                  {m.name}
+                  <MemberOptionLabel member={m} />
                   {blocked ? (
                     <span className="ml-auto text-[10px] text-muted-foreground">
                       배정됨
@@ -327,7 +345,9 @@ export function MemberSearchSelect({
           <p className="px-1 text-xs text-muted-foreground">회원을 찾을 수 없습니다.</p>
         )}
         {!allowFreeText && selected && !query && (
-          <p className="px-1 text-xs text-muted-foreground">선택: {selected.name}</p>
+          <p className="px-1 text-xs text-muted-foreground">
+            선택: <MemberOptionLabel member={selected} />
+          </p>
         )}
       </div>
     )
@@ -378,7 +398,7 @@ export function MemberSearchSelect({
                       toast.error('이미 같은 시간에 배정된 회원입니다.')
                       return
                     }
-                    onValueChange(m.id === value ? '' : m.id)
+                    onValueChange(m.id === value ? '' : m.id, m.id === value ? undefined : m)
                     setOpen(false)
                   }}
                 >
@@ -388,7 +408,7 @@ export function MemberSearchSelect({
                       value === m.id ? 'opacity-100' : 'opacity-0',
                     )}
                   />
-                  {m.name}
+                  <MemberOptionLabel member={m} />
                 </CommandItem>
               ))}
             </CommandGroup>

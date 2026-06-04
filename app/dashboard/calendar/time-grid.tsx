@@ -101,10 +101,51 @@ type ResizeDrag = {
 }
 
 const MIN_LESSON_MINUTES = 15
+const DEFAULT_CREATE_DURATION_MIN = 60
+const CLICK_SNAP_MINUTES = 30
 const CALENDAR_START_MINUTES = CALENDAR_START_HOUR * 60
 const CALENDAR_END_MINUTES = CALENDAR_END_HOUR * 60
 const DRAG_THRESHOLD = 6
 const CREATE_DRAG_THRESHOLD = 8
+
+type PendingCreate = {
+  col: number
+  startMin: number
+  endMin: number
+}
+
+type PendingAdjust = {
+  col: number
+  mode: 'move' | 'resize-start' | 'resize-end'
+  grabOffsetY: number
+  anchorStartMin: number
+  anchorEndMin: number
+}
+
+function yToRawMinutes(y: number, hourHeight: number) {
+  const raw = CALENDAR_START_HOUR * 60 + (y / hourHeight) * 60
+  return Math.max(
+    CALENDAR_START_MINUTES,
+    Math.min(CALENDAR_END_MINUTES, raw),
+  )
+}
+
+/** 클릭한 Y 위치 기준, 30분 격자에 맞춘 시작 시각 */
+function snapToClickStart(minutes: number): number {
+  const start = Math.floor(minutes / CLICK_SNAP_MINUTES) * CLICK_SNAP_MINUTES
+  return Math.max(
+    CALENDAR_START_MINUTES,
+    Math.min(CALENDAR_END_MINUTES - DEFAULT_CREATE_DURATION_MIN, start),
+  )
+}
+
+function getClickCreateSlotFromY(y: number, hourHeight: number) {
+  const startMin = snapToClickStart(yToRawMinutes(y, hourHeight))
+  return {
+    startMin,
+    endMin: Math.min(startMin + DEFAULT_CREATE_DURATION_MIN, CALENDAR_END_MINUTES),
+  }
+}
 
 const SLOT_INSET_PX = 4
 const SLOT_GAP_PX = 2
@@ -279,11 +320,14 @@ export function TimeGrid({
   const columnRefs = useRef<(HTMLDivElement | null)[]>([])
   const lessonDragStartedRef = useRef(false)
   const altSelectClickRef = useRef(false)
+  const pendingAdjustStartedRef = useRef(false)
   const [drag, setDrag] = useState<{
     col: number
     startY: number
     currentY: number
   } | null>(null)
+  const [pendingCreate, setPendingCreate] = useState<PendingCreate | null>(null)
+  const [pendingAdjust, setPendingAdjust] = useState<PendingAdjust | null>(null)
   const [lessonPress, setLessonPress] = useState<LessonPress | null>(null)
   const [moveDrag, setMoveDrag] = useState<MoveDrag | null>(null)
   const [movePreview, setMovePreview] = useState<MovePreview | null>(null)
@@ -530,6 +574,103 @@ export function TimeGrid({
     }
   }, [resizeDrag, dates, hourHeight, onLessonMove])
 
+  useEffect(() => {
+    if (!pendingCreate) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      setPendingCreate(null)
+      setPendingAdjust(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [pendingCreate])
+
+  useEffect(() => {
+    if (!pendingAdjust || !pendingCreate) return
+
+    function handlePointerMove(e: PointerEvent) {
+      pendingAdjustStartedRef.current = true
+      const y = getYInColumn(e.clientY, pendingAdjust.col)
+      if (y == null) return
+
+      const duration = pendingAdjust.anchorEndMin - pendingAdjust.anchorStartMin
+
+      if (pendingAdjust.mode === 'move') {
+        const top = Math.max(
+          0,
+          Math.min(gridHeight - 24, y - pendingAdjust.grabOffsetY),
+        )
+        let startMin = getMinutesFromY(top)
+        let endMin = startMin + duration
+        if (endMin > CALENDAR_END_MINUTES) {
+          endMin = CALENDAR_END_MINUTES
+          startMin = endMin - duration
+        }
+        if (startMin < CALENDAR_START_MINUTES) {
+          startMin = CALENDAR_START_MINUTES
+          endMin = startMin + duration
+        }
+        setPendingCreate({
+          col: pendingAdjust.col,
+          startMin,
+          endMin,
+        })
+        return
+      }
+
+      if (pendingAdjust.mode === 'resize-end') {
+        const nextEnd = Math.min(
+          CALENDAR_END_MINUTES,
+          Math.max(
+            pendingAdjust.anchorStartMin + MIN_LESSON_MINUTES,
+            getMinutesFromY(y),
+          ),
+        )
+        setPendingCreate({
+          col: pendingAdjust.col,
+          startMin: pendingAdjust.anchorStartMin,
+          endMin: nextEnd,
+        })
+        return
+      }
+
+      const nextStart = Math.max(
+        CALENDAR_START_MINUTES,
+        Math.min(
+          pendingAdjust.anchorEndMin - MIN_LESSON_MINUTES,
+          getMinutesFromY(y),
+        ),
+      )
+      setPendingCreate({
+        col: pendingAdjust.col,
+        startMin: nextStart,
+        endMin: pendingAdjust.anchorEndMin,
+      })
+    }
+
+    function handlePointerUp() {
+      setPendingAdjust(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+  }, [pendingAdjust, pendingCreate, gridHeight, hourHeight])
+
+  function confirmPendingCreate() {
+    if (!pendingCreate) return
+    onDragCreate({
+      date: toDateKey(dates[pendingCreate.col]),
+      startTime: minutesToTimeString(pendingCreate.startMin),
+      endTime: minutesToTimeString(pendingCreate.endMin),
+    })
+    setPendingCreate(null)
+    setPendingAdjust(null)
+  }
+
   function handlePointerDown(
     e: React.PointerEvent<HTMLDivElement>,
     col: number,
@@ -561,17 +702,67 @@ export function TimeGrid({
     setDrag(null)
     e.currentTarget.releasePointerCapture(e.pointerId)
 
-    if (dragDistance < CREATE_DRAG_THRESHOLD) return
+    if (dragDistance < CREATE_DRAG_THRESHOLD) {
+      const slot = getClickCreateSlotFromY(drag.startY, hourHeight)
+      setPendingCreate({ col, ...slot })
+      return
+    }
 
     const startMin = getMinutesFromY(Math.min(drag.startY, drag.currentY))
     let endMin = getMinutesFromY(Math.max(drag.startY, drag.currentY))
-    if (endMin <= startMin) endMin = startMin + 30
+    if (endMin <= startMin) {
+      endMin = startMin + DEFAULT_CREATE_DURATION_MIN
+    }
+    endMin = Math.max(endMin, startMin + MIN_LESSON_MINUTES)
+    endMin = Math.min(endMin, CALENDAR_END_MINUTES)
+    setPendingCreate({ col, startMin, endMin })
+  }
 
-    onDragCreate({
-      date: toDateKey(dates[col]),
-      startTime: minutesToTimeString(startMin),
-      endTime: minutesToTimeString(endMin),
+  function handlePendingPointerDown(
+    e: React.PointerEvent<HTMLDivElement>,
+    col: number,
+  ) {
+    if ((e.target as HTMLElement).closest('[data-pending-resize]')) return
+    e.stopPropagation()
+    if (!pendingCreate || pendingCreate.col !== col) return
+
+    pendingAdjustStartedRef.current = false
+    const rect = e.currentTarget.getBoundingClientRect()
+    setPendingAdjust({
+      col,
+      mode: 'move',
+      grabOffsetY: e.clientY - rect.top,
+      anchorStartMin: pendingCreate.startMin,
+      anchorEndMin: pendingCreate.endMin,
     })
+  }
+
+  function beginPendingResize(
+    e: React.PointerEvent<HTMLDivElement>,
+    col: number,
+    edge: 'start' | 'end',
+  ) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!pendingCreate || pendingCreate.col !== col) return
+
+    pendingAdjustStartedRef.current = false
+    setPendingAdjust({
+      col,
+      mode: edge === 'start' ? 'resize-start' : 'resize-end',
+      grabOffsetY: 0,
+      anchorStartMin: pendingCreate.startMin,
+      anchorEndMin: pendingCreate.endMin,
+    })
+  }
+
+  function handlePendingClick(e: React.MouseEvent<HTMLDivElement>) {
+    e.stopPropagation()
+    if (pendingAdjustStartedRef.current) {
+      pendingAdjustStartedRef.current = false
+      return
+    }
+    confirmPendingCreate()
   }
 
   function handleLessonPointerDown(
@@ -581,6 +772,10 @@ export function TimeGrid({
   ) {
     if ((e.target as HTMLElement).closest('[data-resize-handle]')) return
     e.stopPropagation()
+    if (!e.altKey) {
+      setPendingCreate(null)
+      setPendingAdjust(null)
+    }
     if (!onLessonMove && !activateLesson) return
 
     const eventRect = e.currentTarget.getBoundingClientRect()
@@ -666,12 +861,27 @@ export function TimeGrid({
       ? (() => {
           const startMin = getMinutesFromY(Math.min(drag.startY, drag.currentY))
           let endMin = getMinutesFromY(Math.max(drag.startY, drag.currentY))
-          if (endMin <= startMin) endMin = startMin + 30
+          if (endMin <= startMin) endMin = startMin + DEFAULT_CREATE_DURATION_MIN
+          endMin = Math.max(endMin, startMin + MIN_LESSON_MINUTES)
           return {
             start: minutesToTimeString(startMin),
             end: minutesToTimeString(endMin),
           }
         })()
+      : null
+
+  const pendingBlock =
+    pendingCreate != null
+      ? {
+          top: minutesToTop(pendingCreate.startMin, hourHeight),
+          height: minutesToHeight(
+            pendingCreate.endMin - pendingCreate.startMin,
+            hourHeight,
+            minLessonHeight,
+          ),
+          start: minutesToTimeString(pendingCreate.startMin),
+          end: minutesToTimeString(pendingCreate.endMin),
+        }
       : null
 
   return (
@@ -728,8 +938,8 @@ export function TimeGrid({
 
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
         <div className="pointer-events-none absolute right-2 top-2 z-30 rounded-md bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
-          Alt+클릭 선택 · Ctrl+Z/Y(한 단계씩) · Ctrl+휠 확대/축소 ·{' '}
-          {Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)}%
+          빈칸 클릭(30분·1시간) · 박스 드래그로 시간 조절 · 박스 클릭 등록 · Esc 취소 · Alt+클릭
+          선택 · Ctrl+Z/Y · Ctrl+휠 {Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)}%
         </div>
         <div className="flex min-w-[480px]">
           <div className="w-14 shrink-0 border-r border-border relative" style={{ height: gridHeight }}>
@@ -813,6 +1023,37 @@ export function TimeGrid({
                     <p className="text-[10px] font-semibold text-primary truncate tabular-nums">
                       {createPreviewTimes.start} – {createPreviewTimes.end}
                     </p>
+                  </div>
+                )}
+
+                {pendingCreate?.col === col && pendingBlock && (
+                  <div
+                    data-pending-create
+                    className={cn(
+                      'absolute inset-x-1 z-[12] flex min-w-0 touch-none flex-col overflow-hidden rounded-md border-2 border-primary bg-primary/15 shadow-sm',
+                      pendingAdjust ? 'cursor-grabbing' : 'cursor-grab',
+                    )}
+                    style={{ top: pendingBlock.top, height: pendingBlock.height }}
+                    title="드래그로 이동·위·아래로 시간 조절 · 클릭하면 수업 등록"
+                    onPointerDown={(e) => handlePendingPointerDown(e, col)}
+                    onClick={handlePendingClick}
+                  >
+                    <div
+                      data-pending-resize
+                      className="relative z-10 h-2 shrink-0 cursor-ns-resize touch-none"
+                      onPointerDown={(e) => beginPendingResize(e, col, 'start')}
+                    />
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-1.5 py-0.5 pointer-events-none">
+                      <p className="text-[10px] font-semibold text-primary tabular-nums">
+                        {pendingBlock.start} – {pendingBlock.end}
+                      </p>
+                      <p className="text-[9px] text-primary/80">클릭하여 등록</p>
+                    </div>
+                    <div
+                      data-pending-resize
+                      className="relative z-10 h-2 shrink-0 cursor-ns-resize touch-none"
+                      onPointerDown={(e) => beginPendingResize(e, col, 'end')}
+                    />
                   </div>
                 )}
 

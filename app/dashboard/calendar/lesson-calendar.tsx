@@ -89,6 +89,7 @@ export function LessonCalendar({
   const [agendaSelectedDate, setAgendaSelectedDate] = useState(() => new Date())
   const [isFetching, setIsFetching] = useState(false)
   const rangeCacheRef = useRef(new Map<string, Lesson[]>())
+  const rangeFetchSeqRef = useRef(0)
   const calendarRootRef = useRef<HTMLDivElement>(null)
   const {
     selectedIds: selectedLessonIds,
@@ -97,6 +98,8 @@ export function LessonCalendar({
     clear: clearLessonSelection,
     isSelected: isLessonSelected,
     registerDeleteSelected,
+    registerLessonSaved,
+    setLessonFormOpen,
     setIsDeleting,
   } = useCalendarSelection()
 
@@ -105,6 +108,11 @@ export function LessonCalendar({
     const timer = window.setTimeout(() => setHighlight(null), 10000)
     return () => window.clearTimeout(timer)
   }, [highlight])
+
+  useEffect(() => {
+    setLessonFormOpen(createOpen || editOpen)
+    return () => setLessonFormOpen(false)
+  }, [createOpen, editOpen, setLessonFormOpen])
 
   const filteredLessons = useMemo(() => {
     if (instructorFilter === 'all') return lessons
@@ -136,6 +144,31 @@ export function LessonCalendar({
     rangeCacheRef.current.set(rangeCacheKey(currentDate, view), lessons)
   }, [lessons, currentDate, view, isFetching, rangeCacheKey])
 
+  useEffect(() => {
+    setLessons((prev) => {
+      const byId = new Map(prev.map((l) => [l.id, l]))
+      let changed = false
+      for (const lesson of initialLessons) {
+        if (!byId.has(lesson.id)) {
+          byId.set(lesson.id, lesson)
+          changed = true
+        }
+      }
+      return changed ? Array.from(byId.values()) : prev
+    })
+    setSearchPoolLessons((prev) => {
+      const byId = new Map(prev.map((l) => [l.id, l]))
+      let changed = false
+      for (const lesson of initialLessons) {
+        if (!byId.has(lesson.id)) {
+          byId.set(lesson.id, lesson)
+          changed = true
+        }
+      }
+      return changed ? Array.from(byId.values()) : prev
+    })
+  }, [initialLessons])
+
   const loadSearchPool = useCallback(() => {
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth() + 1
@@ -161,15 +194,19 @@ export function LessonCalendar({
         return
       }
 
+      const seq = ++rangeFetchSeqRef.current
       setIsFetching(true)
       const { dateFrom, dateTo } = getRangeForView(date, nextView)
       void getLessonsForRange(dateFrom, dateTo)
         .then((data) => {
+          if (seq !== rangeFetchSeqRef.current) return
           rangeCacheRef.current.set(cacheKey, data)
           setLessons(data)
           lessonHistory.clear()
         })
-        .finally(() => setIsFetching(false))
+        .finally(() => {
+          if (seq === rangeFetchSeqRef.current) setIsFetching(false)
+        })
     },
     [lessonHistory, rangeCacheKey],
   )
@@ -426,30 +463,44 @@ export function LessonCalendar({
     }
   }
 
-  function handleLessonSaved(lesson: Lesson) {
-    setLessons((prev) => {
-      const before = prev.find((item) => item.id === lesson.id)
-      const exists = Boolean(before)
+  const handleLessonSaved = useCallback(
+    (lesson: Lesson) => {
+      rangeFetchSeqRef.current += 1
 
-      if (before) {
-        lessonHistory.pushLessonUpdate(before, lesson)
-      } else {
-        lessonHistory.pushLessonCreate(lesson)
-      }
+      setLessons((prev) => {
+        const before = prev.find((item) => item.id === lesson.id)
+        const exists = Boolean(before)
 
-      if (exists) {
-        return prev.map((l) => (l.id === lesson.id ? lesson : l))
-      }
-      return [...prev, lesson]
-    })
-    setSearchPoolLessons((prev) => {
-      const exists = prev.some((item) => item.id === lesson.id)
-      if (exists) {
-        return prev.map((l) => (l.id === lesson.id ? lesson : l))
-      }
-      return [...prev, lesson]
-    })
-  }
+        if (before) {
+          lessonHistory.pushLessonUpdate(before, lesson)
+        } else {
+          lessonHistory.pushLessonCreate(lesson)
+        }
+
+        const next = exists
+          ? prev.map((l) => (l.id === lesson.id ? lesson : l))
+          : [...prev, lesson]
+        rangeCacheRef.current.set(rangeCacheKey(currentDate, view), next)
+        return next
+      })
+      setSearchPoolLessons((prev) => {
+        const exists = prev.some((item) => item.id === lesson.id)
+        if (exists) {
+          return prev.map((l) => (l.id === lesson.id ? lesson : l))
+        }
+        return [...prev, lesson]
+      })
+    },
+    [lessonHistory, currentDate, view, rangeCacheKey],
+  )
+
+  const lessonSavedRef = useRef(handleLessonSaved)
+  lessonSavedRef.current = handleLessonSaved
+
+  useEffect(() => {
+    registerLessonSaved((lesson) => lessonSavedRef.current(lesson))
+    return () => registerLessonSaved(null)
+  }, [registerLessonSaved])
 
   async function handleMemoSubmit(payload: MemoQuickAddPayload) {
     const result = await createLesson({
