@@ -22,10 +22,17 @@ interface DayWeekViewProps {
     update: { date: string; startTime: string; endTime: string },
   ) => void
   onLessonEdit?: (lesson: Lesson, anchor?: LessonEditAnchor) => void
+  onLessonActivate?: (
+    lesson: Lesson,
+    anchor?: LessonEditAnchor,
+    options?: { altKey?: boolean },
+  ) => void
   onLessonLineUpdate?: (lesson: Lesson, line: string) => Promise<void>
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
   compactHeader?: boolean
   highlightedLessonIds?: string[]
+  isLessonSelected?: (lessonId: string) => boolean
+  onClearLessonSelection?: () => void
 }
 
 export function DayWeekView({
@@ -37,10 +44,13 @@ export function DayWeekView({
   onDragCreate,
   onLessonMove,
   onLessonEdit,
+  onLessonActivate,
   onLessonLineUpdate,
   onMemoSubmit,
   compactHeader = false,
   highlightedLessonIds,
+  isLessonSelected,
+  onClearLessonSelection,
 }: DayWeekViewProps) {
   return (
     <div className="flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card">
@@ -53,6 +63,9 @@ export function DayWeekView({
           onDragCreate={onDragCreate}
           onLessonMove={onLessonMove}
           onLessonEdit={onLessonEdit}
+          onLessonActivate={onLessonActivate}
+          isLessonSelected={isLessonSelected}
+          onClearLessonSelection={onClearLessonSelection}
           compactHeader={compactHeader}
           highlightedLessonIds={highlightedLessonIds}
           className="h-full min-h-0 rounded-none border-0"
@@ -63,9 +76,11 @@ export function DayWeekView({
         selectedDate={selectedDate}
         lessons={lessons}
         members={members}
-        onLessonEdit={(lesson) => onLessonEdit?.(lesson)}
+        onLessonActivate={onLessonActivate}
+        onLessonEdit={onLessonEdit}
         onLessonLineUpdate={onLessonLineUpdate}
         onMemoSubmit={onMemoSubmit}
+        isLessonSelected={isLessonSelected}
       />
     </div>
   )

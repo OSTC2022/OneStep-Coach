@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { TimeInput24 } from '@/components/ui/time-input-24'
+import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -292,23 +292,23 @@ export function LessonsList({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-4">
                   <Label htmlFor="start_time">시작 시간</Label>
-                  <TimeInput24
-                    id="start_time"
-                    value={formData.start_time}
-                    onChange={(start_time) => setFormData({ ...formData, start_time })}
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="end_time">종료 시간</Label>
-                  <TimeInput24
-                    id="end_time"
-                    value={formData.end_time}
-                    onChange={(end_time) => setFormData({ ...formData, end_time })}
-                  />
                 </div>
+                <SimpleTimeRangeInput
+                  startId="start_time"
+                  endId="end_time"
+                  startValue={formData.start_time}
+                  endValue={formData.end_time}
+                  onStartChange={(start_time) =>
+                    setFormData({ ...formData, start_time })
+                  }
+                  onEndChange={(end_time) =>
+                    setFormData({ ...formData, end_time })
+                  }
+                />
               </div>
 
               <div className="space-y-2">

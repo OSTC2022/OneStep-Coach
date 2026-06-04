@@ -65,7 +65,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, email, full_name, role, created_at')
     .eq('id', authUser.id)
     .single()
 
@@ -74,7 +74,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   // Fallback: legacy users table before migration
   const { data: legacy } = await supabase
     .from('users')
-    .select('*')
+    .select('id, email, full_name, role, created_at')
     .eq('id', authUser.id)
     .single()
 

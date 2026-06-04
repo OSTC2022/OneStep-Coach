@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Lesson, SessionPackage } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { TimeInput24 } from '@/components/ui/time-input-24'
+import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -466,21 +466,26 @@ export function LessonRegistration({ members, instructors, todayLessons }: Lesso
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>시작 시간</Label>
-                <TimeInput24
-                  value={formData.start_time}
-                  onChange={(start_time) => setFormData({ ...formData, start_time })}
-                />
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-4">
+                <Label htmlFor="reg-start-time">시작 시간</Label>
+                <Label htmlFor="reg-end-time">종료 시간</Label>
               </div>
-              <div className="space-y-2">
-                <Label>종료 시간</Label>
-                <TimeInput24
-                  value={formData.end_time}
-                  onChange={(end_time) => setFormData({ ...formData, end_time })}
-                />
-              </div>
+              <SimpleTimeRangeInput
+                startId="reg-start-time"
+                endId="reg-end-time"
+                startValue={formData.start_time}
+                endValue={formData.end_time}
+                onStartChange={(start_time) =>
+                  setFormData({ ...formData, start_time })
+                }
+                onEndChange={(end_time) =>
+                  setFormData({ ...formData, end_time })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                예: 18:00~19:30 (시작 칸에 한 번에 입력 가능)
+              </p>
             </div>
 
             <div className="space-y-2">

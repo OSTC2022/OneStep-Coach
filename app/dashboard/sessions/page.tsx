@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { getSessionsPageData } from '@/lib/actions/sessions-page'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { SessionsList } from './sessions-list'
 
 export default async function SessionsPage({
@@ -7,27 +8,9 @@ export default async function SessionsPage({
   searchParams: Promise<{ member?: string }>
 }) {
   const params = await searchParams
-  const supabase = await createClient()
-
-  let query = supabase
-    .from('session_packages')
-    .select(`
-      *,
-      member:members(id, name, phone)
-    `)
-    .order('created_at', { ascending: false })
-
-  if (params.member) {
-    query = query.eq('member_id', params.member)
-  }
-
-  const { data: packages } = await query
-
-  const { data: members } = await supabase
-    .from('members')
-    .select('id, name')
-    .eq('is_active', true)
-    .order('name')
+  const { packages, totalCount, members } = await getSessionsPageData(
+    params.member,
+  )
 
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
@@ -37,10 +20,12 @@ export default async function SessionsPage({
           회원 수업권 구매 및 잔여 횟수를 관리합니다.
         </p>
       </div>
-      
-      <SessionsList 
-        initialPackages={packages || []} 
-        members={members || []}
+
+      <SessionsList
+        initialPackages={packages}
+        totalCount={totalCount}
+        pageSize={LIST_PAGE_SIZE}
+        members={members}
         selectedMemberId={params.member}
       />
     </div>

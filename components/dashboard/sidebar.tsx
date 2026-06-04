@@ -1,7 +1,8 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   Sidebar,
   SidebarContent,
@@ -13,6 +14,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import {
   LayoutDashboard,
@@ -29,6 +31,7 @@ import {
 } from 'lucide-react'
 import type { User } from '@/lib/types'
 import { getRoleLabel } from '@/lib/roles'
+import { preloadDashboardChunks, preloadRouteChunk } from '@/lib/chunk-preload'
 
 const menuItems = [
   {
@@ -105,11 +108,25 @@ interface DashboardSidebarProps {
 
 export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
+  const { isMobile, openMobile, setOpenMobile } = useSidebar()
   const userRole = user?.role || 'member'
 
-  const filteredItems = menuItems.filter(item => 
-    item.roles.includes(userRole)
+  const filteredItems = menuItems.filter((item) =>
+    item.roles.includes(userRole),
   )
+
+  function prefetchMenuRoute(href: string) {
+    router.prefetch(href)
+    preloadRouteChunk(href)
+  }
+
+  useEffect(() => {
+    if (!openMobile) return
+    for (const item of filteredItems) {
+      prefetchMenuRoute(item.url)
+    }
+  }, [openMobile, filteredItems, router])
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -141,7 +158,15 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
                       isActive={isActive}
                       className={isActive ? 'bg-sidebar-accent text-sidebar-primary' : ''}
                     >
-                      <Link href={item.url}>
+                      <Link
+                        href={item.url}
+                        prefetch
+                        onPointerEnter={() => prefetchMenuRoute(item.url)}
+                        onTouchStart={() => prefetchMenuRoute(item.url)}
+                        onClick={() => {
+                          if (isMobile) setOpenMobile(false)
+                        }}
+                      >
                         <item.icon className={`w-4 h-4 ${isActive ? 'text-sidebar-primary' : ''}`} />
                         <span>{item.title}</span>
                       </Link>

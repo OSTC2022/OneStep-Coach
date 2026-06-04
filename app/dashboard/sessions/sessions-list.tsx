@@ -38,6 +38,8 @@ import { Plus, Search, CreditCard, AlertTriangle, TrendingUp } from 'lucide-reac
 import { toast } from 'sonner'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { getPresetPrice } from '@/lib/session-package-utils'
+import { getSessionPackagesPage } from '@/lib/actions/sessions'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
 interface SessionPackage {
   id: string
@@ -56,16 +58,48 @@ interface SessionPackage {
 
 interface SessionsListProps {
   initialPackages: SessionPackage[]
+  totalCount: number
+  pageSize?: number
   members: { id: string; name: string }[]
   selectedMemberId?: string
 }
 
-export function SessionsList({ initialPackages, members, selectedMemberId }: SessionsListProps) {
+export function SessionsList({
+  initialPackages,
+  totalCount,
+  pageSize = LIST_PAGE_SIZE,
+  members,
+  selectedMemberId,
+}: SessionsListProps) {
   const [packages, setPackages] = useState(initialPackages)
+  const [loadedCount, setLoadedCount] = useState(initialPackages.length)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(!!selectedMemberId)
   const [isLoading, setIsLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const hasMore = loadedCount < totalCount
+
+  async function handleLoadMore() {
+    if (!hasMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const { data } = await getSessionPackagesPage({
+        memberId: selectedMemberId,
+        limit: pageSize,
+        offset: loadedCount,
+      })
+      if (data.length > 0) {
+        setPackages((prev) => {
+          const ids = new Set(prev.map((p) => p.id))
+          return [...prev, ...(data as SessionPackage[]).filter((p) => !ids.has(p.id))]
+        })
+        setLoadedCount((n) => n + data.length)
+      }
+    } finally {
+      setLoadingMore(false)
+    }
+  }
   const router = useRouter()
 
   const [formData, setFormData] = useState({
@@ -468,6 +502,19 @@ export function SessionsList({ initialPackages, members, selectedMemberId }: Ses
           </TableBody>
         </Table>
       </div>
+
+      {hasMore && !searchTerm && statusFilter === 'all' && (
+        <div className="flex justify-center pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loadingMore}
+            onClick={() => void handleLoadMore()}
+          >
+            {loadingMore ? '불러오는 중…' : `더보기 (${loadedCount}/${totalCount})`}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

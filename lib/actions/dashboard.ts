@@ -12,18 +12,18 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   // Total members
   const { count: totalMembers } = await supabase
     .from('members')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
 
   // Active members
   const { count: activeMembers } = await supabase
     .from('members')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('is_active', true)
 
   // Today's lessons
   const { count: todayLessons } = await supabase
     .from('lessons')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('lesson_date', today)
 
   // Monthly revenue (sum of session packages paid this month)
@@ -37,7 +37,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   // Expiring packages (within 7 days)
   const { count: expiringPackages } = await supabase
     .from('session_packages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('is_active', true)
     .lte('expires_at', sevenDaysLater)
     .gte('expires_at', today)
@@ -45,7 +45,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   // Low session members (3 or less)
   const { count: lowSessionMembers } = await supabase
     .from('session_packages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('is_active', true)
     .lte('remaining_sessions', 3)
     .gt('remaining_sessions', 0)

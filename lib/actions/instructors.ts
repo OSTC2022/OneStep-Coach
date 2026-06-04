@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Instructor, InstructorFormData, InstructorReport } from '@/lib/types'
+import { INSTRUCTOR_LIST_SELECT } from '@/lib/supabase-selects'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
 type InstructorMutationResult = {
   data?: Instructor
@@ -26,10 +28,10 @@ export async function getInstructors(options?: {
   isActive?: boolean
 }): Promise<Instructor[]> {
   const supabase = await createClient()
-  
+
   let query = supabase
     .from('instructors')
-    .select('*')
+    .select(INSTRUCTOR_LIST_SELECT)
     .order('name', { ascending: true })
 
   if (options?.isActive !== undefined) {
@@ -43,7 +45,37 @@ export async function getInstructors(options?: {
     return []
   }
 
-  return data as Instructor[]
+  return (data ?? []) as Instructor[]
+}
+
+export async function getInstructorsPage(options?: {
+  isActive?: boolean
+  limit?: number
+  offset?: number
+}): Promise<{ data: Instructor[]; count: number }> {
+  const supabase = await createClient()
+
+  let query = supabase
+    .from('instructors')
+    .select(INSTRUCTOR_LIST_SELECT, { count: 'exact' })
+    .order('name', { ascending: true })
+
+  if (options?.isActive !== undefined) {
+    query = query.eq('is_active', options.isActive)
+  }
+
+  const limit = options?.limit ?? LIST_PAGE_SIZE
+  const offset = options?.offset ?? 0
+  query = query.range(offset, offset + limit - 1)
+
+  const { data, error, count } = await query
+
+  if (error) {
+    console.error('Error fetching instructors:', error)
+    return { data: [], count: 0 }
+  }
+
+  return { data: (data ?? []) as Instructor[], count: count ?? 0 }
 }
 
 export async function getInstructor(id: string): Promise<Instructor | null> {
@@ -51,7 +83,7 @@ export async function getInstructor(id: string): Promise<Instructor | null> {
   
   const { data, error } = await supabase
     .from('instructors')
-    .select('*')
+    .select(INSTRUCTOR_LIST_SELECT)
     .eq('id', id)
     .single()
 
@@ -74,7 +106,7 @@ export async function getInstructorForCurrentUser(): Promise<Instructor | null> 
 
   const { data: byUserId } = await supabase
     .from('instructors')
-    .select('*')
+    .select(INSTRUCTOR_LIST_SELECT)
     .eq('user_id', authUser.id)
     .eq('is_active', true)
     .maybeSingle()
@@ -90,7 +122,7 @@ export async function getInstructorForCurrentUser(): Promise<Instructor | null> 
   if (profile?.role === 'instructor' && profile.full_name) {
     const { data: byName } = await supabase
       .from('instructors')
-      .select('*')
+      .select(INSTRUCTOR_LIST_SELECT)
       .eq('name', profile.full_name)
       .eq('is_active', true)
       .maybeSingle()
@@ -240,7 +272,7 @@ export async function getInstructorReport(
   // Get lessons for the period
   const { data: lessons, error } = await supabase
     .from('lessons')
-    .select('*')
+    .select('id, lesson_date, start_time, end_time, attendance_status, lesson_type')
     .eq('instructor_id', instructorId)
     .eq('attendance_status', 'present')
     .gte('lesson_date', dateFrom)

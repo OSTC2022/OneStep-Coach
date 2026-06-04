@@ -1,33 +1,29 @@
 import { getLessonsForMonth } from '@/lib/actions/lessons'
 import { getInstructorForCurrentUser, getInstructors } from '@/lib/actions/instructors'
-import { getMembers } from '@/lib/actions/members'
-import { LessonCalendar } from './lesson-calendar'
+import { CalendarView } from './calendar-view'
 
 export default async function CalendarPage() {
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
 
-  const [lessons, instructors, membersResult, currentInstructor] = await Promise.all([
+  const [lessons, instructors, currentInstructor] = await Promise.all([
     getLessonsForMonth(year, month),
     getInstructors({ isActive: true }),
-    getMembers({ isActive: true }),
     getInstructorForCurrentUser(),
   ])
 
   const members = (() => {
-    const map = new Map(
-      membersResult.data.map((m) => [
-        m.id,
-        {
-          id: m.id,
-          name: m.name,
-          sport: m.sport,
-          age: m.age,
-          birth_date: m.birth_date,
-        },
-      ]),
-    )
+    const map = new Map<
+      string,
+      {
+        id: string
+        name: string
+        sport?: string | null
+        age?: number | null
+        birth_date?: string | null
+      }
+    >()
     for (const lesson of lessons) {
       if (lesson.member && !map.has(lesson.member.id)) {
         map.set(lesson.member.id, {
@@ -46,7 +42,7 @@ export default async function CalendarPage() {
 
   return (
     <div className="-m-4 md:-m-6 flex min-h-[calc(100dvh-3.5rem)] flex-col">
-      <LessonCalendar
+      <CalendarView
         initialLessons={lessons}
         instructors={instructors}
         members={members}

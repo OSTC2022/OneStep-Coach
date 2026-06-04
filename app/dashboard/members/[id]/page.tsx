@@ -19,13 +19,18 @@ export default async function MemberDetailPage({
 
   const { data: sessionPackages } = await supabase
     .from('session_packages')
-    .select('*')
+    .select(
+      'id, member_id, total_sessions, remaining_sessions, price, paid_at, is_active, created_at',
+    )
     .eq('member_id', id)
     .order('created_at', { ascending: false })
+    .limit(20)
 
   const { data: lessons } = await supabase
     .from('lessons')
-    .select('*')
+    .select(
+      'id, lesson_date, start_time, end_time, lesson_type, attendance_status, instructor_id',
+    )
     .eq('member_id', id)
     .order('lesson_date', { ascending: false })
     .limit(10)

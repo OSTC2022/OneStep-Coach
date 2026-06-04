@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { getLessonsForRange, createLesson, updateLesson } from '@/lib/actions/lessons'
+import {
+  createLesson,
+  deleteLesson,
+  getLessonsForMonth,
+  getLessonsForRange,
+  updateLesson,
+} from '@/lib/actions/lessons'
+import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
+import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
 import { normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { parseMemoQuickAdd } from '@/lib/memo-quick-add'
 import type { MemoQuickAddPayload } from './month-memo-input'
@@ -42,6 +50,7 @@ import { LessonCreateDialog } from './lesson-create-dialog'
 import {
   isEditableTarget,
   matchCalendarShortcut,
+  matchCalendarUndoRedo,
 } from '@/lib/calendar-shortcuts'
 
 interface MemberOption extends CalendarMemberSearchItem {}
@@ -67,6 +76,7 @@ export function LessonCalendar({
   const [view, setView] = useState<CalendarView>('week')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [lessons, setLessons] = useState(initialLessons)
+  const lessonHistory = useCalendarLessonHistory(setLessons)
   const [instructorFilter, setInstructorFilter] = useState('all')
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -74,11 +84,21 @@ export function LessonCalendar({
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null)
   const [editAnchor, setEditAnchor] = useState<LessonEditAnchor | null>(null)
   const [searchPoolLessons, setSearchPoolLessons] = useState<Lesson[]>([])
-  const [searchPoolYear, setSearchPoolYear] = useState<number | null>(null)
+  const [searchPoolKey, setSearchPoolKey] = useState<string | null>(null)
   const [highlight, setHighlight] = useState<CalendarHighlight | null>(null)
   const [agendaSelectedDate, setAgendaSelectedDate] = useState(() => new Date())
-  const [isPending, startTransition] = useTransition()
+  const [isFetching, setIsFetching] = useState(false)
+  const rangeCacheRef = useRef(new Map<string, Lesson[]>())
   const calendarRootRef = useRef<HTMLDivElement>(null)
+  const {
+    selectedIds: selectedLessonIds,
+    count: selectionCount,
+    toggle: toggleLessonSelection,
+    clear: clearLessonSelection,
+    isSelected: isLessonSelected,
+    registerDeleteSelected,
+    setIsDeleting,
+  } = useCalendarSelection()
 
   useEffect(() => {
     if (!highlight) return
@@ -102,29 +122,60 @@ export function LessonCalendar({
     return Array.from(map.values())
   }, [searchPoolLessons, lessons])
 
+  const rangeCacheKey = useCallback((date: Date, nextView: CalendarView) => {
+    const { dateFrom, dateTo } = getRangeForView(date, nextView)
+    return `${dateFrom}|${dateTo}`
+  }, [])
+
+  useEffect(() => {
+    rangeCacheRef.current.set(rangeCacheKey(currentDate, view), initialLessons)
+  }, [initialLessons, currentDate, view, rangeCacheKey])
+
+  useEffect(() => {
+    if (isFetching) return
+    rangeCacheRef.current.set(rangeCacheKey(currentDate, view), lessons)
+  }, [lessons, currentDate, view, isFetching, rangeCacheKey])
+
   const loadSearchPool = useCallback(() => {
     const year = currentDate.getFullYear()
-    if (searchPoolYear === year) return
+    const month = currentDate.getMonth() + 1
+    const key = `${year}-${month}`
+    if (searchPoolKey === key) return
 
-    startTransition(async () => {
-      const data = await getLessonsForRange(`${year}-01-01`, `${year}-12-31`)
-      setSearchPoolLessons(data)
-      setSearchPoolYear(year)
+    void getLessonsForMonth(year, month).then((data) => {
+      setSearchPoolLessons((prev) => {
+        const map = new Map(prev.map((l) => [l.id, l]))
+        for (const lesson of data) map.set(lesson.id, lesson)
+        return Array.from(map.values())
+      })
+      setSearchPoolKey(key)
     })
-  }, [currentDate, searchPoolYear])
+  }, [currentDate, searchPoolKey])
 
   const loadRange = useCallback(
-    (date: Date, nextView: CalendarView) => {
+    (date: Date, nextView: CalendarView, options?: { force?: boolean }) => {
+      const cacheKey = rangeCacheKey(date, nextView)
+      const cached = rangeCacheRef.current.get(cacheKey)
+      if (cached && !options?.force) {
+        setLessons(cached)
+        return
+      }
+
+      setIsFetching(true)
       const { dateFrom, dateTo } = getRangeForView(date, nextView)
-      startTransition(async () => {
-        const data = await getLessonsForRange(dateFrom, dateTo)
-        setLessons(data)
-      })
+      void getLessonsForRange(dateFrom, dateTo)
+        .then((data) => {
+          rangeCacheRef.current.set(cacheKey, data)
+          setLessons(data)
+          lessonHistory.clear()
+        })
+        .finally(() => setIsFetching(false))
     },
-    [],
+    [lessonHistory, rangeCacheKey],
   )
 
   function handleViewChange(nextView: CalendarView) {
+    if (nextView === view) return
     setView(nextView)
     if (nextView === 'day') {
       setCurrentDate(agendaSelectedDate)
@@ -166,8 +217,143 @@ export function LessonCalendar({
     goToTodayRef.current()
   }
 
+  function openCreateDialog(d: LessonDraft) {
+    clearLessonSelection()
+    setEditingLesson(null)
+    setDraft(d)
+    setCreateOpen(true)
+  }
+
+  function openEditDialog(lesson: Lesson, anchor?: LessonEditAnchor) {
+    clearLessonSelection()
+    setDraft(null)
+    setEditingLesson(lesson)
+    setEditAnchor(anchor ?? null)
+    setEditOpen(true)
+  }
+
+  function handleLessonActivate(
+    lesson: Lesson,
+    anchor?: LessonEditAnchor,
+    options?: { altKey?: boolean },
+  ) {
+    if (options?.altKey) {
+      toggleLessonSelection(lesson.id)
+      return
+    }
+    openEditDialog(lesson, anchor)
+  }
+
+  const handleDeleteSelectedLessons = useCallback(async () => {
+    if (selectionCount === 0) return
+
+    const targets = searchLessons.filter((lesson) =>
+      selectedLessonIds.has(lesson.id),
+    )
+    if (targets.length === 0) {
+      clearLessonSelection()
+      return
+    }
+
+    if (
+      !window.confirm(
+        `선택한 ${targets.length}개 수업을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`,
+      )
+    ) {
+      return
+    }
+
+    setIsDeleting(true)
+    const results = await Promise.all(
+      targets.map((lesson) => deleteLesson(lesson.id)),
+    )
+    setIsDeleting(false)
+
+    const failed = results.filter((result) => result.error)
+    const removed = targets.filter((_, index) => !results[index].error)
+
+    if (removed.length > 0) {
+      const removedIds = new Set(removed.map((lesson) => lesson.id))
+      setLessons((prev) => prev.filter((lesson) => !removedIds.has(lesson.id)))
+      setSearchPoolLessons((prev) =>
+        prev.filter((lesson) => !removedIds.has(lesson.id)),
+      )
+      lessonHistory.pushLessonBulkDelete(removed)
+    }
+
+    clearLessonSelection()
+    setEditOpen(false)
+    setEditingLesson(null)
+    setEditAnchor(null)
+
+    if (failed.length > 0) {
+      toast.error('일부 수업 삭제 실패', {
+        description: failed[0].error ?? `${failed.length}건 실패`,
+      })
+    }
+    if (removed.length > 0) {
+      toast.success(`${removed.length}개 수업을 삭제했습니다.`)
+    }
+  }, [
+    selectionCount,
+    selectedLessonIds,
+    searchLessons,
+    clearLessonSelection,
+    setIsDeleting,
+    lessonHistory,
+  ])
+
+  const deleteSelectedRef = useRef(handleDeleteSelectedLessons)
+  deleteSelectedRef.current = handleDeleteSelectedLessons
+
   useEffect(() => {
-    function handleShortcut(e: KeyboardEvent) {
+    registerDeleteSelected(() => {
+      void deleteSelectedRef.current()
+    })
+    return () => registerDeleteSelected(null)
+  }, [registerDeleteSelected, handleDeleteSelectedLessons])
+
+  const undoRef = useRef(lessonHistory.undo)
+  undoRef.current = lessonHistory.undo
+  const redoRef = useRef(lessonHistory.redo)
+  redoRef.current = lessonHistory.redo
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (createOpen || editOpen) return
+      if (isEditableTarget(e.target)) return
+
+      if (e.key === 'Escape' && selectionCount > 0) {
+        e.preventDefault()
+        clearLessonSelection()
+        return
+      }
+
+      const undoRedo = matchCalendarUndoRedo(e)
+      if (undoRedo === 'undo' && lessonHistory.canUndo && !e.repeat) {
+        e.preventDefault()
+        void undoRef.current()
+        return
+      }
+      if (undoRedo === 'redo' && lessonHistory.canRedo && !e.repeat) {
+        e.preventDefault()
+        void redoRef.current()
+        return
+      }
+
+      const action = matchCalendarShortcut(e)
+      if (!action) return
+
+      e.preventDefault()
+      e.stopPropagation()
+      if (action === 'today') {
+        triggerGoToToday()
+      } else {
+        handleViewChangeRef.current(action)
+      }
+    }
+
+    function handleKeyUp(e: KeyboardEvent) {
       if (createOpen || editOpen) return
       if (isEditableTarget(e.target)) return
 
@@ -183,26 +369,20 @@ export function LessonCalendar({
       }
     }
 
-    document.addEventListener('keydown', handleShortcut, { capture: true })
-    document.addEventListener('keyup', handleShortcut, { capture: true })
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    document.addEventListener('keyup', handleKeyUp, { capture: true })
     return () => {
-      document.removeEventListener('keydown', handleShortcut, { capture: true })
-      document.removeEventListener('keyup', handleShortcut, { capture: true })
+      document.removeEventListener('keydown', handleKeyDown, { capture: true })
+      document.removeEventListener('keyup', handleKeyUp, { capture: true })
     }
-  }, [createOpen, editOpen])
-
-  function openCreateDialog(d: LessonDraft) {
-    setEditingLesson(null)
-    setDraft(d)
-    setCreateOpen(true)
-  }
-
-  function openEditDialog(lesson: Lesson, anchor?: LessonEditAnchor) {
-    setDraft(null)
-    setEditingLesson(lesson)
-    setEditAnchor(anchor ?? null)
-    setEditOpen(true)
-  }
+  }, [
+    createOpen,
+    editOpen,
+    selectionCount,
+    clearLessonSelection,
+    lessonHistory.canUndo,
+    lessonHistory.canRedo,
+  ])
 
   function handleSearchSelectMember(result: CalendarMemberSearchResult) {
     const lesson = result.targetLesson
@@ -232,31 +412,38 @@ export function LessonCalendar({
       lessonIds: [lesson.id],
     })
 
-    startTransition(async () => {
-      const { dateFrom, dateTo } = getRangeForView(lessonDate, nextView)
-      const data = await getLessonsForRange(dateFrom, dateTo)
-      setLessons(data)
-
-      if (data.some((item) => item.id === lesson.id)) {
-        setHighlight((prev) =>
-          prev
-            ? {
-                ...prev,
-                lessonIds: [lesson.id],
-              }
-            : prev,
-        )
-      }
-    })
+    loadRange(lessonDate, nextView, { force: true })
   }
 
   function handleLessonDeleted(lessonId: string) {
+    const removed =
+      lessons.find((lesson) => lesson.id === lessonId) ??
+      searchPoolLessons.find((lesson) => lesson.id === lessonId)
     setLessons((prev) => prev.filter((l) => l.id !== lessonId))
+    setSearchPoolLessons((prev) => prev.filter((l) => l.id !== lessonId))
+    if (removed) {
+      lessonHistory.pushLessonDelete(removed)
+    }
   }
 
   function handleLessonSaved(lesson: Lesson) {
     setLessons((prev) => {
-      const exists = prev.some((l) => l.id === lesson.id)
+      const before = prev.find((item) => item.id === lesson.id)
+      const exists = Boolean(before)
+
+      if (before) {
+        lessonHistory.pushLessonUpdate(before, lesson)
+      } else {
+        lessonHistory.pushLessonCreate(lesson)
+      }
+
+      if (exists) {
+        return prev.map((l) => (l.id === lesson.id ? lesson : l))
+      }
+      return [...prev, lesson]
+    })
+    setSearchPoolLessons((prev) => {
+      const exists = prev.some((item) => item.id === lesson.id)
       if (exists) {
         return prev.map((l) => (l.id === lesson.id ? lesson : l))
       }
@@ -309,8 +496,10 @@ export function LessonCalendar({
     }
 
     if (result.data) {
+      const after = result.data
+      lessonHistory.pushLessonUpdate(target, after)
       setLessons((prev) =>
-        prev.map((l) => (l.id === target.id ? result.data! : l)),
+        prev.map((l) => (l.id === target.id ? after : l)),
       )
     }
 
@@ -406,7 +595,6 @@ export function LessonCalendar({
             variant="outline"
             size="icon"
             onClick={() => handleNavigate(-1)}
-            disabled={isPending}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -414,7 +602,6 @@ export function LessonCalendar({
             variant="outline"
             size="sm"
             onClick={goToToday}
-            disabled={isPending}
             title="오늘 (Ctrl+Space, Ctrl+Shift+Space)"
           >
             오늘
@@ -423,13 +610,12 @@ export function LessonCalendar({
             variant="outline"
             size="icon"
             onClick={() => handleNavigate(1)}
-            disabled={isPending}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
           <h2 className="ml-1 flex items-center gap-2 text-base font-semibold sm:text-lg">
             {title}
-            {isPending && (
+            {isFetching && (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             )}
           </h2>
@@ -485,6 +671,23 @@ export function LessonCalendar({
             onLoadSearchPool={loadSearchPool}
             onSelectMember={handleSearchSelectMember}
           />
+
+          {selectionCount > 0 && (
+            <span className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground">
+              {selectionCount}개 선택 · 휴지통으로 삭제 · Esc 해제
+            </span>
+          )}
+          {(lessonHistory.canUndo || lessonHistory.canRedo) && (
+            <span className="hidden text-xs text-muted-foreground sm:inline">
+              {lessonHistory.canUndo
+                ? `Ctrl+Z (${lessonHistory.undoCount}단계)`
+                : ''}
+              {lessonHistory.canUndo && lessonHistory.canRedo ? ' · ' : ''}
+              {lessonHistory.canRedo
+                ? `Ctrl+Y (${lessonHistory.redoCount}단계)`
+                : ''}
+            </span>
+          )}
         </div>
       </div>
 
@@ -497,8 +700,10 @@ export function LessonCalendar({
             lessons={filteredLessons}
             members={members}
             onMemoSubmit={handleMemoSubmit}
-            onLessonEdit={openEditDialog}
+            onLessonActivate={handleLessonActivate}
             onLessonLineUpdate={handleLessonLineUpdate}
+            isLessonSelected={isLessonSelected}
+            onClearLessonSelection={clearLessonSelection}
           />
         )}
 
@@ -511,10 +716,12 @@ export function LessonCalendar({
             members={members}
             onDragCreate={openCreateDialog}
             onLessonMove={handleLessonMove}
-            onLessonEdit={openEditDialog}
+            onLessonActivate={handleLessonActivate}
             onLessonLineUpdate={handleLessonLineUpdate}
             onMemoSubmit={handleMemoSubmit}
             highlightedLessonIds={highlight?.lessonIds}
+            isLessonSelected={isLessonSelected}
+            onClearLessonSelection={clearLessonSelection}
           />
         )}
 
@@ -527,11 +734,13 @@ export function LessonCalendar({
             members={members}
             onDragCreate={openCreateDialog}
             onLessonMove={handleLessonMove}
-            onLessonEdit={openEditDialog}
+            onLessonActivate={handleLessonActivate}
             onLessonLineUpdate={handleLessonLineUpdate}
             onMemoSubmit={handleMemoSubmit}
             compactHeader
             highlightedLessonIds={highlight?.lessonIds}
+            isLessonSelected={isLessonSelected}
+            onClearLessonSelection={clearLessonSelection}
           />
         )}
       </div>

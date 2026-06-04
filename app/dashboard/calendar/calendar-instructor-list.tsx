@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { List, X } from 'lucide-react'
+import { List, Loader2, Trash2, X } from 'lucide-react'
+import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
 import { Button } from '@/components/ui/button'
 import {
   filterLessonsForMonth,
@@ -73,6 +74,13 @@ export function CalendarInstructorList({
   onEditLesson,
   className,
 }: CalendarInstructorListProps) {
+  const {
+    count: selectionCount,
+    toggle: toggleLessonSelection,
+    isSelected: isLessonSelected,
+    runDeleteSelected,
+    isDeleting,
+  } = useCalendarSelection()
   const [open, setOpen] = useState(false)
   const longPressTimerRef = useRef<number | null>(null)
   const longPressTriggeredRef = useRef(false)
@@ -215,19 +223,39 @@ export function CalendarInstructorList({
             <div>
               <p className="text-sm font-medium">{monthLabel} 수업 목록</p>
               <p className="text-xs text-muted-foreground">
-                강사 색 on/off · 클릭 이동 · 우클릭/길게 누르기 수정
+                강사 색 on/off · Alt+클릭 선택 · 클릭 이동 · 우클릭/길게 누르기 수정
               </p>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0"
-              onClick={closePanel}
-              title="닫기 (Esc)"
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
+            <div className="flex shrink-0 items-center gap-1">
+              {selectionCount > 0 && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-xs"
+                  disabled={isDeleting}
+                  onClick={() => runDeleteSelected()}
+                  title={`선택 ${selectionCount}개 삭제`}
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  {selectionCount}개 삭제
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={closePanel}
+                title="닫기 (Esc)"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
 
           <div className="flex max-h-[min(24rem,60vh)] min-h-48">
@@ -288,6 +316,7 @@ export function CalendarInstructorList({
                   {monthLessons.map((lesson) => {
                     const color = getLessonInstructorColor(lesson)
                     const isHighlighted = highlightedSet.has(lesson.id)
+                    const isMultiSelected = isLessonSelected(lesson.id)
                     const dateLabel = format(
                       new Date(`${lesson.lesson_date}T12:00:00`),
                       'M/d (EEE)',
@@ -302,22 +331,29 @@ export function CalendarInstructorList({
                           data-lesson-id={lesson.id}
                           className={cn(
                             'mx-1 flex w-[calc(100%-0.5rem)] items-start gap-2.5 rounded-md border px-3 py-2 text-left transition-colors hover:bg-accent/50',
-                            isHighlighted
+                            isHighlighted || isMultiSelected
                               ? 'ring-2 ring-offset-1 ring-offset-popover'
                               : 'border-transparent',
                           )}
                           style={
-                            isHighlighted
+                            isHighlighted || isMultiSelected
                               ? {
                                   borderColor: color,
                                   backgroundColor: hexToRgba(color, 0.16),
-                                  boxShadow: `0 0 0 1px ${hexToRgba(color, 0.45)}`,
+                                  boxShadow: isMultiSelected
+                                    ? `0 0 0 2px #fff, 0 0 12px ${hexToRgba(color, 0.85)}`
+                                    : `0 0 0 1px ${hexToRgba(color, 0.45)}`,
                                 }
                               : undefined
                           }
-                          onClick={() => {
+                          onClick={(e) => {
                             if (longPressTriggeredRef.current) {
                               longPressTriggeredRef.current = false
+                              return
+                            }
+                            if (e.altKey) {
+                              e.preventDefault()
+                              toggleLessonSelection(lesson.id)
                               return
                             }
                             onSelectLesson?.(lesson)
@@ -329,13 +365,13 @@ export function CalendarInstructorList({
                             handleLessonEdit(lesson)
                           }}
                           onPointerDown={(e) => {
-                            if (e.button !== 0) return
+                            if (e.button !== 0 || e.altKey) return
                             startLongPress(lesson)
                           }}
                           onPointerUp={clearLongPress}
                           onPointerLeave={clearLongPress}
                           onPointerCancel={clearLongPress}
-                          title="클릭: 이동 · 우클릭/길게 누르기: 수정"
+                          title="Alt+클릭: 선택 · 클릭: 이동 · 우클릭/길게 누르기: 수정"
                         >
                           <span
                             className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
@@ -371,6 +407,7 @@ export function CalendarInstructorList({
               }}
             >
               {monthLessons.length}건 · {activeInstructorIds.size}개 표시 중
+              {selectionCount > 0 ? ` · ${selectionCount}개 선택` : ''}
             </div>
           )}
         </div>

@@ -33,3 +33,16 @@ export function matchCalendarShortcut(e: KeyboardEvent): CalendarShortcutAction 
 
   return null
 }
+
+/** Ctrl+Z 실행 취소, Ctrl+Y / Ctrl+Shift+Z 다시 실행 */
+export function matchCalendarUndoRedo(
+  e: KeyboardEvent,
+): 'undo' | 'redo' | null {
+  const mod = e.ctrlKey || e.metaKey
+  if (!mod || e.altKey) return null
+
+  const key = e.key.toLowerCase()
+  if (key === 'z' && !e.shiftKey) return 'undo'
+  if (key === 'y' || (key === 'z' && e.shiftKey)) return 'redo'
+  return null
+}

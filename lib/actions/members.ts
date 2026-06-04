@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Member, MemberFormData } from '@/lib/types'
 import { resolveMemberAgeAndBirthDate, normalizePrimaryInstructorId } from '@/lib/member-utils'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+import { MEMBER_DETAIL_SELECT, MEMBER_LIST_SELECT } from '@/lib/supabase-selects'
 
 type InstructorSummary = { id: string; name: string }
 
@@ -53,7 +55,7 @@ async function fetchMembersRows(
 
   let query = supabase
     .from('members')
-    .select('*', options?.withCount ? { count: 'exact' } : undefined)
+    .select(MEMBER_LIST_SELECT, options?.withCount ? { count: 'exact' } : undefined)
     .order(orderBy, { ascending: orderAsc })
 
   if (options?.search) {
@@ -68,12 +70,13 @@ async function fetchMembersRows(
     query = query.eq('primary_instructor_id', options.instructorId)
   }
 
-  if (options?.limit) {
-    query = query.limit(options.limit)
-  }
+  const limit = options?.limit
+  const offset = options?.offset
 
-  if (options?.offset) {
-    query = query.range(options.offset, options.offset + (options.limit || 10) - 1)
+  if (limit != null && offset != null) {
+    query = query.range(offset, offset + limit - 1)
+  } else if (limit != null) {
+    query = query.limit(limit)
   }
 
   let result = await query
@@ -81,7 +84,7 @@ async function fetchMembersRows(
   if (result.error?.message.includes("'created_at'")) {
     query = supabase
       .from('members')
-      .select('*', options?.withCount ? { count: 'exact' } : undefined)
+      .select(MEMBER_LIST_SELECT, options?.withCount ? { count: 'exact' } : undefined)
       .order('name', { ascending: orderAsc })
 
     if (options?.search) {
@@ -93,11 +96,10 @@ async function fetchMembersRows(
     if (options?.instructorId) {
       query = query.eq('primary_instructor_id', options.instructorId)
     }
-    if (options?.limit) {
-      query = query.limit(options.limit)
-    }
-    if (options?.offset) {
-      query = query.range(options.offset, options.offset + (options.limit || 10) - 1)
+    if (limit != null && offset != null) {
+      query = query.range(offset, offset + limit - 1)
+    } else if (limit != null) {
+      query = query.limit(limit)
     }
 
     result = await query
@@ -146,12 +148,29 @@ export async function getMembers(options?: {
   }
 }
 
+export async function searchMembersForPicker(search: string) {
+  const q = search.trim()
+  if (!q) return []
+  const { data } = await getMembers({
+    search: q,
+    isActive: true,
+    limit: LIST_PAGE_SIZE,
+  })
+  return data.map((m) => ({
+    id: m.id,
+    name: m.name,
+    sport: m.sport,
+    age: m.age,
+    birth_date: m.birth_date,
+  }))
+}
+
 export async function getMember(id: string): Promise<Member | null> {
   const supabase = await createClient()
 
   const { data: member, error } = await supabase
     .from('members')
-    .select('*')
+    .select(MEMBER_DETAIL_SELECT)
     .eq('id', id)
     .single()
 

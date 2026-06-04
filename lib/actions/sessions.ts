@@ -3,6 +3,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { SessionPackage, SessionPackageFormData } from '@/lib/types'
+import {
+  SESSION_PACKAGE_DETAIL_SELECT,
+  SESSION_PACKAGE_LIST_SELECT,
+} from '@/lib/supabase-selects'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
 export async function getSessionPackages(options?: {
   memberId?: string
@@ -12,7 +17,7 @@ export async function getSessionPackages(options?: {
   
   let query = supabase
     .from('session_packages')
-    .select('*, member:members(*)')
+    .select(SESSION_PACKAGE_LIST_SELECT)
     .order('created_at', { ascending: false })
 
   if (options?.memberId) {
@@ -33,12 +38,42 @@ export async function getSessionPackages(options?: {
   return data as SessionPackage[]
 }
 
+export async function getSessionPackagesPage(options?: {
+  memberId?: string
+  limit?: number
+  offset?: number
+}): Promise<{ data: SessionPackage[]; count: number }> {
+  const supabase = await createClient()
+
+  let query = supabase
+    .from('session_packages')
+    .select(SESSION_PACKAGE_LIST_SELECT, { count: 'exact' })
+    .order('created_at', { ascending: false })
+
+  if (options?.memberId) {
+    query = query.eq('member_id', options.memberId)
+  }
+
+  const limit = options?.limit ?? LIST_PAGE_SIZE
+  const offset = options?.offset ?? 0
+  query = query.range(offset, offset + limit - 1)
+
+  const { data, error, count } = await query
+
+  if (error) {
+    console.error('Error fetching session packages:', error)
+    return { data: [], count: 0 }
+  }
+
+  return { data: (data ?? []) as SessionPackage[], count: count ?? 0 }
+}
+
 export async function getActivePackageForMember(memberId: string): Promise<SessionPackage | null> {
   const supabase = await createClient()
   
   const { data, error } = await supabase
     .from('session_packages')
-    .select('*')
+    .select(SESSION_PACKAGE_DETAIL_SELECT)
     .eq('member_id', memberId)
     .eq('is_active', true)
     .gt('remaining_sessions', 0)
@@ -113,7 +148,7 @@ export async function getSessionPackage(id: string): Promise<SessionPackage | nu
 
   const { data, error } = await supabase
     .from('session_packages')
-    .select('*')
+    .select(SESSION_PACKAGE_DETAIL_SELECT)
     .eq('id', id)
     .single()
 

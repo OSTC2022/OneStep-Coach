@@ -4,8 +4,16 @@ import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
-const _geist = Geist({ subsets: ["latin"] });
-const _geistMono = Geist_Mono({ subsets: ["latin"] });
+const geistSans = Geist({
+  subsets: ['latin'],
+  variable: '--font-geist-sans',
+  display: 'swap',
+})
+const geistMono = Geist_Mono({
+  subsets: ['latin'],
+  variable: '--font-geist-mono',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'OneStep Coach - 스포츠 트레이닝 센터 관리',
@@ -44,8 +52,13 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="ko" className="dark bg-background">
-      <body className="font-sans antialiased bg-background text-foreground min-h-screen">
+    <html
+      lang="ko"
+      className={`dark bg-background ${geistSans.variable} ${geistMono.variable}`}
+    >
+      <body
+        className={`${geistSans.className} antialiased bg-background text-foreground min-h-screen`}
+      >
         {children}
         <Toaster richColors position="top-center" />
         {process.env.NODE_ENV === 'production' && <Analytics />}

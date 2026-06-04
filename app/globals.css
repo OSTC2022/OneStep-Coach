@@ -87,8 +87,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -133,5 +133,23 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* 터치: 더블탭 줌 대기 제거 + 기본 하이라이트 제거 */
+button,
+[role='button'],
+[data-slot='button'],
+[data-slot='sidebar-menu-button'],
+a[href] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 모바일: 사이드바 너비 애니만 끔 (버튼 눌림 scale은 유지) */
+@media (max-width: 767px) {
+  [data-slot='sidebar'] {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
   }
 }

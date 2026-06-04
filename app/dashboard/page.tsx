@@ -1,35 +1,14 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { getDefaultDashboardPath, profileRoleToAppRole } from '@/lib/roles'
+import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Users, CalendarCheck, ClipboardList, CalendarDays } from 'lucide-react'
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const profile = await getDashboardProfile()
+  if (!profile) redirect('/auth/login')
 
-  if (!user) redirect('/auth/login')
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .maybeSingle()
-
-  let role = profileRoleToAppRole(profile?.role ?? null)
-  if (!profile?.role) {
-    const { data: legacy } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle()
-    role = profileRoleToAppRole(legacy?.role ?? 'member')
-  }
-
-  if (role === 'member' || role === 'guardian') {
+  if (profile.role === 'member' || profile.role === 'guardian') {
     redirect('/dashboard/my')
   }
 
@@ -48,8 +27,8 @@ export default async function DashboardPage() {
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {quickLinks.map((item) => (
-          <Link key={item.href} href={item.href}>
-            <Card className="transition-colors hover:bg-muted/40">
+          <Link key={item.href} href={item.href} prefetch>
+            <Card className="transition-colors hover:bg-muted/40 active:bg-muted/60 max-md:transition-none">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <item.icon className="h-4 w-4" />

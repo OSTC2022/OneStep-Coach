@@ -1,13 +1,12 @@
-import { createClient } from '@/lib/supabase/server'
+import { getInstructorsPage } from '@/lib/actions/instructors'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { InstructorManagement } from './instructor-management'
 
 export default async function InstructorsPage() {
-  const supabase = await createClient()
-  
-  const { data: instructors } = await supabase
-    .from('instructors')
-    .select('*')
-    .order('name')
+  const { data: instructors, count: totalCount } = await getInstructorsPage({
+    limit: LIST_PAGE_SIZE,
+    offset: 0,
+  })
 
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
@@ -17,8 +16,12 @@ export default async function InstructorsPage() {
           강사를 등록하고 강사료를 관리합니다.
         </p>
       </div>
-      
-      <InstructorManagement instructors={instructors || []} />
+
+      <InstructorManagement
+        initialInstructors={instructors}
+        totalCount={totalCount}
+        pageSize={LIST_PAGE_SIZE}
+      />
     </div>
   )
 }

@@ -88,7 +88,7 @@ export async function getSessionTransactionsForMember(
 
   const { data, error } = await supabase
     .from('session_transactions')
-    .select('*')
+    .select('id, member_id, session_package_id, lesson_id, instructor_id, delta, balance_after, reason, note, created_at')
     .eq('member_id', memberId)
     .order('created_at', { ascending: false })
     .limit(limit)

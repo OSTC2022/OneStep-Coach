@@ -8,13 +8,15 @@ import { createLesson, deleteLesson, updateLesson } from '@/lib/actions/lessons'
 import { AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { getLessonPopupPosition, getLessonCalendarLabel, getDefaultLessonCalendarLabel, resolveLessonTitle, type LessonDraft, type LessonEditAnchor } from '@/lib/calendar-utils'
 import { formatMemberCalendarLabel } from '@/lib/member-utils'
+import { touchMemberRecent } from '@/lib/member-recent-search'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
-import { TimeInput24 } from '@/components/ui/time-input-24'
+import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import { MemberSearchSelect } from '@/components/members/member-search-select'
+import { searchMembersForPicker } from '@/lib/actions/members'
 import {
   Dialog,
   DialogContent,
@@ -72,7 +74,13 @@ function mergeMemberOptions(
   for (const item of lessons) {
     if (!item) continue
     if (item.member) {
-      map.set(item.member.id, { id: item.member.id, name: item.member.name })
+      map.set(item.member.id, {
+        id: item.member.id,
+        name: item.member.name,
+        sport: item.member.sport,
+        age: item.member.age,
+        birth_date: item.member.birth_date,
+      })
       continue
     }
     if (item.member_id && !map.has(item.member_id)) {
@@ -227,7 +235,7 @@ export function LessonCreateDialog({
       setLessonType('개인레슨')
       setDate(draft.date)
       setStartTime(draft.startTime)
-      setEndTime(draft.endTime)
+      setEndTime('')
     }
   }, [open, lesson, draft, sameSlotLessons, initialInstructorId])
 
@@ -246,6 +254,22 @@ export function LessonCreateDialog({
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [open, isPopup])
+
+  function handleMemberChange(nextMemberId: string) {
+    setMemberId(nextMemberId)
+    if (!nextMemberId) return
+
+    const member =
+      memberOptions.find((m) => m.id === nextMemberId) ??
+      (lesson?.member?.id === nextMemberId ? lesson.member : undefined) ??
+      sameSlotLessons.find((l) => getLessonMemberId(l) === nextMemberId)?.member
+
+    if (member) {
+      setCalendarDisplayText(formatMemberCalendarLabel(member))
+      setEntryText(member.name)
+      touchMemberRecent({ id: member.id, name: member.name })
+    }
+  }
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -446,29 +470,31 @@ export function LessonCreateDialog({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1.5">
+      <div className="space-y-1.5">
+        <div className="grid grid-cols-2 gap-2">
           <Label htmlFor="start-time" className={isPopup ? 'text-xs' : undefined}>
             시작
           </Label>
-          <TimeInput24
-            id="start-time"
-            value={startTime}
-            onChange={setStartTime}
-            compact={isPopup}
-          />
-        </div>
-        <div className="space-y-1.5">
           <Label htmlFor="end-time" className={isPopup ? 'text-xs' : undefined}>
             종료
           </Label>
-          <TimeInput24
-            id="end-time"
-            value={endTime}
-            onChange={setEndTime}
-            compact={isPopup}
-          />
         </div>
+        <SimpleTimeRangeInput
+          startId="start-time"
+          endId="end-time"
+          startValue={startTime}
+          endValue={endTime}
+          onStartChange={setStartTime}
+          onEndChange={setEndTime}
+          calendarStartTime={draft?.startTime ?? null}
+          endPlaceholder={draft?.endTime || '19:30'}
+          compact={isPopup}
+        />
+        {!isPopup && (
+          <p className="text-xs text-muted-foreground">
+            예: 18:00~19:30 (시작 칸에 한 번에 입력 가능)
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
@@ -482,7 +508,7 @@ export function LessonCreateDialog({
                 : 'create'
           }
           value={selectedMemberId}
-          onValueChange={setMemberId}
+          onValueChange={handleMemberChange}
           inputValue={entryText}
           onInputValueChange={setEntryText}
           members={memberOptions}
@@ -490,6 +516,9 @@ export function LessonCreateDialog({
           disabledIds={addModeDisabledMemberIds}
           compact={isPopup}
           allowFreeText
+          inlineSearch
+          enableRecentSearches
+          onSearchMembers={searchMembersForPicker}
         />
       </div>
 

@@ -144,7 +144,7 @@ export function ReportDashboard({ stats, instructorStats, sportStats }: ReportDa
                         </div>
                         <div className="h-2 bg-secondary rounded-full overflow-hidden">
                           <div 
-                            className="h-full bg-primary rounded-full transition-all duration-500"
+                            className="h-full bg-primary rounded-full max-md:transition-none md:transition-all md:duration-200"
                             style={{ width: `${percentage}%` }}
                           />
                         </div>
@@ -185,7 +185,7 @@ export function ReportDashboard({ stats, instructorStats, sportStats }: ReportDa
                       </div>
                       <div className="h-2 bg-secondary rounded-full overflow-hidden">
                         <div 
-                          className="h-full bg-primary/70 rounded-full transition-all duration-500"
+                          className="h-full bg-primary/70 rounded-full max-md:transition-none md:transition-all md:duration-200"
                           style={{ width: `${percentage}%` }}
                         />
                       </div>

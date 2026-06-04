@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createMember, deleteMember } from '@/lib/actions/members'
+import { createMember, deleteMember, getMembers } from '@/lib/actions/members'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { formatMemberAge, formatMemberAgeFromBirthDate, AUTO_INSTRUCTOR_ID, formatPrimaryInstructorName } from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
@@ -42,20 +43,54 @@ import { Plus, Search, Eye, Edit, Trash2 } from 'lucide-react'
 
 interface MemberListProps {
   initialMembers: (Member & { primary_instructor?: { id: string; name: string } | null })[]
+  totalCount: number
+  pageSize?: number
   instructors: { id: string; name: string }[]
 }
 
-export function MemberList({ initialMembers, instructors }: MemberListProps) {
+export function MemberList({
+  initialMembers,
+  totalCount,
+  pageSize = LIST_PAGE_SIZE,
+  instructors,
+}: MemberListProps) {
   const [members, setMembers] = useState(initialMembers)
+  const [loadedCount, setLoadedCount] = useState(initialMembers.length)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
     setMembers(initialMembers)
+    setLoadedCount(initialMembers.length)
   }, [initialMembers])
+
+  const hasMore = loadedCount < totalCount
+
+  async function handleLoadMore() {
+    if (!hasMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const { data } = await getMembers({
+        orderBy: 'created_at',
+        orderAsc: false,
+        limit: pageSize,
+        offset: loadedCount,
+      })
+      if (data.length > 0) {
+        setMembers((prev) => {
+          const ids = new Set(prev.map((m) => m.id))
+          return [...prev, ...data.filter((m) => !ids.has(m.id))]
+        })
+        setLoadedCount((n) => n + data.length)
+      }
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const [formData, setFormData] = useState<MemberFormData>({
     name: '',
@@ -427,6 +462,19 @@ export function MemberList({ initialMembers, instructors }: MemberListProps) {
           </TableBody>
         </Table>
       </div>
+
+      {hasMore && !searchTerm && statusFilter === 'all' && (
+        <div className="flex justify-center pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loadingMore}
+            onClick={() => void handleLoadMore()}
+          >
+            {loadingMore ? '불러오는 중…' : `더보기 (${loadedCount}/${totalCount})`}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

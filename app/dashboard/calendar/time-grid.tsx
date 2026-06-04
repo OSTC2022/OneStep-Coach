@@ -50,6 +50,13 @@ interface TimeGridProps {
     update: { date: string; startTime: string; endTime: string },
   ) => void
   onLessonEdit?: (lesson: Lesson, anchor?: LessonEditAnchor) => void
+  onLessonActivate?: (
+    lesson: Lesson,
+    anchor?: LessonEditAnchor,
+    options?: { altKey?: boolean },
+  ) => void
+  isLessonSelected?: (lessonId: string) => boolean
+  onClearLessonSelection?: () => void
   compactHeader?: boolean
   className?: string
   highlightedLessonIds?: string[]
@@ -241,10 +248,14 @@ export function TimeGrid({
   onDragCreate,
   onLessonMove,
   onLessonEdit,
+  onLessonActivate,
+  isLessonSelected,
+  onClearLessonSelection,
   compactHeader = false,
   className,
   highlightedLessonIds,
 }: TimeGridProps) {
+  const activateLesson = onLessonActivate ?? onLessonEdit
   const scrollRef = useRef<HTMLDivElement>(null)
   const highlightedSet = useMemo(
     () => new Set(highlightedLessonIds ?? []),
@@ -267,6 +278,7 @@ export function TimeGrid({
   const minLessonHeight = Math.max(36, hourHeight * 0.45)
   const columnRefs = useRef<(HTMLDivElement | null)[]>([])
   const lessonDragStartedRef = useRef(false)
+  const altSelectClickRef = useRef(false)
   const [drag, setDrag] = useState<{
     col: number
     startY: number
@@ -384,7 +396,7 @@ export function TimeGrid({
         if (moved) {
           commitLessonUpdate(moveDrag.lesson.id, preview.col, startMin, endMin)
         } else {
-          onLessonEdit?.(moveDrag.lesson, moveDrag.anchor)
+          activateLesson?.(moveDrag.lesson, moveDrag.anchor)
         }
       }
       lessonDragStartedRef.current = false
@@ -398,7 +410,7 @@ export function TimeGrid({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [moveDrag, dates, gridHeight, hourHeight, onLessonMove, onLessonEdit])
+  }, [moveDrag, dates, gridHeight, hourHeight, onLessonMove, activateLesson])
 
   useEffect(() => {
     if (!lessonPress) return
@@ -432,8 +444,13 @@ export function TimeGrid({
     }
 
     function handlePointerUp() {
+      if (altSelectClickRef.current) {
+        altSelectClickRef.current = false
+        setLessonPress(null)
+        return
+      }
       if (lessonDragStartedRef.current) return
-      onLessonEdit?.(lessonPress.lesson, lessonPress.anchor)
+      activateLesson?.(lessonPress.lesson, lessonPress.anchor)
       setLessonPress(null)
     }
 
@@ -443,7 +460,7 @@ export function TimeGrid({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [lessonPress, onLessonMove, onLessonEdit, gridHeight, hourHeight, dates])
+  }, [lessonPress, onLessonMove, activateLesson, gridHeight, hourHeight, dates])
 
   useEffect(() => {
     if (!resizeDrag) return
@@ -518,6 +535,7 @@ export function TimeGrid({
     col: number,
   ) {
     if ((e.target as HTMLElement).closest('[data-lesson-event]')) return
+    if (!e.altKey) onClearLessonSelection?.()
     const rect = e.currentTarget.getBoundingClientRect()
     const y = e.clientY - rect.top
     setDrag({ col, startY: y, currentY: y })
@@ -563,7 +581,7 @@ export function TimeGrid({
   ) {
     if ((e.target as HTMLElement).closest('[data-resize-handle]')) return
     e.stopPropagation()
-    if (!onLessonMove && !onLessonEdit) return
+    if (!onLessonMove && !activateLesson) return
 
     const eventRect = e.currentTarget.getBoundingClientRect()
     const grabOffsetY = e.clientY - eventRect.top
@@ -574,6 +592,14 @@ export function TimeGrid({
       right: eventRect.right,
       bottom: eventRect.bottom,
     }
+    if (e.altKey) {
+      e.preventDefault()
+      altSelectClickRef.current = true
+      activateLesson?.(lesson, anchor, { altKey: true })
+      return
+    }
+
+    altSelectClickRef.current = false
     setLessonPress({
       lessons: [lesson],
       lesson,
@@ -701,8 +727,9 @@ export function TimeGrid({
       </div>
 
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
-        <div className="pointer-events-none absolute right-2 top-2 z-30 rounded-md bg-background/80 px-2 py-1 text-[10px] text-muted-foreground shadow-sm backdrop-blur-sm">
-          Ctrl+휠 시간 확대/축소 · {Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)}%
+        <div className="pointer-events-none absolute right-2 top-2 z-30 rounded-md bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
+          Alt+클릭 선택 · Ctrl+Z/Y(한 단계씩) · Ctrl+휠 확대/축소 ·{' '}
+          {Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)}%
         </div>
         <div className="flex min-w-[480px]">
           <div className="w-14 shrink-0 border-r border-border relative" style={{ height: gridHeight }}>
@@ -822,6 +849,7 @@ export function TimeGrid({
                     const timeLabel = `${lessonStart}${lessonEnd ? ` – ${lessonEnd}` : ''}`
                     const blockStyle = getLessonCalendarBlockStyle(lesson)
                     const isHighlighted = highlightedSet.has(lesson.id)
+                    const isMultiSelected = isLessonSelected?.(lesson.id)
                     const highlightColor = lesson.instructor_id
                       ? getInstructorCalendarColor(lesson.instructor)
                       : AUTO_INSTRUCTOR_CALENDAR_COLOR
@@ -837,6 +865,8 @@ export function TimeGrid({
                           isResizing && 'z-40 ring-2 ring-primary/70',
                           isMoving && 'opacity-60 ring-2 ring-primary/60',
                           isHighlighted && 'z-30',
+                          isMultiSelected &&
+                            'z-[25] ring-2 ring-white ring-offset-1 ring-offset-transparent',
                           onLessonMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
                         )}
                         style={{
@@ -851,10 +881,19 @@ export function TimeGrid({
                                 borderWidth: 3,
                                 boxShadow: `0 0 0 3px ${highlightColor}, 0 0 0 5px rgba(255,255,255,0.9), 0 0 20px ${hexToRgba(highlightColor, 0.7)}`,
                               }
-                            : {}),
+                            : isMultiSelected
+                              ? {
+                                  boxShadow: `0 0 0 2px #fff, 0 0 12px ${hexToRgba(highlightColor, 0.85)}`,
+                                }
+                              : {}),
                         }}
-                        title={`${memberLabel} · ${timeLabel} · ${lesson.lesson_type}${onLessonMove ? ' · 드래그 이동 · 위·아래 드래그로 시간 조절' : ''}${onLessonEdit ? ' · 클릭 수정' : ''}`}
+                        title={`${memberLabel} · ${timeLabel} · ${lesson.lesson_type}${onLessonMove ? ' · 드래그 이동 · 위·아래 드래그로 시간 조절' : ''}${activateLesson ? ' · 클릭 수정 · Alt+클릭 선택' : ''}`}
                         onPointerDown={(e) => handleLessonPointerDown(e, lesson, col)}
+                        onClick={(e) => {
+                          if (!e.altKey) return
+                          e.preventDefault()
+                          e.stopPropagation()
+                        }}
                       >
                         {onLessonMove && (
                           <div

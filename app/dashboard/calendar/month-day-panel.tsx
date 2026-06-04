@@ -24,8 +24,13 @@ interface MonthDayPanelProps {
   lessons: Lesson[]
   members: CalendarMemberSearchItem[]
   onLessonEdit?: (lesson: Lesson) => void
+  onLessonActivate?: (
+    lesson: Lesson,
+    options?: { altKey?: boolean },
+  ) => void
   onLessonLineUpdate?: (lesson: Lesson, line: string) => Promise<void>
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
+  isLessonSelected?: (lessonId: string) => boolean
 }
 
 export function MonthDayPanel({
@@ -33,9 +38,12 @@ export function MonthDayPanel({
   lessons,
   members,
   onLessonEdit,
+  onLessonActivate,
   onLessonLineUpdate,
   onMemoSubmit,
+  isLessonSelected,
 }: MonthDayPanelProps) {
+  const activateLesson = onLessonActivate ?? ((lesson) => onLessonEdit?.(lesson))
   const [inlineEditId, setInlineEditId] = useState<string | null>(null)
   const [inlineEditText, setInlineEditText] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
@@ -114,6 +122,7 @@ export function MonthDayPanel({
               const displayLine = getLessonCalendarDisplayLine(lesson)
               const isEditing = inlineEditId === lesson.id
               const isSaving = savingId === lesson.id
+              const isMultiSelected = isLessonSelected?.(lesson.id)
 
               return (
                 <li key={lesson.id}>
@@ -121,6 +130,7 @@ export function MonthDayPanel({
                     className={cn(
                       'flex w-full items-stretch gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40',
                       lesson.attendance_status === 'cancelled' && 'opacity-60',
+                      isMultiSelected && 'bg-primary/15 ring-2 ring-inset ring-primary/50',
                     )}
                   >
                     <span
@@ -157,13 +167,20 @@ export function MonthDayPanel({
                         <button
                           type="button"
                           className="block w-full truncate text-left text-sm font-medium"
-                          onClick={() => {
+                          onClick={(e) => {
+                            if (e.altKey) {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              skipClickRef.current = true
+                              activateLesson(lesson, { altKey: true })
+                              return
+                            }
                             window.setTimeout(() => {
                               if (skipClickRef.current) {
                                 skipClickRef.current = false
                                 return
                               }
-                              onLessonEdit?.(lesson)
+                              activateLesson(lesson)
                             }, 220)
                           }}
                           onDoubleClick={(e) => {

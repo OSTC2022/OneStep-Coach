@@ -30,6 +30,8 @@ function parseTime(value: string) {
   }
 }
 
+const DRAG_SCROLL_THRESHOLD_PX = 4
+
 function TimeColumn({
   label,
   items,
@@ -42,24 +44,110 @@ function TimeColumn({
   onSelect: (value: string) => void
 }) {
   const listRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef({
+    active: false,
+    didDrag: false,
+    pointerId: -1,
+    startY: 0,
+    startScrollTop: 0,
+  })
 
   useEffect(() => {
     const el = listRef.current?.querySelector(`[data-value="${selected}"]`)
     el?.scrollIntoView({ block: 'center' })
   }, [selected])
 
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault()
+      e.stopPropagation()
+      el.scrollTop += e.deltaY
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+
+    function onPointerDown(e: PointerEvent) {
+      if (e.button !== 0) return
+      dragRef.current = {
+        active: false,
+        didDrag: false,
+        pointerId: e.pointerId,
+        startY: e.clientY,
+        startScrollTop: el.scrollTop,
+      }
+      el.setPointerCapture(e.pointerId)
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      const drag = dragRef.current
+      if (drag.pointerId !== e.pointerId) return
+
+      const deltaY = e.clientY - drag.startY
+      if (!drag.active) {
+        if (Math.abs(deltaY) < DRAG_SCROLL_THRESHOLD_PX) return
+        dragRef.current.active = true
+        dragRef.current.didDrag = true
+      }
+
+      e.preventDefault()
+      el.scrollTop = drag.startScrollTop - deltaY
+    }
+
+    function endPointer(e: PointerEvent) {
+      const drag = dragRef.current
+      if (drag.pointerId !== e.pointerId) return
+      if (el.hasPointerCapture(e.pointerId)) {
+        el.releasePointerCapture(e.pointerId)
+      }
+      dragRef.current.active = false
+      dragRef.current.pointerId = -1
+    }
+
+    el.addEventListener('pointerdown', onPointerDown)
+    el.addEventListener('pointermove', onPointerMove)
+    el.addEventListener('pointerup', endPointer)
+    el.addEventListener('pointercancel', endPointer)
+
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('pointermove', onPointerMove)
+      el.removeEventListener('pointerup', endPointer)
+      el.removeEventListener('pointercancel', endPointer)
+    }
+  }, [])
+
+  function handleSelect(item: string) {
+    if (dragRef.current.didDrag) {
+      dragRef.current.didDrag = false
+      return
+    }
+    onSelect(item)
+  }
+
   return (
     <div className="flex w-14 flex-col">
       <div className="border-b border-border px-2 py-1.5 text-center text-[10px] font-medium text-muted-foreground">
         {label}
       </div>
-      <div ref={listRef} className="max-h-44 overflow-y-auto overscroll-contain py-1">
+      <div
+        ref={listRef}
+        className="max-h-44 cursor-grab overflow-y-auto overscroll-contain py-1 active:cursor-grabbing"
+      >
         {items.map((item) => (
           <button
             key={item}
             type="button"
             data-value={item}
-            onClick={() => onSelect(item)}
+            onClick={() => handleSelect(item)}
             className={cn(
               'flex w-full items-center justify-center py-1.5 text-sm tabular-nums hover:bg-accent',
               selected === item && 'bg-primary text-primary-foreground hover:bg-primary',
@@ -116,7 +204,11 @@ export function TimeInput24({
           {display || '시간 선택'}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      <PopoverContent
+        className="w-auto p-0"
+        align="start"
+        onWheel={(e) => e.stopPropagation()}
+      >
         <div className="flex divide-x divide-border">
           <TimeColumn label="시" items={HOURS} selected={hour || '09'} onSelect={pickHour} />
           <TimeColumn

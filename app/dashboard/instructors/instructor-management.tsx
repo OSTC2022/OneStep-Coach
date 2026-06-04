@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { createInstructor, updateInstructor } from '@/lib/actions/instructors'
+import { createInstructor, getInstructorsPage, updateInstructor } from '@/lib/actions/instructors'
+import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { Instructor } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,12 +39,41 @@ import {
 } from '@/lib/instructor-colors'
 
 interface InstructorManagementProps {
-  instructors: Instructor[]
+  initialInstructors: Instructor[]
+  totalCount: number
+  pageSize?: number
 }
 
-export function InstructorManagement({ instructors: initialInstructors }: InstructorManagementProps) {
+export function InstructorManagement({
+  initialInstructors,
+  totalCount,
+  pageSize = LIST_PAGE_SIZE,
+}: InstructorManagementProps) {
   const router = useRouter()
   const [instructors, setInstructors] = useState(initialInstructors)
+  const [loadedCount, setLoadedCount] = useState(initialInstructors.length)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const hasMore = loadedCount < totalCount
+
+  async function handleLoadMore() {
+    if (!hasMore || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const { data } = await getInstructorsPage({
+        limit: pageSize,
+        offset: loadedCount,
+      })
+      if (data.length > 0) {
+        setInstructors((prev) => {
+          const ids = new Set(prev.map((i) => i.id))
+          return [...prev, ...data.filter((i) => !ids.has(i.id))]
+        })
+        setLoadedCount((n) => n + data.length)
+      }
+    } finally {
+      setLoadingMore(false)
+    }
+  }
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isCalcDialogOpen, setIsCalcDialogOpen] = useState(false)
@@ -418,6 +448,19 @@ export function InstructorManagement({ instructors: initialInstructors }: Instru
               )}
             </TableBody>
           </Table>
+
+          {hasMore && (
+            <div className="flex justify-center pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loadingMore}
+                onClick={() => void handleLoadMore()}
+              >
+                {loadingMore ? '불러오는 중…' : `더보기 (${loadedCount}/${totalCount})`}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

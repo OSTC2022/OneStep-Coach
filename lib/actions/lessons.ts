@@ -10,8 +10,12 @@ import {
   resolveLessonTitle,
 } from '@/lib/calendar-utils'
 
-const LESSON_SELECT =
-  '*, member:members(*), instructor:instructors(*), session_package:session_packages(*)'
+import {
+  LESSON_LIST_SELECT,
+  LESSON_MUTATION_SELECT,
+} from '@/lib/supabase-selects'
+
+const LESSON_SELECT = LESSON_LIST_SELECT
 
 type LessonMutationResult = {
   data?: Lesson
@@ -206,7 +210,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   let { data, error } = await supabase
     .from('lessons')
     .insert(payload)
-    .select('*, member:members(*), instructor:instructors(*)')
+    .select(LESSON_MUTATION_SELECT)
     .single()
 
   if (error && isMissingTitleColumn(error) && !memberId && title) {
@@ -221,7 +225,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
     const retry = await supabase
       .from('lessons')
       .insert(fallbackPayload)
-      .select('*, member:members(*), instructor:instructors(*)')
+      .select(LESSON_MUTATION_SELECT)
       .single()
 
     data = retry.data
@@ -271,7 +275,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     .from('lessons')
     .update(payload)
     .eq('id', id)
-    .select('*, member:members(*), instructor:instructors(*)')
+    .select(LESSON_MUTATION_SELECT)
     .single()
 
   if (error && isMissingTitleColumn(error) && titleForFallback) {
@@ -282,7 +286,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
       .from('lessons')
       .update(fallbackPayload)
       .eq('id', id)
-      .select('*, member:members(*), instructor:instructors(*)')
+      .select(LESSON_MUTATION_SELECT)
       .single()
 
     data = retry.data
@@ -322,7 +326,7 @@ export async function markAttendance(
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('lessons')
-    .select('*, member:members(*), instructor:instructors(*)')
+    .select(LESSON_MUTATION_SELECT)
     .eq('id', lessonId)
     .single()
 

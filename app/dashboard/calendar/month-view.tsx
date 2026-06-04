@@ -34,7 +34,14 @@ interface MonthViewProps {
   members: CalendarMemberSearchItem[]
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
   onLessonEdit?: (lesson: Lesson, anchor?: LessonEditAnchor) => void
+  onLessonActivate?: (
+    lesson: Lesson,
+    anchor?: LessonEditAnchor,
+    options?: { altKey?: boolean },
+  ) => void
   onLessonLineUpdate?: (lesson: Lesson, line: string) => Promise<void>
+  isLessonSelected?: (lessonId: string) => boolean
+  onClearLessonSelection?: () => void
 }
 
 const WEEKDAY_LABELS = WEEKDAY_LABELS_MON_START
@@ -49,7 +56,10 @@ export function MonthView({
   members,
   onMemoSubmit,
   onLessonEdit,
+  onLessonActivate,
   onLessonLineUpdate,
+  isLessonSelected,
+  onClearLessonSelection,
 }: MonthViewProps) {
   const [gridExpanded, setGridExpanded] = useState(true)
   const gridDates = getMonthGridDates(currentDate)
@@ -203,9 +213,11 @@ export function MonthView({
         selectedDate={selectedDate}
         lessons={lessons}
         members={members}
-        onLessonEdit={(lesson) => onLessonEdit?.(lesson)}
+        onLessonActivate={onLessonActivate}
+        onLessonEdit={onLessonEdit}
         onLessonLineUpdate={onLessonLineUpdate}
         onMemoSubmit={onMemoSubmit}
+        isLessonSelected={isLessonSelected}
       />
     </div>
   )
