@@ -321,6 +321,10 @@ export function TimeGrid({
   const lessonDragStartedRef = useRef(false)
   const altSelectClickRef = useRef(false)
   const pendingAdjustStartedRef = useRef(false)
+  const pendingSkipClickRef = useRef(false)
+  const pendingSkipClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
   const [drag, setDrag] = useState<{
     col: number
     startY: number
@@ -336,6 +340,25 @@ export function TimeGrid({
     startMin: number
     endMin: number
   } | null>(null)
+
+  function armPendingClickGuard() {
+    pendingSkipClickRef.current = true
+    if (pendingSkipClickTimerRef.current) {
+      clearTimeout(pendingSkipClickTimerRef.current)
+    }
+    pendingSkipClickTimerRef.current = window.setTimeout(() => {
+      pendingSkipClickRef.current = false
+      pendingSkipClickTimerRef.current = null
+    }, 500)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (pendingSkipClickTimerRef.current) {
+        clearTimeout(pendingSkipClickTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -705,6 +728,8 @@ export function TimeGrid({
     if (dragDistance < CREATE_DRAG_THRESHOLD) {
       const slot = getClickCreateSlotFromY(drag.startY, hourHeight)
       setPendingCreate({ col, ...slot })
+      armPendingClickGuard()
+      e.preventDefault()
       return
     }
 
@@ -716,6 +741,8 @@ export function TimeGrid({
     endMin = Math.max(endMin, startMin + MIN_LESSON_MINUTES)
     endMin = Math.min(endMin, CALENDAR_END_MINUTES)
     setPendingCreate({ col, startMin, endMin })
+    armPendingClickGuard()
+    e.preventDefault()
   }
 
   function handlePendingPointerDown(
@@ -756,8 +783,10 @@ export function TimeGrid({
     })
   }
 
-  function handlePendingClick(e: React.MouseEvent<HTMLDivElement>) {
+  function handlePendingConfirm(e: React.SyntheticEvent<HTMLDivElement>) {
     e.stopPropagation()
+    e.preventDefault()
+    if (pendingSkipClickRef.current) return
     if (pendingAdjustStartedRef.current) {
       pendingAdjustStartedRef.current = false
       return
@@ -937,10 +966,6 @@ export function TimeGrid({
       </div>
 
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
-        <div className="pointer-events-none absolute right-2 top-2 z-30 rounded-md bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
-          빈칸 클릭(30분·1시간) · 박스 드래그로 시간 조절 · 박스 클릭 등록 · Esc 취소 · Alt+클릭
-          선택 · Ctrl+Z/Y · Ctrl+휠 {Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)}%
-        </div>
         <div className="flex min-w-[480px]">
           <div className="w-14 shrink-0 border-r border-border relative" style={{ height: gridHeight }}>
             {HOURS.map((hour) => (
@@ -1034,21 +1059,24 @@ export function TimeGrid({
                       pendingAdjust ? 'cursor-grabbing' : 'cursor-grab',
                     )}
                     style={{ top: pendingBlock.top, height: pendingBlock.height }}
-                    title="드래그로 이동·위·아래로 시간 조절 · 클릭하면 수업 등록"
+                    title="드래그로 이동·위·아래로 시간 조절 · 한 번 더 탭하면 수업 등록"
                     onPointerDown={(e) => handlePendingPointerDown(e, col)}
-                    onClick={handlePendingClick}
                   >
                     <div
                       data-pending-resize
                       className="relative z-10 h-2 shrink-0 cursor-ns-resize touch-none"
                       onPointerDown={(e) => beginPendingResize(e, col, 'start')}
                     />
-                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-1.5 py-0.5 pointer-events-none">
+                    <button
+                      type="button"
+                      className="flex min-h-0 flex-1 w-full flex-col items-center justify-center px-1.5 py-0.5 touch-manipulation"
+                      onClick={handlePendingConfirm}
+                    >
                       <p className="text-[10px] font-semibold text-primary tabular-nums">
                         {pendingBlock.start} – {pendingBlock.end}
                       </p>
-                      <p className="text-[9px] text-primary/80">클릭하여 등록</p>
-                    </div>
+                      <p className="text-[9px] text-primary/80">탭하여 등록</p>
+                    </button>
                     <div
                       data-pending-resize
                       className="relative z-10 h-2 shrink-0 cursor-ns-resize touch-none"
