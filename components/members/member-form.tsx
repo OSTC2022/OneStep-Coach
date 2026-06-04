@@ -125,12 +125,12 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="grade">학년/직업</Label>
+                <Label htmlFor="grade">학년 / 포지션</Label>
                 <Input
                   id="grade"
                   value={formData.grade}
                   onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                  placeholder="중3 / 직장인"
+                  placeholder="중3 / 공격수"
                   className="bg-input border-border"
                 />
               </div>

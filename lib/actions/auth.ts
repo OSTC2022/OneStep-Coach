@@ -2,23 +2,22 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import type { Member, Profile, ProfileRole, User, UserRole } from '@/lib/types'
+import type {
+  Member,
+  Profile,
+  ProfileApprovalStatus,
+  ProfileRole,
+  User,
+  UserRole,
+} from '@/lib/types'
+import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import {
-  appRoleToProfileRole,
-  getDefaultDashboardPath,
-  profileRoleToAppRole,
-  type AppRole,
-} from '@/lib/roles'
-
-function toAppUser(profile: Profile): User {
-  return {
-    id: profile.id,
-    email: profile.email,
-    full_name: profile.full_name,
-    role: profileRoleToAppRole(profile.role) as UserRole,
-    created_at: profile.created_at,
-  }
-}
+  getEffectiveApprovalStatus,
+  isProfileAccessAllowed,
+} from '@/lib/profile-approval'
+import { resolveLoginAuthEmail } from '@/lib/auth/login-resolve'
+import { isProtectedAdminAccount } from '@/lib/protected-admin'
+import { appRoleToProfileRole, getDefaultDashboardPath, type AppRole } from '@/lib/roles'
 
 export async function signIn(
   _prevState: { error?: string } | null,
@@ -26,11 +25,16 @@ export async function signIn(
 ) {
   const supabase = await createClient()
 
-  const email = formData.get('email') as string
+  const loginInput = (formData.get('email') as string)?.trim() ?? ''
   const password = formData.get('password') as string
 
+  const resolved = await resolveLoginAuthEmail(loginInput)
+  if (resolved.error) {
+    return { error: resolved.error }
+  }
+
   const { error } = await supabase.auth.signInWithPassword({
-    email,
+    email: resolved.email,
     password,
   })
 
@@ -42,10 +46,42 @@ export async function signIn(
     return { error: message }
   }
 
-  const profile = await getCurrentProfile()
-  const path = getDefaultDashboardPath(
-    profileRoleToAppRole(profile?.role ?? 'member'),
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser()
+  if (!authUser) {
+    return { error: '로그인 처리에 실패했습니다.' }
+  }
+
+  const { data: profileRow } = await supabase
+    .from('profiles')
+    .select('approval_status, email, role, full_name')
+    .eq('id', authUser.id)
+    .maybeSingle()
+
+  const accountEmail =
+    profileRow?.email ?? authUser.email ?? resolved.email
+  const approvalStatus = getEffectiveApprovalStatus(
+    accountEmail,
+    profileRow?.approval_status as ProfileApprovalStatus | null | undefined,
+    authUser.user_metadata?.approval_status as ProfileApprovalStatus | undefined,
   )
+
+  if (
+    !isProtectedAdminAccount(accountEmail) &&
+    !isProfileAccessAllowed(approvalStatus, accountEmail)
+  ) {
+    if (approvalStatus === 'pending') redirect('/auth/pending')
+    if (approvalStatus === 'rejected') {
+      await supabase.auth.signOut()
+      return { error: '가입 승인이 거절되었습니다. 관리자에게 문의해주세요.' }
+    }
+    await supabase.auth.signOut()
+    return { error: '가입 승인 후 로그인할 수 있습니다.' }
+  }
+
+  const user = await getDashboardProfile()
+  const path = getDefaultDashboardPath(user?.role ?? 'member')
   redirect(path)
 }
 
@@ -56,42 +92,21 @@ export async function signOut() {
 }
 
 export async function getCurrentProfile(): Promise<Profile | null> {
-  const supabase = await createClient()
-  const {
-    data: { user: authUser },
-  } = await supabase.auth.getUser()
-
-  if (!authUser) return null
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, email, full_name, role, created_at')
-    .eq('id', authUser.id)
-    .single()
-
-  if (profile) return profile as Profile
-
-  // Fallback: legacy users table before migration
-  const { data: legacy } = await supabase
-    .from('users')
-    .select('id, email, full_name, role, created_at')
-    .eq('id', authUser.id)
-    .single()
-
-  if (legacy) {
-    return {
-      ...legacy,
-      role: appRoleToProfileRole(legacy.role as AppRole),
-    } as Profile
+  const user = await getDashboardProfile()
+  if (!user) return null
+  return {
+    id: user.id,
+    email: user.email,
+    full_name: user.full_name,
+    role: appRoleToProfileRole(user.role as AppRole),
+    approval_status: user.approval_status,
+    created_at: user.created_at,
   }
-
-  return null
 }
 
+/** 레이아웃·권한 검사와 동일한 프로필 (보호 관리자·레거시 포함) */
 export async function getCurrentUser(): Promise<User | null> {
-  const profile = await getCurrentProfile()
-  if (!profile) return null
-  return toAppUser(profile)
+  return getDashboardProfile()
 }
 
 export async function getUserRole(): Promise<UserRole | null> {

@@ -1,8 +1,12 @@
+import { redirect } from 'next/navigation'
+import { requireDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getInstructorsPage } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { InstructorManagement } from './instructor-management'
 
 export default async function InstructorsPage() {
+  const user = await requireDashboardProfile()
+  if (user.role !== 'admin') redirect('/unauthorized')
   const { data: instructors, count: totalCount } = await getInstructorsPage({
     limit: LIST_PAGE_SIZE,
     offset: 0,

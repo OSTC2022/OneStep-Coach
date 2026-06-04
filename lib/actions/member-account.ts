@@ -4,11 +4,22 @@ import { revalidatePath } from 'next/cache'
 import { isRedirectError } from 'next/dist/client/components/redirect-error'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { getSiteUrl } from '@/lib/site-url'
+import { createAuthEmailClient } from '@/lib/supabase/auth-email-client'
+import {
+  getInviteEmailRedirectUrl,
+  getRecoveryEmailRedirectUrl,
+  getSiteUrl,
+} from '@/lib/site-url'
 import { getCurrentUser } from './auth'
 
 const INVITE_SUCCESS =
   '초대 메일을 보냈습니다. 회원이 이메일에서 링크를 눌러 비밀번호를 설정하면 앱에 로그인할 수 있습니다.'
+
+const INVITE_RESEND_SUCCESS =
+  '등록된 이메일로 비밀번호 설정 링크를 다시 보냈습니다. 메일함(스팸함)을 확인해주세요.'
+
+const INVITE_MANUAL_LINK_SUCCESS =
+  '자동 메일 발송에 실패했습니다. 아래 링크를 회원에게 직접 보내주세요. (유효 시간이 제한됩니다)'
 
 const INVITE_FAILURE =
   '초대 메일 발송에 실패했습니다. 이메일 주소와 Supabase Auth 설정을 확인해주세요.'
@@ -25,7 +36,18 @@ function formatInviteError(message?: string): string {
   if (lower.includes('invalid') && lower.includes('redirect')) {
     return (
       'Redirect URL이 Supabase에 등록되지 않았습니다. ' +
-      'Authentication → URL Configuration에 /auth/callback/hash 등을 추가해주세요.'
+      'Authentication → URL Configuration에 /auth/callback, /auth/callback/hash 를 추가해주세요.'
+    )
+  }
+  if (
+    lower.includes('recovery email') ||
+    lower.includes('magic link') ||
+    lower.includes('sending recovery') ||
+    lower.includes('unexpected_failure')
+  ) {
+    return (
+      '메일 발송에 실패했습니다. Supabase Dashboard → Authentication → Email에서 SMTP를 설정했는지 확인하고, ' +
+      '기본 SMTP는 시간당 발송 한도가 매우 낮습니다. 잠시 후 다시 시도해주세요.'
     )
   }
   if (message) {
@@ -160,6 +182,174 @@ async function sendInviteEmail(
       member_id: memberId,
     },
   })
+}
+
+type MemberInviteSendResult = {
+  userId: string | null
+  sent: boolean
+  resent: boolean
+  manualLink?: string | null
+  error?: { message?: string } | null
+}
+
+function extractActionLink(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null
+  const record = data as Record<string, unknown>
+  const props = record.properties
+  if (props && typeof props === 'object') {
+    const link = (props as Record<string, unknown>).action_link
+    if (typeof link === 'string' && link.length > 0) return link
+  }
+  const direct = record.action_link
+  if (typeof direct === 'string' && direct.length > 0) return direct
+  return null
+}
+
+/** SMTP 실패 시 관리자가 직접 전달할 수 있는 일회성 링크 */
+async function generateManualAuthLink(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+  memberName: string,
+  memberId: string,
+  siteUrl: string,
+): Promise<string | null> {
+  const attempts: {
+    type: 'recovery' | 'magiclink' | 'invite'
+    redirectTo: string
+  }[] = [
+    { type: 'recovery', redirectTo: getRecoveryEmailRedirectUrl(siteUrl) },
+    { type: 'magiclink', redirectTo: getRecoveryEmailRedirectUrl(siteUrl) },
+    { type: 'invite', redirectTo: getInviteEmailRedirectUrl(siteUrl) },
+  ]
+
+  for (const attempt of attempts) {
+    const { data, error } = await admin.auth.admin.generateLink({
+      type: attempt.type,
+      email,
+      options: {
+        redirectTo: attempt.redirectTo,
+        ...(attempt.type === 'invite'
+          ? {
+              data: {
+                full_name: memberName,
+                role: 'member',
+                member_id: memberId,
+              },
+            }
+          : {}),
+      },
+    })
+    if (error) continue
+    const link = extractActionLink(data)
+    if (link) return link
+  }
+
+  return null
+}
+
+/** 기존 계정: 비밀번호 재설정 또는 매직링크 (anon 클라이언트) */
+async function sendExistingUserLoginEmail(
+  email: string,
+  siteUrl: string,
+): Promise<{ sent: boolean; error?: { message?: string } | null }> {
+  const anon = createAuthEmailClient()
+  const recoveryRedirect = getRecoveryEmailRedirectUrl(siteUrl)
+
+  const { error: recoveryError } = await anon.auth.resetPasswordForEmail(email, {
+    redirectTo: recoveryRedirect,
+  })
+  if (!recoveryError) {
+    return { sent: true }
+  }
+
+  const { error: otpError } = await anon.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: recoveryRedirect,
+      shouldCreateUser: false,
+    },
+  })
+  if (!otpError) {
+    return { sent: true }
+  }
+
+  return { sent: false, error: otpError ?? recoveryError }
+}
+
+/** 신규는 초대 메일, 이미 등록된 이메일은 초대 재시도 후 비밀번호/매직링크 재발송 */
+async function sendMemberInviteEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+  memberName: string,
+  memberId: string,
+  inviteRedirectTo: string,
+  siteUrl: string,
+): Promise<MemberInviteSendResult> {
+  const existingUserId = await findAuthUserIdByEmail(email)
+
+  const invite = await sendInviteEmail(
+    admin,
+    email,
+    memberName,
+    memberId,
+    inviteRedirectTo,
+  )
+
+  if (!invite.error) {
+    return {
+      userId: invite.data?.user?.id ?? existingUserId,
+      sent: true,
+      resent: Boolean(existingUserId),
+    }
+  }
+
+  const alreadyRegistered = isAlreadyRegisteredError(invite.error.message)
+
+  if (alreadyRegistered || existingUserId) {
+    const userId =
+      existingUserId ?? (await findAuthUserIdByEmail(email))
+
+    const fallback = await sendExistingUserLoginEmail(email, siteUrl)
+    if (fallback.sent) {
+      return {
+        userId,
+        sent: true,
+        resent: true,
+      }
+    }
+
+    const manualLink = await generateManualAuthLink(
+      admin,
+      email,
+      memberName,
+      memberId,
+      siteUrl,
+    )
+
+    return {
+      userId,
+      sent: false,
+      resent: true,
+      manualLink,
+      error: fallback.error ?? invite.error,
+    }
+  }
+
+  const manualLink = await generateManualAuthLink(
+    admin,
+    email,
+    memberName,
+    memberId,
+    siteUrl,
+  )
+
+  return {
+    userId: null,
+    sent: false,
+    resent: false,
+    manualLink,
+    error: invite.error,
+  }
 }
 
 async function isAuthUserLinkedToOtherMember(
@@ -313,7 +503,13 @@ export async function inviteMemberLogin(
   memberId: string,
   email: string,
   memberName: string,
-): Promise<{ userId?: string; message?: string; error?: string }> {
+): Promise<{
+  userId?: string
+  message?: string
+  error?: string
+  /** SMTP 실패 시 화면에 표시·복사용 */
+  manualLink?: string
+}> {
   const user = await getCurrentUser()
   if (!user) {
     return { error: '로그인이 필요합니다.' }
@@ -338,9 +534,9 @@ export async function inviteMemberLogin(
 
     const admin = createAdminClient()
     const siteUrl = getSiteUrl()
-    const redirectTo = `${siteUrl}/auth/callback/hash?next=${encodeURIComponent('/auth/set-password')}`
+    const inviteRedirectTo = getInviteEmailRedirectUrl(siteUrl)
 
-    let existingUserId = await findAuthUserIdByEmail(normalizedEmail)
+    const existingUserId = await findAuthUserIdByEmail(normalizedEmail)
 
     if (existingUserId) {
       const linkedElsewhere = await isAuthUserLinkedToOtherMember(
@@ -353,93 +549,62 @@ export async function inviteMemberLogin(
             '이 이메일은 다른 회원에 연결된 계정입니다. Supabase Authentication에서 해당 사용자를 확인하거나 다른 이메일을 사용해주세요.',
         }
       }
-
-      const { data: resendData, error: resendError } = await sendInviteEmail(
-        admin,
-        normalizedEmail,
-        memberName,
-        memberId,
-        redirectTo,
-      )
-
-      const authUserId = resendData?.user?.id ?? existingUserId
-
-      const linkResult = await linkInvitedUser(
-        memberId,
-        authUserId,
-        normalizedEmail,
-        memberName,
-        normalizedEmail,
-      )
-      if (linkResult.error) {
-        return { error: linkResult.error }
-      }
-
-      revalidatePath(`/dashboard/members/${memberId}`)
-      revalidatePath('/dashboard/members')
-
-      if (!resendError) {
-        return { userId: authUserId, message: INVITE_SUCCESS }
-      }
-
-      if (isAlreadyRegisteredError(resendError.message)) {
-        return {
-          userId: authUserId,
-          message:
-            '이미 Auth에 등록된 이메일입니다. 회원 계정과 연결했습니다. 비밀번호를 잊었다면 로그인 화면에서 비밀번호 재설정을 이용해주세요.',
-        }
-      }
-
-      return {
-        userId: authUserId,
-        error: formatInviteError(resendError.message),
-      }
     }
 
-    let { data, error } = await sendInviteEmail(
+    const sendResult = await sendMemberInviteEmail(
       admin,
       normalizedEmail,
       memberName,
       memberId,
-      redirectTo,
+      inviteRedirectTo,
+      siteUrl,
     )
 
-    if ((error || !data.user) && isAlreadyRegisteredError(error?.message ?? '')) {
-      await cleanupOrphanRecordsByEmail(normalizedEmail)
-      existingUserId = await findAuthUserIdByEmail(normalizedEmail)
+    let authUserId =
+      sendResult.userId ?? existingUserId ?? (await findAuthUserIdByEmail(normalizedEmail))
 
-      if (existingUserId) {
-        const linkedElsewhere = await isAuthUserLinkedToOtherMember(
-          existingUserId,
+    let manualLink = sendResult.manualLink ?? null
+
+    if (!sendResult.sent) {
+      if (!authUserId) {
+        authUserId = await findAuthUserIdByEmail(normalizedEmail)
+      }
+
+      if (!manualLink && authUserId) {
+        manualLink = await generateManualAuthLink(
+          admin,
+          normalizedEmail,
+          memberName,
           memberId,
+          siteUrl,
         )
-        if (!linkedElsewhere) {
-          const retry = await sendInviteEmail(
-            admin,
-            normalizedEmail,
-            memberName,
-            memberId,
-            redirectTo,
-          )
-          data = retry.data
-          error = retry.error
+      }
+
+      if (!authUserId && !manualLink) {
+        console.error('inviteMemberLogin:', sendResult.error)
+        return {
+          error: sendResult.error
+            ? formatInviteError(sendResult.error.message)
+            : '계정을 찾을 수 없습니다. Supabase Authentication > Users에서 확인해주세요.',
         }
-      } else {
+      }
+
+      if (!authUserId && manualLink) {
         return {
           error:
-            'Supabase Auth에 이메일이 남아 있는 것 같습니다. Dashboard > Authentication > Users에서 완전히 삭제한 뒤 1–2분 후 다시 시도해주세요.',
+            'Auth 계정이 없어 연결할 수 없습니다. Supabase에서 사용자를 만든 뒤 UUID로 연결하거나 SMTP 설정 후 다시 초대해주세요.',
+          manualLink,
         }
       }
     }
 
-    if (error || !data?.user) {
-      console.error('inviteMemberLogin:', error)
-      return { error: formatInviteError(error?.message) }
+    if (!authUserId) {
+      return { error: '계정을 찾을 수 없습니다. 잠시 후 다시 시도해주세요.' }
     }
 
     const linkResult = await linkInvitedUser(
       memberId,
-      data.user.id,
+      authUserId,
       normalizedEmail,
       memberName,
       normalizedEmail,
@@ -451,7 +616,18 @@ export async function inviteMemberLogin(
     revalidatePath(`/dashboard/members/${memberId}`)
     revalidatePath('/dashboard/members')
 
-    return { userId: data.user.id, message: INVITE_SUCCESS }
+    if (manualLink) {
+      return {
+        userId: authUserId,
+        message: INVITE_MANUAL_LINK_SUCCESS,
+        manualLink,
+      }
+    }
+
+    return {
+      userId: authUserId,
+      message: sendResult.resent ? INVITE_RESEND_SUCCESS : INVITE_SUCCESS,
+    }
   } catch (err) {
     if (isRedirectError(err)) {
       throw err

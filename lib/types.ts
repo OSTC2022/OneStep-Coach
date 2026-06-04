@@ -2,12 +2,14 @@
 
 export type UserRole = 'admin' | 'instructor' | 'member' | 'guardian'
 export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian'
+export type ProfileApprovalStatus = 'pending' | 'approved' | 'rejected'
 
 export interface User {
   id: string
   email: string | null
   full_name: string | null
   role: UserRole
+  approval_status: ProfileApprovalStatus
   created_at: string
 }
 
@@ -16,6 +18,7 @@ export interface Profile {
   email: string | null
   full_name: string | null
   role: ProfileRole
+  approval_status: ProfileApprovalStatus
   created_at: string
   updated_at?: string
 }

@@ -134,11 +134,12 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="grade">학년/직업</Label>
+              <Label htmlFor="grade">학년 / 포지션</Label>
               <Input
                 id="grade"
                 value={formData.grade}
                 onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+                placeholder="중3 / 공격수"
               />
             </div>
 

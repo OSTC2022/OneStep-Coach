@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { getDefaultDashboardPath, profileRoleToAppRole } from '@/lib/roles'
 
 export default async function Home() {
@@ -17,6 +18,10 @@ export default async function Home() {
     .select('role')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (isProtectedAdminAccount(user.email ?? profile?.email)) {
+    redirect('/dashboard')
+  }
 
   let role = profileRoleToAppRole(profile?.role ?? null)
   if (!profile?.role) {

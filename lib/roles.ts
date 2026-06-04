@@ -25,7 +25,7 @@ export function getRoleLabel(role: AppRole): string {
     case 'instructor':
       return '강사'
     case 'guardian':
-      return '보호자'
+      return '학부모'
     default:
       return '회원'
   }

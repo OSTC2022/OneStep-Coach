@@ -6,7 +6,9 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   const type = searchParams.get('type')
   const defaultNext =
-    type === 'invite' ? '/auth/set-password' : '/dashboard/my'
+    type === 'invite' || type === 'recovery' || type === 'magiclink'
+      ? '/auth/set-password'
+      : '/dashboard/my'
   const next = searchParams.get('next') ?? defaultNext
 
   if (code) {

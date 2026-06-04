@@ -1,6 +1,7 @@
 /** Supabase select strings — avoid select('*') on list/hot paths */
 
-export const PROFILE_SELECT = 'id, email, full_name, role, created_at'
+export const PROFILE_SELECT =
+  'id, email, full_name, role, approval_status, created_at'
 
 export const USER_LEGACY_SELECT = 'id, email, full_name, role, created_at'
 

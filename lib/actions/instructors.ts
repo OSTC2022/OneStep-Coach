@@ -1,6 +1,8 @@
 'use server'
 
+import { requireRole } from '@/lib/actions/auth'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import type { Instructor, InstructorFormData, InstructorReport } from '@/lib/types'
 import { INSTRUCTOR_LIST_SELECT } from '@/lib/supabase-selects'
@@ -23,6 +25,26 @@ function isMissingCalendarColorColumn(error: { message?: string; code?: string }
 
 const CALENDAR_COLOR_MIGRATION_HINT =
   '캘린더 색상 저장을 위해 Supabase SQL Editor에서 supabase/add-instructor-calendar-color.sql 을 실행해 주세요.'
+
+function mapInstructorError(message: string): string {
+  if (
+    message.includes('row-level security') ||
+    message.includes('permission denied')
+  ) {
+    return (
+      '강사 저장 권한이 없습니다. Supabase SQL Editor에서 supabase/fix-instructors-rls.sql 을 실행한 뒤 다시 시도해주세요.'
+    )
+  }
+  return message
+}
+
+function getInstructorWriteClient() {
+  try {
+    return createAdminClient()
+  } catch {
+    return null
+  }
+}
 
 export async function getInstructors(options?: {
   isActive?: boolean
@@ -134,7 +156,8 @@ export async function getInstructorForCurrentUser(): Promise<Instructor | null> 
 }
 
 export async function createInstructor(formData: InstructorFormData): Promise<InstructorMutationResult> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = getInstructorWriteClient() ?? (await createClient())
 
   const payload = {
     name: formData.name,
@@ -164,7 +187,7 @@ export async function createInstructor(formData: InstructorFormData): Promise<In
 
     if (retry.error) {
       console.error('Error creating instructor:', retry.error)
-      return { error: retry.error.message }
+      return { error: mapInstructorError(retry.error.message) }
     }
 
     revalidatePath('/dashboard/instructors')
@@ -174,7 +197,7 @@ export async function createInstructor(formData: InstructorFormData): Promise<In
 
   if (error) {
     console.error('Error creating instructor:', error)
-    return { error: error.message }
+    return { error: mapInstructorError(error.message) }
   }
 
   revalidatePath('/dashboard/instructors')
@@ -186,7 +209,8 @@ export async function updateInstructor(
   id: string,
   formData: Partial<InstructorFormData>,
 ): Promise<InstructorMutationResult> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = getInstructorWriteClient() ?? (await createClient())
 
   const { data, error } = await supabase
     .from('instructors')
@@ -206,7 +230,7 @@ export async function updateInstructor(
 
     if (retry.error) {
       console.error('Error updating instructor:', retry.error)
-      return { error: retry.error.message }
+      return { error: mapInstructorError(retry.error.message) }
     }
 
     revalidatePath('/dashboard/instructors')
@@ -216,7 +240,7 @@ export async function updateInstructor(
 
   if (error) {
     console.error('Error updating instructor:', error)
-    return { error: error.message }
+    return { error: mapInstructorError(error.message) }
   }
 
   revalidatePath('/dashboard/instructors')
@@ -225,7 +249,8 @@ export async function updateInstructor(
 }
 
 export async function toggleInstructorStatus(id: string, isActive: boolean): Promise<{ error?: string }> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = getInstructorWriteClient() ?? (await createClient())
   
   const { error } = await supabase
     .from('instructors')
@@ -234,7 +259,7 @@ export async function toggleInstructorStatus(id: string, isActive: boolean): Pro
 
   if (error) {
     console.error('Error toggling instructor status:', error)
-    return { error: error.message }
+    return { error: mapInstructorError(error.message) }
   }
 
   revalidatePath('/dashboard/instructors')
@@ -242,7 +267,8 @@ export async function toggleInstructorStatus(id: string, isActive: boolean): Pro
 }
 
 export async function deleteInstructor(id: string): Promise<{ error?: string }> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = getInstructorWriteClient() ?? (await createClient())
   
   const { error } = await supabase
     .from('instructors')
@@ -251,7 +277,7 @@ export async function deleteInstructor(id: string): Promise<{ error?: string }> 
 
   if (error) {
     console.error('Error deleting instructor:', error)
-    return { error: error.message }
+    return { error: mapInstructorError(error.message) }
   }
 
   revalidatePath('/dashboard/instructors')

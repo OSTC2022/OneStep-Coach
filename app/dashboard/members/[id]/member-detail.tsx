@@ -79,7 +79,7 @@ export function MemberDetail({ member, sessionPackages, lessons }: MemberDetailP
               <span>{formatMemberAge(member)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">학년/직업</span>
+              <span className="text-muted-foreground">학년 / 포지션</span>
               <span>{member.grade || '-'}</span>
             </div>
             <div className="flex justify-between">

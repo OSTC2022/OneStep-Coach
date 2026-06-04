@@ -37,7 +37,9 @@ export default function SetPasswordPage() {
         <CardContent>
           <form action={formAction} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="password">새 비밀번호</Label>
+              <Label htmlFor="password">
+                새 비밀번호 <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="password"
                 name="password"
@@ -50,12 +52,14 @@ export default function SetPasswordPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password_confirm">비밀번호 확인</Label>
+              <Label htmlFor="password_confirm">
+                비밀번호 확인 <span className="text-destructive">*</span>
+              </Label>
               <Input
                 id="password_confirm"
                 name="password_confirm"
                 type="password"
-                placeholder="비밀번호 다시 입력"
+                placeholder="8자 이상"
                 minLength={8}
                 required
                 disabled={isPending}

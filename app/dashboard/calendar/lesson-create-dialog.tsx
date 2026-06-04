@@ -324,10 +324,18 @@ export function LessonCreateDialog({
   }
 
   useEffect(() => {
-    if (!open || !isEditing || !lesson || isAddingToSlot) return
+    if (!open) return
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Delete') return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        handleOpenChange(false)
+        return
+      }
+
+      if (e.key !== 'Delete' || !isEditing || !lesson || isAddingToSlot) return
+
       const target = e.target as HTMLElement
       if (
         target.tagName === 'INPUT' ||
@@ -343,9 +351,9 @@ export function LessonCreateDialog({
       void handleDelete()
     }
 
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, isEditing, lesson?.id])
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [open, isEditing, lesson?.id, isAddingToSlot])
 
   function showSaveWarning(warning?: string) {
     if (warning) {

@@ -34,7 +34,12 @@ export function AuthHashCallback() {
           return
         }
         const destination =
-          type === 'invite' || next === '/auth/set-password' ? next : next
+          type === 'invite' ||
+          type === 'recovery' ||
+          type === 'magiclink' ||
+          next === '/auth/set-password'
+            ? next
+            : next
         router.replace(destination)
         return
       }

@@ -1,10 +1,51 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { isProtectedAdminAccount } from '@/lib/protected-admin'
+import {
+  getEffectiveApprovalStatus,
+  isProfileAccessAllowed,
+} from '@/lib/profile-approval'
 import {
   canAccessPath,
   getDefaultDashboardPath,
   profileRoleToAppRole,
 } from '@/lib/roles'
+import type { ProfileApprovalStatus } from '@/lib/types'
+
+const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
+
+function isAuthStatusPath(pathname: string) {
+  return AUTH_STATUS_PATHS.some((p) => pathname.startsWith(p))
+}
+
+async function getProfileApprovalStatus(
+  supabase: ReturnType<typeof createServerClient>,
+  userId: string,
+  userEmail: string | null | undefined,
+  metadataStatus?: ProfileApprovalStatus | string | null,
+): Promise<ProfileApprovalStatus> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('approval_status, email')
+    .eq('id', userId)
+    .maybeSingle()
+
+  return getEffectiveApprovalStatus(
+    userEmail ?? profile?.email,
+    profile?.approval_status as ProfileApprovalStatus | null | undefined,
+    metadataStatus as ProfileApprovalStatus | undefined,
+  )
+}
+
+function resolveSessionRole(
+  email: string | null | undefined,
+  profileRole: string | null | undefined,
+  legacyRole?: string | null,
+) {
+  if (isProtectedAdminAccount(email)) return 'admin' as const
+  if (profileRole) return profileRoleToAppRole(profileRole)
+  return profileRoleToAppRole(legacyRole ?? 'member')
+}
 
 function missingSupabaseEnvResponse() {
   return new NextResponse(
@@ -77,17 +118,81 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url)
     }
 
+    if (user) {
+      const approvalStatus = await getProfileApprovalStatus(
+        supabase,
+        user.id,
+        user.email,
+        user.user_metadata?.approval_status as ProfileApprovalStatus | undefined,
+      )
+
+      if (
+        !isProfileAccessAllowed(approvalStatus, user.email) &&
+        (request.nextUrl.pathname.startsWith('/dashboard') ||
+          request.nextUrl.pathname.startsWith('/auth/login'))
+      ) {
+        const url = request.nextUrl.clone()
+        url.pathname =
+          approvalStatus === 'rejected' ? '/auth/rejected' : '/auth/pending'
+        return NextResponse.redirect(url)
+      }
+
+      if (
+        isAuthStatusPath(request.nextUrl.pathname) &&
+        isProfileAccessAllowed(approvalStatus, user.email)
+      ) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, email')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        let legacyRole: string | null = null
+        if (!profile?.role) {
+          const { data: legacy } = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle()
+          legacyRole = legacy?.role ?? null
+        }
+
+        const role = resolveSessionRole(
+          user.email ?? profile?.email,
+          profile?.role ?? null,
+          legacyRole,
+        )
+        const url = request.nextUrl.clone()
+        url.pathname = getDefaultDashboardPath(role)
+        return NextResponse.redirect(url)
+      }
+    }
+
     if (
       request.nextUrl.pathname.startsWith('/auth/login') &&
       user
     ) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, email')
         .eq('id', user.id)
         .maybeSingle()
 
-      const role = profileRoleToAppRole(profile?.role ?? 'member')
+      let legacyRole: string | null = null
+      if (!profile?.role) {
+        const { data: legacy } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle()
+        legacyRole = legacy?.role ?? null
+      }
+
+      const role = resolveSessionRole(
+        user.email ?? profile?.email,
+        profile?.role ?? null,
+        legacyRole,
+      )
       const url = request.nextUrl.clone()
       url.pathname = getDefaultDashboardPath(role)
       return NextResponse.redirect(url)
@@ -96,20 +201,25 @@ export async function updateSession(request: NextRequest) {
     if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, email')
         .eq('id', user.id)
         .maybeSingle()
 
-      let role = profileRoleToAppRole(profile?.role ?? null)
-
+      let legacyRole: string | null = null
       if (!profile?.role) {
         const { data: legacy } = await supabase
           .from('users')
           .select('role')
           .eq('id', user.id)
           .maybeSingle()
-        role = profileRoleToAppRole(legacy?.role ?? 'member')
+        legacyRole = legacy?.role ?? null
       }
+
+      const role = resolveSessionRole(
+        user.email ?? profile?.email,
+        profile?.role ?? null,
+        legacyRole,
+      )
 
       if (!canAccessPath(role, request.nextUrl.pathname)) {
         const url = request.nextUrl.clone()
