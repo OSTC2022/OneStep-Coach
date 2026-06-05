@@ -1,41 +1,225 @@
 'use server'
 
+import { requireRole } from '@/lib/actions/auth'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { SessionPackage, SessionPackageFormData } from '@/lib/types'
 import {
   SESSION_PACKAGE_DETAIL_SELECT,
   SESSION_PACKAGE_LIST_SELECT,
+  SESSION_PACKAGE_LIST_SELECT_LEGACY,
 } from '@/lib/supabase-selects'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+
+function mapSessionPackageError(message: string): string {
+  if (message.includes('row-level security') || message.includes('permission denied')) {
+    return (
+      '수업권 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY가 있는지 확인하거나, ' +
+      'Supabase SQL Editor에서 supabase/fix-session-packages-rls.sql 을 실행해주세요.'
+    )
+  }
+  if (message.includes("Could not find the table 'public.session_packages'")) {
+    return 'session_packages 테이블이 없습니다. supabase/fix-session-packages.sql 을 실행해주세요.'
+  }
+  return message
+}
+
+function getSessionWriteClient() {
+  try {
+    return createAdminClient()
+  } catch {
+    return null
+  }
+}
+
+async function sessionWriteClient() {
+  return getSessionWriteClient() ?? (await createClient())
+}
+
+const SESSION_PACKAGE_TRASH_SETUP_MESSAGE =
+  '휴지통 기능을 사용하려면 Supabase SQL Editor에서 supabase/add-session-packages-deleted-at.sql 을 실행해주세요.'
+
+function isDeletedAtMissingError(message?: string, code?: string) {
+  return code === '42703' || Boolean(message?.includes('deleted_at'))
+}
+
+function withDeletedAtDefault<T extends Record<string, unknown>>(row: T) {
+  return {
+    ...row,
+    deleted_at: (row.deleted_at as string | null | undefined) ?? null,
+  }
+}
+
+function applyTrashFilter<T extends { is: (col: string, val: null) => T; not: (col: string, op: string, val: null) => T }>(
+  query: T,
+  trash?: boolean,
+): T {
+  if (trash) {
+    return query.not('deleted_at', 'is', null)
+  }
+  return query.is('deleted_at', null)
+}
+
+export async function isSessionPackageTrashEnabled(): Promise<boolean> {
+  try {
+    const supabase = await createStaffDataClient()
+    const { error } = await supabase.from('session_packages').select('deleted_at').limit(1)
+    if (!error) return true
+    return !isDeletedAtMissingError(error.message, error.code)
+  } catch {
+    return false
+  }
+}
+
+export async function getDeletedSessionPackagesCount(memberId: string): Promise<number> {
+  try {
+    const supabase = await createStaffDataClient()
+    const { count, error } = await supabase
+      .from('session_packages')
+      .select('id', { count: 'exact', head: true })
+      .eq('member_id', memberId)
+      .not('deleted_at', 'is', null)
+
+    if (error) return 0
+    return count ?? 0
+  } catch {
+    return 0
+  }
+}
+
+async function fetchSessionPackageRows(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  options: {
+    memberId?: string
+    isActive?: boolean
+    trash?: boolean
+    limit?: number
+    offset?: number
+    orderBy?: 'created_at' | 'deleted_at'
+    orderAsc?: boolean
+    withCount?: boolean
+    select: string
+    useTrashFilter: boolean
+  },
+) {
+  let query = supabase
+    .from('session_packages')
+    .select(options.select, options.withCount ? { count: 'exact' } : undefined)
+
+  if (options.useTrashFilter) {
+    query = applyTrashFilter(query, options.trash)
+  } else if (options.trash) {
+    return { data: null, error: null, count: 0 }
+  }
+
+  const orderBy = options.orderBy ?? 'created_at'
+  const orderAsc = options.orderAsc ?? false
+  query = query.order(orderBy, { ascending: orderAsc })
+
+  if (options.memberId) {
+    query = query.eq('member_id', options.memberId)
+  }
+
+  if (options.isActive !== undefined) {
+    query = query.eq('is_active', options.isActive)
+  }
+
+  if (options.limit != null) {
+    const offset = options.offset ?? 0
+    query = query.range(offset, offset + options.limit - 1)
+  }
+
+  return query
+}
+
+async function fetchSessionPackages(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  options?: {
+    memberId?: string
+    isActive?: boolean
+    trash?: boolean
+    limit?: number
+    offset?: number
+    orderBy?: 'created_at' | 'deleted_at'
+    orderAsc?: boolean
+    withCount?: boolean
+  },
+) {
+  const trashEnabled = await isSessionPackageTrashEnabled()
+  const useTrashFilter = trashEnabled
+
+  const primary = await fetchSessionPackageRows(supabase, {
+    ...options,
+    orderBy: options?.orderBy ?? 'created_at',
+    orderAsc: options?.orderAsc ?? false,
+    withCount: options?.withCount,
+    select: SESSION_PACKAGE_LIST_SELECT,
+    useTrashFilter,
+  })
+
+  if (!primary.error) {
+    return {
+      data: (primary.data ?? []).map((row) => withDeletedAtDefault(row as Record<string, unknown>)),
+      error: null,
+      count: primary.count,
+      trashEnabled,
+    }
+  }
+
+  if (!isDeletedAtMissingError(primary.error.message, primary.error.code)) {
+    return { data: null, error: primary.error, count: 0, trashEnabled: false }
+  }
+
+  const legacy = await fetchSessionPackageRows(supabase, {
+    ...options,
+    orderBy: options?.orderBy === 'deleted_at' ? 'created_at' : (options?.orderBy ?? 'created_at'),
+    orderAsc: options?.orderAsc ?? false,
+    withCount: options?.withCount,
+    select: SESSION_PACKAGE_LIST_SELECT_LEGACY,
+    useTrashFilter: false,
+  })
+
+  return {
+    data: (legacy.data ?? []).map((row) => withDeletedAtDefault({ ...row, deleted_at: null })),
+    error: legacy.error,
+    count: legacy.count,
+    trashEnabled: false,
+  }
+}
 
 export async function getSessionPackages(options?: {
   memberId?: string
   isActive?: boolean
-}): Promise<SessionPackage[]> {
-  const supabase = await createClient()
-  
-  let query = supabase
-    .from('session_packages')
-    .select(SESSION_PACKAGE_LIST_SELECT)
-    .order('created_at', { ascending: false })
+  trash?: boolean
+  limit?: number
+  offset?: number
+  orderBy?: 'created_at' | 'deleted_at'
+  orderAsc?: boolean
+}): Promise<{ data: SessionPackage[]; count: number; trashEnabled: boolean }> {
+  const supabase = await createStaffDataClient()
+  const trashEnabled = options?.trash ? await isSessionPackageTrashEnabled() : true
 
-  if (options?.memberId) {
-    query = query.eq('member_id', options.memberId)
+  if (options?.trash && !trashEnabled) {
+    return { data: [], count: 0, trashEnabled: false }
   }
 
-  if (options?.isActive !== undefined) {
-    query = query.eq('is_active', options.isActive)
-  }
-
-  const { data, error } = await query
+  const { data, error, count } = await fetchSessionPackages(supabase, {
+    ...options,
+    withCount: true,
+  })
 
   if (error) {
     console.error('Error fetching session packages:', error)
-    return []
+    return { data: [], count: 0, trashEnabled }
   }
 
-  return data as SessionPackage[]
+  return {
+    data: (data ?? []) as SessionPackage[],
+    count: count ?? data?.length ?? 0,
+    trashEnabled,
+  }
 }
 
 export async function getSessionPackagesPage(options?: {
@@ -43,35 +227,19 @@ export async function getSessionPackagesPage(options?: {
   limit?: number
   offset?: number
 }): Promise<{ data: SessionPackage[]; count: number }> {
-  const supabase = await createClient()
-
-  let query = supabase
-    .from('session_packages')
-    .select(SESSION_PACKAGE_LIST_SELECT, { count: 'exact' })
-    .order('created_at', { ascending: false })
-
-  if (options?.memberId) {
-    query = query.eq('member_id', options.memberId)
-  }
-
-  const limit = options?.limit ?? LIST_PAGE_SIZE
-  const offset = options?.offset ?? 0
-  query = query.range(offset, offset + limit - 1)
-
-  const { data, error, count } = await query
-
-  if (error) {
-    console.error('Error fetching session packages:', error)
-    return { data: [], count: 0 }
-  }
-
-  return { data: (data ?? []) as SessionPackage[], count: count ?? 0 }
+  const { data, count } = await getSessionPackages({
+    memberId: options?.memberId,
+    limit: options?.limit ?? LIST_PAGE_SIZE,
+    offset: options?.offset ?? 0,
+  })
+  return { data, count }
 }
 
 export async function getActivePackageForMember(memberId: string): Promise<SessionPackage | null> {
   const supabase = await createClient()
-  
-  const { data, error } = await supabase
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
+  let query = supabase
     .from('session_packages')
     .select(SESSION_PACKAGE_DETAIL_SELECT)
     .eq('member_id', memberId)
@@ -79,7 +247,12 @@ export async function getActivePackageForMember(memberId: string): Promise<Sessi
     .gt('remaining_sessions', 0)
     .order('created_at', { ascending: false })
     .limit(1)
-    .single()
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  const { data, error } = await query.single()
 
   if (error) {
     if (error.code !== 'PGRST116') { // No rows found
@@ -92,8 +265,9 @@ export async function getActivePackageForMember(memberId: string): Promise<Sessi
 }
 
 export async function createSessionPackage(formData: SessionPackageFormData): Promise<{ data?: SessionPackage; error?: string }> {
-  const supabase = await createClient()
-  
+  await requireRole(['admin'])
+  const supabase = await sessionWriteClient()
+
   const { data, error } = await supabase
     .from('session_packages')
     .insert({
@@ -115,7 +289,7 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
     const message =
       error.code === 'PGRST205'
         ? 'session_packages 테이블이 없습니다. supabase/fix-session-packages.sql 을 실행해주세요.'
-        : error.message
+        : mapSessionPackageError(error.message)
     return { error: message }
   }
 
@@ -144,13 +318,19 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
 }
 
 export async function getSessionPackage(id: string): Promise<SessionPackage | null> {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
+  const trashEnabled = await isSessionPackageTrashEnabled()
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('session_packages')
     .select(SESSION_PACKAGE_DETAIL_SELECT)
     .eq('id', id)
-    .single()
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  const { data, error } = await query.single()
 
   if (error) {
     console.error('Error fetching session package:', error)
@@ -164,8 +344,9 @@ export async function updateSessionPackage(
   id: string, 
   updates: Partial<SessionPackageFormData & { remaining_sessions?: number; is_active?: boolean }>
 ): Promise<{ data?: SessionPackage; error?: string }> {
-  const supabase = await createClient()
-  
+  await requireRole(['admin'])
+  const supabase = await sessionWriteClient()
+
   const { data, error } = await supabase
     .from('session_packages')
     .update(updates)
@@ -175,7 +356,7 @@ export async function updateSessionPackage(
 
   if (error) {
     console.error('Error updating session package:', error)
-    return { error: error.message }
+    return { error: mapSessionPackageError(error.message) }
   }
 
   revalidatePath('/dashboard/members')
@@ -184,6 +365,156 @@ export async function updateSessionPackage(
   }
   revalidatePath('/dashboard/sessions')
   return { data: data as SessionPackage }
+}
+
+/** 휴지통으로 이동 (소프트 삭제) */
+export async function deleteSessionPackage(id: string): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+
+  if (!(await isSessionPackageTrashEnabled())) {
+    return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+  }
+
+  const supabase = await sessionWriteClient()
+
+  const { data: pkg, error: fetchError } = await supabase
+    .from('session_packages')
+    .select('member_id')
+    .eq('id', id)
+    .is('deleted_at', null)
+    .maybeSingle()
+
+  if (fetchError) {
+    if (isDeletedAtMissingError(fetchError.message, fetchError.code)) {
+      return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+    }
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (!pkg) {
+    return { error: '수업권을 찾을 수 없거나 이미 삭제되었습니다.' }
+  }
+
+  const { error } = await supabase
+    .from('session_packages')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
+    .is('deleted_at', null)
+
+  if (error) {
+    if (isDeletedAtMissingError(error.message, error.code)) {
+      return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+    }
+    console.error('Error moving session package to trash:', error)
+    return { error: mapSessionPackageError(error.message) }
+  }
+
+  const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+    p_member_id: pkg.member_id,
+  })
+  if (syncError) {
+    console.warn('sync_member_remaining_sessions:', syncError.message)
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${pkg.member_id}`)
+  revalidatePath('/dashboard/sessions')
+  return {}
+}
+
+/** 휴지통에서 복구 */
+export async function restoreSessionPackage(id: string): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+  const supabase = await sessionWriteClient()
+
+  const { data: pkg, error: fetchError } = await supabase
+    .from('session_packages')
+    .select('member_id')
+    .eq('id', id)
+    .not('deleted_at', 'is', null)
+    .maybeSingle()
+
+  if (fetchError || !pkg) {
+    if (isDeletedAtMissingError(fetchError?.message, fetchError?.code)) {
+      return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+    }
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  const { error } = await supabase
+    .from('session_packages')
+    .update({ deleted_at: null })
+    .eq('id', id)
+    .not('deleted_at', 'is', null)
+
+  if (error) {
+    if (isDeletedAtMissingError(error.message, error.code)) {
+      return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+    }
+    console.error('Error restoring session package:', error)
+    return { error: mapSessionPackageError(error.message) }
+  }
+
+  const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+    p_member_id: pkg.member_id,
+  })
+  if (syncError) {
+    console.warn('sync_member_remaining_sessions:', syncError.message)
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${pkg.member_id}`)
+  revalidatePath('/dashboard/sessions')
+  return {}
+}
+
+/** 휴지통에서 영구 삭제 */
+export async function permanentlyDeleteSessionPackage(id: string): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+  const supabase = await sessionWriteClient()
+
+  const { data: pkg, error: fetchError } = await supabase
+    .from('session_packages')
+    .select('member_id')
+    .eq('id', id)
+    .not('deleted_at', 'is', null)
+    .maybeSingle()
+
+  if (fetchError || !pkg) {
+    if (isDeletedAtMissingError(fetchError?.message, fetchError?.code)) {
+      return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+    }
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  const { error } = await supabase
+    .from('session_packages')
+    .delete()
+    .eq('id', id)
+    .not('deleted_at', 'is', null)
+
+  if (error) {
+    if (isDeletedAtMissingError(error.message, error.code)) {
+      return { error: SESSION_PACKAGE_TRASH_SETUP_MESSAGE }
+    }
+    console.error('Error permanently deleting session package:', error)
+    if (error.message.includes('foreign key')) {
+      return { error: '연결된 수업 기록이 있어 삭제할 수 없습니다.' }
+    }
+    return { error: mapSessionPackageError(error.message) }
+  }
+
+  const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+    p_member_id: pkg.member_id,
+  })
+  if (syncError) {
+    console.warn('sync_member_remaining_sessions:', syncError.message)
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${pkg.member_id}`)
+  revalidatePath('/dashboard/sessions')
+  return {}
 }
 
 export async function deductSession(packageId: string): Promise<{ data?: SessionPackage; error?: string }> {
@@ -222,16 +553,23 @@ export async function deductSession(packageId: string): Promise<{ data?: Session
 
 export async function getExpiringPackages(days: number = 7): Promise<SessionPackage[]> {
   const supabase = await createClient()
-  
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
   const futureDate = new Date()
   futureDate.setDate(futureDate.getDate() + days)
-  
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('session_packages')
     .select('*, member:members(*)')
     .eq('is_active', true)
     .lte('expires_at', futureDate.toISOString().split('T')[0])
     .order('expires_at', { ascending: true })
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('Error fetching expiring packages:', error)
@@ -243,14 +581,21 @@ export async function getExpiringPackages(days: number = 7): Promise<SessionPack
 
 export async function getLowSessionPackages(threshold: number = 3): Promise<SessionPackage[]> {
   const supabase = await createClient()
-  
-  const { data, error } = await supabase
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
+  let query = supabase
     .from('session_packages')
     .select('*, member:members(*)')
     .eq('is_active', true)
     .lte('remaining_sessions', threshold)
     .gt('remaining_sessions', 0)
     .order('remaining_sessions', { ascending: true })
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('Error fetching low session packages:', error)

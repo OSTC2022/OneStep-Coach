@@ -14,6 +14,14 @@ export function isProtectedAdminAccount(
   return PROTECTED_ADMIN_EMAILS.some((e) => e === normalized)
 }
 
+/** 보호 관리자 사이드바·프로필 표시명 */
+export function getProtectedAdminDisplayName(
+  email: string | null | undefined,
+): string | null {
+  if (!isProtectedAdminAccount(email)) return null
+  return '관리자'
+}
+
 /** DB·레거시 users가 member 등으로 바뀐 경우 관리자 권한 복구 */
 export async function ensureProtectedAdminRole(
   userId: string,
@@ -36,11 +44,15 @@ export async function ensureProtectedAdminRole(
 
   if (!profile) return
 
+  const needsRoleRepair = profile.role !== 'admin'
+  const adminDisplayName = getProtectedAdminDisplayName(profile.email ?? email)
+
   await admin
     .from('profiles')
     .update({
       role: 'admin' satisfies ProfileRole,
       approval_status: 'approved',
+      ...(needsRoleRepair && adminDisplayName ? { full_name: adminDisplayName } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', userId)
@@ -49,7 +61,7 @@ export async function ensureProtectedAdminRole(
     {
       id: userId,
       email: profile.email,
-      full_name: profile.full_name,
+      full_name: needsRoleRepair && adminDisplayName ? adminDisplayName : profile.full_name,
       role: 'admin',
     },
     { onConflict: 'id' },
@@ -69,7 +81,9 @@ export async function ensureProtectedAdminRole(
     await admin.auth.admin.updateUserById(userId, {
       user_metadata: {
         role: 'admin',
-        full_name: profile.full_name ?? undefined,
+        full_name:
+          (needsRoleRepair && adminDisplayName ? adminDisplayName : profile.full_name) ??
+          undefined,
       },
     })
   } catch (e) {

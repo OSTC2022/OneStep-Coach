@@ -78,11 +78,19 @@ export function MonthView({
     return week ? [week] : weeks.slice(0, 1)
   }, [gridExpanded, weeks, selectedDate])
 
-  function getLessonsForDate(date: Date) {
-    return lessons
-      .filter((lesson) => lesson.lesson_date === toDateKey(date))
-      .sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? ''))
-  }
+  const lessonsByDate = useMemo(() => {
+    const map = new Map<string, Lesson[]>()
+    for (const lesson of lessons) {
+      const key = lesson.lesson_date
+      const group = map.get(key) ?? []
+      group.push(lesson)
+      map.set(key, group)
+    }
+    for (const group of map.values()) {
+      group.sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? ''))
+    }
+    return map
+  }, [lessons])
 
   const today = new Date()
 
@@ -146,7 +154,7 @@ export function MonthView({
             >
               {week.map((date) => {
                 const dateKey = toDateKey(date)
-                const dayLessons = getLessonsForDate(date)
+                const dayLessons = lessonsByDate.get(dateKey) ?? []
                 const inMonth = isSameMonth(date, currentDate)
                 const isToday = isSameDay(date, today)
                 const isSelected = isSameDay(date, selectedDate)

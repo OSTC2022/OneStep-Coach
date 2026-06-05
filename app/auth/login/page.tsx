@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useState } from 'react'
-import { signIn } from '@/lib/actions/auth'
+import { requestPasswordReset, signIn } from '@/lib/actions/auth'
 import { signUpPublic } from '@/lib/actions/auth-registration'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,8 +19,10 @@ import { Loader2, Dumbbell } from 'lucide-react'
 
 export default function LoginPage() {
   const [tab, setTab] = useState('login')
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [loginState, loginAction, loginPending] = useActionState(signIn, null)
   const [signUpState, signUpAction, signUpPending] = useActionState(signUpPublic, null)
+  const [resetState, resetAction, resetPending] = useActionState(requestPasswordReset, null)
 
   useEffect(() => {
     if (loginState?.error) {
@@ -44,6 +46,19 @@ export default function LoginPage() {
     }
   }, [signUpState])
 
+  useEffect(() => {
+    if (resetState?.error) {
+      toast.error('비밀번호 찾기 실패', { description: resetState.error })
+    }
+    if (resetState?.success) {
+      toast.success('재설정 메일 발송', {
+        description: resetState.message,
+        duration: 10000,
+      })
+      setShowForgotPassword(false)
+    }
+  }, [resetState])
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
@@ -61,55 +76,115 @@ export default function LoginPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Tabs value={tab} onValueChange={setTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-4">
+          <Tabs
+            value={tab}
+            onValueChange={(value) => {
+              setTab(value)
+              setShowForgotPassword(false)
+            }}
+            className="w-full"
+          >
+            <TabsList className="mb-4 grid w-full grid-cols-2">
               <TabsTrigger value="login">로그인</TabsTrigger>
               <TabsTrigger value="signup">회원가입</TabsTrigger>
             </TabsList>
 
             <TabsContent value="login">
-              <form action={loginAction} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email">이메일 또는 로그인 ID</Label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="text"
-                    placeholder="admin@example.com"
-                    required
+              {showForgotPassword ? (
+                <form action={resetAction} className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    가입 시 등록한 이메일 또는 로그인 ID를 입력하면 비밀번호 재설정
+                    링크를 보내드립니다.
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="reset-email">이메일 또는 로그인 ID</Label>
+                    <Input
+                      id="reset-email"
+                      name="email"
+                      type="text"
+                      placeholder="example@email.com"
+                      required
+                      disabled={resetPending}
+                      className="bg-input border-border"
+                      autoComplete="username"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    variant="secondary"
+                    disabled={resetPending}
+                  >
+                    {resetPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        발송 중...
+                      </>
+                    ) : (
+                      '재설정 링크 보내기'
+                    )}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(false)}
+                    className="w-full text-center text-xs text-muted-foreground hover:text-foreground hover:underline"
+                  >
+                    로그인으로 돌아가기
+                  </button>
+                </form>
+              ) : (
+                <form action={loginAction} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">이메일 또는 로그인 ID</Label>
+                    <Input
+                      id="email"
+                      name="email"
+                      type="text"
+                      placeholder="admin@example.com"
+                      required
+                      disabled={loginPending}
+                      className="bg-input border-border"
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="password">비밀번호</Label>
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotPassword(true)}
+                        className="text-[11px] text-muted-foreground hover:text-primary hover:underline"
+                      >
+                        비밀번호를 잊으셨나요?
+                      </button>
+                    </div>
+                    <Input
+                      id="password"
+                      name="password"
+                      type="password"
+                      placeholder="••••••••"
+                      required
+                      disabled={loginPending}
+                      className="bg-input border-border"
+                      autoComplete="current-password"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
                     disabled={loginPending}
-                    className="bg-input border-border"
-                    autoComplete="username"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">비밀번호</Label>
-                  <Input
-                    id="password"
-                    name="password"
-                    type="password"
-                    placeholder="••••••••"
-                    required
-                    disabled={loginPending}
-                    className="bg-input border-border"
-                    autoComplete="current-password"
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                  disabled={loginPending}
-                >
-                  {loginPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      로그인 중...
-                    </>
-                  ) : (
-                    '로그인'
-                  )}
-                </Button>
-              </form>
+                  >
+                    {loginPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        로그인 중...
+                      </>
+                    ) : (
+                      '로그인'
+                    )}
+                  </Button>
+                </form>
+              )}
             </TabsContent>
 
             <TabsContent value="signup">
@@ -141,19 +216,7 @@ export default function LoginPage() {
                     autoComplete="email"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="role">가입 유형</Label>
-                  <select
-                    id="role"
-                    name="role"
-                    defaultValue="member"
-                    disabled={signUpPending}
-                    className="flex h-9 w-full rounded-md border border-input bg-input px-3 py-1 text-sm shadow-xs"
-                  >
-                    <option value="member">회원</option>
-                    <option value="guardian">학부모</option>
-                  </select>
-                </div>
+                <input type="hidden" name="role" value="member" />
                 <div className="space-y-2">
                   <Label htmlFor="signup-password">
                     비밀번호 <span className="text-destructive">*</span>

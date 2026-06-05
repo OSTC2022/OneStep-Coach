@@ -1,8 +1,14 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { revalidatePath } from 'next/cache'
 import type { AttendanceStatus, Lesson, LessonSession, SessionTransaction } from '@/lib/types'
+import { getLessonCalendarDisplayParts } from '@/lib/calendar-utils'
+import { countsTowardSessionNumber, getTodayDateKey } from '@/lib/lesson-record-utils'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { canRoleSetAttendanceStatus } from '@/lib/roles'
 import { requireRole } from './auth'
 
 type CheckInResult = {
@@ -10,6 +16,23 @@ type CheckInResult = {
   lesson_session_id?: string
   member_remaining_sessions?: number
   error?: string
+}
+
+function attendanceWriteClient() {
+  try {
+    return createAdminClient()
+  } catch {
+    return null
+  }
+}
+
+function isMissingTableError(message?: string) {
+  return Boolean(
+    message?.includes('Could not find the table') ||
+      message?.includes('lesson_sessions') ||
+      message?.includes('session_transactions') ||
+      message?.includes('signatures'),
+  )
 }
 
 export async function checkInLesson(
@@ -21,41 +44,848 @@ export async function checkInLesson(
     notes?: string
   },
 ): Promise<{ data?: CheckInResult; error?: string }> {
-  await requireRole(['admin', 'instructor'])
+  const user = await requireRole(['admin', 'instructor'])
 
-  const supabase = await createClient()
-
-  const { data, error } = await supabase.rpc('check_in_lesson', {
-    p_lesson_id: lessonId,
-    p_status: status,
-    p_signature_data: options?.signatureData ?? null,
-    p_signature_url: options?.signatureUrl ?? null,
-    p_notes: options?.notes ?? null,
-  })
-
-  if (error) {
-    console.error('checkInLesson RPC error:', error)
-    if (error.code === 'PGRST202') {
-      return {
-        error:
-          'check_in_lesson 함수가 없습니다. supabase/add-auth-roles-mvp.sql 을 실행해주세요.',
-      }
-    }
-    return { error: error.message }
+  if (!canRoleSetAttendanceStatus(user.role, status)) {
+    return { error: '이 출석 상태를 변경할 권한이 없습니다.' }
   }
 
-  const result = data as CheckInResult
-  if (result.error) {
-    return { error: result.error }
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select(
+      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status',
+    )
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (!lesson.member_id) {
+    return { error: '회원이 연결되지 않은 수업입니다.' }
+  }
+
+  const now = new Date().toISOString()
+  const sessionUpdate = {
+    status,
+    checked_in_at: now,
+    checked_in_by: user.id,
+    ...(options?.notes ? { notes: options.notes } : {}),
+    ...(options?.signatureData ? { signature_data: options.signatureData } : {}),
+    ...(options?.signatureUrl ? { signature_url: options.signatureUrl } : {}),
+    updated_at: now,
+  }
+
+  let sessionId: string | undefined
+
+  const { data: existingSession, error: existingError } = await supabase
+    .from('lesson_sessions')
+    .select('id')
+    .eq('lesson_id', lessonId)
+    .maybeSingle()
+
+  if (!existingError) {
+    if (existingSession?.id) {
+      sessionId = existingSession.id
+      const { error } = await supabase
+        .from('lesson_sessions')
+        .update(sessionUpdate)
+        .eq('id', existingSession.id)
+      if (error && !isMissingTableError(error.message)) {
+        console.warn('lesson_sessions update:', error.message)
+      }
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('lesson_sessions')
+        .insert({
+          lesson_id: lessonId,
+          member_id: lesson.member_id,
+          instructor_id: lesson.instructor_id,
+          session_package_id: lesson.session_package_id,
+          session_date: lesson.lesson_date,
+          ...sessionUpdate,
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        if (!isMissingTableError(error.message)) {
+          console.warn('lesson_sessions insert:', error.message)
+        }
+      } else {
+        sessionId = inserted.id
+      }
+    }
+  }
+
+  let memberRemaining: number | undefined
+
+  if (status === 'present' && !lesson.session_deducted && lesson.session_package_id) {
+    const { data: pkg, error: pkgError } = await supabase
+      .from('session_packages')
+      .select('id, remaining_sessions')
+      .eq('id', lesson.session_package_id)
+      .single()
+
+    if (pkgError || !pkg) {
+      return { error: '수업권을 찾을 수 없습니다.' }
+    }
+
+    if (pkg.remaining_sessions <= 0) {
+      return { error: '남은 수업 횟수가 없습니다.' }
+    }
+
+    const newRemaining = pkg.remaining_sessions - 1
+
+    const { error: updatePkgError } = await supabase
+      .from('session_packages')
+      .update({
+        remaining_sessions: newRemaining,
+        is_active: newRemaining > 0,
+      })
+      .eq('id', pkg.id)
+
+    if (updatePkgError) {
+      return { error: updatePkgError.message }
+    }
+
+    const { error: txError } = await supabase.from('session_transactions').insert({
+      member_id: lesson.member_id,
+      session_package_id: pkg.id,
+      lesson_session_id: sessionId ?? null,
+      delta: -1,
+      balance_after: newRemaining,
+      reason: 'lesson_check_in',
+      created_by: user.id,
+    })
+
+    if (txError && !isMissingTableError(txError.message)) {
+      console.warn('session_transactions insert:', txError.message)
+    }
+
+    if (sessionId) {
+      await supabase
+        .from('lesson_sessions')
+        .update({ session_deducted: true })
+        .eq('id', sessionId)
+    }
+
+    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+      p_member_id: lesson.member_id,
+    })
+    if (syncError) {
+      console.warn('sync_member_remaining_sessions:', syncError.message)
+    }
+
+    const { data: member } = await supabase
+      .from('members')
+      .select('remaining_sessions')
+      .eq('id', lesson.member_id)
+      .single()
+    memberRemaining = member?.remaining_sessions ?? undefined
+
+    const { error: lessonUpdateError } = await supabase
+      .from('lessons')
+      .update({ attendance_status: status, session_deducted: true })
+      .eq('id', lessonId)
+
+    if (lessonUpdateError) {
+      if (
+        lessonUpdateError.message.includes('row-level security') ||
+        lessonUpdateError.message.includes('permission denied')
+      ) {
+        return {
+          error:
+            '출석 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/fix-check-in-lesson.sql 을 실행해주세요.',
+        }
+      }
+      return { error: lessonUpdateError.message }
+    }
+  } else {
+    const { error: lessonUpdateError } = await supabase
+      .from('lessons')
+      .update({ attendance_status: status })
+      .eq('id', lessonId)
+
+    if (lessonUpdateError) {
+      if (
+        lessonUpdateError.message.includes('row-level security') ||
+        lessonUpdateError.message.includes('permission denied')
+      ) {
+        return {
+          error:
+            '출석 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/fix-check-in-lesson.sql 을 실행해주세요.',
+        }
+      }
+      return { error: lessonUpdateError.message }
+    }
   }
 
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/members')
 
-  return { data: result }
+  return {
+    data: {
+      success: true,
+      lesson_session_id: sessionId,
+      member_remaining_sessions: memberRemaining,
+    },
+  }
+}
+
+/** 출석/취소만 변경 (세션 차감 없음) — 수업현황용 */
+export async function updateLessonAttendanceStatus(
+  lessonId: string,
+  status: AttendanceStatus,
+): Promise<{ data?: CheckInResult; error?: string }> {
+  const user = await requireRole(['admin', 'instructor'])
+
+  if (!canRoleSetAttendanceStatus(user.role, status)) {
+    return { error: '이 출석 상태를 변경할 권한이 없습니다.' }
+  }
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select(
+      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status',
+    )
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (!lesson.member_id) {
+    return { error: '회원이 연결되지 않은 수업입니다.' }
+  }
+
+  const now = new Date().toISOString()
+  const sessionUpdate = {
+    status,
+    checked_in_at: now,
+    checked_in_by: user.id,
+    updated_at: now,
+  }
+
+  let sessionId: string | undefined
+
+  const { data: existingSession, error: existingError } = await supabase
+    .from('lesson_sessions')
+    .select('id')
+    .eq('lesson_id', lessonId)
+    .maybeSingle()
+
+  if (!existingError) {
+    if (existingSession?.id) {
+      sessionId = existingSession.id
+      const { error } = await supabase
+        .from('lesson_sessions')
+        .update(sessionUpdate)
+        .eq('id', existingSession.id)
+      if (error && !isMissingTableError(error.message)) {
+        console.warn('lesson_sessions update:', error.message)
+      }
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('lesson_sessions')
+        .insert({
+          lesson_id: lessonId,
+          member_id: lesson.member_id,
+          instructor_id: lesson.instructor_id,
+          session_package_id: lesson.session_package_id,
+          session_date: lesson.lesson_date,
+          ...sessionUpdate,
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        if (!isMissingTableError(error.message)) {
+          console.warn('lesson_sessions insert:', error.message)
+        }
+      } else {
+        sessionId = inserted.id
+      }
+    }
+  }
+
+  const { error: lessonUpdateError } = await supabase
+    .from('lessons')
+    .update({ attendance_status: status })
+    .eq('id', lessonId)
+
+  if (lessonUpdateError) {
+    if (
+      lessonUpdateError.message.includes('row-level security') ||
+      lessonUpdateError.message.includes('permission denied')
+    ) {
+      return {
+        error:
+          '출석 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/fix-check-in-lesson.sql 을 실행해주세요.',
+      }
+    }
+    return { error: lessonUpdateError.message }
+  }
+
+  revalidatePath('/dashboard/attendance')
+  revalidatePath('/dashboard/lessons')
+  revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/members')
+
+  return {
+    data: {
+      success: true,
+      lesson_session_id: sessionId,
+    },
+  }
+}
+
+function normalizeEndTime(value: string) {
+  const trimmed = value.trim()
+  if (/^\d{2}:\d{2}$/.test(trimmed)) return `${trimmed}:00`
+  if (/^\d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed
+  return null
+}
+
+async function resolveSessionPackageId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  lesson: {
+    member_id: string
+    session_package_id: string | null
+  },
+) {
+  if (lesson.session_package_id) return lesson.session_package_id
+
+  const { data: pkg } = await supabase
+    .from('session_packages')
+    .select('id')
+    .eq('member_id', lesson.member_id)
+    .eq('is_active', true)
+    .gt('remaining_sessions', 0)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  return pkg?.id ?? null
+}
+
+/** 수업 종료 — 서명 + 종료 시간 저장 + 세션 1회 차감 */
+export async function completeLessonWithSignature(
+  lessonId: string,
+  signatureData: string,
+  endTime: string,
+): Promise<{
+  data?: {
+    id: string
+    end_time: string
+    session_deducted: boolean
+    attendance_status: AttendanceStatus
+    signature_id: string | null
+    member_remaining_sessions?: number
+  }
+  error?: string
+}> {
+  const user = await requireRole(['admin', 'instructor'])
+
+  if (!signatureData?.startsWith('data:image')) {
+    return { error: '서명이 필요합니다.' }
+  }
+
+  const normalizedEndTime = normalizeEndTime(endTime)
+  if (!normalizedEndTime) {
+    return { error: '종료 시간 형식이 올바르지 않습니다.' }
+  }
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select(
+      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status, end_time, lesson_no',
+    )
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (!lesson.member_id) {
+    return { error: '회원이 연결되지 않은 수업입니다.' }
+  }
+
+  if (lesson.session_deducted && lesson.end_time) {
+    return { error: '이미 종료 처리된 수업입니다.' }
+  }
+
+  if (lesson.attendance_status === 'cancelled') {
+    return { error: '취소된 수업은 종료할 수 없습니다.' }
+  }
+
+  const now = new Date().toISOString()
+  let signatureId: string | null = null
+
+  const { data: signature, error: signatureError } = await supabase
+    .from('signatures')
+    .insert({
+      member_id: lesson.member_id,
+      lesson_id: lessonId,
+      signature_data: signatureData,
+      signed_at: now,
+    })
+    .select('id')
+    .single()
+
+  if (signatureError) {
+    if (isMissingTableError(signatureError.message)) {
+      console.warn('signatures table missing — storing signature in lesson_sessions only')
+    } else if (
+      signatureError.message.includes('row-level security') ||
+      signatureError.message.includes('permission denied')
+    ) {
+      return {
+        error:
+          '서명 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/add-signatures.sql 을 실행해주세요.',
+      }
+    } else if (signatureError.message.includes('signature_id')) {
+      console.warn('lessons.signature_id unavailable — skipping signature_id link')
+    } else {
+      return { error: signatureError.message }
+    }
+  } else {
+    signatureId = signature.id
+  }
+
+  let sessionId: string | undefined
+  const { data: existingSession } = await supabase
+    .from('lesson_sessions')
+    .select('id')
+    .eq('lesson_id', lessonId)
+    .maybeSingle()
+
+  const sessionPackageId = await resolveSessionPackageId(supabase, lesson)
+  const sessionPayload = {
+    status: 'present' as AttendanceStatus,
+    checked_in_at: now,
+    checked_in_by: user.id,
+    signature_data: signatureData,
+    updated_at: now,
+  }
+
+  if (existingSession?.id) {
+    sessionId = existingSession.id
+    await supabase
+      .from('lesson_sessions')
+      .update(sessionPayload)
+      .eq('id', existingSession.id)
+  } else {
+    const { data: inserted } = await supabase
+      .from('lesson_sessions')
+      .insert({
+        lesson_id: lessonId,
+        member_id: lesson.member_id,
+        instructor_id: lesson.instructor_id,
+        session_package_id: sessionPackageId,
+        session_date: lesson.lesson_date,
+        ...sessionPayload,
+      })
+      .select('id')
+      .single()
+    sessionId = inserted?.id
+  }
+
+  let memberRemaining: number | undefined
+  let sessionDeducted = lesson.session_deducted
+
+  if (!lesson.session_deducted) {
+    if (!sessionPackageId) {
+      return { error: '차감할 수업권이 없습니다.' }
+    }
+
+    const { data: pkg, error: pkgError } = await supabase
+      .from('session_packages')
+      .select('id, remaining_sessions')
+      .eq('id', sessionPackageId)
+      .single()
+
+    if (pkgError || !pkg) {
+      return { error: '수업권을 찾을 수 없습니다.' }
+    }
+
+    if (pkg.remaining_sessions <= 0) {
+      return { error: '남은 수업 횟수가 없습니다.' }
+    }
+
+    const newRemaining = pkg.remaining_sessions - 1
+
+    const { error: updatePkgError } = await supabase
+      .from('session_packages')
+      .update({
+        remaining_sessions: newRemaining,
+        is_active: newRemaining > 0,
+      })
+      .eq('id', pkg.id)
+
+    if (updatePkgError) {
+      return { error: updatePkgError.message }
+    }
+
+    const { error: txError } = await supabase.from('session_transactions').insert({
+      member_id: lesson.member_id,
+      session_package_id: pkg.id,
+      lesson_session_id: sessionId ?? null,
+      delta: -1,
+      balance_after: newRemaining,
+      reason: 'lesson_complete',
+      created_by: user.id,
+    })
+
+    if (txError && !isMissingTableError(txError.message)) {
+      console.warn('session_transactions insert:', txError.message)
+    }
+
+    if (sessionId) {
+      await supabase
+        .from('lesson_sessions')
+        .update({ session_deducted: true })
+        .eq('id', sessionId)
+    }
+
+    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+      p_member_id: lesson.member_id,
+    })
+    if (syncError) {
+      console.warn('sync_member_remaining_sessions:', syncError.message)
+    }
+
+    const { data: member } = await supabase
+      .from('members')
+      .select('remaining_sessions')
+      .eq('id', lesson.member_id)
+      .single()
+    memberRemaining = member?.remaining_sessions ?? undefined
+    sessionDeducted = true
+  }
+
+  const attendanceStatus: AttendanceStatus = 'present'
+
+  const lessonUpdate: Record<string, unknown> = {
+    end_time: normalizedEndTime,
+    session_deducted: sessionDeducted,
+    attendance_status: attendanceStatus,
+  }
+
+  if (signatureId) {
+    lessonUpdate.signature_id = signatureId
+  }
+
+  if (sessionPackageId && !lesson.session_package_id) {
+    lessonUpdate.session_package_id = sessionPackageId
+  }
+
+  if (sessionDeducted && !lesson.lesson_no) {
+    const { data: lastLesson } = await supabase
+      .from('lessons')
+      .select('lesson_no')
+      .eq('member_id', lesson.member_id)
+      .not('lesson_no', 'is', null)
+      .order('lesson_no', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    lessonUpdate.lesson_no = (lastLesson?.lesson_no || 0) + 1
+  }
+
+  const { data: updatedLesson, error: lessonUpdateError } = await supabase
+    .from('lessons')
+    .update(lessonUpdate)
+    .eq('id', lessonId)
+    .select('id, end_time, session_deducted, attendance_status, signature_id')
+    .single()
+
+  if (lessonUpdateError) {
+    if (
+      lessonUpdateError.message.includes('row-level security') ||
+      lessonUpdateError.message.includes('permission denied')
+    ) {
+      return {
+        error:
+          '수업 종료 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인해주세요.',
+      }
+    }
+    return { error: lessonUpdateError.message }
+  }
+
+  revalidatePath('/dashboard/attendance')
+  revalidatePath('/dashboard/lessons')
+  revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/members')
+
+  return {
+    data: {
+      ...(updatedLesson as {
+        id: string
+        end_time: string
+        session_deducted: boolean
+        attendance_status: AttendanceStatus
+        signature_id: string | null
+      }),
+      member_remaining_sessions: memberRemaining,
+    },
+  }
+}
+
+/** 수업 종료 취소 — 종료 시간·서명 제거 + 세션 차감 복구 */
+export async function cancelLessonCompletion(lessonId: string): Promise<{
+  data?: {
+    id: string
+    end_time: null
+    session_deducted: boolean
+    attendance_status: AttendanceStatus
+    signature_id: null
+    member_remaining_sessions?: number
+  }
+  error?: string
+}> {
+  const user = await requireRole(['admin', 'instructor'])
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select(
+      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status, end_time, signature_id',
+    )
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (!lesson.member_id) {
+    return { error: '회원이 연결되지 않은 수업입니다.' }
+  }
+
+  if (!lesson.session_deducted || !lesson.end_time) {
+    return { error: '종료 처리된 수업이 아닙니다.' }
+  }
+
+  const { data: existingSession } = await supabase
+    .from('lesson_sessions')
+    .select('id')
+    .eq('lesson_id', lessonId)
+    .maybeSingle()
+
+  let memberRemaining: number | undefined
+  const sessionPackageId =
+    lesson.session_package_id ??
+    (await resolveSessionPackageId(supabase, lesson))
+
+  if (sessionPackageId) {
+    const { data: pkg, error: pkgError } = await supabase
+      .from('session_packages')
+      .select('id, remaining_sessions')
+      .eq('id', sessionPackageId)
+      .single()
+
+    if (pkgError || !pkg) {
+      return { error: '수업권을 찾을 수 없습니다.' }
+    }
+
+    const newRemaining = pkg.remaining_sessions + 1
+
+    const { error: updatePkgError } = await supabase
+      .from('session_packages')
+      .update({
+        remaining_sessions: newRemaining,
+        is_active: true,
+      })
+      .eq('id', pkg.id)
+
+    if (updatePkgError) {
+      return { error: updatePkgError.message }
+    }
+
+    const { error: txError } = await supabase.from('session_transactions').insert({
+      member_id: lesson.member_id,
+      session_package_id: pkg.id,
+      lesson_session_id: existingSession?.id ?? null,
+      delta: 1,
+      balance_after: newRemaining,
+      reason: 'lesson_complete_cancel',
+      created_by: user.id,
+    })
+
+    if (txError && !isMissingTableError(txError.message)) {
+      console.warn('session_transactions insert:', txError.message)
+    }
+
+    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+      p_member_id: lesson.member_id,
+    })
+    if (syncError) {
+      console.warn('sync_member_remaining_sessions:', syncError.message)
+    }
+
+    const { data: member } = await supabase
+      .from('members')
+      .select('remaining_sessions')
+      .eq('id', lesson.member_id)
+      .single()
+    memberRemaining = member?.remaining_sessions ?? undefined
+  }
+
+  if (existingSession?.id) {
+    await supabase
+      .from('lesson_sessions')
+      .update({
+        session_deducted: false,
+        signature_data: null,
+        signature_url: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existingSession.id)
+  }
+
+  if (lesson.signature_id) {
+    const { error: signatureDeleteError } = await supabase
+      .from('signatures')
+      .delete()
+      .eq('id', lesson.signature_id)
+
+    if (
+      signatureDeleteError &&
+      !isMissingTableError(signatureDeleteError.message)
+    ) {
+      console.warn('signatures delete:', signatureDeleteError.message)
+    }
+  }
+
+  const { data: updatedLesson, error: lessonUpdateError } = await supabase
+    .from('lessons')
+    .update({
+      end_time: null,
+      session_deducted: false,
+      signature_id: null,
+    })
+    .eq('id', lessonId)
+    .select('id, end_time, session_deducted, attendance_status, signature_id')
+    .single()
+
+  if (lessonUpdateError) {
+    if (
+      lessonUpdateError.message.includes('row-level security') ||
+      lessonUpdateError.message.includes('permission denied')
+    ) {
+      return {
+        error:
+          '수업 종료 취소 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인해주세요.',
+      }
+    }
+    return { error: lessonUpdateError.message }
+  }
+
+  revalidatePath('/dashboard/attendance')
+  revalidatePath('/dashboard/lessons')
+  revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/members')
+
+  return {
+    data: {
+      ...(updatedLesson as {
+        id: string
+        end_time: null
+        session_deducted: boolean
+        attendance_status: AttendanceStatus
+        signature_id: null
+      }),
+      member_remaining_sessions: memberRemaining,
+    },
+  }
+}
+
+export type GuestLessonAction = 'trial' | 'cancelled'
+
+/** 회원 미연결(캘린더 이름만 등록) 수업 — 출석 / 취소 */
+export async function markGuestLessonStatus(
+  lessonId: string,
+  action: GuestLessonAction,
+): Promise<{
+  data?: { id: string; lesson_type: string; attendance_status: AttendanceStatus }
+  error?: string
+}> {
+  await requireRole(['admin', 'instructor'])
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select('id, member_id')
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (lesson.member_id) {
+    return { error: '회원이 연결된 수업입니다.' }
+  }
+
+  const updates =
+    action === 'trial'
+      ? { lesson_type: '체험레슨', attendance_status: 'present' as AttendanceStatus }
+      : { lesson_type: '개인레슨', attendance_status: 'cancelled' as AttendanceStatus }
+
+  const { data, error } = await supabase
+    .from('lessons')
+    .update(updates)
+    .eq('id', lessonId)
+    .select('id, lesson_type, attendance_status')
+    .single()
+
+  if (error) {
+    if (
+      error.message.includes('row-level security') ||
+      error.message.includes('permission denied')
+    ) {
+      return {
+        error:
+          '저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인해주세요.',
+      }
+    }
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/attendance')
+  revalidatePath('/dashboard/lessons')
+  revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
+
+  return { data: data as { id: string; lesson_type: string; attendance_status: AttendanceStatus } }
 }
 
 export async function getLessonSessionsForMember(
@@ -88,7 +918,9 @@ export async function getSessionTransactionsForMember(
 
   const { data, error } = await supabase
     .from('session_transactions')
-    .select('id, member_id, session_package_id, lesson_id, instructor_id, delta, balance_after, reason, note, created_at')
+    .select(
+      'id, member_id, session_package_id, lesson_id, instructor_id, delta, balance_after, reason, note, created_at',
+    )
     .eq('member_id', memberId)
     .order('created_at', { ascending: false })
     .limit(limit)
@@ -99,6 +931,611 @@ export async function getSessionTransactionsForMember(
   }
 
   return data as SessionTransaction[]
+}
+
+export type PastLessonSignatureRow = {
+  id: string
+  lessonDate: string
+  startTime: string | null
+  endTime: string | null
+  lessonNo: number | null
+  memberLabel: string
+  instructorName: string | null
+  attendanceStatus: AttendanceStatus
+  isCompleted: boolean
+  hasSignature: boolean
+  signatureData: string | null
+  signatureSignedAt: string | null
+}
+
+function resolveLessonSignatureState(lesson: {
+  signature_id?: string | null
+  signature?: { signature_data?: string | null; signed_at?: string | null } | null
+  lesson_sessions?:
+    | Array<{ signature_data?: string | null }>
+    | { signature_data?: string | null }
+    | null
+}) {
+  const sessionRows = Array.isArray(lesson.lesson_sessions)
+    ? lesson.lesson_sessions
+    : lesson.lesson_sessions
+      ? [lesson.lesson_sessions]
+      : []
+  const sessionSig = sessionRows.find((row) => row.signature_data)?.signature_data ?? null
+  const signatureData = lesson.signature?.signature_data ?? sessionSig ?? null
+  const hasSignature = Boolean(lesson.signature_id || signatureData)
+
+  return {
+    hasSignature,
+    signatureData,
+    signatureSignedAt: lesson.signature?.signed_at ?? null,
+  }
+}
+
+function isSignatureJoinError(message?: string) {
+  const text = message?.toLowerCase() ?? ''
+  return (
+    text.includes('signatures') ||
+    text.includes('could not find') ||
+    text.includes('lesson_sessions')
+  )
+}
+
+function compareLessonsChronologically(
+  a: Pick<PastLessonSignatureRow, 'lessonDate' | 'startTime'>,
+  b: Pick<PastLessonSignatureRow, 'lessonDate' | 'startTime'>,
+) {
+  const dateCmp = a.lessonDate.localeCompare(b.lessonDate)
+  if (dateCmp !== 0) return dateCmp
+  return (a.startTime ?? '').localeCompare(b.startTime ?? '')
+}
+
+function assignChronologicalLessonNumbers(
+  rows: PastLessonSignatureRow[],
+): PastLessonSignatureRow[] {
+  const sorted = [...rows].sort(compareLessonsChronologically)
+
+  let counter = 0
+  const numberById = new Map<string, number>()
+
+  for (const row of sorted) {
+    const counts = countsTowardSessionNumber({
+      session_deducted: row.isCompleted,
+      attendance_status: row.attendanceStatus,
+    })
+    if (!counts) continue
+    counter += 1
+    numberById.set(row.id, counter)
+  }
+
+  return sorted.map((row) => ({
+    ...row,
+    lessonNo: numberById.get(row.id) ?? null,
+  }))
+}
+
+function mapLessonToSignatureRow(
+  lesson: Record<string, unknown>,
+): PastLessonSignatureRow {
+  const display = getLessonCalendarDisplayParts(
+    lesson as Parameters<typeof getLessonCalendarDisplayParts>[0],
+  )
+  const memberLabel = display.meta
+    ? `${display.name}(${display.meta})`
+    : display.name
+  const signatureState = resolveLessonSignatureState(
+    lesson as Parameters<typeof resolveLessonSignatureState>[0],
+  )
+  const lessonId = String(lesson.id)
+
+  return {
+    id: lessonId,
+    lessonDate: String(lesson.lesson_date),
+    startTime: (lesson.start_time as string | null) ?? null,
+    endTime: (lesson.end_time as string | null) ?? null,
+    lessonNo: (lesson.lesson_no as number | null) ?? null,
+    memberLabel,
+    instructorName:
+      (lesson.instructor as { name?: string } | null)?.name ?? null,
+    attendanceStatus: lesson.attendance_status as AttendanceStatus,
+    isCompleted: Boolean(lesson.session_deducted && lesson.end_time),
+    hasSignature: signatureState.hasSignature,
+    signatureData: signatureState.signatureData,
+    signatureSignedAt: signatureState.signatureSignedAt,
+  }
+}
+
+async function resolveMemberIdFromLabel(
+  supabase: SupabaseClient,
+  memberLabel: string,
+): Promise<string | null> {
+  const name = memberLabel.split('(')[0]?.trim()
+  if (!name) return null
+
+  const { data } = await supabase
+    .from('members')
+    .select('id')
+    .eq('name', name)
+    .limit(1)
+    .maybeSingle()
+
+  return data?.id ?? null
+}
+
+async function fetchMemberLessonsForSignature(
+  supabase: SupabaseClient,
+  memberId: string,
+  limit: number,
+) {
+  const lessonSelectBase = `
+    id,
+    lesson_date,
+    start_time,
+    end_time,
+    lesson_no,
+    attendance_status,
+    session_deducted,
+    signature_id,
+    title,
+    content,
+    created_at,
+    member:members(id, name, sport, age, birth_date),
+    instructor:instructors(id, name),
+    lesson_sessions(signature_data)
+  `
+  const lessonSelectWithSignature = `${lessonSelectBase},
+    signature:signatures(id, signature_data, signed_at)`
+
+  const todayKey = getTodayDateKey()
+
+  let lessonsResult = await supabase
+    .from('lessons')
+    .select(lessonSelectWithSignature)
+    .eq('member_id', memberId)
+    .lte('lesson_date', todayKey)
+    .order('lesson_date', { ascending: false })
+    .order('start_time', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (isSignatureJoinError(lessonsResult.error?.message)) {
+    lessonsResult = await supabase
+      .from('lessons')
+      .select(lessonSelectBase)
+      .eq('member_id', memberId)
+      .lte('lesson_date', todayKey)
+      .order('lesson_date', { ascending: false })
+      .order('start_time', { ascending: false, nullsFirst: false })
+      .limit(limit)
+  }
+
+  if (lessonsResult.error) {
+    console.error('fetchMemberLessonsForSignature:', lessonsResult.error)
+    return []
+  }
+
+  const rows = (lessonsResult.data ?? []).map((lesson) =>
+    mapLessonToSignatureRow(lesson as Record<string, unknown>),
+  )
+
+  return assignChronologicalLessonNumbers(rows)
+}
+
+export async function searchPastLessonsForSignature(
+  options?: {
+    daysBack?: number
+    memberId?: string
+    memberLabel?: string
+    limit?: number
+    /** 회원 지정 시 오늘·예정 수업 포함 전체 기록 */
+    allLessons?: boolean
+  },
+): Promise<PastLessonSignatureRow[]> {
+  const user = await requireRole(['admin', 'instructor'])
+  const supabase = await createStaffDataClient()
+
+  let resolvedMemberId = options?.memberId ?? null
+  if (!resolvedMemberId && options?.memberLabel) {
+    resolvedMemberId = await resolveMemberIdFromLabel(supabase, options.memberLabel)
+  }
+
+  const memberScoped = Boolean(resolvedMemberId)
+  const allMemberLessons = memberScoped && options?.allLessons !== false
+  const limit = memberScoped
+    ? Math.min(Math.max(options?.limit ?? 200, 5), 500)
+    : Math.min(Math.max(options?.limit ?? 300, 10), 300)
+
+  if (allMemberLessons && resolvedMemberId) {
+    return fetchMemberLessonsForSignature(supabase, resolvedMemberId, limit)
+  }
+
+  const daysBack = Math.min(Math.max(options?.daysBack ?? 90, 7), 365)
+  const today = new Date().toISOString().split('T')[0]
+  const dateTo = new Date()
+  dateTo.setDate(dateTo.getDate() - 1)
+  const dateFrom = new Date(dateTo)
+  dateFrom.setDate(dateFrom.getDate() - (daysBack - 1))
+  const dateFromKey = dateFrom.toISOString().split('T')[0]
+
+  const lessonSelectBase = `
+    id,
+    lesson_date,
+    start_time,
+    end_time,
+    lesson_no,
+    attendance_status,
+    session_deducted,
+    signature_id,
+    title,
+    content,
+    member:members(id, name, sport, age, birth_date),
+    instructor:instructors(id, name),
+    lesson_sessions(signature_data)
+  `
+  const lessonSelectWithSignature = `${lessonSelectBase},
+    signature:signatures(id, signature_data, signed_at)`
+
+  let query = supabase
+    .from('lessons')
+    .select(lessonSelectWithSignature)
+    .not('member_id', 'is', null)
+    .neq('attendance_status', 'cancelled')
+    .gte('lesson_date', dateFromKey)
+    .lt('lesson_date', today)
+    .order('lesson_date', { ascending: false })
+    .order('start_time', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (options?.memberId) {
+    query = query.eq('member_id', options.memberId)
+  }
+
+  if (user.role === 'instructor' && !memberScoped) {
+    const { data: instructor } = await supabase
+      .from('instructors')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!instructor?.id) return []
+    query = query.eq('instructor_id', instructor.id)
+  }
+
+  let { data, error } = await query
+
+  if (isSignatureJoinError(error?.message)) {
+    let fallbackQuery = supabase
+      .from('lessons')
+      .select(lessonSelectBase)
+      .not('member_id', 'is', null)
+      .neq('attendance_status', 'cancelled')
+      .gte('lesson_date', dateFromKey)
+      .lt('lesson_date', today)
+      .order('lesson_date', { ascending: false })
+      .order('start_time', { ascending: false, nullsFirst: false })
+      .limit(limit)
+
+    if (options?.memberId) {
+      fallbackQuery = fallbackQuery.eq('member_id', options.memberId)
+    }
+    if (user.role === 'instructor' && !memberScoped) {
+      const { data: instructor } = await supabase
+        .from('instructors')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (!instructor?.id) return []
+      fallbackQuery = fallbackQuery.eq('instructor_id', instructor.id)
+    }
+
+    const retry = await fallbackQuery
+    data = retry.data
+    error = retry.error
+  }
+
+  if (error) {
+    console.error('searchPastLessonsForSignature:', error)
+    return []
+  }
+
+  const rows = (data ?? []).map((lesson) =>
+    mapLessonToSignatureRow(lesson as Record<string, unknown>),
+  )
+
+  if (options?.memberId) {
+    return assignChronologicalLessonNumbers(rows)
+  }
+
+  return rows
+}
+
+async function fetchLessonForSignatureMutation(
+  supabase: SupabaseClient,
+  lessonId: string,
+) {
+  const baseSelect = `
+    id,
+    member_id,
+    instructor_id,
+    session_package_id,
+    lesson_date,
+    session_deducted,
+    attendance_status,
+    end_time,
+    start_time,
+    signature_id
+  `
+  const selectWithJoins = `${baseSelect},
+    signature:signatures(id, signature_data),
+    lesson_sessions(signature_data)`
+
+  let result = await supabase
+    .from('lessons')
+    .select(selectWithJoins)
+    .eq('id', lessonId)
+    .single()
+
+  if (isSignatureJoinError(result.error?.message)) {
+    result = await supabase
+      .from('lessons')
+      .select(baseSelect)
+      .eq('id', lessonId)
+      .single()
+  }
+
+  return result
+}
+
+type LessonSignatureMutationRow = {
+  id: string
+  member_id: string
+  instructor_id: string | null
+  session_package_id: string | null
+  lesson_date: string
+  session_deducted: boolean
+  attendance_status: AttendanceStatus
+  end_time: string | null
+  start_time: string | null
+  signature_id: string | null
+}
+
+async function saveLessonSignatureOnly(
+  supabase: SupabaseClient,
+  userId: string,
+  lesson: LessonSignatureMutationRow,
+  signatureData: string,
+): Promise<{ signatureId: string | null; error?: string }> {
+  const now = new Date().toISOString()
+  let signatureId: string | null = lesson.signature_id
+
+  if (lesson.signature_id) {
+    const { error: updateSignatureError } = await supabase
+      .from('signatures')
+      .update({
+        signature_data: signatureData,
+        signed_at: now,
+      })
+      .eq('id', lesson.signature_id)
+
+    if (updateSignatureError) {
+      if (
+        updateSignatureError.message.includes('row-level security') ||
+        updateSignatureError.message.includes('permission denied')
+      ) {
+        return {
+          error:
+            '서명 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/add-signatures.sql 을 실행해주세요.',
+        }
+      }
+      if (!isMissingTableError(updateSignatureError.message)) {
+        return { error: updateSignatureError.message }
+      }
+      signatureId = null
+    }
+  } else {
+    const { data: signature, error: signatureError } = await supabase
+      .from('signatures')
+      .insert({
+        member_id: lesson.member_id,
+        lesson_id: lesson.id,
+        signature_data: signatureData,
+        signed_at: now,
+      })
+      .select('id')
+      .single()
+
+    if (signatureError) {
+      if (
+        signatureError.message.includes('row-level security') ||
+        signatureError.message.includes('permission denied')
+      ) {
+        return {
+          error:
+            '서명 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/add-signatures.sql 을 실행해주세요.',
+        }
+      }
+      if (!isMissingTableError(signatureError.message)) {
+        return { error: signatureError.message }
+      }
+    } else {
+      signatureId = signature.id
+    }
+  }
+
+  const { data: existingSession } = await supabase
+    .from('lesson_sessions')
+    .select('id')
+    .eq('lesson_id', lesson.id)
+    .maybeSingle()
+
+  if (existingSession?.id) {
+    const { error: sessionError } = await supabase
+      .from('lesson_sessions')
+      .update({
+        signature_data: signatureData,
+        updated_at: now,
+        checked_in_by: userId,
+      })
+      .eq('id', existingSession.id)
+
+    if (sessionError && !isMissingTableError(sessionError.message)) {
+      return { error: sessionError.message }
+    }
+  } else {
+    const { error: sessionError } = await supabase.from('lesson_sessions').insert({
+      lesson_id: lesson.id,
+      member_id: lesson.member_id,
+      instructor_id: lesson.instructor_id,
+      session_package_id: lesson.session_package_id,
+      session_date: lesson.lesson_date,
+      status: lesson.attendance_status,
+      checked_in_at: now,
+      checked_in_by: userId,
+      signature_data: signatureData,
+      updated_at: now,
+    })
+
+    if (sessionError && !isMissingTableError(sessionError.message)) {
+      return { error: sessionError.message }
+    }
+  }
+
+  if (signatureId && signatureId !== lesson.signature_id) {
+    const { error: linkError } = await supabase
+      .from('lessons')
+      .update({ signature_id: signatureId })
+      .eq('id', lesson.id)
+
+    if (linkError) {
+      return { error: linkError.message }
+    }
+  }
+
+  return { signatureId }
+}
+
+function buildPastLessonSignatureResult(lesson: LessonSignatureMutationRow) {
+  return {
+    id: lesson.id,
+    signature_id: lesson.signature_id,
+    end_time: lesson.end_time,
+    session_deducted: lesson.session_deducted,
+    attendance_status: lesson.attendance_status,
+  }
+}
+
+/** 지난 수업 — 서명 저장·수정 (종료 시간은 변경하지 않음) */
+export async function addSignatureToPastLesson(
+  lessonId: string,
+  signatureData: string,
+): Promise<{
+  data?: {
+    id: string
+    signature_id: string | null
+    end_time: string | null
+    session_deducted: boolean
+    attendance_status: AttendanceStatus
+  }
+  error?: string
+}> {
+  const user = await requireRole(['admin', 'instructor'])
+
+  if (!signatureData?.startsWith('data:image')) {
+    return { error: '서명이 필요합니다.' }
+  }
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createStaffDataClient())
+
+  const { data: lesson, error: lessonError } = await fetchLessonForSignatureMutation(
+    supabase,
+    lessonId,
+  )
+
+  if (lessonError || !lesson) {
+    console.error('addSignatureToPastLesson fetch:', lessonError)
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (!lesson.member_id) {
+    return { error: '회원이 연결되지 않은 수업입니다.' }
+  }
+
+  if (lesson.attendance_status === 'cancelled') {
+    return { error: '취소된 수업에는 서명할 수 없습니다.' }
+  }
+
+  const today = new Date().toISOString().split('T')[0]
+  if (lesson.lesson_date > today) {
+    return { error: '예정된 수업은 수업현황에서 처리해주세요.' }
+  }
+
+  const lessonRow = lesson as LessonSignatureMutationRow
+  const preservedEndTime = lessonRow.end_time
+
+  if (lessonRow.end_time) {
+    const saveResult = await saveLessonSignatureOnly(
+      supabase,
+      user.id,
+      lessonRow,
+      signatureData,
+    )
+
+    if (saveResult.error) {
+      return { error: saveResult.error }
+    }
+
+    revalidatePath('/dashboard/lesson-status')
+    revalidatePath('/dashboard/members')
+
+    return {
+      data: {
+        ...buildPastLessonSignatureResult(lessonRow),
+        signature_id: saveResult.signatureId ?? lessonRow.signature_id,
+        end_time: preservedEndTime,
+      },
+    }
+  }
+
+  const fallbackEnd =
+    lessonRow.start_time?.slice(0, 5) ?? '12:00'
+  const completeResult = await addSignatureToPastLessonViaComplete(
+    lessonId,
+    signatureData,
+    fallbackEnd,
+  )
+
+  if (completeResult.error || !completeResult.data) {
+    return completeResult
+  }
+
+  return {
+    data: {
+      ...completeResult.data,
+      end_time: completeResult.data.end_time ?? preservedEndTime,
+    },
+  }
+}
+
+async function addSignatureToPastLessonViaComplete(
+  lessonId: string,
+  signatureData: string,
+  endTime: string,
+) {
+  const result = await completeLessonWithSignature(lessonId, signatureData, endTime)
+  if (result.error) {
+    return { error: result.error }
+  }
+  return {
+    data: result.data
+      ? {
+          id: result.data.id,
+          signature_id: result.data.signature_id,
+          end_time: result.data.end_time,
+          session_deducted: result.data.session_deducted,
+          attendance_status: result.data.attendance_status,
+        }
+      : undefined,
+  }
 }
 
 export async function getNextLessonForMember(memberId: string): Promise<Lesson | null> {

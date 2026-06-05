@@ -59,6 +59,7 @@ export interface Member {
   registered_at: string
   is_active: boolean
   created_at: string
+  deleted_at: string | null
   // Joined fields
   primary_instructor?: Instructor
 }
@@ -75,6 +76,7 @@ export interface SessionPackage {
   note: string | null
   is_active: boolean
   created_at: string
+  deleted_at: string | null
   // Joined fields
   member?: Member
 }
@@ -106,6 +108,8 @@ export interface Lesson {
   session_deducted: boolean
   lesson_no: number | null
   signature_id: string | null
+  recurrence_group_id?: string | null
+  recurrence_pattern?: string | null
   created_at: string
   created_by: string | null
   // Joined fields
@@ -153,6 +157,8 @@ export interface LessonFormData {
   content?: string
   special_note?: string
   attendance_status?: AttendanceStatus
+  recurrence_group_id?: string | null
+  recurrence_pattern?: string | null
 }
 
 export interface InstructorFormData {
@@ -179,11 +185,24 @@ export interface DashboardStats {
 // Report types
 export interface InstructorReport {
   instructor: Instructor
+  /** 출석 처리된 개별 수업(회원) 수 */
   totalLessons: number
+  /** 평일 시간대(타임) 수 */
   weekdayLessons: number
+  /** 주말·공휴일 시간대(타임) 수 */
   weekendLessons: number
+  /** 2명 이상인 타임 수 */
   groupLessons: number
   totalEarnings: number
+  weekdayEarnings?: number
+  weekendEarnings?: number
+  paySlots?: Array<{
+    lessonDate: string
+    startTime: string
+    memberCount: number
+    isWeekendOrHoliday: boolean
+    pay: number
+  }>
 }
 
 export interface MemberReport {

@@ -18,9 +18,9 @@ export function getInviteEmailRedirectUrl(siteUrl?: string): string {
   return `${base}/auth/callback/hash?next=${next}`
 }
 
-/** 기존 계정 재발송 — PKCE callback */
+/** 비밀번호 재설정 — hash 토큰 callback (generateLink·복구 메일 공통) */
 export function getRecoveryEmailRedirectUrl(siteUrl?: string): string {
   const base = siteUrl ?? getSiteUrl()
   const next = encodeURIComponent('/auth/set-password')
-  return `${base}/auth/callback?next=${next}&type=recovery`
+  return `${base}/auth/callback/hash?next=${next}`
 }

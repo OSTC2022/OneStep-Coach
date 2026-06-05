@@ -4,7 +4,11 @@ import { createClient } from '@/lib/supabase/server'
 export default async function AuthErrorPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; error_description?: string }>
+  searchParams: Promise<{
+    error?: string
+    error_code?: string
+    error_description?: string
+  }>
 }) {
   const params = await searchParams
   const supabase = await createClient()
@@ -34,7 +38,9 @@ export default async function AuthErrorPage({
         </div>
         <h1 className="text-2xl font-bold text-foreground">인증 오류</h1>
         <p className="text-muted-foreground">
-          {params.error_description || params.error || '인증 중 오류가 발생했습니다.'}
+          {params.error_code === 'otp_expired'
+            ? '링크가 만료되었거나 이미 사용되었습니다. 로그인 화면에서 비밀번호 찾기로 새 링크를 받아주세요.'
+            : params.error_description || params.error || '인증 중 오류가 발생했습니다.'}
         </p>
         <a 
           href="/auth/login" 

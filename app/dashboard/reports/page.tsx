@@ -16,6 +16,7 @@ export default async function ReportsPage() {
       <ReportDashboard
         stats={data.stats}
         instructorStats={data.instructorStats}
+        instructorPayroll={data.instructorPayroll}
         sportStats={data.sportStats}
       />
     </div>

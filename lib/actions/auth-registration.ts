@@ -21,7 +21,7 @@ import {
 import { resolveApprovalStatus } from '@/lib/profile-approval'
 import type { SettingsAssignableRole } from '@/lib/settings-accounts-types'
 
-export type PublicSignUpRole = 'member' | 'guardian'
+export type PublicSignUpRole = 'member'
 
 export type PendingAccountRow = {
   id: string
@@ -58,8 +58,8 @@ export async function signUpPublic(
   if (password !== passwordConfirm) {
     return { error: '비밀번호가 일치하지 않습니다.' }
   }
-  if (requestedRole !== 'member' && requestedRole !== 'guardian') {
-    return { error: '가입 유형이 올바르지 않습니다.' }
+  if (requestedRole !== 'member') {
+    return { error: '회원 가입만 가능합니다.' }
   }
 
   const profileRole = appRoleToProfileRole(requestedRole)
@@ -119,7 +119,7 @@ export async function signUpPublic(
       id: userId,
       email: authEmail,
       full_name: fullName,
-      role: requestedRole === 'guardian' ? 'member' : requestedRole,
+      role: 'member',
     },
     { onConflict: 'id' },
   )

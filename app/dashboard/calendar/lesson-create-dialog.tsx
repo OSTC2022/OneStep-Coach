@@ -4,13 +4,39 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Trash2, UserPlus, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { createLesson, deleteLesson, updateLesson } from '@/lib/actions/lessons'
+import {
+  createLesson,
+  createRecurringLessons,
+  deleteLessonsInSeries,
+  getLessonRecurrenceInfo,
+  updateLesson,
+  updateLessonSeries,
+  type LessonSeriesScope,
+} from '@/lib/actions/lessons'
+import { resolveLessonRecurrence } from '@/lib/lesson-recurrence-legacy'
+import {
+  defaultRecurrenceEndDate,
+  formatRecurrencePreview,
+  getAdditionalRecurrenceDates,
+  LESSON_RECURRENCE_OPTIONS,
+  parseLessonRecurrencePattern,
+  type LessonRecurrencePattern,
+} from '@/lib/lesson-recurrence'
 import { AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { getLessonPopupPosition, getLessonCalendarLabel, getDefaultLessonCalendarLabel, resolveLessonTitle, type LessonDraft, type LessonEditAnchor } from '@/lib/calendar-utils'
 import { formatMemberCalendarLabel } from '@/lib/member-utils'
 import { touchMemberRecent } from '@/lib/member-recent-search'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Label } from '@/components/ui/label'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
@@ -52,7 +78,8 @@ interface LessonCreateDialogProps {
   instructors: Instructor[]
   defaultInstructorId?: string | null
   onSaved: (lesson: Lesson) => void
-  onDeleted?: (lessonId: string) => void
+  onDeleted?: (lessonIds: string[]) => void
+  onEditDraftChange?: (draft: { instructorId: string }) => void
   variant?: 'dialog' | 'popup'
   anchor?: LessonEditAnchor | null
   sameSlotLessons?: Lesson[]
@@ -107,6 +134,7 @@ export function LessonCreateDialog({
   defaultInstructorId = null,
   onSaved,
   onDeleted,
+  onEditDraftChange,
   variant = 'dialog',
   anchor = null,
   sameSlotLessons = EMPTY_SLOT_LESSONS,
@@ -115,6 +143,16 @@ export function LessonCreateDialog({
   const isPopup = variant === 'popup'
   const popupRef = useRef<HTMLDivElement>(null)
   const initKeyRef = useRef<string | null>(null)
+  const originalLessonDateRef = useRef('')
+  const pendingEditUpdatesRef = useRef<{
+    instructor_id: string | undefined
+    lesson_date: string
+    start_time: string | undefined
+    end_time: string | undefined
+    lesson_type: string
+    member_id: string | null
+    title: string | null
+  } | null>(null)
   const [popupPosition, setPopupPosition] = useState<{ top: number; left: number }>({
     top: 80,
     left: 304,
@@ -131,6 +169,16 @@ export function LessonCreateDialog({
   const [date, setDate] = useState('')
   const [isAddingToSlot, setIsAddingToSlot] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [recurrencePattern, setRecurrencePattern] =
+    useState<LessonRecurrencePattern>('none')
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('')
+  const [seriesGroupId, setSeriesGroupId] = useState<string | null>(null)
+  const [saveScopeOpen, setSaveScopeOpen] = useState(false)
+  const [deleteScopeOpen, setDeleteScopeOpen] = useState(false)
+
+  function getActiveSeriesGroupId(targetLesson?: typeof lesson) {
+    return seriesGroupId ?? resolveLessonRecurrence(targetLesson ?? lesson ?? {}).groupId
+  }
 
   const memberOptions = useMemo(
     () => mergeMemberOptions(members, [lesson, ...sameSlotLessons]),
@@ -166,6 +214,13 @@ export function LessonCreateDialog({
     return Array.from(slotAssignedMemberIds)
   }, [isAddingToSlot, slotAssignedMemberIds])
 
+  const recurrencePreview = useMemo(() => {
+    if (recurrencePattern === 'none') return null
+    return formatRecurrencePreview(date, recurrencePattern, recurrenceEndDate, {
+      editing: isEditing && !isAddingToSlot,
+    })
+  }, [recurrencePattern, recurrenceEndDate, date, isEditing, isAddingToSlot])
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -189,7 +244,19 @@ export function LessonCreateDialog({
       top = Math.max(12, window.innerHeight - height - 12)
     }
     setPopupPosition({ top, left: base.left })
-  }, [open, isPopup, anchor, isAddingToSlot, lesson?.id, date, startTime, endTime, memberId])
+  }, [
+    open,
+    isPopup,
+    anchor,
+    isAddingToSlot,
+    lesson?.id,
+    date,
+    startTime,
+    endTime,
+    memberId,
+    recurrencePattern,
+    recurrenceEndDate,
+  ])
 
   useEffect(() => {
     if (!open) {
@@ -228,6 +295,17 @@ export function LessonCreateDialog({
         customTitle ??
           (lesson.member ? formatMemberCalendarLabel(lesson.member) : ''),
       )
+      originalLessonDateRef.current = lesson.lesson_date
+      const recurrence = resolveLessonRecurrence(lesson)
+      setSeriesGroupId(recurrence.groupId)
+      setRecurrencePattern(recurrence.pattern)
+      setRecurrenceEndDate(defaultRecurrenceEndDate(lesson.lesson_date))
+      void getLessonRecurrenceInfo(lesson.id).then((info) => {
+        if (!info || initKeyRef.current !== initKey) return
+        setSeriesGroupId(info.groupId)
+        setRecurrencePattern(info.pattern)
+        if (info.endDate) setRecurrenceEndDate(info.endDate)
+      })
       return
     }
 
@@ -240,8 +318,23 @@ export function LessonCreateDialog({
       setDate(draft.date)
       setStartTime(draft.startTime)
       setEndTime('')
+      setRecurrencePattern('none')
+      setRecurrenceEndDate(defaultRecurrenceEndDate(draft.date))
     }
   }, [open, lesson, draft, sameSlotLessons, initialInstructorId])
+
+  useEffect(() => {
+    if (!open || recurrencePattern === 'none') return
+    if (!date) return
+    if (!recurrenceEndDate || recurrenceEndDate < date) {
+      setRecurrenceEndDate(defaultRecurrenceEndDate(date))
+    }
+  }, [open, recurrencePattern, date, recurrenceEndDate])
+
+  useEffect(() => {
+    if (!open || !isEditing || !onEditDraftChange) return
+    onEditDraftChange({ instructorId })
+  }, [open, isEditing, instructorId, onEditDraftChange])
 
   useEffect(() => {
     if (!open || !isPopup) return
@@ -291,8 +384,94 @@ export function LessonCreateDialog({
       setEndTime('')
       setDate('')
       setIsAddingToSlot(false)
+      setRecurrencePattern('none')
+      setRecurrenceEndDate('')
+      setSaveScopeOpen(false)
+      setDeleteScopeOpen(false)
+      pendingEditUpdatesRef.current = null
     }
     onOpenChange(next)
+  }
+
+  function validateRecurrenceSelection() {
+    if (recurrencePattern === 'none') return true
+    if (!recurrenceEndDate) {
+      toast.error('반복 종료 날짜를 선택해주세요.')
+      return false
+    }
+    if (recurrenceEndDate < date) {
+      toast.error('반복 종료 날짜는 시작 날짜 이후여야 합니다.')
+      return false
+    }
+    return true
+  }
+
+  async function saveNewLessons(
+    schedulePayload: {
+      instructor_id: string | undefined
+      lesson_date: string
+      start_time: string | undefined
+      end_time: string | undefined
+      lesson_type: string
+    },
+    identityPayload: {
+      member_id: string | null
+      title: string | null
+    },
+    successLabel: string,
+  ) {
+    if (recurrencePattern !== 'none') {
+      if (!validateRecurrenceSelection()) {
+        setIsLoading(false)
+        return
+      }
+
+      const result = await createRecurringLessons(
+        {
+          ...schedulePayload,
+          ...identityPayload,
+        },
+        {
+          pattern: recurrencePattern,
+          endDate: recurrenceEndDate,
+          recurrencePattern,
+        },
+      )
+
+      if (result.error) {
+        setIsLoading(false)
+        toast.error('반복 수업 등록 실패', { description: result.error })
+        return
+      }
+
+      result.data?.forEach((item) => onSaved(item))
+      showSaveWarning(result.warning)
+
+      setIsLoading(false)
+      toast.success(
+        `${result.createdCount ?? result.data?.length ?? 0}개 ${successLabel}`,
+      )
+      handleOpenChange(false)
+      return
+    }
+
+    const result = await createLesson({
+      ...schedulePayload,
+      ...identityPayload,
+    })
+
+    if (result.error) {
+      setIsLoading(false)
+      toast.error('수업 등록 실패', { description: result.error })
+      return
+    }
+
+    if (result.data) onSaved(result.data)
+    showSaveWarning(result.warning)
+
+    setIsLoading(false)
+    toast.success(successLabel)
+    handleOpenChange(false)
   }
 
   function handleAddAnotherMember() {
@@ -302,24 +481,190 @@ export function LessonCreateDialog({
     setEntryText('')
     setCalendarDisplayText('')
     setInstructorId(lesson.instructor_id || initialInstructorId)
+    setRecurrencePattern('none')
+    setRecurrenceEndDate(defaultRecurrenceEndDate(lesson.lesson_date))
   }
 
-  async function handleDelete() {
+  async function handleDeleteRequest() {
     if (!isEditing || !lesson) return
-    const name = lesson ? getLessonCalendarLabel(lesson) : '수업'
-    if (!window.confirm(`${name} 수업을 삭제할까요?`)) return
 
     setIsLoading(true)
-    const result = await deleteLesson(lesson.id)
+    const info = await getLessonRecurrenceInfo(lesson.id)
     setIsLoading(false)
 
-    if (result.error) {
-      toast.error('수업 삭제 실패', { description: result.error })
+    if (info?.groupId) setSeriesGroupId(info.groupId)
+    if (info?.pattern && info.pattern !== 'none') {
+      setRecurrencePattern(info.pattern)
+    }
+    if (info?.endDate) setRecurrenceEndDate(info.endDate)
+
+    const hasSeries =
+      Boolean(info?.groupId) ||
+      (info?.pattern !== undefined && info.pattern !== 'none')
+
+    if (hasSeries) {
+      setDeleteScopeOpen(true)
       return
     }
 
-    onDeleted?.(lesson.id)
-    toast.success('수업이 삭제되었습니다.')
+    const name = getLessonCalendarLabel(lesson)
+    if (!window.confirm(`${name} 수업을 삭제할까요?`)) return
+    void executeDelete('single')
+  }
+
+  async function executeDelete(scope: LessonSeriesScope) {
+    if (!lesson) return
+
+    setDeleteScopeOpen(false)
+    setIsLoading(true)
+
+    try {
+      const result = await deleteLessonsInSeries(
+        lesson.id,
+        scope,
+        originalLessonDateRef.current || lesson.lesson_date,
+      )
+
+      if (result.error) {
+        toast.error('수업 삭제 실패', { description: result.error })
+        return
+      }
+
+      const deletedIds = result.deletedIds ?? []
+      if (deletedIds.length === 0) {
+        toast.error('수업 삭제 실패', {
+          description:
+            '삭제된 수업이 없습니다. Supabase에서 supabase/fix-lessons-recurrence-delete.sql 을 실행했는지 확인해주세요.',
+        })
+        return
+      }
+
+      onDeleted?.(deletedIds)
+      toast.success(
+        deletedIds.length > 1
+          ? `${deletedIds.length}개 수업이 삭제되었습니다.`
+          : '수업이 삭제되었습니다.',
+      )
+      handleOpenChange(false)
+    } catch (error) {
+      console.error('executeDelete:', error)
+      toast.error('수업 삭제 실패', {
+        description: '서버 요청 중 오류가 발생했습니다. 새로고침 후 다시 시도해주세요.',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function executeEditSave(
+    scope: LessonSeriesScope,
+    updates: {
+      instructor_id: string | undefined
+      lesson_date: string
+      start_time: string | undefined
+      end_time: string | undefined
+      lesson_type: string
+      member_id: string | null
+      title: string | null
+    },
+  ) {
+    if (!lesson) return
+
+    const activeSeriesGroupId = getActiveSeriesGroupId()
+    const hadRecurrenceGroup = Boolean(activeSeriesGroupId)
+
+    setIsLoading(true)
+    setSaveScopeOpen(false)
+
+    const anchorDate = originalLessonDateRef.current || lesson.lesson_date
+    const result = await updateLessonSeries(lesson.id, updates, scope, anchorDate)
+
+    if (result.error) {
+      setIsLoading(false)
+      toast.error('수업 수정 실패', { description: result.error })
+      return
+    }
+
+    result.data?.forEach((item) => onSaved(item))
+    showSaveWarning(result.warning)
+
+    let createdCount = 0
+
+    if (recurrencePattern !== 'none' && !hadRecurrenceGroup) {
+      if (!validateRecurrenceSelection()) {
+        setIsLoading(false)
+        return
+      }
+
+      const additionalDates = getAdditionalRecurrenceDates(
+        date,
+        recurrencePattern,
+        recurrenceEndDate,
+      )
+
+      if (additionalDates.length > 0) {
+        const updatedPrimary =
+          result.data?.find((item) => item.id === lesson.id) ?? result.data?.[0]
+        let groupId =
+          scope === 'future'
+            ? activeSeriesGroupId ?? updatedPrimary?.recurrence_group_id
+            : updatedPrimary?.recurrence_group_id
+
+        if (!groupId) {
+          groupId = crypto.randomUUID()
+          const linkResult = await updateLesson(lesson.id, {
+            recurrence_group_id: groupId,
+            recurrence_pattern: recurrencePattern,
+          })
+          if (linkResult.data) onSaved(linkResult.data)
+        } else if (scope === 'future') {
+          const linkResult = await updateLesson(lesson.id, {
+            recurrence_pattern: recurrencePattern,
+          })
+          if (linkResult.data) onSaved(linkResult.data)
+        }
+
+        const recurringResult = await createRecurringLessons(
+          {
+            instructor_id: updates.instructor_id,
+            lesson_date: date,
+            start_time: updates.start_time,
+            end_time: updates.end_time,
+            lesson_type: updates.lesson_type,
+            member_id: updates.member_id,
+            title: updates.title,
+          },
+          {
+            dates: additionalDates,
+            recurrenceGroupId: groupId!,
+            recurrencePattern,
+          },
+        )
+
+        if (recurringResult.error) {
+          setIsLoading(false)
+          toast.error('반복 수업 추가 실패', {
+            description: recurringResult.error,
+          })
+          return
+        }
+
+        recurringResult.data?.forEach((item) => onSaved(item))
+        showSaveWarning(recurringResult.warning)
+        createdCount = recurringResult.createdCount ?? additionalDates.length
+      }
+    }
+
+    setIsLoading(false)
+
+    if (createdCount > 0) {
+      toast.success(`수업이 수정되었고 ${createdCount}개 일정이 추가되었습니다.`)
+    } else if ((result.data?.length ?? 0) > 1) {
+      toast.success(`${result.data?.length ?? 0}개 수업이 수정되었습니다.`)
+    } else {
+      toast.success('수업이 수정되었습니다.')
+    }
+
     handleOpenChange(false)
   }
 
@@ -330,6 +675,10 @@ export function LessonCreateDialog({
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
+        if (deleteScopeOpen) {
+          setDeleteScopeOpen(false)
+          return
+        }
         handleOpenChange(false)
         return
       }
@@ -348,12 +697,12 @@ export function LessonCreateDialog({
         return
       }
       e.preventDefault()
-      void handleDelete()
+      void handleDeleteRequest()
     }
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [open, isEditing, lesson?.id, isAddingToSlot])
+  }, [open, isEditing, lesson?.id, isAddingToSlot, deleteScopeOpen])
 
   function showSaveWarning(warning?: string) {
     if (warning) {
@@ -410,31 +759,35 @@ export function LessonCreateDialog({
         return
       }
 
-      const result = await createLesson({
-        ...schedulePayload,
-        ...identityPayload,
-      })
-
-      if (result.error) {
-        setIsLoading(false)
-        toast.error('수업 추가 실패', { description: result.error })
-        return
-      }
-
-      if (result.data) onSaved(result.data)
-      showSaveWarning(result.warning)
-
-      setIsLoading(false)
-      toast.success('수업이 추가되었습니다.')
-      handleOpenChange(false)
+      await saveNewLessons(schedulePayload, identityPayload, '수업이 추가되었습니다.')
       return
     }
 
     if (isEditing && lesson) {
-      const primaryResult = await updateLesson(lesson.id, {
+      const updates = {
         ...schedulePayload,
         ...identityPayload,
-      })
+      }
+
+      if (recurrencePattern !== 'none' && !validateRecurrenceSelection()) {
+        setIsLoading(false)
+        return
+      }
+
+      if (getActiveSeriesGroupId()) {
+        pendingEditUpdatesRef.current = updates
+        setIsLoading(false)
+        setSaveScopeOpen(true)
+        return
+      }
+
+      if (recurrencePattern !== 'none') {
+        setIsLoading(false)
+        await executeEditSave('single', updates)
+        return
+      }
+
+      const primaryResult = await updateLesson(lesson.id, updates)
 
       if (primaryResult.error) {
         setIsLoading(false)
@@ -451,23 +804,7 @@ export function LessonCreateDialog({
       return
     }
 
-    const result = await createLesson({
-      ...schedulePayload,
-      ...identityPayload,
-    })
-
-    if (result.error) {
-      setIsLoading(false)
-      toast.error('수업 등록 실패', { description: result.error })
-      return
-    }
-
-    if (result.data) onSaved(result.data)
-    showSaveWarning(result.warning)
-
-    setIsLoading(false)
-    toast.success('수업이 등록되었습니다.')
-    handleOpenChange(false)
+    await saveNewLessons(schedulePayload, identityPayload, '수업이 등록되었습니다.')
   }
 
   const formFields = (
@@ -606,6 +943,59 @@ export function LessonCreateDialog({
           </div>
         </>
       )}
+
+      <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-2">
+        <div className="space-y-1">
+          <Label className={isPopup ? 'text-xs' : undefined}>반복</Label>
+          <Select
+            value={recurrencePattern}
+            onValueChange={(value) =>
+              setRecurrencePattern(value as LessonRecurrencePattern)
+            }
+          >
+            <SelectTrigger className={isPopup ? 'h-8 text-xs' : undefined}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LESSON_RECURRENCE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {recurrencePattern !== 'none' ? (
+          <div className="space-y-1">
+            <Label
+              htmlFor="recurrence-end-date"
+              className={isPopup ? 'text-xs' : undefined}
+            >
+              반복 종료
+            </Label>
+            <KoreanDatePicker
+              id="recurrence-end-date"
+              value={recurrenceEndDate}
+              onChange={setRecurrenceEndDate}
+              placeholder="종료 날짜"
+              compact={isPopup}
+              className={isPopup ? 'text-xs' : undefined}
+            />
+            {recurrencePreview ? (
+              <p className="text-[11px] font-medium text-primary">
+                {recurrencePreview}
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {isEditing && !isAddingToSlot
+                  ? '이 수업을 수정한 뒤 이후 일정을 추가합니다.'
+                  : '같은 시간·강사로 반복 등록됩니다.'}
+              </p>
+            )}
+          </div>
+        ) : null}
+      </div>
     </>
   )
 
@@ -619,7 +1009,7 @@ export function LessonCreateDialog({
           className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
           disabled={isLoading}
           title="삭제 (Del)"
-          onClick={() => void handleDelete()}
+          onClick={() => void handleDeleteRequest()}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
@@ -659,7 +1049,7 @@ export function LessonCreateDialog({
             className="h-9 w-9 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
             disabled={isLoading}
             title="삭제 (Del)"
-            onClick={() => void handleDelete()}
+            onClick={() => void handleDeleteRequest()}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -699,10 +1089,127 @@ export function LessonCreateDialog({
     </form>
   )
 
+  const editLabel = lesson ? getLessonCalendarLabel(lesson) : '수업'
+
+  const scopeDialogs = (
+    <>
+      <AlertDialog
+        open={saveScopeOpen}
+        onOpenChange={(next) => {
+          if (!isLoading) setSaveScopeOpen(next)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>수업 수정 범위</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium text-foreground">{editLabel}</span>{' '}
+              반복 일정입니다. 어떻게 수정할까요? 이전 날짜는 변경되지 않습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={isLoading || !pendingEditUpdatesRef.current}
+              onClick={() => {
+                if (!pendingEditUpdatesRef.current) return
+                void executeEditSave('single', pendingEditUpdatesRef.current)
+              }}
+            >
+              이것만 수정
+            </Button>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={isLoading || !pendingEditUpdatesRef.current}
+              onClick={() => {
+                if (!pendingEditUpdatesRef.current) return
+                void executeEditSave('future', pendingEditUpdatesRef.current)
+              }}
+            >
+              이후 모두 수정
+            </Button>
+            <AlertDialogCancel disabled={isLoading} className="w-full">
+              취소
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {deleteScopeOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-scope-title"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget && !isLoading) {
+              setDeleteScopeOpen(false)
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-2xl"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <h3 id="delete-scope-title" className="text-base font-semibold">
+              수업 삭제 범위
+            </h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{editLabel}</span>{' '}
+              반복 일정입니다. 어떻게 삭제할까요?
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full"
+                disabled={isLoading}
+                onClick={() => void executeDelete('all')}
+              >
+                반복 전체 지우기
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={isLoading}
+                onClick={() => void executeDelete('single')}
+              >
+                이것만 지우기
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={isLoading}
+                onClick={() => void executeDelete('future')}
+              >
+                이후 모두 지우기
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                disabled={isLoading}
+                onClick={() => setDeleteScopeOpen(false)}
+              >
+                취소
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+
   if (isPopup) {
     if (!open || !mounted) return null
 
     return createPortal(
+      <>
       <div
         ref={popupRef}
         className="fixed z-50 w-72 rounded-lg border border-border bg-card shadow-xl animate-in fade-in-0 zoom-in-95"
@@ -710,14 +1217,16 @@ export function LessonCreateDialog({
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <h3 className="truncate text-sm font-semibold">
-            {isAddingToSlot ? '수업 추가' : '수업 수정'}
-            {!isAddingToSlot && lesson ? (
-              <span className="ml-1 font-normal text-muted-foreground">
-                · {getLessonCalendarLabel(lesson)}
-              </span>
-            ) : null}
-          </h3>
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold">
+              {isAddingToSlot ? '수업 추가' : '수업 수정'}
+              {!isAddingToSlot && lesson ? (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · {getLessonCalendarLabel(lesson)}
+                </span>
+              ) : null}
+            </h3>
+          </div>
           <div className="flex shrink-0 items-center gap-1">
             {!isAddingToSlot && (
               <Button
@@ -746,24 +1255,29 @@ export function LessonCreateDialog({
           <div className="space-y-2 px-3 py-2">{formFields}</div>
           <div className="border-t border-border px-3 py-2">{popupFooter}</div>
         </form>
-      </div>,
+      </div>
+      {scopeDialogs}
+      </>,
       document.body,
     )
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? '수업 수정' : '수업 추가'}</DialogTitle>
-          <DialogDescription>
-            {isEditing
-              ? '수업 일정과 정보를 수정합니다.'
-              : '드래그한 시간에 새 수업을 등록합니다.'}
-          </DialogDescription>
-        </DialogHeader>
-        {form}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? '수업 수정' : '수업 추가'}</DialogTitle>
+            <DialogDescription>
+              {isEditing
+                ? '수업 일정과 정보를 수정합니다.'
+                : '드래그한 시간에 새 수업을 등록합니다.'}
+            </DialogDescription>
+          </DialogHeader>
+          {form}
+        </DialogContent>
+      </Dialog>
+      {scopeDialogs}
+    </>
   )
 }

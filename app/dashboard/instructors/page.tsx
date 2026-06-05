@@ -25,6 +25,7 @@ export default async function InstructorsPage() {
         initialInstructors={instructors}
         totalCount={totalCount}
         pageSize={LIST_PAGE_SIZE}
+        isAdmin={user.role === 'admin'}
       />
     </div>
   )

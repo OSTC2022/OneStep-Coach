@@ -8,13 +8,14 @@ import type {
   LessonDraft,
   LessonEditAnchor,
 } from '@/lib/calendar-utils'
-import type { Lesson } from '@/lib/types'
+import type { Instructor, Lesson } from '@/lib/types'
 
 interface DayWeekViewProps {
   dates: Date[]
   selectedDate: Date
   onSelectDate: (date: Date) => void
   lessons: Lesson[]
+  instructors: Instructor[]
   members: CalendarMemberSearchItem[]
   onDragCreate: (draft: LessonDraft) => void
   onLessonMove?: (
@@ -40,6 +41,7 @@ export function DayWeekView({
   selectedDate,
   onSelectDate,
   lessons,
+  instructors,
   members,
   onDragCreate,
   onLessonMove,
@@ -58,6 +60,7 @@ export function DayWeekView({
         <TimeGrid
           dates={dates}
           lessons={lessons}
+          instructors={instructors}
           selectedDate={selectedDate}
           onSelectDate={onSelectDate}
           onDragCreate={onDragCreate}

@@ -1,11 +1,18 @@
 'use server'
 
+import { requireRole } from '@/lib/actions/auth'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Member, MemberFormData } from '@/lib/types'
 import { resolveMemberAgeAndBirthDate, normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
-import { MEMBER_DETAIL_SELECT, MEMBER_LIST_SELECT } from '@/lib/supabase-selects'
+import {
+  MEMBER_DETAIL_SELECT,
+  MEMBER_LIST_SELECT,
+  MEMBER_LIST_SELECT_LEGACY,
+} from '@/lib/supabase-selects'
 
 type InstructorSummary = { id: string; name: string }
 
@@ -37,72 +44,159 @@ function attachPrimaryInstructors<T extends { primary_instructor_id?: string | n
   }))
 }
 
+function isDeletedAtMissingError(message?: string, code?: string) {
+  return code === '42703' || Boolean(message?.includes('deleted_at'))
+}
+
+function withDeletedAtDefault<T extends Record<string, unknown>>(row: T) {
+  return {
+    ...row,
+    deleted_at: (row.deleted_at as string | null | undefined) ?? null,
+  }
+}
+
+function applyTrashFilter<T extends { is: (col: string, val: null) => T; not: (col: string, op: string, val: null) => T }>(
+  query: T,
+  trash?: boolean,
+): T {
+  if (trash) {
+    return query.not('deleted_at', 'is', null)
+  }
+  return query.is('deleted_at', null)
+}
+
+function buildMembersQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  options: {
+    search?: string
+    isActive?: boolean
+    instructorId?: string
+    trash?: boolean
+    limit?: number
+    offset?: number
+    orderBy: string
+    orderAsc: boolean
+    withCount?: boolean
+    select: string
+    useTrashFilter: boolean
+  },
+) {
+  let query = supabase
+    .from('members')
+    .select(options.select, options.withCount ? { count: 'exact' } : undefined)
+
+  if (options.useTrashFilter) {
+    query = applyTrashFilter(query, options.trash)
+  } else if (options.trash) {
+    return null
+  }
+
+  query = query.order(options.orderBy, { ascending: options.orderAsc })
+
+  if (options.search) {
+    query = query.or(`name.ilike.%${options.search}%,phone.ilike.%${options.search}%`)
+  }
+  if (options.isActive !== undefined) {
+    query = query.eq('is_active', options.isActive)
+  }
+  if (options.instructorId) {
+    query = query.eq('primary_instructor_id', options.instructorId)
+  }
+  if (options.limit != null && options.offset != null) {
+    query = query.range(options.offset, options.offset + options.limit - 1)
+  } else if (options.limit != null) {
+    query = query.limit(options.limit)
+  }
+
+  return query
+}
+
 async function fetchMembersRows(
   supabase: Awaited<ReturnType<typeof createClient>>,
   options?: {
     search?: string
     isActive?: boolean
     instructorId?: string
+    trash?: boolean
     limit?: number
     offset?: number
-    orderBy?: 'name' | 'created_at'
+    orderBy?: 'name' | 'created_at' | 'deleted_at'
     orderAsc?: boolean
     withCount?: boolean
   },
 ) {
   const orderBy = options?.orderBy ?? 'name'
   const orderAsc = options?.orderAsc ?? true
-
-  let query = supabase
-    .from('members')
-    .select(MEMBER_LIST_SELECT, options?.withCount ? { count: 'exact' } : undefined)
-    .order(orderBy, { ascending: orderAsc })
-
-  if (options?.search) {
-    query = query.or(`name.ilike.%${options.search}%,phone.ilike.%${options.search}%`)
-  }
-
-  if (options?.isActive !== undefined) {
-    query = query.eq('is_active', options.isActive)
-  }
-
-  if (options?.instructorId) {
-    query = query.eq('primary_instructor_id', options.instructorId)
-  }
-
   const limit = options?.limit
   const offset = options?.offset
 
-  if (limit != null && offset != null) {
-    query = query.range(offset, offset + limit - 1)
-  } else if (limit != null) {
-    query = query.limit(limit)
+  const baseOpts = {
+    search: options?.search,
+    isActive: options?.isActive,
+    instructorId: options?.instructorId,
+    trash: options?.trash,
+    limit,
+    offset,
+    orderBy,
+    orderAsc,
+    withCount: options?.withCount,
   }
 
-  let result = await query
+  const primaryQuery = buildMembersQuery(supabase, {
+    ...baseOpts,
+    select: MEMBER_LIST_SELECT,
+    useTrashFilter: true,
+  })
 
-  if (result.error?.message.includes("'created_at'")) {
-    query = supabase
-      .from('members')
-      .select(MEMBER_LIST_SELECT, options?.withCount ? { count: 'exact' } : undefined)
-      .order('name', { ascending: orderAsc })
+  if (!primaryQuery) {
+    return { data: [], error: null, count: 0 }
+  }
 
-    if (options?.search) {
-      query = query.or(`name.ilike.%${options.search}%,phone.ilike.%${options.search}%`)
-    }
-    if (options?.isActive !== undefined) {
-      query = query.eq('is_active', options.isActive)
-    }
-    if (options?.instructorId) {
-      query = query.eq('primary_instructor_id', options.instructorId)
-    }
-    if (limit != null && offset != null) {
-      query = query.range(offset, offset + limit - 1)
-    } else if (limit != null) {
-      query = query.limit(limit)
+  let result = await primaryQuery
+
+  if (result.error && isDeletedAtMissingError(result.error.message, result.error.code)) {
+    const legacyOrderBy = orderBy === 'deleted_at' ? 'name' : orderBy
+    let legacyQuery = buildMembersQuery(supabase, {
+      ...baseOpts,
+      orderBy: legacyOrderBy,
+      select: MEMBER_LIST_SELECT_LEGACY,
+      useTrashFilter: false,
+    })
+
+    if (!legacyQuery) {
+      return { data: [], error: null, count: 0 }
     }
 
-    result = await query
+    result = await legacyQuery
+
+    if (result.error?.message.includes("'created_at'")) {
+      legacyQuery = buildMembersQuery(supabase, {
+        ...baseOpts,
+        orderBy: 'name',
+        select: MEMBER_LIST_SELECT_LEGACY,
+        useTrashFilter: false,
+      })
+      if (legacyQuery) {
+        result = await legacyQuery
+      }
+    }
+
+    if (result.data) {
+      result = { ...result, data: result.data.map(withDeletedAtDefault) }
+    }
+  } else if (result.error?.message.includes("'created_at'")) {
+    const legacyQuery = buildMembersQuery(supabase, {
+      ...baseOpts,
+      orderBy: 'name',
+      select: MEMBER_LIST_SELECT_LEGACY,
+      useTrashFilter: false,
+    })
+    if (legacyQuery) {
+      result = await legacyQuery
+      if (result.data) {
+        result = { ...result, data: result.data.map(withDeletedAtDefault) }
+      }
+    }
   }
 
   return result
@@ -112,12 +206,18 @@ export async function getMembers(options?: {
   search?: string
   isActive?: boolean
   instructorId?: string
+  trash?: boolean
   limit?: number
   offset?: number
-  orderBy?: 'name' | 'created_at'
+  orderBy?: 'name' | 'created_at' | 'deleted_at'
   orderAsc?: boolean
-}): Promise<{ data: Member[]; count: number }> {
-  const supabase = await createClient()
+}): Promise<{ data: Member[]; count: number; trashEnabled: boolean }> {
+  const supabase = await createStaffDataClient()
+  const trashEnabled = options?.trash ? await isMemberTrashEnabled() : true
+
+  if (options?.trash && !trashEnabled) {
+    return { data: [], count: 0, trashEnabled: false }
+  }
 
   const { data: members, error, count } = await fetchMembersRows(supabase, {
     ...options,
@@ -126,11 +226,11 @@ export async function getMembers(options?: {
 
   if (error) {
     console.error('Error fetching members:', error)
-    return { data: [], count: 0 }
+    return { data: [], count: 0, trashEnabled }
   }
 
   if (!members?.length) {
-    return { data: [], count: count ?? 0 }
+    return { data: [], count: count ?? 0, trashEnabled }
   }
 
   const instructorIds = [
@@ -145,6 +245,7 @@ export async function getMembers(options?: {
   return {
     data: attachPrimaryInstructors(members, lookup) as Member[],
     count: count ?? members.length,
+    trashEnabled,
   }
 }
 
@@ -166,13 +267,24 @@ export async function searchMembersForPicker(search: string) {
 }
 
 export async function getMember(id: string): Promise<Member | null> {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
 
-  const { data: member, error } = await supabase
+  let { data: member, error } = await supabase
     .from('members')
     .select(MEMBER_DETAIL_SELECT)
     .eq('id', id)
+    .is('deleted_at', null)
     .single()
+
+  if (error && isDeletedAtMissingError(error.message, error.code)) {
+    const fallback = await supabase
+      .from('members')
+      .select(MEMBER_LIST_SELECT_LEGACY)
+      .eq('id', id)
+      .single()
+    member = fallback.data ? withDeletedAtDefault(fallback.data) : null
+    error = fallback.error
+  }
 
   if (error || !member) {
     console.error('Error fetching member:', error)
@@ -211,13 +323,29 @@ function mapMemberError(message: string): string {
     return '담당 강사 정보가 올바르지 않습니다. 강사 선택을 해제하고 다시 시도해주세요.'
   }
   if (message.includes('row-level security') || message.includes('permission denied')) {
-    return '데이터베이스 권한이 없습니다. Supabase SQL Editor에서 supabase/fix-members-rls.sql을 실행해주세요.'
+    return (
+      '데이터베이스 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY가 있는지 확인하거나, ' +
+      'Supabase SQL Editor에서 supabase/fix-members-rls.sql을 실행해주세요.'
+    )
   }
   return message
 }
 
+function getMemberWriteClient() {
+  try {
+    return createAdminClient()
+  } catch {
+    return null
+  }
+}
+
+async function memberWriteClient() {
+  return getMemberWriteClient() ?? (await createClient())
+}
+
 export async function createMember(formData: MemberFormData): Promise<{ data?: Member; error?: string }> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = await memberWriteClient()
 
   const name = formData.name?.trim()
   if (!name) {
@@ -257,7 +385,8 @@ export async function createMember(formData: MemberFormData): Promise<{ data?: M
 }
 
 export async function updateMember(id: string, formData: Partial<MemberFormData>): Promise<{ data?: Member; error?: string }> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = await memberWriteClient()
   
   const updateData: Record<string, unknown> = {}
   
@@ -303,7 +432,8 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
 }
 
 export async function toggleMemberStatus(id: string, isActive: boolean): Promise<{ error?: string }> {
-  const supabase = await createClient()
+  await requireRole(['admin'])
+  const supabase = await memberWriteClient()
   
   const { error } = await supabase
     .from('members')
@@ -312,24 +442,116 @@ export async function toggleMemberStatus(id: string, isActive: boolean): Promise
 
   if (error) {
     console.error('Error toggling member status:', error)
-    return { error: error.message }
+    return { error: mapMemberError(error.message) }
   }
 
   revalidatePath('/dashboard/members')
   return {}
 }
 
+const MEMBER_TRASH_SETUP_MESSAGE =
+  '휴지통 기능을 사용하려면 Supabase SQL Editor에서 supabase/add-members-deleted-at.sql 을 실행해주세요.'
+
+export async function isMemberTrashEnabled(): Promise<boolean> {
+  try {
+    const supabase = await createStaffDataClient()
+    const { error } = await supabase.from('members').select('deleted_at').limit(1)
+    if (!error) return true
+    return !isDeletedAtMissingError(error.message, error.code)
+  } catch {
+    return false
+  }
+}
+
+export async function getDeletedMembersCount(): Promise<number> {
+  try {
+    const supabase = await createStaffDataClient()
+    const { count, error } = await supabase
+      .from('members')
+      .select('id', { count: 'exact', head: true })
+      .not('deleted_at', 'is', null)
+
+    if (error) return 0
+    return count ?? 0
+  } catch {
+    return 0
+  }
+}
+
+/** 휴지통으로 이동 (소프트 삭제) */
 export async function deleteMember(id: string): Promise<{ error?: string }> {
-  const supabase = await createClient()
-  
+  await requireRole(['admin'])
+
+  if (!(await isMemberTrashEnabled())) {
+    return { error: MEMBER_TRASH_SETUP_MESSAGE }
+  }
+
+  const supabase = await memberWriteClient()
+
+  const { data, error } = await supabase
+    .from('members')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', id)
+    .is('deleted_at', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    if (isDeletedAtMissingError(error.message, error.code)) {
+      return { error: MEMBER_TRASH_SETUP_MESSAGE }
+    }
+    console.error('Error moving member to trash:', error)
+    return { error: mapMemberError(error.message) }
+  }
+
+  if (!data) {
+    return { error: '회원을 찾을 수 없거나 이미 삭제되었습니다.' }
+  }
+
+  revalidatePath('/dashboard/members')
+  return {}
+}
+
+/** 휴지통에서 복구 */
+export async function restoreMember(id: string): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+  const supabase = await memberWriteClient()
+
+  const { error } = await supabase
+    .from('members')
+    .update({ deleted_at: null })
+    .eq('id', id)
+    .not('deleted_at', 'is', null)
+
+  if (error) {
+    if (isDeletedAtMissingError(error.message, error.code)) {
+      return { error: MEMBER_TRASH_SETUP_MESSAGE }
+    }
+    console.error('Error restoring member:', error)
+    return { error: mapMemberError(error.message) }
+  }
+
+  revalidatePath('/dashboard/members')
+  return {}
+}
+
+/** 휴지통에서 영구 삭제 */
+export async function permanentlyDeleteMember(id: string): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+  const supabase = await memberWriteClient()
+
   const { error } = await supabase
     .from('members')
     .delete()
     .eq('id', id)
+    .not('deleted_at', 'is', null)
 
   if (error) {
-    console.error('Error deleting member:', error)
-    return { error: error.message }
+    if (isDeletedAtMissingError(error.message, error.code)) {
+      return { error: MEMBER_TRASH_SETUP_MESSAGE }
+    }
+    console.error('Error permanently deleting member:', error)
+    return { error: mapMemberError(error.message) }
   }
 
   revalidatePath('/dashboard/members')

@@ -11,6 +11,8 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
     void import('@/app/dashboard/instructors/instructor-management')
   },
   '/dashboard/members': () => void import('@/app/dashboard/members/member-list'),
+  '/dashboard/lesson-status': () =>
+    void import('@/app/dashboard/lesson-status/lesson-status-view'),
   '/dashboard/lessons': () =>
     void import('@/app/dashboard/lessons/lesson-registration'),
   '/dashboard/attendance': () =>

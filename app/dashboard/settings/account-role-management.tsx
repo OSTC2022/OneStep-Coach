@@ -465,7 +465,7 @@ export function AccountRoleManagement({
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  강사: 캘린더·회원 관리 메뉴 · 학부모: 마이페이지(보호자) · 회원: 일반
+                  강사: 캘린더·수업·출석 메뉴 · 학부모: 마이페이지(보호자) · 회원: 일반
                   회원 마이페이지
                 </p>
               </div>

@@ -1,24 +1,43 @@
 'use server'
 
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import type { DashboardStats } from '@/lib/types'
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
   const today = new Date().toISOString().split('T')[0]
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
   const sevenDaysLater = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
   // Total members
-  const { count: totalMembers } = await supabase
+  let totalMembersRes = await supabase
     .from('members')
     .select('id', { count: 'exact', head: true })
+    .is('deleted_at', null)
+
+  if (totalMembersRes.error?.code === '42703') {
+    totalMembersRes = await supabase
+      .from('members')
+      .select('id', { count: 'exact', head: true })
+  }
 
   // Active members
-  const { count: activeMembers } = await supabase
+  let activeMembersRes = await supabase
     .from('members')
     .select('id', { count: 'exact', head: true })
     .eq('is_active', true)
+    .is('deleted_at', null)
+
+  if (activeMembersRes.error?.code === '42703') {
+    activeMembersRes = await supabase
+      .from('members')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true)
+  }
+
+  const totalMembers = totalMembersRes.count
+  const activeMembers = activeMembersRes.count
 
   // Today's lessons
   const { count: todayLessons } = await supabase

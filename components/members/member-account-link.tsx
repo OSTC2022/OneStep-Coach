@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { Copy, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -10,23 +10,45 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   inviteMemberLogin,
   linkExistingAuthUserToMember,
+  type MemberAccountEmailInfo,
 } from '@/lib/actions/member-account'
 
 interface MemberAccountLinkProps {
   memberId: string
   memberName: string
   linkedAuthUserId?: string | null
+  registeredEmail?: string | null
+  emailSource?: MemberAccountEmailInfo['source']
 }
 
 export function MemberAccountLink({
   memberId,
   memberName,
   linkedAuthUserId,
+  registeredEmail = null,
+  emailSource = null,
 }: MemberAccountLinkProps) {
-  const [email, setEmail] = useState('')
+  const hasRegisteredEmail = Boolean(registeredEmail?.trim())
+  const [useCustomEmail, setUseCustomEmail] = useState(!hasRegisteredEmail)
+  const [email, setEmail] = useState(registeredEmail?.trim() ?? '')
   const [authUserId, setAuthUserId] = useState(linkedAuthUserId ?? '')
   const [manualLink, setManualLink] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    const next = registeredEmail?.trim() ?? ''
+    if (next) {
+      setEmail(next)
+      setUseCustomEmail(false)
+    } else {
+      setEmail('')
+      setUseCustomEmail(true)
+    }
+  }, [registeredEmail])
+
+  useEffect(() => {
+    setAuthUserId(linkedAuthUserId ?? '')
+  }, [linkedAuthUserId])
 
   function handleInvite() {
     startTransition(async () => {
@@ -74,6 +96,8 @@ export function MemberAccountLink({
     })
   }
 
+  const inviteEmail = useCustomEmail ? email.trim() : (registeredEmail?.trim() || email.trim())
+
   return (
     <Card>
       <CardHeader>
@@ -92,21 +116,66 @@ export function MemberAccountLink({
         ) : null}
 
         <div className="space-y-2 rounded-md border border-border p-3">
-          <div className="space-y-1">
-            <Label htmlFor="member-account-email">회원 또는 보호자 이메일</Label>
-            <Input
-              id="member-account-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="member@example.com"
-              required
-            />
-          </div>
+          {hasRegisteredEmail && !useCustomEmail ? (
+            <div className="space-y-2">
+              <Label>가입 이메일</Label>
+              <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2.5">
+                <p className="text-sm font-semibold text-foreground">{registeredEmail}</p>
+                {emailSource === 'auth' ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Supabase에 등록된 계정 이메일입니다.
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    초대한 이메일입니다. 가입 완료 전입니다.
+                  </p>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto px-0 text-xs text-muted-foreground"
+                onClick={() => {
+                  setUseCustomEmail(true)
+                  setEmail('')
+                }}
+              >
+                다른 이메일로 초대
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <Label htmlFor="member-account-email">회원 또는 보호자 이메일</Label>
+              {hasRegisteredEmail ? (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="mb-1 h-auto px-0 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setUseCustomEmail(false)
+                    setEmail(registeredEmail?.trim() ?? '')
+                  }}
+                >
+                  가입 이메일 사용 ({registeredEmail})
+                </Button>
+              ) : null}
+              <Input
+                id="member-account-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="member@example.com"
+                required
+              />
+            </div>
+          )}
+
           <Button
             type="button"
             size="sm"
-            disabled={isPending || !email.trim()}
+            disabled={isPending || !inviteEmail}
             onClick={handleInvite}
           >
             {isPending ? (

@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { INSTRUCTOR_PICKER_SELECT } from '@/lib/supabase-selects'
 
 export async function getTodayAttendanceData() {
   const supabase = await createClient()
@@ -18,17 +19,21 @@ export async function getTodayAttendanceData() {
         end_time,
         lesson_type,
         title,
+        content,
+        created_at,
         attendance_status,
         session_deducted,
+        signature_id,
         member:members(id, name, phone, sport),
-        instructor:instructors(id, name)
+        instructor:instructors(id, name, calendar_color)
       `)
       .eq('lesson_date', today)
       .order('start_time'),
     supabase
       .from('instructors')
-      .select('id, name')
-      .eq('is_active', true),
+      .select(INSTRUCTOR_PICKER_SELECT)
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return {

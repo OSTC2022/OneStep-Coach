@@ -25,7 +25,7 @@ export async function getMemberPortalData(): Promise<MemberPortalData | null> {
 
   const [nextLesson, recentLessons, recentSessions, transactions] = await Promise.all([
     getNextLessonForMember(member.id),
-    getLessons({ memberId: member.id, limit: 10 }),
+    getLessons({ memberId: member.id, limit: 10, upToNow: true }),
     getLessonSessionsForMember(member.id, 10),
     getSessionTransactionsForMember(member.id, 15),
   ])

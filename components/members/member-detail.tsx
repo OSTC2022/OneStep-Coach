@@ -57,7 +57,7 @@ export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
     if (result.error) {
       toast.error('회원 삭제 실패', { description: result.error })
     } else {
-      toast.success('회원이 삭제되었습니다.')
+      toast.success('회원이 휴지통으로 이동했습니다.')
       router.push('/dashboard/members')
     }
   }
@@ -119,7 +119,8 @@ export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
               <AlertDialogHeader>
                 <AlertDialogTitle>회원 삭제</AlertDialogTitle>
                 <AlertDialogDescription>
-                  정말로 {member.name} 회원을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.
+                  정말로 {member.name} 회원을 삭제하시겠습니까? 휴지통으로 이동하며, 회원
+                  관리 화면의 휴지통에서 복구할 수 있습니다.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -190,9 +191,7 @@ export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
                   <p className={`text-2xl font-bold font-mono ${member.bmi ? getBmiCategory(member.bmi).color : ''}`}>
                     {member.bmi?.toFixed(1) || '-'}
                   </p>
-                  <p className="text-sm text-muted-foreground">
-                    BMI {member.bmi && `(${getBmiCategory(member.bmi).label})`}
-                  </p>
+                  <p className="text-sm text-muted-foreground">BMI</p>
                 </div>
                 <div className="p-4 rounded-lg bg-primary/10 text-center">
                   <p className="text-2xl font-bold text-primary">{member.sport || '-'}</p>

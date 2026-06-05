@@ -2,6 +2,15 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import type { InstructorPayrollRow } from '@/lib/actions/reports'
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -21,12 +30,19 @@ interface ReportDashboardProps {
     totalMembers: number
     activeMembers: number
     newMembersThisMonth: number
+    totalInstructorPay: number
   }
   instructorStats: { name: string; count: number }[]
+  instructorPayroll: InstructorPayrollRow[]
   sportStats: Record<string, number>
 }
 
-export function ReportDashboard({ stats, instructorStats, sportStats }: ReportDashboardProps) {
+export function ReportDashboard({
+  stats,
+  instructorStats,
+  instructorPayroll,
+  sportStats,
+}: ReportDashboardProps) {
   const revenueChange = stats.lastMonthRevenue > 0 
     ? ((stats.thisMonthRevenue - stats.lastMonthRevenue) / stats.lastMonthRevenue * 100).toFixed(1)
     : '0'
@@ -197,6 +213,70 @@ export function ReportDashboard({ stats, instructorStats, sportStats }: ReportDa
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>강사료 정산 (이번 달)</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            같은 시간대 인원 기준 · 평일 3만/주말 4만 시작 + 추가 인원당 1만
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>강사</TableHead>
+                <TableHead className="text-center">출석</TableHead>
+                <TableHead className="text-center hidden sm:table-cell">평일 타임</TableHead>
+                <TableHead className="text-center hidden sm:table-cell">주말 타임</TableHead>
+                <TableHead className="text-right">강사료</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {instructorPayroll.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    출석 수업이 없습니다.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <>
+                  {instructorPayroll.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="font-medium">{row.name}</TableCell>
+                      <TableCell className="text-center">{row.totalLessons}</TableCell>
+                      <TableCell className="text-center hidden sm:table-cell">
+                        {row.weekdaySlots}
+                      </TableCell>
+                      <TableCell className="text-center hidden sm:table-cell">
+                        {row.weekendSlots}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {row.totalPay.toLocaleString()}원
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-secondary/50">
+                    <TableCell className="font-bold">합계</TableCell>
+                    <TableCell className="text-center font-bold">
+                      {instructorPayroll.reduce((sum, row) => sum + row.totalLessons, 0)}
+                    </TableCell>
+                    <TableCell className="text-center hidden sm:table-cell font-bold">
+                      {instructorPayroll.reduce((sum, row) => sum + row.weekdaySlots, 0)}
+                    </TableCell>
+                    <TableCell className="text-center hidden sm:table-cell font-bold">
+                      {instructorPayroll.reduce((sum, row) => sum + row.weekendSlots, 0)}
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-primary">
+                      {stats.totalInstructorPay.toLocaleString()}원
+                    </TableCell>
+                  </TableRow>
+                </>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* Monthly Summary */}
       <Card>

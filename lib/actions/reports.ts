@@ -1,6 +1,19 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { buildInstructorPayroll } from '@/lib/instructor-pay'
+import { INSTRUCTOR_LIST_SELECT } from '@/lib/supabase-selects'
+
+export type InstructorPayrollRow = {
+  id: string
+  name: string
+  totalLessons: number
+  weekdaySlots: number
+  weekendSlots: number
+  weekdayPay: number
+  weekendPay: number
+  totalPay: number
+}
 
 export type ReportDashboardData = {
   stats: {
@@ -11,8 +24,10 @@ export type ReportDashboardData = {
     totalMembers: number
     activeMembers: number
     newMembersThisMonth: number
+    totalInstructorPay: number
   }
   instructorStats: { name: string; count: number }[]
+  instructorPayroll: InstructorPayrollRow[]
   sportStats: Record<string, number>
 }
 
@@ -35,6 +50,8 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
     activeMembersRes,
     newMembersRes,
     instructorLessonsRes,
+    payrollLessonsRes,
+    instructorsRes,
     memberSportsRes,
   ] = await Promise.all([
     supabase
@@ -55,15 +72,20 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
       .select('id, attendance_status, lesson_date')
       .gte('lesson_date', lastMonthStr)
       .lte('lesson_date', lastMonthEndStr),
-    supabase.from('members').select('id', { count: 'exact', head: true }),
     supabase
       .from('members')
       .select('id', { count: 'exact', head: true })
-      .eq('is_active', true),
+      .is('deleted_at', null),
     supabase
       .from('members')
       .select('id', { count: 'exact', head: true })
-      .gte('registered_at', thisMonthStr),
+      .eq('is_active', true)
+      .is('deleted_at', null),
+    supabase
+      .from('members')
+      .select('id', { count: 'exact', head: true })
+      .gte('registered_at', thisMonthStr)
+      .is('deleted_at', null),
     supabase
       .from('lessons')
       .select(
@@ -71,7 +93,21 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
       )
       .gte('lesson_date', thisMonthStr)
       .eq('attendance_status', 'present'),
-    supabase.from('members').select('sport').eq('is_active', true),
+    supabase
+      .from('lessons')
+      .select('lesson_date, start_time, instructor_id, attendance_status')
+      .gte('lesson_date', thisMonthStr)
+      .neq('attendance_status', 'cancelled')
+      .not('instructor_id', 'is', null),
+    supabase
+      .from('instructors')
+      .select(INSTRUCTOR_LIST_SELECT)
+      .eq('is_active', true),
+    supabase
+      .from('members')
+      .select('sport')
+      .eq('is_active', true)
+      .is('deleted_at', null),
   ])
 
   const instructorStatsMap: Record<string, { name: string; count: number }> = {}
@@ -98,6 +134,15 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
   const lastMonthPackages = lastMonthPackagesRes.data ?? []
   const thisMonthLessons = thisMonthLessonsRes.data ?? []
   const lastMonthLessons = lastMonthLessonsRes.data ?? []
+  const instructors = instructorsRes.data ?? []
+  const instructorPayroll = buildInstructorPayroll(
+    instructors,
+    payrollLessonsRes.data ?? [],
+  ).filter((row) => row.totalPay > 0 || row.totalLessons > 0)
+  const totalInstructorPay = instructorPayroll.reduce(
+    (sum, row) => sum + row.totalPay,
+    0,
+  )
 
   return {
     stats: {
@@ -118,8 +163,10 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
       totalMembers: totalMembersRes.count ?? 0,
       activeMembers: activeMembersRes.count ?? 0,
       newMembersThisMonth: newMembersRes.count ?? 0,
+      totalInstructorPay,
     },
     instructorStats: Object.values(instructorStatsMap),
+    instructorPayroll,
     sportStats,
   }
 }

@@ -10,6 +10,7 @@ import {
   getRecoveryEmailRedirectUrl,
   getSiteUrl,
 } from '@/lib/site-url'
+import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { getCurrentUser } from './auth'
 
 const INVITE_SUCCESS =
@@ -372,6 +373,13 @@ async function ensureMemberProfile(
   email: string,
   fullName: string,
 ): Promise<{ error?: string }> {
+  if (isProtectedAdminAccount(email)) {
+    return {
+      error:
+        '관리자 계정 이메일은 회원 로그인에 사용할 수 없습니다. 회원 또는 보호자 이메일을 입력해주세요.',
+    }
+  }
+
   const admin = createAdminClient()
 
   const { error: profileError } = await admin.from('profiles').upsert(
@@ -486,6 +494,13 @@ export async function linkExistingAuthUserToMember(
     return { error: 'auth user UUID를 찾을 수 없습니다.' }
   }
 
+  if (isProtectedAdminAccount(authUser.user.email)) {
+    return {
+      error:
+        '관리자 계정은 회원과 연결할 수 없습니다. 회원 전용 계정 UUID를 사용해주세요.',
+    }
+  }
+
   const linkResult = await linkInvitedUser(
     memberId,
     authUserId,
@@ -526,6 +541,13 @@ export async function inviteMemberLogin(
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail || !normalizedEmail.includes('@')) {
     return { error: '올바른 이메일 주소를 입력해주세요.' }
+  }
+
+  if (isProtectedAdminAccount(normalizedEmail)) {
+    return {
+      error:
+        '관리자 계정 이메일(allakj@naver.com)은 회원 초대에 사용할 수 없습니다. 회원 또는 보호자 이메일을 입력해주세요.',
+    }
   }
 
   try {
@@ -661,4 +683,53 @@ export async function searchAuthProfiles(query: string) {
     .limit(10)
 
   return data ?? []
+}
+
+export type MemberAccountEmailInfo = {
+  email: string | null
+  source: 'auth' | 'invite' | null
+}
+
+/** 연결된 auth 계정 또는 초대 이메일 조회 */
+export async function getMemberAccountEmail(
+  memberId: string,
+): Promise<MemberAccountEmailInfo> {
+  const user = await getCurrentUser()
+  if (!user || user.role !== 'admin') {
+    return { email: null, source: null }
+  }
+
+  const envError = getAdminEnvError()
+  if (envError) {
+    return { email: null, source: null }
+  }
+
+  try {
+    const admin = createAdminClient()
+    const { data: member } = await admin
+      .from('members')
+      .select('auth_user_id, user_id, invite_email')
+      .eq('id', memberId)
+      .maybeSingle()
+
+    if (!member) return { email: null, source: null }
+
+    const linkedId = member.auth_user_id ?? member.user_id
+    if (linkedId) {
+      const { data: authData } = await admin.auth.admin.getUserById(linkedId)
+      const authEmail = authData.user?.email?.trim()
+      if (authEmail && !isProtectedAdminAccount(authEmail)) {
+        return { email: authEmail, source: 'auth' }
+      }
+    }
+
+    const inviteEmail = member.invite_email?.trim()
+    if (inviteEmail && !isProtectedAdminAccount(inviteEmail)) {
+      return { email: inviteEmail, source: 'invite' }
+    }
+
+    return { email: null, source: null }
+  } catch {
+    return { email: null, source: null }
+  }
 }

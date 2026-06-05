@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -28,10 +27,11 @@ import {
   CreditCard,
   UserPlus,
   CalendarDays,
+  ListChecks,
 } from 'lucide-react'
 import type { User } from '@/lib/types'
 import { getRoleLabel } from '@/lib/roles'
-import { preloadDashboardChunks, preloadRouteChunk } from '@/lib/chunk-preload'
+import { preloadRouteChunk } from '@/lib/chunk-preload'
 
 const menuItems = [
   {
@@ -47,16 +47,22 @@ const menuItems = [
     roles: ['admin', 'instructor'],
   },
   {
+    title: '수업현황',
+    url: '/dashboard/lesson-status',
+    icon: ListChecks,
+    roles: ['admin', 'instructor'],
+  },
+  {
     title: '회원 관리',
     url: '/dashboard/members',
     icon: Users,
-    roles: ['admin', 'instructor'],
+    roles: ['admin'],
   },
   {
     title: '회원 추가',
     url: '/dashboard/members/new',
     icon: UserPlus,
-    roles: ['admin', 'instructor'],
+    roles: ['admin'],
   },
   {
     title: '세션/결제',
@@ -109,7 +115,7 @@ interface DashboardSidebarProps {
 export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const { isMobile, openMobile, setOpenMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const userRole = user?.role || 'member'
 
   const filteredItems = menuItems.filter((item) =>
@@ -120,13 +126,6 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     router.prefetch(href)
     preloadRouteChunk(href)
   }
-
-  useEffect(() => {
-    if (!openMobile) return
-    for (const item of filteredItems) {
-      prefetchMenuRoute(item.url)
-    }
-  }, [openMobile, filteredItems, router])
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -160,7 +159,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
                     >
                       <Link
                         href={item.url}
-                        prefetch
+                        prefetch={false}
                         onPointerEnter={() => prefetchMenuRoute(item.url)}
                         onTouchStart={() => prefetchMenuRoute(item.url)}
                         onClick={() => {

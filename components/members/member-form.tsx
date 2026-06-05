@@ -45,13 +45,6 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
     ? (formData.weight_kg / Math.pow(formData.height_cm / 100, 2)).toFixed(1)
     : null
 
-  function getBmiCategory(bmi: number) {
-    if (bmi < 18.5) return { label: '저체중', color: 'text-chart-2' }
-    if (bmi < 25) return { label: '정상', color: 'text-success' }
-    if (bmi < 30) return { label: '과체중', color: 'text-warning' }
-    return { label: '비만', color: 'text-destructive' }
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     
@@ -210,8 +203,8 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
                 <Label>BMI</Label>
                 <div className="h-10 px-3 py-2 rounded-md bg-secondary border border-border flex items-center">
                   {bmiPreview ? (
-                    <span className={`font-mono ${getBmiCategory(parseFloat(bmiPreview)).color}`}>
-                      {bmiPreview} ({getBmiCategory(parseFloat(bmiPreview)).label})
+                    <span className="font-mono">
+                      {bmiPreview}
                     </span>
                   ) : (
                     <span className="text-muted-foreground">자동 계산</span>

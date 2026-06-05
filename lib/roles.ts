@@ -1,4 +1,4 @@
-import type { UserRole as DbUserRole } from '@/lib/types'
+import type { AttendanceStatus, UserRole as DbUserRole } from '@/lib/types'
 
 /** DB profile roles */
 export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian'
@@ -52,6 +52,20 @@ export function isAdminPath(pathname: string): boolean {
   return ADMIN_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
+/** 수업현황·출석에서 역할별로 설정 가능한 상태 */
+export function getAttendanceStatusesForRole(role: AppRole): AttendanceStatus[] {
+  if (role === 'admin') return ['present', 'absent', 'makeup', 'cancelled']
+  if (role === 'instructor') return ['present', 'absent', 'cancelled']
+  return []
+}
+
+export function canRoleSetAttendanceStatus(
+  role: AppRole,
+  status: AttendanceStatus,
+): boolean {
+  return getAttendanceStatusesForRole(role).includes(status)
+}
+
 export function canAccessPath(role: AppRole, pathname: string): boolean {
   if (role === 'admin') return true
 
@@ -59,12 +73,12 @@ export function canAccessPath(role: AppRole, pathname: string): boolean {
     return pathname === '/dashboard/my' || pathname.startsWith('/dashboard/my/')
   }
 
-  // coach / instructor
+  // coach / instructor — 회원 관리는 관리자 전용, 수업·캘린더·출석만 이용
   if (isAdminPath(pathname)) return false
-  if (pathname.startsWith('/dashboard/members/new')) return true
+  if (pathname.startsWith('/dashboard/members')) return false
   return (
     pathname === '/dashboard' ||
-    pathname.startsWith('/dashboard/members') ||
+    pathname.startsWith('/dashboard/lesson-status') ||
     pathname.startsWith('/dashboard/lessons') ||
     pathname.startsWith('/dashboard/calendar') ||
     pathname.startsWith('/dashboard/attendance')

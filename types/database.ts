@@ -44,6 +44,7 @@ export interface Member {
   registered_at: string
   is_active: boolean
   created_at: string
+  deleted_at: string | null
   // Joined relations
   primary_instructor?: Instructor
 }
@@ -60,6 +61,7 @@ export interface SessionPackage {
   note: string | null
   is_active: boolean
   created_at: string
+  deleted_at: string | null
   // Joined relations
   member?: Member
 }
@@ -82,6 +84,8 @@ export interface Lesson {
   session_deducted: boolean
   lesson_no: number | null
   signature_id: string | null
+  recurrence_group_id: string | null
+  recurrence_pattern: string | null
   created_at: string
   created_by: string | null
   // Joined relations

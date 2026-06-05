@@ -3,8 +3,9 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
+import { toggleMemberStatus, updateMember } from '@/lib/actions/members'
 import { Member } from '@/types/database'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { ArrowLeft, Save } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
-import { formatMemberAgeFromBirthDate, resolveMemberAgeAndBirthDate, AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
+import { formatMemberAgeFromBirthDate, AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
@@ -45,35 +46,39 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
     e.preventDefault()
     setIsLoading(true)
 
-    const supabase = createClient()
-    const { birth_date, age } = resolveMemberAgeAndBirthDate(formData.birth_date)
-
-    const { error } = await supabase
-      .from('members')
-      .update({
-        name: formData.name,
-        birth_date,
-        age,
-        grade: formData.grade || null,
-        phone: formData.phone || null,
-        parent_phone: formData.parent_phone || null,
-        sport: formData.sport || null,
-        height_cm: formData.height_cm ? Number(formData.height_cm) : null,
-        weight_kg: formData.weight_kg ? Number(formData.weight_kg) : null,
-        goal: formData.goal || null,
-        injury_history: formData.injury_history || null,
-        memo: formData.memo || null,
-        primary_instructor_id: normalizePrimaryInstructorId(formData.primary_instructor_id),
-        is_active: formData.is_active,
-      })
-      .eq('id', member.id)
+    const result = await updateMember(member.id, {
+      name: formData.name,
+      birth_date: formData.birth_date,
+      grade: formData.grade || undefined,
+      phone: formData.phone || undefined,
+      parent_phone: formData.parent_phone || undefined,
+      sport: formData.sport || undefined,
+      height_cm: formData.height_cm ? Number(formData.height_cm) : undefined,
+      weight_kg: formData.weight_kg ? Number(formData.weight_kg) : undefined,
+      goal: formData.goal || undefined,
+      injury_history: formData.injury_history || undefined,
+      memo: formData.memo || undefined,
+      primary_instructor_id: normalizePrimaryInstructorId(formData.primary_instructor_id),
+    })
 
     setIsLoading(false)
 
-    if (!error) {
-      router.push(`/dashboard/members/${member.id}`)
-      router.refresh()
+    if (result.error) {
+      toast.error('저장 실패', { description: result.error })
+      return
     }
+
+    if (formData.is_active !== member.is_active) {
+      const statusResult = await toggleMemberStatus(member.id, formData.is_active)
+      if (statusResult.error) {
+        toast.error('활성 상태 저장 실패', { description: statusResult.error })
+        return
+      }
+    }
+
+    toast.success('회원 정보가 저장되었습니다.')
+    router.push(`/dashboard/members/${member.id}`)
+    router.refresh()
   }
 
   const calculatedBMI = formData.height_cm && formData.weight_kg

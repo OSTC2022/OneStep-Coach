@@ -9,8 +9,10 @@ import {
   getInstructorCalendarColor,
   getLessonCalendarBlockBackgroundColor,
   getLessonCalendarBlockStyle,
+  resolveLessonInstructor,
   AUTO_INSTRUCTOR_CALENDAR_COLOR,
   hexToRgba,
+  type InstructorColorSource,
 } from '@/lib/instructor-colors'
 import { getDateColorClass, isKoreanHoliday } from '@/lib/korean-holidays'
 import {
@@ -37,11 +39,12 @@ import {
   type LessonDraft,
   type LessonEditAnchor,
 } from '@/lib/calendar-utils'
-import type { Lesson } from '@/lib/types'
+import type { Instructor, Lesson } from '@/lib/types'
 
 interface TimeGridProps {
   dates: Date[]
   lessons: Lesson[]
+  instructors?: Instructor[]
   selectedDate?: Date
   onSelectDate?: (date: Date) => void
   onDragCreate: (draft: LessonDraft) => void
@@ -205,6 +208,7 @@ function LessonBlockContent({
   blockHeight,
   hourHeight,
   hasResizeHandles,
+  instructors,
 }: {
   lesson: Lesson
   start: string
@@ -213,12 +217,15 @@ function LessonBlockContent({
   blockHeight: number
   hourHeight: number
   hasResizeHandles: boolean
+  instructors?: InstructorColorSource[]
 }) {
   const { name, meta } = getLessonCalendarDisplayParts(lesson)
   const fullLabel = getLessonCalendarLabel(lesson)
   const layout = getLessonLabelLayout({ columnCount, blockHeight, hourHeight })
   const showTime = Boolean(start) && layout === 'horizontal' && blockHeight >= 56 && !meta
-  const textStyle = getCalendarBlockTextStyle(getLessonCalendarBlockBackgroundColor(lesson))
+  const textStyle = getCalendarBlockTextStyle(
+    getLessonCalendarBlockBackgroundColor(lesson, instructors),
+  )
   const sizes = getLessonLabelFontSizes(
     layout,
     blockHeight,
@@ -284,6 +291,7 @@ function LessonBlockContent({
 export function TimeGrid({
   dates,
   lessons,
+  instructors = [],
   selectedDate,
   onSelectDate,
   onDragCreate,
@@ -302,7 +310,6 @@ export function TimeGrid({
     () => new Set(highlightedLessonIds ?? []),
     [highlightedLessonIds],
   )
-
   useEffect(() => {
     if (!highlightedLessonIds?.length) return
     const targetId = highlightedLessonIds[0]
@@ -1116,13 +1123,14 @@ export function TimeGrid({
                     )
                     const memberLabel = getLessonCalendarLabel(lesson)
                     const timeLabel = `${lessonStart}${lessonEnd ? ` – ${lessonEnd}` : ''}`
-                    const blockStyle = getLessonCalendarBlockStyle(lesson)
+                    const blockStyle = getLessonCalendarBlockStyle(lesson, instructors)
                     const isHighlighted = highlightedSet.has(lesson.id)
                     const isMultiSelected = isLessonSelected?.(lesson.id)
                     const highlightColor = lesson.instructor_id
-                      ? getInstructorCalendarColor(lesson.instructor)
+                      ? getInstructorCalendarColor(
+                          resolveLessonInstructor(lesson, instructors),
+                        )
                       : AUTO_INSTRUCTOR_CALENDAR_COLOR
-
                     return (
                       <div
                         key={lesson.id}
@@ -1180,6 +1188,7 @@ export function TimeGrid({
                             blockHeight={blockHeight}
                             hourHeight={hourHeight}
                             hasResizeHandles={Boolean(onLessonMove)}
+                            instructors={instructors}
                           />
                         </div>
                         {onLessonMove && (

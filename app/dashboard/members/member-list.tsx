@@ -39,13 +39,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Plus, Search, Eye, Edit, Trash2 } from 'lucide-react'
+import { MemberTrashSheet } from './member-trash-sheet'
 
 interface MemberListProps {
   initialMembers: (Member & { primary_instructor?: { id: string; name: string } | null })[]
   totalCount: number
   pageSize?: number
   instructors: { id: string; name: string }[]
+  initialTrashCount?: number
 }
 
 export function MemberList({
@@ -53,6 +65,7 @@ export function MemberList({
   totalCount,
   pageSize = LIST_PAGE_SIZE,
   instructors,
+  initialTrashCount = 0,
 }: MemberListProps) {
   const [members, setMembers] = useState(initialMembers)
   const [loadedCount, setLoadedCount] = useState(initialMembers.length)
@@ -61,6 +74,10 @@ export function MemberList({
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Member | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [trashCount, setTrashCount] = useState(initialTrashCount)
+  const [recentTrashItems, setRecentTrashItems] = useState<Member[]>([])
   const router = useRouter()
 
   useEffect(() => {
@@ -156,18 +173,31 @@ export function MemberList({
     router.refresh()
   }
 
-  const handleDeleteMember = async (memberId: string) => {
-    if (!confirm('정말 이 회원을 삭제하시겠습니까?')) return
+  const handleDeleteMember = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
 
-    const result = await deleteMember(memberId)
+    const result = await deleteMember(deleteTarget.id)
 
     if (result.error) {
       toast.error('삭제 실패', { description: result.error })
+      setDeleting(false)
       return
     }
 
-    setMembers(members.filter(m => m.id !== memberId))
-    toast.success('회원이 삭제되었습니다.')
+    const trashedMember: Member = {
+      ...deleteTarget,
+      deleted_at: new Date().toISOString(),
+    }
+    setMembers(members.filter((m) => m.id !== deleteTarget.id))
+    setRecentTrashItems((prev) => [
+      trashedMember,
+      ...prev.filter((m) => m.id !== trashedMember.id),
+    ])
+    setTrashCount((n) => n + 1)
+    setDeleteTarget(null)
+    setDeleting(false)
+    toast.success(`${deleteTarget.name} 회원이 휴지통으로 이동했습니다.`)
     router.refresh()
   }
 
@@ -197,7 +227,12 @@ export function MemberList({
           </Select>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <MemberTrashSheet
+            initialCount={trashCount}
+            recentTrashItems={recentTrashItems}
+            onTrashCountChange={setTrashCount}
+          />
           <Button asChild variant="outline">
             <Link href="/dashboard/members/new">
               <Plus className="h-4 w-4 mr-2" />
@@ -417,7 +452,14 @@ export function MemberList({
             ) : (
               filteredMembers.map((member) => (
                 <TableRow key={member.id}>
-                  <TableCell className="font-medium">{member.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link
+                      href={`/dashboard/members/${member.id}`}
+                      className="hover:text-primary hover:underline underline-offset-4"
+                    >
+                      {member.name}
+                    </Link>
+                  </TableCell>
                   <TableCell className="hidden sm:table-cell">
                     {formatMemberAge(member)}
                   </TableCell>
@@ -447,10 +489,10 @@ export function MemberList({
                           <Edit className="h-4 w-4" />
                         </Button>
                       </Link>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="icon"
-                        onClick={() => handleDeleteMember(member.id)}
+                        onClick={() => setDeleteTarget(member)}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -462,6 +504,36 @@ export function MemberList({
           </TableBody>
         </Table>
       </div>
+
+      <AlertDialog
+        open={deleteTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>회원 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.name} 회원을 삭제하시겠습니까? 휴지통으로 이동하며, 휴지통에서
+              복구할 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault()
+                void handleDeleteMember()
+              }}
+            >
+              {deleting ? '삭제 중…' : '삭제'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {hasMore && !searchTerm && statusFilter === 'all' && (
         <div className="flex justify-center pt-2">

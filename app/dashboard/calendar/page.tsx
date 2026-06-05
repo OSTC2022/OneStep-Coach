@@ -1,15 +1,15 @@
-import { getLessonsForMonth } from '@/lib/actions/lessons'
+import { getLessonsForRange } from '@/lib/actions/lessons'
 import { getInstructorForCurrentUser, getInstructors } from '@/lib/actions/instructors'
+import { getRangeForView } from '@/lib/calendar-utils'
 import { CalendarView } from './calendar-view'
 
 export default async function CalendarPage() {
   const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
+  const { dateFrom, dateTo } = getRangeForView(now, 'week')
 
   const [lessons, instructors, currentInstructor] = await Promise.all([
-    getLessonsForMonth(year, month),
-    getInstructors({ isActive: true }),
+    getLessonsForRange(dateFrom, dateTo),
+    getInstructors({ isActive: true, calendar: true }),
     getInstructorForCurrentUser(),
   ])
 

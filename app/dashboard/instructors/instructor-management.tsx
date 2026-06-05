@@ -1,10 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
-import { createInstructor, getInstructorsPage, updateInstructor } from '@/lib/actions/instructors'
+import {
+  createInstructor,
+  deleteInstructor,
+  getInstructorMonthlyPayDetail,
+  getInstructorsPage,
+  toggleInstructorStatus,
+  updateInstructor,
+} from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { Instructor } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -30,7 +36,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Plus, Edit, Trash2, Calculator, User } from 'lucide-react'
+import { Plus, Edit, Trash2, Calculator, User, X } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  calcManualSlotPay,
+  isWeekendOrHolidayRateDay,
+} from '@/lib/instructor-pay'
+import { InstructorPayDetailDialog } from '@/components/instructors/instructor-pay-detail-dialog'
 import { InstructorColorPicker } from '@/components/instructors/instructor-color-picker'
 import {
   DEFAULT_INSTRUCTOR_CALENDAR_COLOR,
@@ -42,18 +60,25 @@ interface InstructorManagementProps {
   initialInstructors: Instructor[]
   totalCount: number
   pageSize?: number
+  isAdmin?: boolean
 }
 
 export function InstructorManagement({
   initialInstructors,
   totalCount,
   pageSize = LIST_PAGE_SIZE,
+  isAdmin = false,
 }: InstructorManagementProps) {
   const router = useRouter()
   const [instructors, setInstructors] = useState(initialInstructors)
   const [loadedCount, setLoadedCount] = useState(initialInstructors.length)
   const [loadingMore, setLoadingMore] = useState(false)
   const hasMore = loadedCount < totalCount
+
+  useEffect(() => {
+    setInstructors(initialInstructors)
+    setLoadedCount(initialInstructors.length)
+  }, [initialInstructors])
 
   async function handleLoadMore() {
     if (!hasMore || loadingMore) return
@@ -77,6 +102,7 @@ export function InstructorManagement({
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isCalcDialogOpen, setIsCalcDialogOpen] = useState(false)
+  const [isPayDetailOpen, setIsPayDetailOpen] = useState(false)
   const [selectedInstructor, setSelectedInstructor] = useState<Instructor | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -90,11 +116,85 @@ export function InstructorManagement({
     calendar_color: DEFAULT_INSTRUCTOR_CALENDAR_COLOR,
   })
 
-  const [calcData, setCalcData] = useState({
-    weekdayHours: 0,
-    weekendHours: 0,
-    extraMembers: 0,
+  type CalcSlotRow = {
+    id: string
+    isWeekend: boolean
+    memberCount: number
+  }
+
+  const [calcSlots, setCalcSlots] = useState<CalcSlotRow[]>([])
+  const [todayPaySummary, setTodayPaySummary] = useState({
+    weekdaySlots: 0,
+    weekendSlots: 0,
+    weekdayPay: 0,
+    weekendPay: 0,
+    totalPay: 0,
   })
+  const [monthPaySummary, setMonthPaySummary] = useState<{
+    weekdaySlots: number
+    weekendSlots: number
+    weekdayPay: number
+    weekendPay: number
+    totalPay: number
+  } | null>(null)
+  const [isMonthPayLoading, setIsMonthPayLoading] = useState(false)
+
+  function getTodayDateKey() {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }
+
+  function formatTodayLabel() {
+    const [year, month, day] = getTodayDateKey().split('-').map(Number)
+    const date = new Date(year, month - 1, day)
+    const weekday = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()]
+    return `${month}월 ${day}일 (${weekday})`
+  }
+
+  function summarizeDaySlots(
+    slots: Array<{ isWeekendOrHoliday: boolean; pay: number }>,
+  ) {
+    let weekdaySlots = 0
+    let weekendSlots = 0
+    let weekdayPay = 0
+    let weekendPay = 0
+
+    for (const slot of slots) {
+      if (slot.isWeekendOrHoliday) {
+        weekendSlots++
+        weekendPay += slot.pay
+      } else {
+        weekdaySlots++
+        weekdayPay += slot.pay
+      }
+    }
+
+    return {
+      weekdaySlots,
+      weekendSlots,
+      weekdayPay,
+      weekendPay,
+      totalPay: weekdayPay + weekendPay,
+    }
+  }
+
+  function getCurrentMonthValue() {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }
+
+  function formatCurrentMonthLabel() {
+    const now = new Date()
+    return `${now.getFullYear()}년 ${now.getMonth() + 1}월`
+  }
+
+  function createDefaultCalcSlot(): CalcSlotRow {
+    return {
+      id: crypto.randomUUID(),
+      isWeekend: isWeekendOrHolidayRateDay(getTodayDateKey()),
+      memberCount: 1,
+    }
+  }
 
   const resetForm = () => {
     setFormData({
@@ -184,31 +284,41 @@ export function InstructorManagement({
   }
 
   const handleToggleActive = async (instructor: Instructor) => {
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('instructors')
-      .update({ is_active: !instructor.is_active })
-      .eq('id', instructor.id)
+    const nextActive = !instructor.is_active
+    const result = await toggleInstructorStatus(instructor.id, nextActive)
 
-    if (!error) {
-      setInstructors(instructors.map(i => 
-        i.id === instructor.id ? { ...i, is_active: !i.is_active } : i
-      ))
+    if (result.error) {
+      toast.error('상태 변경 실패', { description: result.error })
+      return
     }
+
+    setInstructors(
+      instructors.map((i) =>
+        i.id === instructor.id ? { ...i, is_active: nextActive } : i,
+      ),
+    )
+    toast.success(nextActive ? '강사가 활성화되었습니다.' : '강사가 비활성화되었습니다.')
     router.refresh()
   }
 
-  const handleDeleteInstructor = async (instructorId: string) => {
-    if (!confirm('정말 이 강사를 삭제하시겠습니까?')) return
+  const handleDeleteInstructor = async (instructor: Instructor) => {
+    if (!confirm(`정말 ${instructor.name} 강사를 삭제하시겠습니까?`)) return
 
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('instructors')
-      .delete()
-      .eq('id', instructorId)
+    const result = await deleteInstructor(instructor.id)
 
-    if (!error) {
-      setInstructors(instructors.filter(i => i.id !== instructorId))
+    if (result.error) {
+      toast.error('삭제 실패', { description: result.error })
+      return
+    }
+
+    setInstructors(instructors.filter((i) => i.id !== instructor.id))
+    setLoadedCount((n) => Math.max(0, n - 1))
+    toast.success(`${instructor.name} 강사가 삭제되었습니다.`)
+    if (instructor.user_id) {
+      toast.warning('로그인 계정 연결 해제됨', {
+        description:
+          '해당 계정에 강사 권한이 남아 있으면 설정에서 권한을 변경해주세요. 그렇지 않으면 강사가 다시 생성될 수 있습니다.',
+      })
     }
     router.refresh()
   }
@@ -229,16 +339,71 @@ export function InstructorManagement({
 
   const openCalcDialog = (instructor: Instructor) => {
     setSelectedInstructor(instructor)
-    setCalcData({ weekdayHours: 0, weekendHours: 0, extraMembers: 0 })
+    setCalcSlots([])
+    setTodayPaySummary({
+      weekdaySlots: 0,
+      weekendSlots: 0,
+      weekdayPay: 0,
+      weekendPay: 0,
+      totalPay: 0,
+    })
+    setMonthPaySummary(null)
+    setIsMonthPayLoading(true)
     setIsCalcDialogOpen(true)
+
+    const today = getTodayDateKey()
+
+    void getInstructorMonthlyPayDetail(instructor.id, getCurrentMonthValue(), {
+      upToNow: true,
+    }).then(
+      (detail) => {
+        setIsMonthPayLoading(false)
+        if (!detail) return
+
+        setMonthPaySummary({
+          weekdaySlots: detail.weekdaySlots,
+          weekendSlots: detail.weekendSlots,
+          weekdayPay: detail.weekdayPay,
+          weekendPay: detail.weekendPay,
+          totalPay: detail.totalPay,
+        })
+
+        const todayGroup = detail.dayGroups.find((day) => day.lessonDate === today)
+        setTodayPaySummary(
+          todayGroup ? summarizeDaySlots(todayGroup.slots) : {
+            weekdaySlots: 0,
+            weekendSlots: 0,
+            weekdayPay: 0,
+            weekendPay: 0,
+            totalPay: 0,
+          },
+        )
+      },
+    )
   }
 
-  const calculatePay = () => {
-    if (!selectedInstructor) return 0
-    const weekdayPay = calcData.weekdayHours * selectedInstructor.hourly_rate_weekday
-    const weekendPay = calcData.weekendHours * selectedInstructor.hourly_rate_weekend
-    const extraPay = calcData.extraMembers * selectedInstructor.extra_member_rate
-    return weekdayPay + weekendPay + extraPay
+  const manualPaySummary = selectedInstructor
+    ? calcManualSlotPay(
+        calcSlots.map((slot) => ({
+          isWeekendOrHoliday: slot.isWeekend,
+          memberCount: slot.memberCount,
+        })),
+        selectedInstructor,
+      )
+    : null
+
+  function addCalcSlot() {
+    setCalcSlots((prev) => [...prev, createDefaultCalcSlot()])
+  }
+
+  function removeCalcSlot(id: string) {
+    setCalcSlots((prev) => prev.filter((slot) => slot.id !== id))
+  }
+
+  function updateCalcSlot(id: string, patch: Partial<CalcSlotRow>) {
+    setCalcSlots((prev) =>
+      prev.map((slot) => (slot.id === id ? { ...slot, ...patch } : slot)),
+    )
   }
 
   return (
@@ -325,7 +490,7 @@ export function InstructorManagement({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>평일 시급 (원)</Label>
+                  <Label>평일 1타임 기본료 (원)</Label>
                   <Input
                     type="number"
                     value={formData.hourly_rate_weekday}
@@ -333,7 +498,7 @@ export function InstructorManagement({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>주말 시급 (원)</Label>
+                  <Label>주말·공휴일 1타임 기본료 (원)</Label>
                   <Input
                     type="number"
                     value={formData.hourly_rate_weekend}
@@ -342,7 +507,7 @@ export function InstructorManagement({
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>추가 회원 수당 (원/명)</Label>
+                <Label>추가 인원 수당 (원/명)</Label>
                 <Input
                   type="number"
                   value={formData.extra_member_rate}
@@ -383,8 +548,8 @@ export function InstructorManagement({
                 <TableHead>이름</TableHead>
                 <TableHead className="hidden sm:table-cell">연락처</TableHead>
                 <TableHead className="hidden md:table-cell">전문 분야</TableHead>
-                <TableHead className="hidden lg:table-cell">평일 시급</TableHead>
-                <TableHead className="hidden lg:table-cell">주말 시급</TableHead>
+                <TableHead className="hidden lg:table-cell">평일 1타임</TableHead>
+                <TableHead className="hidden lg:table-cell">주말 1타임</TableHead>
                 <TableHead>상태</TableHead>
                 <TableHead className="text-right">관리</TableHead>
               </TableRow>
@@ -438,7 +603,7 @@ export function InstructorManagement({
                         <Button variant="ghost" size="icon" onClick={() => openEditDialog(instructor)}>
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDeleteInstructor(instructor.id)}>
+                        <Button variant="ghost" size="icon" onClick={() => void handleDeleteInstructor(instructor)}>
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
@@ -517,7 +682,7 @@ export function InstructorManagement({
               </div>
             </div>
             <div className="space-y-2">
-              <Label>추가 회원 수당 (원/명)</Label>
+              <Label>추가 인원 수당 (원/명)</Label>
               <Input
                 type="number"
                 value={formData.extra_member_rate}
@@ -541,78 +706,202 @@ export function InstructorManagement({
       </Dialog>
 
       {/* Calculator Dialog */}
-      <Dialog open={isCalcDialogOpen} onOpenChange={setIsCalcDialogOpen}>
+      <Dialog
+        open={isCalcDialogOpen}
+        onOpenChange={(open) => {
+          setIsCalcDialogOpen(open)
+          if (!open) {
+            setCalcSlots([])
+            setTodayPaySummary({
+              weekdaySlots: 0,
+              weekendSlots: 0,
+              weekdayPay: 0,
+              weekendPay: 0,
+              totalPay: 0,
+            })
+            setMonthPaySummary(null)
+            setIsMonthPayLoading(false)
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>강사료 계산</DialogTitle>
             <DialogDescription>
-              {selectedInstructor?.name} 강사의 급여를 계산합니다.
+              {selectedInstructor?.name} 강사 · {formatTodayLabel()} ·{' '}
+              {formatCurrentMonthLabel()}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>평일 근무 시간</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={calcData.weekdayHours}
-                  onChange={(e) => setCalcData({ ...calcData, weekdayHours: Number(e.target.value) })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  시급: {selectedInstructor?.hourly_rate_weekday.toLocaleString()}원
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>주말 근무 시간</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={calcData.weekendHours}
-                  onChange={(e) => setCalcData({ ...calcData, weekendHours: Number(e.target.value) })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  시급: {selectedInstructor?.hourly_rate_weekend.toLocaleString()}원
-                </p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>그룹레슨 추가 회원 수</Label>
-              <Input
-                type="number"
-                min="0"
-                value={calcData.extraMembers}
-                onChange={(e) => setCalcData({ ...calcData, extraMembers: Number(e.target.value) })}
-              />
-              <p className="text-xs text-muted-foreground">
-                인당: {selectedInstructor?.extra_member_rate.toLocaleString()}원
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+              <p>
+                <strong className="text-foreground">평일</strong> 1타임{' '}
+                {selectedInstructor?.hourly_rate_weekday.toLocaleString()}원 + 추가 인원{' '}
+                {selectedInstructor?.extra_member_rate.toLocaleString()}원
               </p>
+              <p>
+                <strong className="text-foreground">주말·공휴일</strong> 1타임{' '}
+                {selectedInstructor?.hourly_rate_weekend.toLocaleString()}원 + 추가 인원{' '}
+                {selectedInstructor?.extra_member_rate.toLocaleString()}원
+              </p>
+              <p>예) 평일 2명 → 4만원 · 평일 3명 → 5만원 · 주말 2명 → 5만원</p>
             </div>
 
+            {isAdmin ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>수동 계산</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={addCalcSlot}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    타임 추가
+                  </Button>
+                </div>
+
+                {calcSlots.length > 0 ? (
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {calcSlots.map((slot) => (
+                      <div key={slot.id} className="flex items-center gap-2">
+                        <Select
+                          value={slot.isWeekend ? 'weekend' : 'weekday'}
+                          onValueChange={(value) =>
+                            updateCalcSlot(slot.id, { isWeekend: value === 'weekend' })
+                          }
+                        >
+                          <SelectTrigger className="w-[132px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="weekday">평일</SelectItem>
+                            <SelectItem value="weekend">주말·공휴일</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          min={1}
+                          className="w-20"
+                          value={slot.memberCount}
+                          onChange={(e) =>
+                            updateCalcSlot(slot.id, {
+                              memberCount: Math.max(1, Number(e.target.value) || 1),
+                            })
+                          }
+                        />
+                        <span className="shrink-0 text-sm text-muted-foreground">명</span>
+                        <span className="ml-auto text-sm font-medium tabular-nums">
+                          {(selectedInstructor
+                            ? calcManualSlotPay(
+                                [
+                                  {
+                                    isWeekendOrHoliday: slot.isWeekend,
+                                    memberCount: slot.memberCount,
+                                  },
+                                ],
+                                selectedInstructor,
+                              ).totalPay
+                            : 0
+                          ).toLocaleString()}
+                          원
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={() => removeCalcSlot(slot.id)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <p className="text-right text-xs text-muted-foreground">
+                      수동 합계{' '}
+                      <span className="font-medium text-foreground">
+                        {(manualPaySummary?.totalPay ?? 0).toLocaleString()}원
+                      </span>
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="bg-primary/20 rounded-lg p-4 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">오늘 합계</p>
               <div className="flex justify-between text-sm">
-                <span>평일 급여</span>
-                <span>{(calcData.weekdayHours * (selectedInstructor?.hourly_rate_weekday || 0)).toLocaleString()}원</span>
+                <span>평일 ({todayPaySummary.weekdaySlots}타임)</span>
+                <span>{todayPaySummary.weekdayPay.toLocaleString()}원</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span>주말 급여</span>
-                <span>{(calcData.weekendHours * (selectedInstructor?.hourly_rate_weekend || 0)).toLocaleString()}원</span>
+                <span>주말·공휴일 ({todayPaySummary.weekendSlots}타임)</span>
+                <span>{todayPaySummary.weekendPay.toLocaleString()}원</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span>추가 수당</span>
-                <span>{(calcData.extraMembers * (selectedInstructor?.extra_member_rate || 0)).toLocaleString()}원</span>
-              </div>
-              <div className="flex justify-between text-lg font-bold border-t border-primary/30 pt-2 mt-2">
-                <span>총 급여</span>
-                <span className="text-primary">{calculatePay().toLocaleString()}원</span>
+              <div className="flex justify-between text-base font-bold border-t border-primary/30 pt-2">
+                <span>오늘 총액</span>
+                <span className="text-primary">
+                  {todayPaySummary.totalPay.toLocaleString()}원
+                </span>
               </div>
             </div>
+
+            <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                {formatCurrentMonthLabel()} 합계
+                <span className="mt-0.5 block font-normal text-[11px]">
+                  현재 시각까지 반영 (이후 일정 제외)
+                </span>
+              </p>
+              {isMonthPayLoading ? (
+                <p className="py-2 text-center text-sm text-muted-foreground">
+                  불러오는 중…
+                </p>
+              ) : (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span>평일 ({monthPaySummary?.weekdaySlots ?? 0}타임)</span>
+                    <span>
+                      {(monthPaySummary?.weekdayPay ?? 0).toLocaleString()}원
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>
+                      주말·공휴일 ({monthPaySummary?.weekendSlots ?? 0}타임)
+                    </span>
+                    <span>
+                      {(monthPaySummary?.weekendPay ?? 0).toLocaleString()}원
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold border-t border-border pt-2">
+                    <span>{formatCurrentMonthLabel()} 총액</span>
+                    <span className="text-primary">
+                      {(monthPaySummary?.totalPay ?? 0).toLocaleString()}원
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-          <DialogFooter>
-            <Button onClick={() => setIsCalcDialogOpen(false)}>닫기</Button>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsPayDetailOpen(true)
+              }}
+            >
+              자세히 보기
+            </Button>
+            <Button type="button" onClick={() => setIsCalcDialogOpen(false)}>
+              닫기
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <InstructorPayDetailDialog
+        open={isPayDetailOpen}
+        onOpenChange={setIsPayDetailOpen}
+        instructor={selectedInstructor}
+        canEdit={isAdmin}
+      />
     </div>
   )
 }

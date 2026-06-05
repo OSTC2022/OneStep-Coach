@@ -3,9 +3,22 @@
 import { requireRole } from '@/lib/actions/auth'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { revalidatePath } from 'next/cache'
 import type { Instructor, InstructorFormData, InstructorReport } from '@/lib/types'
-import { INSTRUCTOR_LIST_SELECT } from '@/lib/supabase-selects'
+import {
+  INSTRUCTOR_CALENDAR_SELECT,
+  INSTRUCTOR_LIST_SELECT,
+  INSTRUCTOR_PICKER_SELECT,
+} from '@/lib/supabase-selects'
+import {
+  applyInstructorPaySlotOverrides,
+  filterLessonsUpToNow,
+  summarizeInstructorPay,
+  summarizeInstructorPayDetailed,
+  type InstructorPayDayGroup,
+  type InstructorPaySlotOverrideRecord,
+} from '@/lib/instructor-pay'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
 type InstructorMutationResult = {
@@ -35,6 +48,9 @@ function mapInstructorError(message: string): string {
       '강사 저장 권한이 없습니다. Supabase SQL Editor에서 supabase/fix-instructors-rls.sql 을 실행한 뒤 다시 시도해주세요.'
     )
   }
+  if (message.includes('foreign key') || message.includes('violates foreign key')) {
+    return '이 강사와 연결된 수업·회원 데이터가 있어 삭제할 수 없습니다. 비활성화를 사용해주세요.'
+  }
   return message
 }
 
@@ -48,12 +64,19 @@ function getInstructorWriteClient() {
 
 export async function getInstructors(options?: {
   isActive?: boolean
+  picker?: boolean
+  calendar?: boolean
 }): Promise<Instructor[]> {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
+  const select = options?.calendar
+    ? INSTRUCTOR_CALENDAR_SELECT
+    : options?.picker
+      ? INSTRUCTOR_PICKER_SELECT
+      : INSTRUCTOR_LIST_SELECT
 
   let query = supabase
     .from('instructors')
-    .select(INSTRUCTOR_LIST_SELECT)
+    .select(select)
     .order('name', { ascending: true })
 
   if (options?.isActive !== undefined) {
@@ -75,7 +98,7 @@ export async function getInstructorsPage(options?: {
   limit?: number
   offset?: number
 }): Promise<{ data: Instructor[]; count: number }> {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
 
   let query = supabase
     .from('instructors')
@@ -101,7 +124,7 @@ export async function getInstructorsPage(options?: {
 }
 
 export async function getInstructor(id: string): Promise<Instructor | null> {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
   
   const { data, error } = await supabase
     .from('instructors')
@@ -281,7 +304,204 @@ export async function deleteInstructor(id: string): Promise<{ error?: string }> 
   }
 
   revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/calendar')
   return {}
+}
+
+export type InstructorMonthlyPayDetail = {
+  instructor: Instructor
+  month: string
+  weekdaySlots: number
+  weekendSlots: number
+  weekdayPay: number
+  weekendPay: number
+  totalPay: number
+  totalLessons: number
+  dayGroups: InstructorPayDayGroup[]
+}
+
+function getMonthDateRange(month: string) {
+  const [yearText, monthText] = month.split('-')
+  const year = Number(yearText)
+  const monthNum = Number(monthText)
+  const dateFrom = `${yearText}-${monthText.padStart(2, '0')}-01`
+  const lastDay = new Date(year, monthNum, 0).getDate()
+  const dateTo = `${yearText}-${monthText.padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  return { dateFrom, dateTo }
+}
+
+function isMissingPayOverrideTable(error: { message?: string }) {
+  const message = error.message?.toLowerCase() ?? ''
+  return (
+    message.includes('instructor_pay_slot_overrides') ||
+    message.includes('could not find the table')
+  )
+}
+
+async function fetchInstructorPaySlotOverrides(
+  instructorId: string,
+  dateFrom: string,
+  dateTo: string,
+): Promise<InstructorPaySlotOverrideRecord[]> {
+  const supabase = await createStaffDataClient()
+
+  const { data, error } = await supabase
+    .from('instructor_pay_slot_overrides')
+    .select('slot_key, pay_amount, member_count')
+    .eq('instructor_id', instructorId)
+
+  if (error) {
+    if (isMissingPayOverrideTable(error)) return []
+    console.error('Error fetching instructor pay overrides:', error)
+    return []
+  }
+
+  return (data ?? [])
+    .filter((row) => {
+      const lessonDate = row.slot_key.split('|')[0]
+      return lessonDate >= dateFrom && lessonDate <= dateTo
+    })
+    .map((row) => ({
+      slotKey: row.slot_key,
+      payAmount: Number(row.pay_amount),
+      memberCount: row.member_count == null ? null : Number(row.member_count),
+    }))
+}
+
+export async function saveInstructorPaySlotOverride(
+  instructorId: string,
+  slotKey: string,
+  payAmount: number,
+  memberCount?: number,
+): Promise<{ error?: string }> {
+  const user = await requireRole(['admin'])
+  const supabase = getInstructorWriteClient() ?? (await createClient())
+
+  if (!Number.isFinite(payAmount) || payAmount < 0) {
+    return { error: '강사료 금액이 올바르지 않습니다.' }
+  }
+
+  const normalizedMemberCount =
+    memberCount == null ? null : Math.max(1, Math.floor(memberCount))
+
+  const { error } = await supabase.from('instructor_pay_slot_overrides').upsert(
+    {
+      instructor_id: instructorId,
+      slot_key: slotKey,
+      pay_amount: payAmount,
+      member_count: normalizedMemberCount,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'instructor_id,slot_key' },
+  )
+
+  if (error) {
+    if (isMissingPayOverrideTable(error)) {
+      return {
+        error:
+          '강사료 수정 저장을 위해 Supabase SQL Editor에서 supabase/add-instructor-pay-overrides.sql 을 실행해 주세요.',
+      }
+    }
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/reports')
+  return {}
+}
+
+export async function clearInstructorPaySlotOverride(
+  instructorId: string,
+  slotKey: string,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+  const supabase = getInstructorWriteClient() ?? (await createClient())
+
+  const { error } = await supabase
+    .from('instructor_pay_slot_overrides')
+    .delete()
+    .eq('instructor_id', instructorId)
+    .eq('slot_key', slotKey)
+
+  if (error) {
+    if (isMissingPayOverrideTable(error)) {
+      return {
+        error:
+          '강사료 수정 저장을 위해 Supabase SQL Editor에서 supabase/add-instructor-pay-overrides.sql 을 실행해 주세요.',
+      }
+    }
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/reports')
+  return {}
+}
+
+export async function getInstructorMonthlyPayDetail(
+  instructorId: string,
+  month: string,
+  options?: { upToNow?: boolean },
+): Promise<InstructorMonthlyPayDetail | null> {
+  const instructor = await getInstructor(instructorId)
+  if (!instructor) return null
+
+  const { dateFrom, dateTo } = getMonthDateRange(month)
+  const supabase = await createClient()
+
+  const { data: lessons, error } = await supabase
+    .from('lessons')
+    .select(
+      'id, lesson_date, start_time, attendance_status, title, content, member:members(id, name)',
+    )
+    .eq('instructor_id', instructorId)
+    .neq('attendance_status', 'cancelled')
+    .gte('lesson_date', dateFrom)
+    .lte('lesson_date', dateTo)
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true, nullsFirst: false })
+
+  if (error) {
+    console.error('Error fetching instructor monthly pay detail:', error)
+    return null
+  }
+
+  const payableLessons =
+    options?.upToNow === true
+      ? filterLessonsUpToNow(lessons ?? [])
+      : (lessons ?? [])
+
+  const base = summarizeInstructorPayDetailed(payableLessons, instructor)
+  const overrides = await fetchInstructorPaySlotOverrides(
+    instructorId,
+    dateFrom,
+    dateTo,
+  )
+
+  const detail = applyInstructorPaySlotOverrides(
+    {
+      weekdaySlots: base.weekdaySlots,
+      weekendSlots: base.weekendSlots,
+      weekdayPay: base.weekdayPay,
+      weekendPay: base.weekendPay,
+      totalPay: base.totalPay,
+      dayGroups: base.dayGroups,
+    },
+    overrides,
+  )
+
+  return {
+    instructor,
+    month,
+    weekdaySlots: detail.weekdaySlots,
+    weekendSlots: detail.weekendSlots,
+    weekdayPay: detail.weekdayPay,
+    weekendPay: detail.weekendPay,
+    totalPay: detail.totalPay,
+    totalLessons: base.totalLessons,
+    dayGroups: detail.dayGroups,
+  }
 }
 
 export async function getInstructorReport(
@@ -295,12 +515,11 @@ export async function getInstructorReport(
   const instructor = await getInstructor(instructorId)
   if (!instructor) return null
 
-  // Get lessons for the period
   const { data: lessons, error } = await supabase
     .from('lessons')
-    .select('id, lesson_date, start_time, end_time, attendance_status, lesson_type')
+    .select('id, lesson_date, start_time, attendance_status, lesson_type')
     .eq('instructor_id', instructorId)
-    .eq('attendance_status', 'present')
+    .neq('attendance_status', 'cancelled')
     .gte('lesson_date', dateFrom)
     .lte('lesson_date', dateTo)
 
@@ -309,36 +528,18 @@ export async function getInstructorReport(
     return null
   }
 
-  // Calculate stats
-  let weekdayLessons = 0
-  let weekendLessons = 0
-  let groupLessons = 0
-
-  lessons?.forEach(lesson => {
-    const date = new Date(lesson.lesson_date)
-    const dayOfWeek = date.getDay()
-    
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      weekendLessons++
-    } else {
-      weekdayLessons++
-    }
-
-    if (lesson.lesson_type === '그룹레슨') {
-      groupLessons++
-    }
-  })
-
-  const totalEarnings = 
-    weekdayLessons * instructor.hourly_rate_weekday +
-    weekendLessons * instructor.hourly_rate_weekend
+  const paySummary = summarizeInstructorPay(lessons ?? [], instructor)
+  const groupLessons = paySummary.slots.filter((slot) => slot.memberCount >= 2).length
 
   return {
     instructor,
-    totalLessons: lessons?.length || 0,
-    weekdayLessons,
-    weekendLessons,
+    totalLessons: paySummary.totalLessons,
+    weekdayLessons: paySummary.weekdaySlots,
+    weekendLessons: paySummary.weekendSlots,
     groupLessons,
-    totalEarnings,
+    totalEarnings: paySummary.totalPay,
+    weekdayEarnings: paySummary.weekdayPay,
+    weekendEarnings: paySummary.weekendPay,
+    paySlots: paySummary.slots,
   }
 }

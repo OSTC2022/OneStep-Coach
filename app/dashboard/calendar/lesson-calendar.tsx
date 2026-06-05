@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -21,6 +22,7 @@ import {
 } from '@/lib/actions/lessons'
 import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
 import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
+import { enrichLessonWithInstructorCatalog } from '@/lib/instructor-colors'
 import { normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { parseMemoQuickAdd } from '@/lib/memo-quick-add'
 import type { MemoQuickAddPayload } from './month-memo-input'
@@ -44,14 +46,35 @@ import { InstructorColorLabel } from '@/components/instructors/instructor-color-
 import { CalendarSearch } from './calendar-search'
 import { CalendarInstructorList } from './calendar-instructor-list'
 import { addWeeks } from 'date-fns'
-import { MonthView } from './month-view'
-import { DayWeekView } from './day-week-view'
-import { LessonCreateDialog } from './lesson-create-dialog'
 import {
   isEditableTarget,
   matchCalendarShortcut,
   matchCalendarUndoRedo,
 } from '@/lib/calendar-shortcuts'
+
+const viewLoading = (
+  <div className="flex min-h-[200px] flex-1 items-center justify-center">
+    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+  </div>
+)
+
+const MonthView = dynamic(
+  () => import('./month-view').then((m) => ({ default: m.MonthView })),
+  { loading: () => viewLoading },
+)
+
+const DayWeekView = dynamic(
+  () => import('./day-week-view').then((m) => ({ default: m.DayWeekView })),
+  { loading: () => viewLoading },
+)
+
+const LessonCreateDialog = dynamic(
+  () =>
+    import('./lesson-create-dialog').then((m) => ({
+      default: m.LessonCreateDialog,
+    })),
+  { ssr: false },
+)
 
 interface MemberOption extends CalendarMemberSearchItem {}
 
@@ -82,6 +105,7 @@ export function LessonCalendar({
   const [editOpen, setEditOpen] = useState(false)
   const [draft, setDraft] = useState<LessonDraft | null>(null)
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null)
+  const [editDraftInstructorId, setEditDraftInstructorId] = useState<string | null>(null)
   const [editAnchor, setEditAnchor] = useState<LessonEditAnchor | null>(null)
   const [searchPoolLessons, setSearchPoolLessons] = useState<Lesson[]>([])
   const [searchPoolKey, setSearchPoolKey] = useState<string | null>(null)
@@ -114,10 +138,30 @@ export function LessonCalendar({
     return () => setLessonFormOpen(false)
   }, [createOpen, editOpen, setLessonFormOpen])
 
+  useEffect(() => {
+    if (!editOpen) setEditDraftInstructorId(null)
+  }, [editOpen])
+
+  const lessonsWithEditPreview = useMemo(() => {
+    if (!editOpen || !editingLesson?.id || editDraftInstructorId == null) {
+      return lessons
+    }
+
+    const normalizedId = normalizePrimaryInstructorId(editDraftInstructorId)
+
+    return lessons.map((item) => {
+      if (item.id !== editingLesson.id) return item
+      return enrichLessonWithInstructorCatalog(
+        { ...item, instructor_id: normalizedId },
+        instructors,
+      )
+    })
+  }, [lessons, editOpen, editingLesson, editDraftInstructorId, instructors])
+
   const filteredLessons = useMemo(() => {
-    if (instructorFilter === 'all') return lessons
-    return lessons.filter((l) => l.instructor_id === instructorFilter)
-  }, [lessons, instructorFilter])
+    if (instructorFilter === 'all') return lessonsWithEditPreview
+    return lessonsWithEditPreview.filter((l) => l.instructor_id === instructorFilter)
+  }, [lessonsWithEditPreview, instructorFilter])
 
   const searchLessons = useMemo(() => {
     const map = new Map<string, Lesson>()
@@ -452,46 +496,55 @@ export function LessonCalendar({
     loadRange(lessonDate, nextView, { force: true })
   }
 
-  function handleLessonDeleted(lessonId: string) {
-    const removed =
-      lessons.find((lesson) => lesson.id === lessonId) ??
-      searchPoolLessons.find((lesson) => lesson.id === lessonId)
-    setLessons((prev) => prev.filter((l) => l.id !== lessonId))
-    setSearchPoolLessons((prev) => prev.filter((l) => l.id !== lessonId))
-    if (removed) {
-      lessonHistory.pushLessonDelete(removed)
+  function handleLessonDeleted(lessonIds: string[]) {
+    const idSet = new Set(lessonIds)
+    const removed = [...lessons, ...searchPoolLessons].filter((lesson) =>
+      idSet.has(lesson.id),
+    )
+    const uniqueRemoved = Array.from(
+      new Map(removed.map((lesson) => [lesson.id, lesson])).values(),
+    )
+
+    setLessons((prev) => prev.filter((l) => !idSet.has(l.id)))
+    setSearchPoolLessons((prev) => prev.filter((l) => !idSet.has(l.id)))
+    for (const lesson of uniqueRemoved) {
+      lessonHistory.pushLessonDelete(lesson)
     }
+
+    rangeCacheRef.current.delete(rangeCacheKey(currentDate, view))
+    loadRange(currentDate, view, { force: true })
   }
 
   const handleLessonSaved = useCallback(
     (lesson: Lesson) => {
       rangeFetchSeqRef.current += 1
+      const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
 
       setLessons((prev) => {
-        const before = prev.find((item) => item.id === lesson.id)
+        const before = prev.find((item) => item.id === enriched.id)
         const exists = Boolean(before)
 
         if (before) {
-          lessonHistory.pushLessonUpdate(before, lesson)
+          lessonHistory.pushLessonUpdate(before, enriched)
         } else {
-          lessonHistory.pushLessonCreate(lesson)
+          lessonHistory.pushLessonCreate(enriched)
         }
 
         const next = exists
-          ? prev.map((l) => (l.id === lesson.id ? lesson : l))
-          : [...prev, lesson]
+          ? prev.map((l) => (l.id === enriched.id ? enriched : l))
+          : [...prev, enriched]
         rangeCacheRef.current.set(rangeCacheKey(currentDate, view), next)
         return next
       })
       setSearchPoolLessons((prev) => {
-        const exists = prev.some((item) => item.id === lesson.id)
+        const exists = prev.some((item) => item.id === enriched.id)
         if (exists) {
-          return prev.map((l) => (l.id === lesson.id ? lesson : l))
+          return prev.map((l) => (l.id === enriched.id ? enriched : l))
         }
-        return [...prev, lesson]
+        return [...prev, enriched]
       })
     },
-    [lessonHistory, currentDate, view, rangeCacheKey],
+    [lessonHistory, currentDate, view, rangeCacheKey, instructors],
   )
 
   const lessonSavedRef = useRef(handleLessonSaved)
@@ -547,7 +600,7 @@ export function LessonCalendar({
     }
 
     if (result.data) {
-      const after = result.data
+      const after = enrichLessonWithInstructorCatalog(result.data, instructors)
       lessonHistory.pushLessonUpdate(target, after)
       setLessons((prev) =>
         prev.map((l) => (l.id === target.id ? after : l)),
@@ -764,6 +817,7 @@ export function LessonCalendar({
             selectedDate={agendaSelectedDate}
             onSelectDate={setAgendaSelectedDate}
             lessons={filteredLessons}
+            instructors={instructors}
             members={members}
             onDragCreate={openCreateDialog}
             onLessonMove={handleLessonMove}
@@ -782,6 +836,7 @@ export function LessonCalendar({
             selectedDate={agendaSelectedDate}
             onSelectDate={setAgendaSelectedDate}
             lessons={filteredLessons}
+            instructors={instructors}
             members={members}
             onDragCreate={openCreateDialog}
             onLessonMove={handleLessonMove}
@@ -796,39 +851,50 @@ export function LessonCalendar({
         )}
       </div>
 
-      <LessonCreateDialog
-        open={editOpen}
-        onOpenChange={(open) => {
-          setEditOpen(open)
-          if (!open) {
-            setEditingLesson(null)
-            setEditAnchor(null)
-          }
-        }}
-        variant="popup"
-        anchor={editAnchor}
-        sameSlotLessons={editingSameSlotLessons}
-        lesson={editingLesson}
-        members={members}
-        instructors={instructors}
-        defaultInstructorId={defaultInstructorId}
-        onSaved={handleLessonSaved}
-        onDeleted={handleLessonDeleted}
-      />
+      {(editOpen || createOpen) && (
+        <>
+          {editOpen && (
+            <LessonCreateDialog
+              open={editOpen}
+              onOpenChange={(open) => {
+                setEditOpen(open)
+                if (!open) {
+                  setEditingLesson(null)
+                  setEditAnchor(null)
+                }
+              }}
+              variant="popup"
+              anchor={editAnchor}
+              sameSlotLessons={editingSameSlotLessons}
+              lesson={editingLesson}
+              members={members}
+              instructors={instructors}
+              defaultInstructorId={defaultInstructorId}
+              onSaved={handleLessonSaved}
+              onDeleted={handleLessonDeleted}
+              onEditDraftChange={({ instructorId }) =>
+                setEditDraftInstructorId(instructorId)
+              }
+            />
+          )}
 
-      <LessonCreateDialog
-        open={createOpen}
-        onOpenChange={(open) => {
-          setCreateOpen(open)
-          if (!open) setDraft(null)
-        }}
-        draft={draft}
-        members={members}
-        instructors={instructors}
-        defaultInstructorId={defaultInstructorId}
-        onSaved={handleLessonSaved}
-        onDeleted={handleLessonDeleted}
-      />
+          {createOpen && (
+            <LessonCreateDialog
+              open={createOpen}
+              onOpenChange={(open) => {
+                setCreateOpen(open)
+                if (!open) setDraft(null)
+              }}
+              draft={draft}
+              members={members}
+              instructors={instructors}
+              defaultInstructorId={defaultInstructorId}
+              onSaved={handleLessonSaved}
+              onDeleted={handleLessonDeleted}
+            />
+          )}
+        </>
+      )}
     </div>
   )
 }

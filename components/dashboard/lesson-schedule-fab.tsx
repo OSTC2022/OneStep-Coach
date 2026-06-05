@@ -1,16 +1,24 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
+import { useCallback, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Plus, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { LessonCreateDialog } from '@/app/dashboard/calendar/lesson-create-dialog'
 import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
 import { getInstructorForCurrentUser, getInstructors } from '@/lib/actions/instructors'
 import { getMembers } from '@/lib/actions/members'
 import type { LessonDraft } from '@/lib/calendar-utils'
 import type { Instructor, Lesson, UserRole } from '@/lib/types'
 import { cn } from '@/lib/utils'
+
+const LessonCreateDialog = dynamic(
+  () =>
+    import('@/app/dashboard/calendar/lesson-create-dialog').then((m) => ({
+      default: m.LessonCreateDialog,
+    })),
+  { ssr: false },
+)
 
 interface MemberOption {
   id: string
@@ -71,7 +79,7 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
       const [membersResult, instructorList, currentInstructor] =
         await Promise.all([
           getMembers({ isActive: true, limit: 30 }),
-          getInstructors({ isActive: true }),
+          getInstructors({ isActive: true, picker: true }),
           getInstructorForCurrentUser(),
         ])
 
@@ -93,12 +101,6 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
       setIsLoadingData(false)
     }
   }, [])
-
-  useEffect(() => {
-    if (canSchedule) {
-      void loadFormData()
-    }
-  }, [canSchedule, loadFormData])
 
   function handleOpen() {
     if (dataReady) {
@@ -182,19 +184,21 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
         </button>
       )}
 
-      <LessonCreateDialog
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next)
-          if (!next) setDraft(null)
-        }}
-        draft={draft}
-        members={members}
-        instructors={instructors}
-        defaultInstructorId={defaultInstructorId}
-        onSaved={handleSaved}
-        variant="dialog"
-      />
+      {open && (
+        <LessonCreateDialog
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next)
+            if (!next) setDraft(null)
+          }}
+          draft={draft}
+          members={members}
+          instructors={instructors}
+          defaultInstructorId={defaultInstructorId}
+          onSaved={handleSaved}
+          variant="dialog"
+        />
+      )}
     </>
   )
 }

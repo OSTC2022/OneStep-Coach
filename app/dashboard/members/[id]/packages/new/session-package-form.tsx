@@ -3,7 +3,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createSessionPackage, updateSessionPackage } from '@/lib/actions/sessions'
+import {
+  createSessionPackage,
+  deleteSessionPackage,
+  updateSessionPackage,
+} from '@/lib/actions/sessions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,12 +21,19 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
+import { PACKAGE_PRESETS, getPresetPrice } from '@/lib/session-package-utils'
 import {
-  PACKAGE_PRESETS,
-  calculatePackageExpiryDate,
-  getPresetPrice,
-} from '@/lib/session-package-utils'
-import { ArrowLeft, Save, CreditCard } from 'lucide-react'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { ArrowLeft, Save, CreditCard, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { SessionPackage } from '@/types/database'
 
@@ -62,7 +73,7 @@ function buildInitialFormData(sessionPackage?: SessionPackage) {
     remaining_sessions: 8,
     price: '880000',
     paid_at: new Date().toISOString().split('T')[0],
-    expires_at: calculatePackageExpiryDate(8),
+    expires_at: '',
     payment_method: 'card',
     note: '',
     is_active: true,
@@ -73,7 +84,24 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   const isEditing = Boolean(sessionPackage)
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [formData, setFormData] = useState(() => buildInitialFormData(sessionPackage))
+
+  async function handleDelete() {
+    if (!sessionPackage) return
+    setIsDeleting(true)
+    const result = await deleteSessionPackage(sessionPackage.id)
+    setIsDeleting(false)
+
+    if (result.error) {
+      toast.error('삭제 실패', { description: result.error })
+      return
+    }
+
+    toast.success('수업권이 휴지통으로 이동했습니다.')
+    router.push(`/dashboard/members/${member.id}`)
+    router.refresh()
+  }
 
   function applyPresetPrice(sessions: number, paymentMethod: string) {
     const presetPrice = getPresetPrice(sessions, paymentMethod)
@@ -86,7 +114,6 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
       ...formData,
       total_sessions: sessions,
       ...(isEditing ? {} : { remaining_sessions: sessions }),
-      expires_at: calculatePackageExpiryDate(sessions),
       ...(price !== undefined ? { price } : {}),
     })
   }
@@ -97,7 +124,6 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
       ...formData,
       total_sessions: sessions,
       ...(isEditing ? {} : { remaining_sessions: sessions }),
-      expires_at: calculatePackageExpiryDate(sessions),
       ...(price !== undefined ? { price } : {}),
     })
   }
@@ -175,10 +201,44 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
             <p className="text-muted-foreground">{member.name} 회원</p>
           </div>
         </div>
-        <Button type="submit" disabled={isLoading}>
-          <Save className="h-4 w-4 mr-2" />
-          {isLoading ? '저장 중...' : '저장'}
-        </Button>
+        <div className="flex gap-2">
+          {isEditing && sessionPackage && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="destructive" disabled={isLoading || isDeleting}>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  삭제
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>수업권 삭제</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {sessionPackage.total_sessions}회 수업권을 삭제하시겠습니까? 휴지통으로
+                    이동하며, 휴지통에서 복구할 수 있습니다.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={isDeleting}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      void handleDelete()
+                    }}
+                  >
+                    {isDeleting ? '삭제 중…' : '삭제'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+          <Button type="submit" disabled={isLoading || isDeleting}>
+            <Save className="h-4 w-4 mr-2" />
+            {isLoading ? '저장 중...' : '저장'}
+          </Button>
+        </div>
       </div>
 
       <div className="max-w-2xl">
@@ -304,7 +364,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                   placeholder="만료일 선택"
                 />
                 <p className="text-xs text-muted-foreground">
-                  미입력 시 기한 없음으로 처리됩니다.
+                  날짜를 선택하지 않으면 만료일 없이 저장됩니다.
                 </p>
               </div>
             </div>
@@ -359,6 +419,8 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     ? `${Math.round(Number(formData.price) / formData.total_sessions).toLocaleString()}원`
                     : '-'}
                 </span>
+                <span className="text-muted-foreground">만료일:</span>
+                <span>{formData.expires_at || '미선택'}</span>
               </div>
             </div>
           </CardContent>

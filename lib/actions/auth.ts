@@ -18,6 +18,11 @@ import {
 import { resolveLoginAuthEmail } from '@/lib/auth/login-resolve'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { appRoleToProfileRole, getDefaultDashboardPath, type AppRole } from '@/lib/roles'
+import {
+  findAuthUserByEmail,
+  formatRecoveryEmailError,
+  sendPasswordRecoveryEmail,
+} from '@/lib/auth-recovery-link'
 
 export async function signIn(
   _prevState: { error?: string } | null,
@@ -89,6 +94,56 @@ export async function signOut() {
   const supabase = await createClient()
   await supabase.auth.signOut()
   redirect('/auth/login')
+}
+
+export async function requestPasswordReset(
+  _prev: { error?: string; success?: boolean; message?: string } | null,
+  formData: FormData,
+): Promise<{ error?: string; success?: boolean; message?: string }> {
+  const loginInput = (formData.get('email') as string)?.trim() ?? ''
+
+  if (!loginInput) {
+    return { error: '이메일 또는 로그인 ID를 입력해주세요.' }
+  }
+
+  const resolved = await resolveLoginAuthEmail(loginInput)
+  if (resolved.error) {
+    return { error: resolved.error }
+  }
+
+  if (!resolved.email.includes('@')) {
+    return {
+      error:
+        '비밀번호 재설정은 등록된 이메일이 필요합니다. 관리자에게 문의해주세요.',
+    }
+  }
+
+  const hasServiceRole = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY)
+  let authEmail = resolved.email
+
+  if (hasServiceRole) {
+    const authUser = await findAuthUserByEmail(resolved.email)
+    if (!authUser) {
+      return {
+        error:
+          '등록된 계정을 찾을 수 없습니다. 이메일 또는 로그인 ID를 확인해주세요.',
+      }
+    }
+    authEmail = authUser.email
+  }
+
+  const emailResult = await sendPasswordRecoveryEmail(authEmail)
+  if (!emailResult.sent) {
+    return {
+      error: formatRecoveryEmailError(emailResult.error),
+    }
+  }
+
+  return {
+    success: true,
+    message:
+      '비밀번호 재설정 링크를 이메일로 보냈습니다. 메일함과 스팸함을 확인해주세요.',
+  }
 }
 
 export async function getCurrentProfile(): Promise<Profile | null> {

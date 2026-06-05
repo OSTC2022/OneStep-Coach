@@ -43,6 +43,7 @@ export default async function MembersPage() {
           name,
           calendar_color,
         }))}
+        initialTrashCount={0}
       />
     </div>
   )

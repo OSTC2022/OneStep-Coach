@@ -30,6 +30,12 @@ export function getDefaultInstructorCalendarColor(index = 0): string {
   return INSTRUCTOR_CALENDAR_COLORS[index % INSTRUCTOR_CALENDAR_COLORS.length].hex
 }
 
+export type InstructorColorSource = {
+  id: string
+  name: string
+  calendar_color?: string | null
+}
+
 export function getInstructorCalendarColor(
   instructor?: { calendar_color?: string | null } | null,
 ): string {
@@ -37,6 +43,39 @@ export function getInstructorCalendarColor(
     return instructor.calendar_color
   }
   return DEFAULT_INSTRUCTOR_CALENDAR_COLOR
+}
+
+/** instructor_id 기준으로 강사 색상 소스 결정 (저장 후 stale join 방지) */
+export function resolveLessonInstructor(
+  lesson: Pick<Lesson, 'instructor_id' | 'instructor'>,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): InstructorColorSource | null {
+  const instructorId = lesson.instructor_id
+  if (!instructorId) return null
+
+  const fromCatalog = instructors?.find((item) => item.id === instructorId)
+  if (fromCatalog) return fromCatalog
+
+  if (lesson.instructor?.id === instructorId) {
+    return {
+      id: lesson.instructor.id,
+      name: lesson.instructor.name,
+      calendar_color: lesson.instructor.calendar_color ?? null,
+    }
+  }
+
+  return null
+}
+
+export function enrichLessonWithInstructorCatalog<T extends Lesson>(
+  lesson: T,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): T {
+  const instructor = resolveLessonInstructor(lesson, instructors)
+  if (!instructor) {
+    return lesson.instructor_id ? { ...lesson, instructor: null } : lesson
+  }
+  return { ...lesson, instructor }
 }
 
 function hexToRgb(hex: string) {
@@ -122,14 +161,17 @@ const STATUS_BLOCK_STYLES: Record<string, CSSProperties & { _bg: string }> = {
   },
 }
 
-export function getLessonCalendarBlockStyle(lesson: Lesson): CSSProperties {
+export function getLessonCalendarBlockStyle(
+  lesson: Lesson,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): CSSProperties {
   const status = lesson.attendance_status
   if (status !== 'present' && STATUS_BLOCK_STYLES[status]) {
     const { _bg: _, ...style } = STATUS_BLOCK_STYLES[status]
     return style
   }
 
-  const color = getInstructorCalendarColor(lesson.instructor)
+  const color = getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))
   const textColor = getContrastTextColor(color)
   return {
     backgroundColor: color,
@@ -138,15 +180,21 @@ export function getLessonCalendarBlockStyle(lesson: Lesson): CSSProperties {
   }
 }
 
-export function getLessonCalendarBlockBackgroundColor(lesson: Lesson): string {
+export function getLessonCalendarBlockBackgroundColor(
+  lesson: Lesson,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): string {
   const status = lesson.attendance_status
   if (status !== 'present' && STATUS_BLOCK_STYLES[status]) {
     return STATUS_BLOCK_STYLES[status]._bg
   }
-  return getInstructorCalendarColor(lesson.instructor)
+  return getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))
 }
 
-export function getLessonCalendarChipStyle(lesson: Lesson): CSSProperties {
+export function getLessonCalendarChipStyle(
+  lesson: Lesson,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): CSSProperties {
   const status = lesson.attendance_status
   if (status !== 'present' && STATUS_BLOCK_STYLES[status]) {
     const base = STATUS_BLOCK_STYLES[status]
@@ -157,7 +205,7 @@ export function getLessonCalendarChipStyle(lesson: Lesson): CSSProperties {
     }
   }
 
-  const color = getInstructorCalendarColor(lesson.instructor)
+  const color = getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))
   return {
     backgroundColor: hexToRgba(color, 0.18),
     color,

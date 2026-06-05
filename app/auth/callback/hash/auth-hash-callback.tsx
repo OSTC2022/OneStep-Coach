@@ -19,6 +19,18 @@ export function AuthHashCallback() {
         ? window.location.hash.slice(1)
         : window.location.hash
       const params = new URLSearchParams(hash)
+      const authError = params.get('error')
+      const errorCode = params.get('error_code')
+      const errorDescription = params.get('error_description')
+
+      if (authError) {
+        const query = new URLSearchParams()
+        if (errorCode) query.set('error_code', errorCode)
+        if (errorDescription) query.set('error_description', errorDescription)
+        router.replace(`/auth/error?${query.toString()}`)
+        return
+      }
+
       const accessToken = params.get('access_token')
       const refreshToken = params.get('refresh_token')
       const type = params.get('type')

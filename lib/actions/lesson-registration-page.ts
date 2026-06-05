@@ -1,10 +1,10 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
 export async function getLessonRegistrationPageData() {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
   const today = new Date().toISOString().split('T')[0]
 
   const [{ data: members }, { data: instructors }, { data: todayLessons }] =

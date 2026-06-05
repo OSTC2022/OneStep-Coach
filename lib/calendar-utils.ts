@@ -13,10 +13,12 @@ import {
 import { ko } from 'date-fns/locale'
 import type { Lesson } from '@/lib/types'
 import {
+  AUTO_INSTRUCTOR_ID,
   formatMemberCalendarLabel,
   formatMemberCalendarMeta,
   getMemberCalendarDisplayParts,
 } from '@/lib/member-utils'
+import type { Instructor } from '@/lib/types'
 import { scoreMemberSearch } from '@/lib/korean-search'
 
 export const LESSON_TITLE_CONTENT_PREFIX = '__cal_title__:'
@@ -255,6 +257,157 @@ export function sortLessonsBySchedule(lessons: Lesson[]): Lesson[] {
     if (dateCmp !== 0) return dateCmp
     return (a.start_time ?? '').localeCompare(b.start_time ?? '')
   })
+}
+
+export function getLessonInstructorGroupId(lesson: Lesson): string {
+  return lesson.instructor_id ?? AUTO_INSTRUCTOR_ID
+}
+
+export function buildInstructorOrderMap(instructors: Instructor[]) {
+  const map = new Map<string, number>()
+  instructors.forEach((instructor, index) => {
+    map.set(instructor.id, index)
+  })
+  map.set(AUTO_INSTRUCTOR_ID, instructors.length)
+  return map
+}
+
+function compareLessonsByInstructorThenSchedule(
+  a: Lesson,
+  b: Lesson,
+  instructorOrder: Map<string, number>,
+) {
+  const instructorA = instructorOrder.get(getLessonInstructorGroupId(a)) ?? 9999
+  const instructorB = instructorOrder.get(getLessonInstructorGroupId(b)) ?? 9999
+  if (instructorA !== instructorB) return instructorA - instructorB
+
+  const startCmp = (a.start_time ?? '').localeCompare(b.start_time ?? '')
+  if (startCmp !== 0) return startCmp
+
+  const createdCmp = (a.created_at ?? '').localeCompare(b.created_at ?? '')
+  if (createdCmp !== 0) return createdCmp
+
+  return a.id.localeCompare(b.id)
+}
+
+/** 수업현황 — 강사별 → 시간순 (출석 변경해도 자리 고정) */
+export function sortLessonsForStatusDisplay(
+  lessons: Lesson[],
+  instructors: Instructor[] = [],
+): Lesson[] {
+  const instructorOrder = buildInstructorOrderMap(instructors)
+  return [...lessons].sort((a, b) =>
+    compareLessonsByInstructorThenSchedule(a, b, instructorOrder),
+  )
+}
+
+export const LESSON_STATUS_MAX_PER_ROW = 8
+
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return []
+  const chunkSize = Math.max(1, size)
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize))
+  }
+  return chunks
+}
+
+/** 같은 시간대 안에서 강사 순으로 정렬 */
+export function sortLessonsInTimeSlot(
+  lessons: Lesson[],
+  instructors: Instructor[] = [],
+): Lesson[] {
+  const instructorOrder = buildInstructorOrderMap(instructors)
+  return [...lessons].sort((a, b) => {
+    const instructorA = instructorOrder.get(getLessonInstructorGroupId(a)) ?? 9999
+    const instructorB = instructorOrder.get(getLessonInstructorGroupId(b)) ?? 9999
+    if (instructorA !== instructorB) return instructorA - instructorB
+
+    const createdCmp = (a.created_at ?? '').localeCompare(b.created_at ?? '')
+    if (createdCmp !== 0) return createdCmp
+
+    return a.id.localeCompare(b.id)
+  })
+}
+
+/** 연속된 같은 강사 수업을 한 덩어리로 묶음 */
+export function groupConsecutiveByInstructor(lessons: Lesson[]) {
+  const chunks: { instructorId: string; lessons: Lesson[] }[] = []
+
+  for (const lesson of lessons) {
+    const instructorId = getLessonInstructorGroupId(lesson)
+    const last = chunks[chunks.length - 1]
+    if (last?.instructorId === instructorId) {
+      last.lessons.push(lesson)
+    } else {
+      chunks.push({ instructorId, lessons: [lesson] })
+    }
+  }
+
+  return chunks
+}
+
+export function buildLessonStatusTimeSlots(
+  lessons: Lesson[],
+  instructors: Instructor[] = [],
+) {
+  const byTime = new Map<string, Lesson[]>()
+
+  for (const lesson of lessons) {
+    const key = lesson.start_time?.slice(0, 5) ?? ''
+    const group = byTime.get(key) ?? []
+    group.push(lesson)
+    byTime.set(key, group)
+  }
+
+  return [...byTime.entries()]
+    .map(([start, slotLessons]) => {
+      const sorted = sortLessonsInTimeSlot(slotLessons, instructors)
+      const rows = chunkArray(sorted, LESSON_STATUS_MAX_PER_ROW).map((rowLessons) =>
+        groupConsecutiveByInstructor(rowLessons),
+      )
+      return { start, total: sorted.length, rows }
+    })
+    .sort((a, b) => {
+      if (!a.start && !b.start) return 0
+      if (!a.start) return 1
+      if (!b.start) return -1
+      return a.start.localeCompare(b.start)
+    })
+}
+
+export function groupLessonsByInstructorForStatus(
+  lessons: Lesson[],
+  instructors: Instructor[],
+) {
+  const groups = new Map<string, Lesson[]>()
+
+  for (const lesson of lessons) {
+    const key = getLessonInstructorGroupId(lesson)
+    const group = groups.get(key) ?? []
+    group.push(lesson)
+    groups.set(key, group)
+  }
+
+  const orderedKeys = [
+    ...instructors.map((instructor) => instructor.id).filter((id) => groups.has(id)),
+    ...(groups.has(AUTO_INSTRUCTOR_ID) ? [AUTO_INSTRUCTOR_ID] : []),
+    ...[...groups.keys()].filter(
+      (id) => id !== AUTO_INSTRUCTOR_ID && !instructors.some((instructor) => instructor.id === id),
+    ),
+  ]
+
+  return orderedKeys.map((instructorId) => ({
+    instructorId,
+    lessons: (groups.get(instructorId) ?? []).sort((a, b) => {
+      const startCmp = (a.start_time ?? '').localeCompare(b.start_time ?? '')
+      if (startCmp !== 0) return startCmp
+      const createdCmp = (a.created_at ?? '').localeCompare(b.created_at ?? '')
+      if (createdCmp !== 0) return createdCmp
+      return a.id.localeCompare(b.id)
+    }),
+  }))
 }
 
 function getMemberIdFromLesson(lesson: Lesson): string | null {
