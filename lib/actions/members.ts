@@ -6,6 +6,7 @@ import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Member, MemberFormData } from '@/lib/types'
+import { addMemberBodyRecord } from '@/lib/actions/member-body-records'
 import {
   calculateMemberBmi,
   normalizePrimaryInstructorId,
@@ -423,6 +424,12 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
   if (error) {
     console.error('Error updating member:', error)
     return { error: mapMemberError(error.message) }
+  }
+
+  if (formData.weight_kg !== undefined && formData.weight_kg) {
+    await addMemberBodyRecord(id, formData.weight_kg, {
+      heightCm: formData.height_cm,
+    })
   }
 
   revalidatePath('/dashboard/members')

@@ -18,18 +18,32 @@ const DASHBOARD_ROUTES = [
   '/dashboard/settings',
 ] as const
 
-const MOBILE_PRIORITY_ROUTES = [
+const MOBILE_LIGHT_ROUTES = [
   '/dashboard/lesson-status',
   '/dashboard/attendance',
+] as const
+
+const HEAVY_ROUTES = new Set([
   '/dashboard/calendar',
   '/dashboard/lessons',
-] as const
+  '/dashboard/members',
+])
 
 function isSaveDataMode() {
   const connection = (
-    navigator as Navigator & { connection?: { saveData?: boolean } }
+    navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string }
+    }
   ).connection
   return Boolean(connection?.saveData)
+}
+
+function isSlowConnection() {
+  const connection = (
+    navigator as Navigator & { connection?: { effectiveType?: string } }
+  ).connection
+  const type = connection?.effectiveType
+  return type === 'slow-2g' || type === '2g'
 }
 
 function isMobileViewport() {
@@ -50,21 +64,25 @@ function prefetchRoute(router: ReturnType<typeof useRouter>, href: string) {
   preloadRouteChunk(href)
 }
 
-/** 라우트·클라이언트 청크 선로딩 — 모바일은 핵심 메뉴만, 데스크톱은 전체 */
+/** 라우트·클라이언트 청크 선로딩 — 모바일·무거운 페이지에서는 지연·최소화 */
 export function NavPrefetch() {
   const router = useRouter()
   const pathname = usePathname()
   const didPrefetchRef = useRef(false)
 
   useEffect(() => {
-    if (didPrefetchRef.current || isSaveDataMode()) return
+    if (didPrefetchRef.current || isSaveDataMode() || isSlowConnection()) return
     didPrefetchRef.current = true
 
     const mobile = isMobileViewport()
+    const onHeavyPage = HEAVY_ROUTES.has(pathname)
+    const idleDelay = mobile ? (onHeavyPage ? 6000 : 3000) : 1200
 
     scheduleIdle(() => {
       if (mobile) {
-        for (const href of MOBILE_PRIORITY_ROUTES) {
+        if (onHeavyPage) return
+
+        for (const href of MOBILE_LIGHT_ROUTES) {
           if (href === pathname) continue
           prefetchRoute(router, href)
         }
@@ -75,7 +93,7 @@ export function NavPrefetch() {
         if (href === pathname) continue
         prefetchRoute(router, href)
       }
-    }, mobile ? 400 : 1200)
+    }, idleDelay)
     // router는 refresh 때마다 참조가 바뀌어 무한 prefetch가 날 수 있어 의존성에서 제외
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

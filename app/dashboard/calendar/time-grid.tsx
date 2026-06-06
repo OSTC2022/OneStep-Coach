@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
+import { Minus, Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   getCalendarBlockTextStyle,
@@ -63,12 +65,35 @@ interface TimeGridProps {
   compactHeader?: boolean
   className?: string
   highlightedLessonIds?: string[]
+  selectedLessonIds?: ReadonlySet<string>
 }
 
 const HOURS = Array.from(
   { length: CALENDAR_END_HOUR - CALENDAR_START_HOUR },
   (_, i) => CALENDAR_START_HOUR + i,
 )
+
+const TIME_GUTTER_WIDTH_PX = 56
+const WEEK_DAY_COLUMN_WIDTH_PX = 72
+
+function getDayColumnClass(multiDay: boolean) {
+  if (!multiDay) return 'min-w-0 flex-1'
+  return 'min-w-0 flex-1 max-md:w-[72px] max-md:shrink-0 max-md:flex-none'
+}
+
+function touchDistance(touches: TouchList) {
+  const dx = touches[0].clientX - touches[1].clientX
+  const dy = touches[0].clientY - touches[1].clientY
+  return Math.hypot(dx, dy)
+}
+
+function getColumnGridStyle(hourHeight: number): React.CSSProperties {
+  const half = hourHeight / 2
+  return {
+    backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${half - 1}px, rgba(45,55,72,0.28) ${half - 1}px, rgba(45,55,72,0.28) ${half}px, transparent ${half}px, transparent ${hourHeight - 1}px, rgba(45,55,72,0.55) ${hourHeight - 1}px, rgba(45,55,72,0.55) ${hourHeight}px)`,
+    backgroundSize: `100% ${hourHeight}px`,
+  }
+}
 
 type MoveDrag = {
   lessons: Lesson[]
@@ -288,6 +313,8 @@ function LessonBlockContent({
   )
 }
 
+const MemoLessonBlockContent = memo(LessonBlockContent)
+
 export function TimeGrid({
   dates,
   lessons,
@@ -303,6 +330,7 @@ export function TimeGrid({
   compactHeader = false,
   className,
   highlightedLessonIds,
+  selectedLessonIds,
 }: TimeGridProps) {
   const activateLesson = onLessonActivate ?? onLessonEdit
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -320,10 +348,67 @@ export function TimeGrid({
       el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }, 180)
     return () => window.clearTimeout(timer)
-  }, [highlightedLessonIds, dates, lessons])
+  }, [highlightedLessonIds])
+
+  const lessonsByDateKey = useMemo(() => {
+    const map = new Map<string, Lesson[]>()
+    for (const lesson of lessons) {
+      const key = lesson.lesson_date
+      const group = map.get(key) ?? []
+      group.push(lesson)
+      map.set(key, group)
+    }
+    for (const group of map.values()) {
+      group.sort((a, b) =>
+        (a.start_time ?? '').localeCompare(b.start_time ?? ''),
+      )
+    }
+    return map
+  }, [lessons])
+
+  const columnLayoutsByDateKey = useMemo(() => {
+    const map = new Map<
+      string,
+      ReturnType<typeof computeLessonColumnLayouts>
+    >()
+    for (const date of dates) {
+      const key = toDateKey(date)
+      map.set(
+        key,
+        computeLessonColumnLayouts(lessonsByDateKey.get(key) ?? []),
+      )
+    }
+    return map
+  }, [dates, lessonsByDateKey])
+
   const [hourHeight, setHourHeight] = useState(DEFAULT_HOUR_HEIGHT)
+  const hourHeightRef = useRef(hourHeight)
+  hourHeightRef.current = hourHeight
   const gridHeight = getGridHeight(hourHeight)
+  const isMultiDay = dates.length > 1
+  const gridMinWidth = isMultiDay
+    ? TIME_GUTTER_WIDTH_PX + dates.length * WEEK_DAY_COLUMN_WIDTH_PX
+    : undefined
+  const dayColumnClass = getDayColumnClass(isMultiDay)
+  const zoomPercent = Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)
+
+  const zoomIn = useCallback(() => {
+    setHourHeight((prev) =>
+      Math.min(MAX_HOUR_HEIGHT, prev + HOUR_HEIGHT_ZOOM_STEP),
+    )
+  }, [])
+
+  const zoomOut = useCallback(() => {
+    setHourHeight((prev) =>
+      Math.max(MIN_HOUR_HEIGHT, prev - HOUR_HEIGHT_ZOOM_STEP),
+    )
+  }, [])
+  const columnGridStyle = useMemo(
+    () => getColumnGridStyle(hourHeight),
+    [hourHeight],
+  )
   const minLessonHeight = Math.max(36, hourHeight * 0.45)
+  const dragRafRef = useRef<number | null>(null)
   const columnRefs = useRef<(HTMLDivElement | null)[]>([])
   const lessonDragStartedRef = useRef(false)
   const altSelectClickRef = useRef(false)
@@ -384,17 +469,64 @@ export function TimeGrid({
     return () => el.removeEventListener('wheel', handleWheel)
   }, [])
 
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    let pinchStartDistance: number | null = null
+    let pinchStartHeight = hourHeightRef.current
+    let pinchRafId: number | null = null
+    let pendingPinchHeight: number | null = null
+
+    function handleTouchStart(e: TouchEvent) {
+      if (e.touches.length === 2) {
+        pinchStartDistance = touchDistance(e.touches)
+        pinchStartHeight = hourHeightRef.current
+      }
+    }
+
+    function handleTouchMove(e: TouchEvent) {
+      if (e.touches.length !== 2 || pinchStartDistance == null) return
+      e.preventDefault()
+      const distance = touchDistance(e.touches)
+      const scale = distance / pinchStartDistance
+      pendingPinchHeight = Math.round(
+        Math.max(
+          MIN_HOUR_HEIGHT,
+          Math.min(MAX_HOUR_HEIGHT, pinchStartHeight * scale),
+        ),
+      )
+      if (pinchRafId != null) return
+      pinchRafId = window.requestAnimationFrame(() => {
+        pinchRafId = null
+        if (pendingPinchHeight != null) {
+          setHourHeight(pendingPinchHeight)
+          pendingPinchHeight = null
+        }
+      })
+    }
+
+    function handleTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) {
+        pinchStartDistance = null
+      }
+    }
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true })
+    el.addEventListener('touchmove', handleTouchMove, { passive: false })
+    el.addEventListener('touchend', handleTouchEnd)
+    el.addEventListener('touchcancel', handleTouchEnd)
+    return () => {
+      if (pinchRafId != null) window.cancelAnimationFrame(pinchRafId)
+      el.removeEventListener('touchstart', handleTouchStart)
+      el.removeEventListener('touchmove', handleTouchMove)
+      el.removeEventListener('touchend', handleTouchEnd)
+      el.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [])
+
   function getMinutesFromY(y: number) {
     return yToMinutes(y, hourHeight)
-  }
-
-  function getLessonsForDate(date: Date) {
-    const key = toDateKey(date)
-    return lessons
-      .filter((l) => l.lesson_date === key)
-      .sort((a, b) =>
-        (a.start_time ?? '').localeCompare(b.start_time ?? ''),
-      )
   }
 
   function findColumnAt(clientX: number) {
@@ -719,7 +851,14 @@ export function TimeGrid({
   ) {
     if (!drag || drag.col !== col) return
     const rect = e.currentTarget.getBoundingClientRect()
-    setDrag({ ...drag, currentY: e.clientY - rect.top })
+    const currentY = e.clientY - rect.top
+    if (dragRafRef.current != null) return
+    dragRafRef.current = window.requestAnimationFrame(() => {
+      dragRafRef.current = null
+      setDrag((prev) =>
+        prev && prev.col === col ? { ...prev, currentY } : prev,
+      )
+    })
   }
 
   function handlePointerUp(
@@ -922,59 +1061,105 @@ export function TimeGrid({
 
   return (
     <div className={cn('flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
-      <div className="flex border-b border-border bg-muted/30 shrink-0">
-        <div className="w-14 shrink-0 border-r border-border" />
-        {dates.map((date) => {
-          const isToday = isSameDay(date, now)
-          const isSelected = selectedDate ? isSameDay(date, selectedDate) : false
-          const dateColor = getDateColorClass(date)
-          const holiday = isKoreanHoliday(date)
-          const canSelect = Boolean(onSelectDate)
-
-          return (
-            <button
-              key={date.toISOString()}
-              type="button"
-              onClick={() => onSelectDate?.(date)}
-              className={cn(
-                'flex-1 min-w-0 border-r border-border py-2 text-center last:border-r-0 transition-colors',
-                canSelect && 'cursor-pointer hover:bg-muted/40',
-                isToday && !isSelected && 'bg-primary/5',
-                isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/40',
-              )}
-            >
-              {!compactHeader && dates.length > 1 && (
-                <p className={cn('text-[11px] font-medium', dateColor || 'text-muted-foreground')}>
-                  {format(date, 'EEE', { locale: ko })}
-                </p>
-              )}
-              <p
-                className={cn(
-                  'text-sm font-semibold tabular-nums',
-                  !isToday && !isSelected && dateColor,
-                  isToday &&
-                    !isSelected &&
-                    'inline-flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-primary/40',
-                  isSelected &&
-                    'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
-                  isToday &&
-                    isSelected &&
-                    'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
-                )}
-              >
-                {format(date, 'd')}
-              </p>
-              {holiday && !isSelected && (
-                <p className="text-[9px] font-medium text-red-500 mt-0.5">공휴일</p>
-              )}
-            </button>
-          )
-        })}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/20 px-2 py-1 md:hidden">
+        <p className="text-[10px] text-muted-foreground">핀치 또는 버튼으로 확대·축소</p>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            onClick={zoomOut}
+            disabled={hourHeight <= MIN_HOUR_HEIGHT}
+            aria-label="줌 아웃"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </Button>
+          <span className="min-w-[2.75rem] text-center text-[10px] font-medium tabular-nums text-muted-foreground">
+            {zoomPercent}%
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-7 w-7"
+            onClick={zoomIn}
+            disabled={hourHeight >= MAX_HOUR_HEIGHT}
+            aria-label="줌 인"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
-      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
-        <div className="flex min-w-[480px]">
-          <div className="w-14 shrink-0 border-r border-border relative" style={{ height: gridHeight }}>
+      <div
+        ref={scrollRef}
+        className="relative min-h-0 flex-1 overflow-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]"
+      >
+        <div
+          className={cn('flex w-full flex-col', isMultiDay && 'max-md:w-max')}
+          style={
+            gridMinWidth != null
+              ? { minWidth: `max(100%, ${gridMinWidth}px)` }
+              : undefined
+          }
+        >
+          <div className="sticky top-0 z-20 flex shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm">
+            <div className="sticky left-0 z-30 w-14 shrink-0 border-r border-border bg-card max-md:bg-card md:bg-card/95" />
+            {dates.map((date) => {
+              const isToday = isSameDay(date, now)
+              const isSelected = selectedDate ? isSameDay(date, selectedDate) : false
+              const dateColor = getDateColorClass(date)
+              const holiday = isKoreanHoliday(date)
+              const canSelect = Boolean(onSelectDate)
+
+              return (
+                <button
+                  key={date.toISOString()}
+                  type="button"
+                  onClick={() => onSelectDate?.(date)}
+                  className={cn(
+                    dayColumnClass,
+                    'border-r border-border py-2 text-center last:border-r-0 transition-colors',
+                    canSelect && 'cursor-pointer hover:bg-muted/40',
+                    isToday && !isSelected && 'bg-primary/5',
+                    isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/40',
+                  )}
+                >
+                  {!compactHeader && isMultiDay && (
+                    <p className={cn('text-[11px] font-medium', dateColor || 'text-muted-foreground')}>
+                      {format(date, 'EEE', { locale: ko })}
+                    </p>
+                  )}
+                  <p
+                    className={cn(
+                      'text-sm font-semibold tabular-nums',
+                      !isToday && !isSelected && dateColor,
+                      isToday &&
+                        !isSelected &&
+                        'inline-flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-primary/40',
+                      isSelected &&
+                        'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
+                      isToday &&
+                        isSelected &&
+                        'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
+                    )}
+                  >
+                    {format(date, 'd')}
+                  </p>
+                  {holiday && !isSelected && (
+                    <p className="mt-0.5 text-[9px] font-medium text-red-500">공휴일</p>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="flex">
+          <div
+            className="sticky left-0 z-10 w-14 shrink-0 border-r border-border bg-card relative"
+            style={{ height: gridHeight }}
+          >
             {HOURS.map((hour) => (
               <div
                 key={hour}
@@ -987,7 +1172,8 @@ export function TimeGrid({
           </div>
 
           {dates.map((date, col) => {
-            const dayLessons = getLessonsForDate(date)
+            const dateKey = toDateKey(date)
+            const dayLayouts = columnLayoutsByDateKey.get(dateKey) ?? []
             const isToday = isSameDay(date, now)
             const isDragging = drag?.col === col
             const isMoveTarget = showMovePreview && movePreview?.col === col
@@ -1003,32 +1189,15 @@ export function TimeGrid({
                   columnRefs.current[col] = el
                 }}
                 className={cn(
-                  'flex-1 min-w-0 relative border-r border-border last:border-r-0',
+                  dayColumnClass,
+                  'relative border-r border-border last:border-r-0',
                   isToday && 'bg-primary/[0.02]',
                 )}
-                style={{ height: gridHeight }}
+                style={{ height: gridHeight, ...columnGridStyle }}
                 onPointerDown={(e) => handlePointerDown(e, col)}
                 onPointerMove={(e) => handlePointerMove(e, col)}
                 onPointerUp={(e) => handlePointerUp(e, col)}
               >
-                {HOURS.map((hour) => (
-                  <div
-                    key={hour}
-                    className="absolute inset-x-0 border-t border-border/60 pointer-events-none"
-                    style={{ top: (hour - CALENDAR_START_HOUR) * hourHeight }}
-                  />
-                ))}
-
-                {HOURS.map((hour) => (
-                  <div
-                    key={`${hour}-half`}
-                    className="absolute inset-x-0 border-t border-dashed border-border/30 pointer-events-none"
-                    style={{
-                      top: (hour - CALENDAR_START_HOUR) * hourHeight + hourHeight / 2,
-                    }}
-                  />
-                ))}
-
                 {isToday &&
                   nowMinutes >= CALENDAR_START_HOUR * 60 &&
                   nowMinutes <= CALENDAR_END_HOUR * 60 && (
@@ -1099,7 +1268,7 @@ export function TimeGrid({
                   />
                 )}
 
-                {computeLessonColumnLayouts(dayLessons).map(
+                {dayLayouts.map(
                   ({ lesson, column, columnCount, startMin, endMin }) => {
                     const isMoving = isLessonMoving(lesson)
                     const isResizing = isLessonResizing(lesson)
@@ -1125,7 +1294,9 @@ export function TimeGrid({
                     const timeLabel = `${lessonStart}${lessonEnd ? ` – ${lessonEnd}` : ''}`
                     const blockStyle = getLessonCalendarBlockStyle(lesson, instructors)
                     const isHighlighted = highlightedSet.has(lesson.id)
-                    const isMultiSelected = isLessonSelected?.(lesson.id)
+                    const isMultiSelected = selectedLessonIds
+                      ? selectedLessonIds.has(lesson.id)
+                      : Boolean(isLessonSelected?.(lesson.id))
                     const highlightColor = lesson.instructor_id
                       ? getInstructorCalendarColor(
                           resolveLessonInstructor(lesson, instructors),
@@ -1180,7 +1351,7 @@ export function TimeGrid({
                           />
                         )}
                         <div className="flex min-h-0 flex-1 items-center justify-center">
-                          <LessonBlockContent
+                          <MemoLessonBlockContent
                             lesson={lesson}
                             start={lessonStart}
                             end={lessonEnd}
@@ -1205,6 +1376,7 @@ export function TimeGrid({
               </div>
             )
           })}
+          </div>
         </div>
       </div>
     </div>

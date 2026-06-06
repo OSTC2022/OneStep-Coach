@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { deleteSessionPackage } from '@/lib/actions/sessions'
 import { resolveMemberBmi } from '@/lib/member-utils'
+import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
+import { MemberBodyChangeMenuLink } from '@/components/members/member-body-change-menu-link'
 import { Member, SessionPackage } from '@/types/database'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -64,6 +66,8 @@ interface MemberDetailProps {
   initialTrashCount?: number
   accountEmail?: string | null
   accountEmailSource?: 'auth' | 'invite' | null
+  bodyRecords?: MemberBodyRecord[]
+  bodyTableReady?: boolean
 }
 
 function formatPackageDate(value: string | null | undefined) {
@@ -79,8 +83,11 @@ export function MemberDetail({
   initialTrashCount = 0,
   accountEmail = null,
   accountEmailSource = null,
+  bodyRecords = [],
+  bodyTableReady = true,
 }: MemberDetailProps) {
   const router = useRouter()
+  const [memberState, setMemberState] = useState(member)
   const [sessionPackages, setSessionPackages] = useState(initialPackages)
   const [deleteTarget, setDeleteTarget] = useState<SessionPackage | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -94,7 +101,11 @@ export function MemberDetail({
     [lessons, sessionNumberByLessonId],
   )
 
-  const displayBmi = useMemo(() => resolveMemberBmi(member), [member])
+  useEffect(() => {
+    setMemberState(member)
+  }, [member])
+
+  const displayBmi = useMemo(() => resolveMemberBmi(memberState), [memberState])
 
   const lessonTotalPages = Math.max(
     1,
@@ -168,18 +179,23 @@ export function MemberDetail({
             </Button>
           </Link>
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl lg:text-3xl font-bold">{member.name}</h1>
-              <Badge variant={member.is_active ? 'default' : 'secondary'}>
-                {member.is_active ? '활성' : '비활성'}
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl lg:text-3xl font-bold">{memberState.name}</h1>
+              <Badge variant={memberState.is_active ? 'default' : 'secondary'}>
+                {memberState.is_active ? '활성' : '비활성'}
               </Badge>
+              <MemberBodyChangeMenuLink
+                memberId={memberState.id}
+                latestWeight={bodyRecords.at(-1)?.weight_kg ?? memberState.weight_kg}
+              />
             </div>
             <p className="text-muted-foreground">
-              등록일: {new Date(member.registered_at).toLocaleDateString('ko-KR')}
+              등록일:{' '}
+              {new Date(memberState.registered_at).toLocaleDateString('ko-KR')}
             </p>
           </div>
         </div>
-        <Link href={`/dashboard/members/${member.id}/edit`}>
+        <Link href={`/dashboard/members/${memberState.id}/edit`}>
           <Button>
             <Edit className="h-4 w-4 mr-2" />
             수정
@@ -252,11 +268,15 @@ export function MemberDetail({
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">키</span>
-              <span>{member.height_cm ? `${member.height_cm}cm` : '-'}</span>
+              <span>
+                {memberState.height_cm ? `${memberState.height_cm}cm` : '-'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">몸무게</span>
-              <span>{member.weight_kg ? `${member.weight_kg}kg` : '-'}</span>
+              <span>
+                {memberState.weight_kg ? `${memberState.weight_kg}kg` : '-'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">BMI</span>

@@ -134,10 +134,13 @@ export function CalendarInstructorList({
     return () => window.clearTimeout(timer)
   }, [open, highlightedLessonIds, monthLessons])
 
+  const onLoadMonthPoolRef = useRef(onLoadMonthPool)
+  onLoadMonthPoolRef.current = onLoadMonthPool
+
   useEffect(() => {
     if (!open) return
 
-    onLoadMonthPool?.()
+    onLoadMonthPoolRef.current?.()
 
     function handlePointerDown(e: PointerEvent) {
       if (containerRef.current?.contains(e.target as Node)) return
@@ -165,7 +168,7 @@ export function CalendarInstructorList({
       window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [open, onLoadMonthPool])
+  }, [open])
 
   function toggleInstructor(instructorId: string) {
     setActiveInstructorIds((prev) => {

@@ -2,6 +2,7 @@ import dynamic from 'next/dynamic'
 import { parseISO } from 'date-fns'
 import { getLessons } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
+import { getMemberBodyWeightsForLessons } from '@/lib/actions/member-body-records'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getRangeForView, type CalendarView } from '@/lib/calendar-utils'
 import { profileRoleToAppRole } from '@/lib/roles'
@@ -63,6 +64,15 @@ export default async function LessonStatusPage({
     }),
   ])
 
+  const bodyWeightByKey = await getMemberBodyWeightsForLessons(
+    lessons
+      .filter((lesson) => lesson.member_id)
+      .map((lesson) => ({
+        memberId: lesson.member_id!,
+        date: lesson.lesson_date,
+      })),
+  )
+
   return (
     <div className="space-y-3 pt-12 lg:pt-0">
       <div>
@@ -79,6 +89,7 @@ export default async function LessonStatusPage({
         initialViewMode={viewMode}
         showAddSchedule={userRole === 'admin'}
         isAdmin={userRole === 'admin'}
+        initialBodyWeightByKey={bodyWeightByKey}
       />
     </div>
   )

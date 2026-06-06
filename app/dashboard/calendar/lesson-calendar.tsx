@@ -51,6 +51,10 @@ import {
   matchCalendarShortcut,
   matchCalendarUndoRedo,
 } from '@/lib/calendar-shortcuts'
+import {
+  logCalendarFetch,
+  withCalendarFetchTimeout,
+} from '@/lib/calendar-client-fetch'
 
 function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   const map = new Map<string, Lesson>()
@@ -62,21 +66,8 @@ function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   return Array.from(map.values())
 }
 
-const viewLoading = (
-  <div className="flex min-h-[200px] flex-1 items-center justify-center">
-    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-  </div>
-)
-
-const MonthView = dynamic(
-  () => import('./month-view').then((m) => ({ default: m.MonthView })),
-  { loading: () => viewLoading },
-)
-
-const DayWeekView = dynamic(
-  () => import('./day-week-view').then((m) => ({ default: m.DayWeekView })),
-  { loading: () => viewLoading },
-)
+import { DayWeekView } from './day-week-view'
+import { MonthView } from './month-view'
 
 const LessonCreateDialog = dynamic(
   () =>
@@ -124,6 +115,9 @@ export function LessonCalendar({
   const [isFetching, setIsFetching] = useState(false)
   const rangeCacheRef = useRef(new Map<string, Lesson[]>())
   const rangeFetchSeqRef = useRef(0)
+  const rangeFetchInFlightKeyRef = useRef<string | null>(null)
+  const isFetchingRef = useRef(false)
+  const monthPoolInFlightRef = useRef(false)
   const calendarRootRef = useRef<HTMLDivElement>(null)
   const {
     selectedIds: selectedLessonIds,
@@ -232,14 +226,45 @@ export function LessonCalendar({
     const month = currentDate.getMonth() + 1
     const key = `${year}-${month}`
     if (searchPoolKey === key) return
+    if (monthPoolInFlightRef.current) return
 
-    void getLessonsForMonth(year, month).then((data) => {
-      syncMonthPool(currentDate, data)
-      if (view === 'month') {
-        rangeCacheRef.current.set(rangeCacheKey(currentDate, view), data)
-      }
+    const dateFrom = `${year}-${String(month).padStart(2, '0')}-01`
+    const lastDay = new Date(year, month, 0).getDate()
+    const dateTo = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+
+    monthPoolInFlightRef.current = true
+    logCalendarFetch('start', {
+      rangeStart: dateFrom,
+      rangeEnd: dateTo,
+      coachId: instructorFilter,
+      pool: 'month',
     })
-  }, [currentDate, searchPoolKey, syncMonthPool, view, rangeCacheKey])
+
+    void withCalendarFetchTimeout(getLessonsForMonth(year, month))
+      .then((data) => {
+        logCalendarFetch('success', data.length)
+        syncMonthPool(currentDate, data)
+        if (view === 'month') {
+          rangeCacheRef.current.set(rangeCacheKey(currentDate, view), data)
+        }
+      })
+      .catch((error) => {
+        console.error(error)
+        logCalendarFetch('error', error)
+        toast.error('월간 검색 일정을 불러오지 못했습니다.')
+      })
+      .finally(() => {
+        monthPoolInFlightRef.current = false
+        logCalendarFetch('end')
+      })
+  }, [
+    currentDate,
+    searchPoolKey,
+    syncMonthPool,
+    view,
+    rangeCacheKey,
+    instructorFilter,
+  ])
 
   const loadRange = useCallback(
     (date: Date, nextView: CalendarView, options?: { force?: boolean }) => {
@@ -253,17 +278,36 @@ export function LessonCalendar({
         return
       }
 
-      const seq = ++rangeFetchSeqRef.current
-      setIsFetching(true)
+      if (
+        isFetchingRef.current &&
+        rangeFetchInFlightKeyRef.current === cacheKey &&
+        !options?.force
+      ) {
+        return
+      }
+
       const { dateFrom, dateTo } = getRangeForView(date, nextView)
+      const seq = ++rangeFetchSeqRef.current
+      rangeFetchInFlightKeyRef.current = cacheKey
+      isFetchingRef.current = true
+      setIsFetching(true)
+
+      logCalendarFetch('start', {
+        rangeStart: dateFrom,
+        rangeEnd: dateTo,
+        coachId: instructorFilter,
+        view: nextView,
+      })
+
       const fetchLessons =
         nextView === 'month'
           ? getLessonsForMonth(date.getFullYear(), date.getMonth() + 1)
           : getLessonsForRange(dateFrom, dateTo)
 
-      void fetchLessons
+      void withCalendarFetchTimeout(fetchLessons)
         .then((data) => {
           if (seq !== rangeFetchSeqRef.current) return
+          logCalendarFetch('success', data.length)
           rangeCacheRef.current.set(cacheKey, data)
           setLessons(data)
           if (nextView === 'month') {
@@ -271,11 +315,22 @@ export function LessonCalendar({
           }
           lessonHistory.clear()
         })
+        .catch((error) => {
+          if (seq !== rangeFetchSeqRef.current) return
+          console.error(error)
+          logCalendarFetch('error', error)
+          toast.error('일정을 불러오지 못했습니다.')
+        })
         .finally(() => {
-          if (seq === rangeFetchSeqRef.current) setIsFetching(false)
+          if (seq === rangeFetchSeqRef.current) {
+            rangeFetchInFlightKeyRef.current = null
+            isFetchingRef.current = false
+            setIsFetching(false)
+            logCalendarFetch('end')
+          }
         })
     },
-    [lessonHistory, rangeCacheKey, syncMonthPool],
+    [lessonHistory, rangeCacheKey, syncMonthPool, instructorFilter],
   )
 
   function handleViewChange(nextView: CalendarView) {
@@ -857,6 +912,7 @@ export function LessonCalendar({
             onLessonLineUpdate={handleLessonLineUpdate}
             onMemoSubmit={handleMemoSubmit}
             highlightedLessonIds={highlight?.lessonIds}
+            selectedLessonIds={selectedLessonIds}
             isLessonSelected={isLessonSelected}
             onClearLessonSelection={clearLessonSelection}
           />
@@ -877,6 +933,7 @@ export function LessonCalendar({
             onMemoSubmit={handleMemoSubmit}
             compactHeader
             highlightedLessonIds={highlight?.lessonIds}
+            selectedLessonIds={selectedLessonIds}
             isLessonSelected={isLessonSelected}
             onClearLessonSelection={clearLessonSelection}
           />

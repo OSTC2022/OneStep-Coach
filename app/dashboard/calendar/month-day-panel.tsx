@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { Loader2 } from 'lucide-react'
@@ -51,13 +51,20 @@ export function MonthDayPanel({
   const inputRef = useRef<HTMLInputElement>(null)
 
   const dateKey = toDateKey(selectedDate)
-  const dayLessons = lessons
-    .filter((lesson) => lesson.lesson_date === dateKey)
-    .sort(
-      (a, b) =>
-        (a.start_time ?? '').localeCompare(b.start_time ?? '') ||
-        getLessonCalendarLabel(a).localeCompare(getLessonCalendarLabel(b), 'ko'),
-    )
+  const dayLessons = useMemo(
+    () =>
+      lessons
+        .filter((lesson) => lesson.lesson_date === dateKey)
+        .sort(
+          (a, b) =>
+            (a.start_time ?? '').localeCompare(b.start_time ?? '') ||
+            getLessonCalendarLabel(a).localeCompare(
+              getLessonCalendarLabel(b),
+              'ko',
+            ),
+        ),
+    [lessons, dateKey],
+  )
 
   const dateLabel = format(selectedDate, 'M월 d일 EEEE', { locale: ko })
 

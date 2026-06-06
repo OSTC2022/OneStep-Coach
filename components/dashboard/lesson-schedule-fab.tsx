@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Plus, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -67,13 +67,18 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
   )
   const [isLoadingData, setIsLoadingData] = useState(false)
   const [dataReady, setDataReady] = useState(false)
+  const loadInFlightRef = useRef(false)
 
   const canSchedule = role === 'admin' || role === 'instructor'
   const onCalendarPage = pathname?.startsWith('/dashboard/calendar') ?? false
   const showSelectionDelete = onCalendarPage && selectionCount > 0
   const hideScheduleFab = open || lessonFormOpen
 
-  const loadFormData = useCallback(async () => {
+  const loadFormData = useCallback(async (): Promise<boolean> => {
+    if (dataReady) return true
+    if (loadInFlightRef.current) return false
+
+    loadInFlightRef.current = true
     setIsLoadingData(true)
     try {
       const [membersResult, instructorList, currentInstructor] =
@@ -95,28 +100,23 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
       setInstructors(instructorList)
       setDefaultInstructorId(currentInstructor?.id ?? null)
       setDataReady(true)
-    } catch {
+      return true
+    } catch (error) {
+      console.error('[calendar] fab form data load error', error)
       toast.error('일정 등록 데이터를 불러오지 못했습니다.')
+      return false
     } finally {
+      loadInFlightRef.current = false
       setIsLoadingData(false)
     }
-  }, [])
+  }, [dataReady])
 
-  function handleOpen() {
-    if (dataReady) {
-      setDraft(getDefaultLessonDraft())
-      setOpen(true)
-      return
-    }
-    void (async () => {
-      await loadFormData()
-      setDraft(getDefaultLessonDraft())
-      setOpen(true)
-    })()
-  }
-
-  function handleFabPointerDown() {
-    if (!dataReady && !isLoadingData) setIsLoadingData(true)
+  async function handleOpen() {
+    if (isLoadingData) return
+    const ready = await loadFormData()
+    if (!ready) return
+    setDraft(getDefaultLessonDraft())
+    setOpen(true)
   }
 
   function handleSaved(lesson: Lesson) {
@@ -124,8 +124,9 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
     setDraft(null)
     if (onCalendarPage) {
       notifyLessonSaved(lesson)
+    } else {
+      router.refresh()
     }
-    router.refresh()
     toast.success('일정이 등록되었습니다.', {
       description: `${lesson.lesson_date} ${lesson.start_time?.slice(0, 5) ?? ''}`.trim(),
     })
@@ -165,9 +166,8 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
         <button
           type="button"
           aria-label="일정 등록"
-          onPointerDown={handleFabPointerDown}
-          onClick={handleOpen}
-          disabled={isLoadingData && !dataReady}
+          onClick={() => void handleOpen()}
+          disabled={isLoadingData}
           className={cn(
             'fixed z-[60] flex h-14 w-14 touch-manipulation select-none items-center justify-center rounded-full',
             'bg-primary text-primary-foreground shadow-lg',
@@ -176,7 +176,7 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           )}
         >
-          {isLoadingData && !dataReady ? (
+          {isLoadingData ? (
             <Loader2 className="h-7 w-7 animate-spin" />
           ) : (
             <Plus className="h-7 w-7" strokeWidth={2.5} />

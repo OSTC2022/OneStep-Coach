@@ -71,6 +71,7 @@ import {
   Pencil,
 } from 'lucide-react'
 import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
+import { LessonStatusWeightInput } from '@/components/lesson-status/lesson-status-weight-input'
 
 const SignaturePadDialog = dynamic(
   () =>
@@ -82,6 +83,12 @@ const SignaturePadDialog = dynamic(
 
 export type LessonStatusViewMode = 'day' | 'week' | 'month' | 'list'
 
+function bodyWeightKey(memberId: string, date: string) {
+  return `${memberId}:${date}`
+}
+
+const EMPTY_BODY_WEIGHT_BY_KEY: Record<string, number> = {}
+
 interface LessonStatusViewProps {
   lessons: Lesson[]
   instructors: Instructor[]
@@ -89,6 +96,7 @@ interface LessonStatusViewProps {
   initialViewMode?: LessonStatusViewMode
   showAddSchedule?: boolean
   isAdmin?: boolean
+  initialBodyWeightByKey?: Record<string, number>
 }
 
 const VIEW_MODE_OPTIONS: { value: LessonStatusViewMode; label: string }[] = [
@@ -166,6 +174,8 @@ interface AthleteTileProps {
   instructorLookup: Map<string, Instructor>
   inInstructorGroup?: boolean
   canEditEndTime?: boolean
+  bodyWeightByKey: Record<string, number>
+  onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
@@ -187,6 +197,8 @@ const AthleteTile = memo(function AthleteTile({
   instructorLookup,
   inInstructorGroup = false,
   canEditEndTime = false,
+  bodyWeightByKey,
+  onBodyWeightChange,
   onStatusChange,
   onGuestStatusChange,
   onLessonCompleted,
@@ -349,6 +361,19 @@ const AthleteTile = memo(function AthleteTile({
               )
             })}
           </div>
+          {lesson.member_id ? (
+            <LessonStatusWeightInput
+              memberId={lesson.member_id}
+              lessonDate={lesson.lesson_date}
+              initialWeight={
+                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]
+              }
+              disabled={isLoading || isCompleting || isCancelling}
+              onWeightChange={(weight) =>
+                onBodyWeightChange(lesson.member_id!, lesson.lesson_date, weight)
+              }
+            />
+          ) : null}
           {completed ? (
             <div className="mt-1 flex gap-0.5">
               <button
@@ -549,6 +574,8 @@ interface TimeSlotsPanelProps {
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
+  bodyWeightByKey: Record<string, number>
+  onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
   emptyMessage?: string
 }
 
@@ -558,6 +585,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   instructorLookup,
   isUpdating,
   canEditEndTime = false,
+  bodyWeightByKey,
+  onBodyWeightChange,
   onStatusChange,
   onGuestStatusChange,
   onLessonCompleted,
@@ -631,6 +660,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         canEditEndTime={canEditEndTime}
                         instructorLookup={instructorLookup}
                         inInstructorGroup
+                        bodyWeightByKey={bodyWeightByKey}
+                        onBodyWeightChange={onBodyWeightChange}
                         onStatusChange={onStatusChange}
                         onGuestStatusChange={onGuestStatusChange}
                         onLessonCompleted={onLessonCompleted}
@@ -654,6 +685,7 @@ export function LessonStatusView({
   initialViewMode = 'day',
   showAddSchedule = false,
   isAdmin = false,
+  initialBodyWeightByKey = EMPTY_BODY_WEIGHT_BY_KEY,
 }: LessonStatusViewProps) {
   const [currentDate, setCurrentDate] = useState(selectedDate)
   const [viewMode, setViewMode] = useState<LessonStatusViewMode>(initialViewMode)
@@ -664,6 +696,9 @@ export function LessonStatusView({
   const [isUpdating, setIsUpdating] = useState<string | null>(null)
   const [isLoadingDate, setIsLoadingDate] = useState(false)
   const quickRegisterPanelRef = useRef<HTMLDivElement>(null)
+  const [bodyWeightByKey, setBodyWeightByKey] = useState(initialBodyWeightByKey)
+  const bodyWeightSeedRef = useRef(initialBodyWeightByKey)
+  bodyWeightSeedRef.current = initialBodyWeightByKey
 
   const dateObj = parseISO(currentDate)
   const today = format(new Date(), 'yyyy-MM-dd')
@@ -679,6 +714,24 @@ export function LessonStatusView({
     setViewMode(initialViewMode)
     setLessons(sortLessonsForStatusDisplay(initialLessons, instructors))
   }, [selectedDate, initialViewMode, initialLessons, instructors])
+
+  useEffect(() => {
+    setBodyWeightByKey(bodyWeightSeedRef.current)
+  }, [selectedDate, initialViewMode])
+
+  const handleBodyWeightChange = useCallback(
+    (memberId: string, date: string, weight: number | null) => {
+      setBodyWeightByKey((prev) => {
+        const key = bodyWeightKey(memberId, date)
+        if (weight == null) {
+          const { [key]: _removed, ...rest } = prev
+          return rest
+        }
+        return { ...prev, [key]: weight }
+      })
+    },
+    [],
+  )
 
   const instructorLookup = useMemo(
     () => new Map(instructors.map((instructor) => [instructor.id, instructor])),
@@ -841,6 +894,8 @@ export function LessonStatusView({
     instructorLookup,
     isUpdating,
     canEditEndTime: isAdmin,
+    bodyWeightByKey,
+    onBodyWeightChange: handleBodyWeightChange,
     onStatusChange: handleStatusChange,
     onGuestStatusChange: handleGuestStatusChange,
     onLessonCompleted: updateLessonInPlace,
@@ -942,6 +997,8 @@ export function LessonStatusView({
                           isLoading={isUpdating === lesson.id}
                           canEditEndTime={isAdmin}
                           instructorLookup={instructorLookup}
+                          bodyWeightByKey={bodyWeightByKey}
+                          onBodyWeightChange={handleBodyWeightChange}
                           onStatusChange={handleStatusChange}
                           onGuestStatusChange={handleGuestStatusChange}
                           onLessonCompleted={updateLessonInPlace}

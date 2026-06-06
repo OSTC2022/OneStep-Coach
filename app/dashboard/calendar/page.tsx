@@ -7,11 +7,25 @@ export default async function CalendarPage() {
   const now = new Date()
   const { dateFrom, dateTo } = getRangeForView(now, 'week')
 
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[calendar] fetch start', {
+      rangeStart: dateFrom,
+      rangeEnd: dateTo,
+      coachId: 'all',
+      source: 'server-page',
+    })
+  }
+
   const [lessons, instructors, currentInstructor] = await Promise.all([
     getLessonsForRange(dateFrom, dateTo),
     getInstructors({ isActive: true, calendar: true, limit: 80 }),
     getInstructorForCurrentUser(),
   ])
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[calendar] fetch success', lessons.length)
+    console.log('[calendar] fetch end')
+  }
 
   const members = (() => {
     const map = new Map<

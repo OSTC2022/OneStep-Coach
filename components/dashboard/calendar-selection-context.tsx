@@ -51,9 +51,12 @@ export function CalendarSelectionProvider({ children }: { children: ReactNode })
     setSelectedIds(new Set())
   }, [])
 
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
+
   const isSelected = useCallback(
-    (id: string) => selectedIds.has(id),
-    [selectedIds],
+    (id: string) => selectedIdsRef.current.has(id),
+    [],
   )
 
   const registerDeleteSelected = useCallback((handler: (() => void) | null) => {

@@ -1,7 +1,7 @@
 'use client'
 
-import { TimeGrid } from './time-grid'
 import { MonthDayPanel } from './month-day-panel'
+import { TimeGrid } from './time-grid'
 import type { MemoQuickAddPayload } from './month-memo-input'
 import type {
   CalendarMemberSearchItem,
@@ -32,6 +32,7 @@ interface DayWeekViewProps {
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
   compactHeader?: boolean
   highlightedLessonIds?: string[]
+  selectedLessonIds?: ReadonlySet<string>
   isLessonSelected?: (lessonId: string) => boolean
   onClearLessonSelection?: () => void
 }
@@ -51,12 +52,13 @@ export function DayWeekView({
   onMemoSubmit,
   compactHeader = false,
   highlightedLessonIds,
+  selectedLessonIds,
   isLessonSelected,
   onClearLessonSelection,
 }: DayWeekViewProps) {
   return (
     <div className="flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <div className="min-h-0 flex-[1.1] overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden md:flex-[1.1]">
         <TimeGrid
           dates={dates}
           lessons={lessons}
@@ -71,10 +73,12 @@ export function DayWeekView({
           onClearLessonSelection={onClearLessonSelection}
           compactHeader={compactHeader}
           highlightedLessonIds={highlightedLessonIds}
+          selectedLessonIds={selectedLessonIds}
           className="h-full min-h-0 rounded-none border-0"
         />
       </div>
 
+      <div className="max-h-[32vh] min-h-0 shrink-0 overflow-hidden border-t border-border md:max-h-none md:flex-1">
       <MonthDayPanel
         selectedDate={selectedDate}
         lessons={lessons}
@@ -85,6 +89,7 @@ export function DayWeekView({
         onMemoSubmit={onMemoSubmit}
         isLessonSelected={isLessonSelected}
       />
+      </div>
     </div>
   )
 }

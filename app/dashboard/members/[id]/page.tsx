@@ -1,4 +1,5 @@
 import { getMember } from '@/lib/actions/members'
+import { getMemberBodyRecords } from '@/lib/actions/member-body-records'
 import { getMemberAccountEmail } from '@/lib/actions/member-account'
 import { getDeletedSessionPackagesCount, getSessionPackages } from '@/lib/actions/sessions'
 import {
@@ -91,6 +92,13 @@ export default async function MemberDetailPage({
     packageOnly: true,
   })
 
+  const { records: bodyRecords, tableReady: bodyTableReady } =
+    await getMemberBodyRecords(member.id, {
+      weight_kg: member.weight_kg,
+      height_cm: member.height_cm,
+      registered_at: member.registered_at,
+    })
+
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
       <MemberDetail
@@ -101,6 +109,8 @@ export default async function MemberDetailPage({
         initialTrashCount={trashCount}
         accountEmail={accountEmailInfo.email}
         accountEmailSource={accountEmailInfo.source}
+        bodyRecords={bodyRecords}
+        bodyTableReady={bodyTableReady}
       />
     </div>
   )
