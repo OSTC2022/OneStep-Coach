@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { format, parseISO, subDays } from 'date-fns'
+import { ko } from 'date-fns/locale'
 import { createClient } from '@/lib/supabase/client'
 import { Lesson, SessionPackage } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -60,7 +62,34 @@ interface LessonWithRelations extends Lesson {
 interface LessonRegistrationProps {
   members: MemberWithPackages[]
   instructors: { id: string; name: string }[]
-  todayLessons: LessonWithRelations[]
+  recentWeekLessons: LessonWithRelations[]
+}
+
+const RECENT_LESSON_DAYS = 7
+
+function getRecentLessonDateRange() {
+  const today = new Date()
+  return {
+    dateFrom: format(subDays(today, RECENT_LESSON_DAYS - 1), 'yyyy-MM-dd'),
+    dateTo: format(today, 'yyyy-MM-dd'),
+  }
+}
+
+function sortRecentLessons(lessons: LessonWithRelations[]) {
+  return [...lessons].sort((a, b) => {
+    const dateCmp = b.lesson_date.localeCompare(a.lesson_date)
+    if (dateCmp !== 0) return dateCmp
+    return (b.start_time ?? '').localeCompare(a.start_time ?? '')
+  })
+}
+
+function formatLessonTime(time: string | null | undefined) {
+  if (!time) return '-'
+  return time.slice(0, 5)
+}
+
+function formatLessonDateLabel(date: string) {
+  return format(parseISO(date), 'M/d (EEE)', { locale: ko })
 }
 
 const LESSON_TYPES = [
@@ -70,14 +99,29 @@ const LESSON_TYPES = [
   { value: '보강', label: '보강' },
 ]
 
-export function LessonRegistration({ members, instructors, todayLessons }: LessonRegistrationProps) {
+export function LessonRegistration({
+  members,
+  instructors,
+  recentWeekLessons,
+}: LessonRegistrationProps) {
   const router = useRouter()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedMember, setSelectedMember] = useState<MemberWithPackages | null>(null)
   const [isRegistering, setIsRegistering] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [showSignature, setShowSignature] = useState(false)
-  const [lessons, setLessons] = useState(todayLessons)
+  const [lessons, setLessons] = useState(() => sortRecentLessons(recentWeekLessons))
+  const { dateFrom, dateTo } = getRecentLessonDateRange()
+  const today = dateTo
+
+  useEffect(() => {
+    setLessons(sortRecentLessons(recentWeekLessons))
+  }, [recentWeekLessons])
+
+  const todayLessonCount = useMemo(
+    () => lessons.filter((lesson) => lesson.lesson_date === today).length,
+    [lessons, today],
+  )
 
   const [formData, setFormData] = useState({
     instructor_id: '',
@@ -261,7 +305,13 @@ export function LessonRegistration({ members, instructors, todayLessons }: Lesso
           .eq('id', signatureId)
       }
 
-      setLessons([lesson, ...lessons])
+      setLessons((prev) =>
+        sortRecentLessons(
+          [lesson as LessonWithRelations, ...prev].filter(
+            (item) => item.lesson_date >= dateFrom && item.lesson_date <= dateTo,
+          ),
+        ),
+      )
       resetForm()
     }
 
@@ -294,7 +344,7 @@ export function LessonRegistration({ members, instructors, todayLessons }: Lesso
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">오늘 수업</p>
-                <p className="text-2xl font-bold">{lessons.length}</p>
+                <p className="text-2xl font-bold">{todayLessonCount}</p>
               </div>
               <CalendarCheck className="h-8 w-8 text-primary" />
             </div>
@@ -376,40 +426,51 @@ export function LessonRegistration({ members, instructors, todayLessons }: Lesso
           </CardContent>
         </Card>
 
-        {/* Today's Lessons */}
+        {/* Recent week lessons */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-primary" />
-              오늘 수업 현황
+              최근 일주일 수업 현황
             </CardTitle>
+            <CardDescription>오늘부터 역순 · 최근 7일</CardDescription>
           </CardHeader>
           <CardContent>
             {lessons.length === 0 ? (
-              <p className="text-center py-8 text-muted-foreground">오늘 등록된 수업이 없습니다.</p>
+              <p className="text-center py-8 text-muted-foreground">
+                최근 일주일 등록된 수업이 없습니다.
+              </p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>회원</TableHead>
-                    <TableHead>강사</TableHead>
-                    <TableHead>시간</TableHead>
-                    <TableHead>유형</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {lessons.map((lesson) => (
-                    <TableRow key={lesson.id}>
-                      <TableCell className="font-medium">{lesson.member?.name}</TableCell>
-                      <TableCell>{lesson.instructor?.name || '-'}</TableCell>
-                      <TableCell>{lesson.start_time || '-'}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{lesson.lesson_type}</Badge>
-                      </TableCell>
+              <div className="max-h-[min(20rem,45vh)] overflow-y-auto overscroll-y-contain rounded-md border border-border [-ms-overflow-style:auto] [scrollbar-width:thin]">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-card">
+                    <TableRow>
+                      <TableHead>날짜</TableHead>
+                      <TableHead>회원</TableHead>
+                      <TableHead>강사</TableHead>
+                      <TableHead>시간</TableHead>
+                      <TableHead>유형</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {lessons.map((lesson) => (
+                      <TableRow key={lesson.id}>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {formatLessonDateLabel(lesson.lesson_date)}
+                        </TableCell>
+                        <TableCell className="font-medium">{lesson.member?.name}</TableCell>
+                        <TableCell>{lesson.instructor?.name || '-'}</TableCell>
+                        <TableCell className="tabular-nums">
+                          {formatLessonTime(lesson.start_time)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{lesson.lesson_type}</Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>

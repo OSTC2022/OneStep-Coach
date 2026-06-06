@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   format,
@@ -21,10 +21,13 @@ import {
   completeLessonWithSignature,
   markGuestLessonStatus,
   updateLessonAttendanceStatus,
+  updateLessonEndTime,
   type GuestLessonAction,
 } from '@/lib/actions/lesson-sessions'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { TimeInput24 } from '@/components/ui/time-input-24'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import {
   Popover,
@@ -58,14 +61,16 @@ import {
 } from '@/lib/instructor-colors'
 import {
   CalendarDays,
+  CalendarPlus,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ListChecks,
   Loader2,
-  UserPlus,
+  Pencil,
 } from 'lucide-react'
+import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
 
 const SignaturePadDialog = dynamic(
   () =>
@@ -82,7 +87,8 @@ interface LessonStatusViewProps {
   instructors: Instructor[]
   selectedDate: string
   initialViewMode?: LessonStatusViewMode
-  showAddMember?: boolean
+  showAddSchedule?: boolean
+  isAdmin?: boolean
 }
 
 const VIEW_MODE_OPTIONS: { value: LessonStatusViewMode; label: string }[] = [
@@ -159,6 +165,7 @@ interface AthleteTileProps {
   isLoading: boolean
   instructorLookup: Map<string, Instructor>
   inInstructorGroup?: boolean
+  canEditEndTime?: boolean
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
@@ -179,14 +186,18 @@ const AthleteTile = memo(function AthleteTile({
   isLoading,
   instructorLookup,
   inInstructorGroup = false,
+  canEditEndTime = false,
   onStatusChange,
   onGuestStatusChange,
   onLessonCompleted,
 }: AthleteTileProps) {
   const [signatureOpen, setSignatureOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [endTimeEditOpen, setEndTimeEditOpen] = useState(false)
+  const [editEndTime, setEditEndTime] = useState('')
   const [isCompleting, setIsCompleting] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
+  const [isSavingEndTime, setIsSavingEndTime] = useState(false)
 
   const display = getLessonCalendarDisplayParts(lesson)
   const label = display.meta ? `${display.name}(${display.meta})` : display.name
@@ -197,9 +208,9 @@ const AthleteTile = memo(function AthleteTile({
   const instructorBorderColor = resolveLessonInstructorColor(lesson, instructorLookup)
   const canEndLesson = isPresent && !completed && !isCancelled
 
-  async function handleCompleteLesson(signatureData: string) {
-    const confirmedAt = new Date()
-    const endTime = formatLocalEndTime(confirmedAt)
+  async function handleCompleteLesson(signatureData: string, endTimeInput?: string) {
+    const endTime =
+      endTimeInput?.trim() || formatLocalEndTime(new Date())
 
     setIsCompleting(true)
     const result = await completeLessonWithSignature(lesson.id, signatureData, endTime)
@@ -249,6 +260,35 @@ const AthleteTile = memo(function AthleteTile({
 
     setCancelOpen(false)
   }
+
+  async function handleSaveEndTime() {
+    if (!editEndTime.trim()) {
+      toast.error('종료 시간을 입력해주세요.')
+      return
+    }
+
+    setIsSavingEndTime(true)
+    const result = await updateLessonEndTime(lesson.id, editEndTime)
+    setIsSavingEndTime(false)
+
+    if (result.error) {
+      toast.error('종료 시간 수정 실패', { description: result.error })
+      return
+    }
+
+    if (result.data) {
+      onLessonCompleted(lesson.id, { end_time: result.data.end_time })
+      toast.success('종료 시간이 수정되었습니다.', {
+        description: formatTime(result.data.end_time) ?? undefined,
+      })
+    }
+
+    setEndTimeEditOpen(false)
+  }
+
+  const defaultEndTimeForDialog =
+    formatTime(lesson.end_time) ||
+    formatLocalEndTime(new Date())
 
   return (
     <>
@@ -310,23 +350,79 @@ const AthleteTile = memo(function AthleteTile({
             })}
           </div>
           {completed ? (
-            <button
-              type="button"
-              disabled={isLoading || isCancelling}
-              title="종료 취소"
-              onClick={() => setCancelOpen(true)}
-              className={cn(
-                'mt-1 flex w-full items-center justify-center gap-0.5 rounded border border-primary/30 bg-primary/5 px-1 py-1 text-[9px] font-medium text-primary transition-colors hover:bg-primary/15',
-                (isLoading || isCancelling) && 'opacity-50',
-              )}
-            >
-              {isCancelling ? (
-                <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />
-              )}
-              종료 {formatTime(lesson.end_time)}
-            </button>
+            <div className="mt-1 flex gap-0.5">
+              <button
+                type="button"
+                disabled={isLoading || isCancelling}
+                title="종료 취소"
+                onClick={() => setCancelOpen(true)}
+                className={cn(
+                  'flex min-w-0 flex-1 items-center justify-center gap-0.5 rounded border border-primary/30 bg-primary/5 px-1 py-1 text-[9px] font-medium text-primary transition-colors hover:bg-primary/15',
+                  (isLoading || isCancelling) && 'opacity-50',
+                )}
+              >
+                {isCancelling ? (
+                  <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-2.5 w-2.5 shrink-0" />
+                )}
+                종료 {formatTime(lesson.end_time)}
+              </button>
+              {canEditEndTime ? (
+                <Popover
+                  open={endTimeEditOpen}
+                  onOpenChange={(open) => {
+                    if (!isSavingEndTime) {
+                      setEndTimeEditOpen(open)
+                      if (open) {
+                        setEditEndTime(formatTime(lesson.end_time) ?? '')
+                      }
+                    }
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={isLoading || isSavingEndTime}
+                      title="종료 시간 수정"
+                      className={cn(
+                        'shrink-0 rounded border border-border bg-muted/40 px-1 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                        (isLoading || isSavingEndTime) && 'opacity-50',
+                      )}
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-52 space-y-2 p-3" align="end">
+                    <Label htmlFor={`end-time-${lesson.id}`} className="text-xs">
+                      종료 시간
+                    </Label>
+                    <TimeInput24
+                      id={`end-time-${lesson.id}`}
+                      value={editEndTime}
+                      onChange={setEditEndTime}
+                      compact
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="w-full"
+                      disabled={isSavingEndTime || !editEndTime.trim()}
+                      onClick={() => void handleSaveEndTime()}
+                    >
+                      {isSavingEndTime ? (
+                        <>
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          저장 중
+                        </>
+                      ) : (
+                        '저장'
+                      )}
+                    </Button>
+                  </PopoverContent>
+                </Popover>
+              ) : null}
+            </div>
           ) : (
             <button
               type="button"
@@ -395,10 +491,14 @@ const AthleteTile = memo(function AthleteTile({
         memberLabel={label}
         confirmLabel="종료 확인"
         isSubmitting={isCompleting}
+        canEditEndTime={canEditEndTime}
+        defaultEndTime={defaultEndTimeForDialog}
         showPastLessonFinder
         pastLessonMemberId={lesson.member_id ?? lesson.member?.id}
         onPastLessonUpdated={onLessonCompleted}
-        onConfirm={(signatureData) => void handleCompleteLesson(signatureData)}
+        onConfirm={(signatureData, endTime) =>
+          void handleCompleteLesson(signatureData, endTime)
+        }
       />
     )}
 
@@ -445,6 +545,7 @@ interface TimeSlotsPanelProps {
   instructors: Instructor[]
   instructorLookup: Map<string, Instructor>
   isUpdating: string | null
+  canEditEndTime?: boolean
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
@@ -456,6 +557,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   instructors,
   instructorLookup,
   isUpdating,
+  canEditEndTime = false,
   onStatusChange,
   onGuestStatusChange,
   onLessonCompleted,
@@ -526,6 +628,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         key={lesson.id}
                         lesson={lesson}
                         isLoading={isUpdating === lesson.id}
+                        canEditEndTime={canEditEndTime}
                         instructorLookup={instructorLookup}
                         inInstructorGroup
                         onStatusChange={onStatusChange}
@@ -549,7 +652,8 @@ export function LessonStatusView({
   instructors,
   selectedDate,
   initialViewMode = 'day',
-  showAddMember = false,
+  showAddSchedule = false,
+  isAdmin = false,
 }: LessonStatusViewProps) {
   const [currentDate, setCurrentDate] = useState(selectedDate)
   const [viewMode, setViewMode] = useState<LessonStatusViewMode>(initialViewMode)
@@ -559,6 +663,7 @@ export function LessonStatusView({
   )
   const [isUpdating, setIsUpdating] = useState<string | null>(null)
   const [isLoadingDate, setIsLoadingDate] = useState(false)
+  const quickRegisterPanelRef = useRef<HTMLDivElement>(null)
 
   const dateObj = parseISO(currentDate)
   const today = format(new Date(), 'yyyy-MM-dd')
@@ -608,6 +713,18 @@ export function LessonStatusView({
       )
     },
     [],
+  )
+
+  const handleQuickLessonCreated = useCallback(
+    (lesson: Lesson) => {
+      setLessons((prev) => {
+        if (prev.some((item) => item.id === lesson.id)) {
+          return sortLessonsForStatusDisplay(prev, instructors)
+        }
+        return sortLessonsForStatusDisplay([...prev, lesson], instructors)
+      })
+    },
+    [instructors],
   )
 
   const syncUrl = useCallback((date: string, mode: LessonStatusViewMode) => {
@@ -723,6 +840,7 @@ export function LessonStatusView({
     instructors,
     instructorLookup,
     isUpdating,
+    canEditEndTime: isAdmin,
     onStatusChange: handleStatusChange,
     onGuestStatusChange: handleGuestStatusChange,
     onLessonCompleted: updateLessonInPlace,
@@ -822,6 +940,7 @@ export function LessonStatusView({
                         <AthleteTile
                           lesson={lesson}
                           isLoading={isUpdating === lesson.id}
+                          canEditEndTime={isAdmin}
                           instructorLookup={instructorLookup}
                           onStatusChange={handleStatusChange}
                           onGuestStatusChange={handleGuestStatusChange}
@@ -939,23 +1058,31 @@ export function LessonStatusView({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <LessonQuickRegister
+            lessonDate={currentDate}
+            instructors={instructors}
+            onCreated={handleQuickLessonCreated}
+            panelContainerRef={quickRegisterPanelRef}
+          />
           <Link href="/dashboard/calendar">
             <Button type="button" variant="outline" size="sm" className="h-8 text-xs">
               <CalendarDays className="h-3.5 w-3.5 mr-1" />
               캘린더
             </Button>
           </Link>
-          {showAddMember && (
-            <Link href="/dashboard/members/new">
+          {showAddSchedule && (
+            <Link href="/dashboard/calendar">
               <Button type="button" variant="outline" size="sm" className="h-8 text-xs">
-                <UserPlus className="h-3.5 w-3.5 mr-1" />
-                회원 추가
+                <CalendarPlus className="h-3.5 w-3.5 mr-1" />
+                스케줄 추가
               </Button>
             </Link>
           )}
         </div>
       </div>
+
+      <div ref={quickRegisterPanelRef} className="empty:hidden" />
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
         <span>

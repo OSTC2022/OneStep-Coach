@@ -52,9 +52,14 @@ interface LessonWithRelations extends Lesson {
   instructor?: { id: string; name: string; calendar_color?: string | null } | null
 }
 
+type AttendanceInstructor = Pick<
+  Instructor,
+  'id' | 'name' | 'calendar_color' | 'is_active'
+>
+
 interface AttendanceCheckProps {
   initialLessons: LessonWithRelations[]
-  instructors: Instructor[]
+  instructors: AttendanceInstructor[]
 }
 
 const ATTENDANCE_OPTIONS: {
@@ -81,7 +86,7 @@ interface AttendanceTileProps {
   lesson: LessonWithRelations
   isLoading: boolean
   isCancelling: boolean
-  instructorLookup: Map<string, Instructor>
+  instructorLookup: Map<string, AttendanceInstructor>
   inInstructorGroup?: boolean
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onAttendanceCancelled: (
@@ -98,7 +103,7 @@ interface AttendanceTileProps {
 
 function resolveLessonInstructorColor(
   lesson: LessonWithRelations,
-  instructorLookup: Map<string, Instructor>,
+  instructorLookup: Map<string, AttendanceInstructor>,
 ) {
   if (!lesson.instructor_id) return AUTO_INSTRUCTOR_CALENDAR_COLOR
   const instructor =

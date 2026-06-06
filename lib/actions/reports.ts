@@ -3,6 +3,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { buildInstructorPayroll } from '@/lib/instructor-pay'
 import { INSTRUCTOR_LIST_SELECT } from '@/lib/supabase-selects'
+import {
+  getMonthlySessionRevenue,
+  sumSessionPackageRevenue,
+} from '@/lib/actions/sessions'
 
 export type InstructorPayrollRow = {
   id: string
@@ -42,8 +46,8 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
   const lastMonthEndStr = lastMonthEnd.toISOString().split('T')[0]
 
   const [
-    thisMonthPackagesRes,
-    lastMonthPackagesRes,
+    thisMonthRevenue,
+    lastMonthRevenue,
     thisMonthLessonsRes,
     lastMonthLessonsRes,
     totalMembersRes,
@@ -54,15 +58,11 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
     instructorsRes,
     memberSportsRes,
   ] = await Promise.all([
-    supabase
-      .from('session_packages')
-      .select('price, paid_at')
-      .gte('paid_at', thisMonthStr),
-    supabase
-      .from('session_packages')
-      .select('price, paid_at')
-      .gte('paid_at', lastMonthStr)
-      .lte('paid_at', lastMonthEndStr),
+    getMonthlySessionRevenue(),
+    sumSessionPackageRevenue({
+      paidFrom: lastMonthStr,
+      paidTo: lastMonthEndStr,
+    }),
     supabase
       .from('lessons')
       .select('id, attendance_status, lesson_date')
@@ -130,8 +130,6 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
     sportStats[sport] = (sportStats[sport] || 0) + 1
   })
 
-  const thisMonthPackages = thisMonthPackagesRes.data ?? []
-  const lastMonthPackages = lastMonthPackagesRes.data ?? []
   const thisMonthLessons = thisMonthLessonsRes.data ?? []
   const lastMonthLessons = lastMonthLessonsRes.data ?? []
   const instructors = instructorsRes.data ?? []
@@ -146,14 +144,8 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
 
   return {
     stats: {
-      thisMonthRevenue: thisMonthPackages.reduce(
-        (sum, p) => sum + (p.price || 0),
-        0,
-      ),
-      lastMonthRevenue: lastMonthPackages.reduce(
-        (sum, p) => sum + (p.price || 0),
-        0,
-      ),
+      thisMonthRevenue,
+      lastMonthRevenue,
       thisMonthLessons: thisMonthLessons.filter(
         (l) => l.attendance_status === 'present',
       ).length,

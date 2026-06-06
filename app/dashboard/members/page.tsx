@@ -1,5 +1,4 @@
 import { getMembers } from '@/lib/actions/members'
-import { getInstructors } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import Link from 'next/link'
 import { UserPlus } from 'lucide-react'
@@ -7,15 +6,12 @@ import { Button } from '@/components/ui/button'
 import { MemberList } from './member-list'
 
 export default async function MembersPage() {
-  const [{ data: members, count: totalCount }, instructors] = await Promise.all([
-    getMembers({
-      orderBy: 'created_at',
-      orderAsc: false,
-      limit: LIST_PAGE_SIZE,
-      offset: 0,
-    }),
-    getInstructors({ isActive: true }),
-  ])
+  const { data: members, count: totalCount } = await getMembers({
+    orderBy: 'created_at',
+    orderAsc: false,
+    limit: LIST_PAGE_SIZE,
+    offset: 0,
+  })
 
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
@@ -38,11 +34,6 @@ export default async function MembersPage() {
         initialMembers={members}
         totalCount={totalCount}
         pageSize={LIST_PAGE_SIZE}
-        instructors={instructors.map(({ id, name, calendar_color }) => ({
-          id,
-          name,
-          calendar_color,
-        }))}
         initialTrashCount={0}
       />
     </div>

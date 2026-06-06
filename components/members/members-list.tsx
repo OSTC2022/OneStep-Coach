@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Member } from '@/lib/types'
-import { formatPrimaryInstructorName } from '@/lib/member-utils'
+import { formatPrimaryInstructorName, resolveMemberBmi } from '@/lib/member-utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -131,16 +131,25 @@ export function MembersList({ members, currentPage, totalPages }: MembersListPro
                       {formatPrimaryInstructorName(member.primary_instructor)}
                     </TableCell>
                     <TableCell>
-                      {member.bmi ? (
-                        <span className={`font-mono ${
-                          member.bmi < 18.5 ? 'text-chart-2' :
-                          member.bmi < 25 ? 'text-success' :
-                          member.bmi < 30 ? 'text-warning' :
-                          'text-destructive'
-                        }`}>
-                          {member.bmi.toFixed(1)}
-                        </span>
-                      ) : '-'}
+                      {(() => {
+                        const bmi = resolveMemberBmi(member)
+                        if (bmi == null) return '-'
+                        return (
+                          <span
+                            className={`font-mono ${
+                              bmi < 18.5
+                                ? 'text-chart-2'
+                                : bmi < 25
+                                  ? 'text-success'
+                                  : bmi < 30
+                                    ? 'text-warning'
+                                    : 'text-destructive'
+                            }`}
+                          >
+                            {bmi.toFixed(1)}
+                          </span>
+                        )
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Badge 

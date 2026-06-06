@@ -147,6 +147,7 @@ export async function listPendingAccounts(): Promise<PendingAccountRow[]> {
     )
     .eq('approval_status', 'pending')
     .order('created_at', ordered)
+    .limit(30)
 
   if (error && isMissingApprovalColumn(error.message)) {
     const rows = await fetchAllProfiles(admin)
@@ -398,9 +399,76 @@ export type AdminCreateAccountInput = {
   instructorId?: string | null
 }
 
+function isAlreadyRegisteredError(message: string) {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('already') ||
+    lower.includes('registered') ||
+    lower.includes('exists')
+  )
+}
+
+async function findAuthUserIdByEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<string | null> {
+  const normalized = email.trim().toLowerCase()
+  let page = 1
+  while (page <= 10) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    })
+    if (error || !data.users.length) break
+
+    const found = data.users.find(
+      (user) => user.email?.toLowerCase() === normalized,
+    )
+    if (found) return found.id
+
+    if (!data.nextPage) break
+    page = data.nextPage
+  }
+  return null
+}
+
+async function persistAdminCreatedAccount(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  authEmail: string,
+  fullName: string,
+  profileRole: ProfileRole,
+): Promise<{ error?: string }> {
+  const profileResult = await upsertUserProfile(admin, {
+    id: userId,
+    email: authEmail,
+    full_name: fullName,
+    role: profileRole,
+    approval_status: 'pending',
+  })
+  if (profileResult.error) {
+    return { error: `프로필 저장 실패: ${profileResult.error}` }
+  }
+
+  const { error: usersError } = await admin.from('users').upsert(
+    {
+      id: userId,
+      email: authEmail,
+      full_name: fullName,
+      role: 'member',
+    },
+    { onConflict: 'id' },
+  )
+  if (usersError) {
+    return { error: `계정 정보 저장 실패: ${usersError.message}` }
+  }
+
+  return {}
+}
+
 export async function createAccountByAdmin(
   input: AdminCreateAccountInput,
-): Promise<{ error?: string; userId?: string; loginEmail?: string }> {
+): Promise<{ error?: string; userId?: string; loginEmail?: string; recovered?: boolean }> {
   await requireRole(['admin'])
 
   const fullName = input.fullName.trim()
@@ -431,52 +499,84 @@ export async function createAccountByAdmin(
     }
   }
 
+  const userMetadata = {
+    full_name: fullName,
+    role: input.role === 'instructor' ? 'instructor' : input.role,
+    requested_role: input.role,
+    requested_instructor_id: input.instructorId ?? null,
+    approval_status: 'pending' as const,
+  }
+
   const { data: created, error: createError } =
     await admin.auth.admin.createUser({
       email: authEmail,
       password: input.password,
       email_confirm: true,
-      user_metadata: {
-        full_name: fullName,
-        role: input.role === 'instructor' ? 'instructor' : input.role,
-        requested_role: input.role,
-        requested_instructor_id: input.instructorId ?? null,
-        approval_status: 'pending',
-      },
+      user_metadata: userMetadata,
     })
 
+  let userId: string | undefined
+  let recovered = false
+
   if (createError || !created.user) {
-    return { error: createError?.message ?? '계정 생성에 실패했습니다.' }
+    const message = createError?.message ?? ''
+    if (!isAlreadyRegisteredError(message)) {
+      return { error: message || '계정 생성에 실패했습니다.' }
+    }
+
+    const existingUserId = await findAuthUserIdByEmail(admin, authEmail)
+    if (!existingUserId) {
+      return { error: '이미 가입된 이메일입니다.' }
+    }
+
+    const allProfiles = await fetchAllProfiles(admin)
+    const existing = allProfiles.find((p) => p.id === existingUserId)
+    if (
+      existing &&
+      resolveApprovalStatus(existing.email, existing.approval_status) ===
+        'approved'
+    ) {
+      return {
+        error:
+          '이미 승인된 계정입니다. 가입 승인 탭에서 확인하거나 다른 이메일을 사용해주세요.',
+      }
+    }
+
+    const { error: updateError } = await admin.auth.admin.updateUserById(
+      existingUserId,
+      {
+        password: input.password,
+        email_confirm: true,
+        user_metadata: userMetadata,
+      },
+    )
+    if (updateError) {
+      return { error: `기존 계정 복구 실패: ${updateError.message}` }
+    }
+
+    userId = existingUserId
+    recovered = true
+  } else {
+    userId = created.user.id
   }
 
-  const userId = created.user.id
-
-  const profileResult = await upsertUserProfile(admin, {
-    id: userId,
-    email: authEmail,
-    full_name: fullName,
-    role: profileRole,
-    approval_status: 'pending',
-  })
-  if (profileResult.error) {
-    return { error: `프로필 저장 실패: ${profileResult.error}`, userId }
-  }
-
-  await admin.from('users').upsert(
-    {
-      id: userId,
-      email: authEmail,
-      full_name: fullName,
-      role: 'member',
-    },
-    { onConflict: 'id' },
+  const saveResult = await persistAdminCreatedAccount(
+    admin,
+    userId,
+    authEmail,
+    fullName,
+    profileRole,
   )
+  if (saveResult.error) {
+    return { error: saveResult.error, userId, recovered }
+  }
 
   revalidatePath('/dashboard/settings')
 
   return {
     userId,
     loginEmail: authEmail,
+    recovered,
   }
 }
 

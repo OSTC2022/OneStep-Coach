@@ -1,43 +1,24 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
-import { INSTRUCTOR_PICKER_SELECT } from '@/lib/supabase-selects'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
+import { collectInstructorsFromLessons } from '@/lib/instructor-lesson-utils'
+import { ATTENDANCE_LESSON_SELECT } from '@/lib/supabase-selects'
 
+/** 출석 페이지 전용 — 오늘 수업만 조회, 강사는 수업에서 추출 */
 export async function getTodayAttendanceData() {
-  const supabase = await createClient()
+  const supabase = await createStaffDataClient()
   const today = new Date().toISOString().split('T')[0]
 
-  const [{ data: todayLessons }, { data: instructors }] = await Promise.all([
-    supabase
-      .from('lessons')
-      .select(`
-        id,
-        member_id,
-        instructor_id,
-        lesson_date,
-        start_time,
-        end_time,
-        lesson_type,
-        title,
-        content,
-        created_at,
-        attendance_status,
-        session_deducted,
-        signature_id,
-        member:members(id, name, phone, sport),
-        instructor:instructors(id, name, calendar_color)
-      `)
-      .eq('lesson_date', today)
-      .order('start_time'),
-    supabase
-      .from('instructors')
-      .select(INSTRUCTOR_PICKER_SELECT)
-      .eq('is_active', true)
-      .order('name'),
-  ])
+  const { data: todayLessons } = await supabase
+    .from('lessons')
+    .select(ATTENDANCE_LESSON_SELECT)
+    .eq('lesson_date', today)
+    .order('start_time')
+
+  const lessons = todayLessons ?? []
 
   return {
-    todayLessons: todayLessons ?? [],
-    instructors: instructors ?? [],
+    todayLessons: lessons,
+    instructors: collectInstructorsFromLessons(lessons),
   }
 }

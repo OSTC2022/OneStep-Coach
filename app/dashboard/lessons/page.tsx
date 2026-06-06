@@ -1,8 +1,17 @@
+import dynamic from 'next/dynamic'
 import { getLessonRegistrationPageData } from '@/lib/actions/lesson-registration-page'
-import { LessonRegistration } from './lesson-registration'
+import { StatCardsSkeleton } from '@/components/dashboard/page-skeletons'
+
+const LessonRegistration = dynamic(
+  () =>
+    import('./lesson-registration').then((mod) => ({
+      default: mod.LessonRegistration,
+    })),
+  { loading: () => <StatCardsSkeleton count={3} /> },
+)
 
 export default async function LessonsPage() {
-  const { members, instructors, todayLessons } =
+  const { members, instructors, recentWeekLessons } =
     await getLessonRegistrationPageData()
 
   return (
@@ -17,7 +26,7 @@ export default async function LessonsPage() {
       <LessonRegistration
         members={members}
         instructors={instructors}
-        todayLessons={todayLessons}
+        recentWeekLessons={recentWeekLessons}
       />
     </div>
   )

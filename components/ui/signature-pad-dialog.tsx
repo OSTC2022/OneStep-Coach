@@ -4,6 +4,8 @@ import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { History, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { TimeInput24 } from '@/components/ui/time-input-24'
 import {
   Dialog,
   DialogContent,
@@ -40,7 +42,10 @@ interface SignaturePadDialogProps {
       attendance_status?: string
     },
   ) => void
-  onConfirm: (signatureData: string) => void
+  /** 관리자 — 종료 시간 직접 입력 */
+  canEditEndTime?: boolean
+  defaultEndTime?: string
+  onConfirm: (signatureData: string, endTime?: string) => void
 }
 
 export function SignaturePadDialog({
@@ -54,6 +59,8 @@ export function SignaturePadDialog({
   showPastLessonFinder = false,
   pastLessonMemberId,
   onPastLessonUpdated,
+  canEditEndTime = false,
+  defaultEndTime = '',
   onConfirm,
 }: SignaturePadDialogProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -61,6 +68,7 @@ export function SignaturePadDialog({
   const [isDrawing, setIsDrawing] = useState(false)
   const [signatureData, setSignatureData] = useState<string | null>(null)
   const [pastLessonOpen, setPastLessonOpen] = useState(false)
+  const [endTime, setEndTime] = useState(defaultEndTime)
 
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -97,6 +105,8 @@ export function SignaturePadDialog({
       return
     }
 
+    setEndTime(defaultEndTime)
+
     const timer = window.setTimeout(initCanvas, 50)
     const onResize = () => initCanvas()
     window.addEventListener('resize', onResize)
@@ -104,7 +114,7 @@ export function SignaturePadDialog({
       window.clearTimeout(timer)
       window.removeEventListener('resize', onResize)
     }
-  }, [open, initCanvas])
+  }, [open, initCanvas, defaultEndTime])
 
   const getCoordinates = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
@@ -170,7 +180,8 @@ export function SignaturePadDialog({
 
   const handleConfirm = () => {
     if (!signatureData) return
-    onConfirm(signatureData)
+    if (canEditEndTime && !endTime.trim()) return
+    onConfirm(signatureData, canEditEndTime ? endTime : undefined)
   }
 
   return (
@@ -189,6 +200,17 @@ export function SignaturePadDialog({
             {description}
           </DialogDescription>
         </DialogHeader>
+
+        {canEditEndTime ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="lesson-end-time">종료 시간</Label>
+            <TimeInput24
+              id="lesson-end-time"
+              value={endTime}
+              onChange={setEndTime}
+            />
+          </div>
+        ) : null}
 
         <div ref={containerRef} className="overflow-hidden rounded-lg border border-border">
           <canvas
@@ -237,7 +259,7 @@ export function SignaturePadDialog({
             <Button
               type="button"
               onClick={handleConfirm}
-              disabled={isSubmitting || !signatureData}
+              disabled={isSubmitting || !signatureData || (canEditEndTime && !endTime.trim())}
             >
               {isSubmitting ? '저장 중...' : confirmLabel}
             </Button>

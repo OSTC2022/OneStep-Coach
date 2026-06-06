@@ -9,7 +9,7 @@ export default async function CalendarPage() {
 
   const [lessons, instructors, currentInstructor] = await Promise.all([
     getLessonsForRange(dateFrom, dateTo),
-    getInstructors({ isActive: true, calendar: true }),
+    getInstructors({ isActive: true, calendar: true, limit: 80 }),
     getInstructorForCurrentUser(),
   ])
 

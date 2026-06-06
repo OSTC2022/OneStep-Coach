@@ -1,3 +1,4 @@
+import dynamic from 'next/dynamic'
 import { parseISO } from 'date-fns'
 import { getLessons } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
@@ -5,10 +6,19 @@ import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getRangeForView, type CalendarView } from '@/lib/calendar-utils'
 import { profileRoleToAppRole } from '@/lib/roles'
 import { redirect } from 'next/navigation'
-import {
-  LessonStatusView,
-  type LessonStatusViewMode,
-} from './lesson-status-view'
+import { TimeSlotsSkeleton } from '@/components/dashboard/page-skeletons'
+import type { LessonStatusViewMode } from './lesson-status-view'
+
+const LESSON_STATUS_LIMIT = 200
+const INSTRUCTOR_PICKER_LIMIT = 80
+
+const LessonStatusView = dynamic(
+  () =>
+    import('./lesson-status-view').then((mod) => ({
+      default: mod.LessonStatusView,
+    })),
+  { loading: () => <TimeSlotsSkeleton /> },
+)
 
 export default async function LessonStatusPage({
   searchParams,
@@ -44,9 +54,13 @@ export default async function LessonStatusPage({
 
   const [lessons, instructors] = await Promise.all([
     viewMode === 'day'
-      ? getLessons({ date: selectedDate })
-      : getLessons(lessonsQuery),
-    getInstructors({ isActive: true, calendar: true }),
+      ? getLessons({ date: selectedDate, limit: LESSON_STATUS_LIMIT })
+      : getLessons({ ...lessonsQuery, limit: LESSON_STATUS_LIMIT }),
+    getInstructors({
+      isActive: true,
+      calendar: true,
+      limit: INSTRUCTOR_PICKER_LIMIT,
+    }),
   ])
 
   return (
@@ -63,7 +77,8 @@ export default async function LessonStatusPage({
         instructors={instructors}
         selectedDate={selectedDate}
         initialViewMode={viewMode}
-        showAddMember={userRole === 'admin'}
+        showAddSchedule={userRole === 'admin'}
+        isAdmin={userRole === 'admin'}
       />
     </div>
   )

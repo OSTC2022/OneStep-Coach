@@ -43,8 +43,9 @@ export async function ensureProtectedAdminRole(
     .maybeSingle()
 
   if (!profile) return
+  if (profile.role === 'admin') return
 
-  const needsRoleRepair = profile.role !== 'admin'
+  const needsRoleRepair = true
   const adminDisplayName = getProtectedAdminDisplayName(profile.email ?? email)
 
   await admin

@@ -38,6 +38,25 @@ export function normalizePrimaryInstructorId(value?: string | null): string | nu
   return trimmed
 }
 
+/** 키(cm)·몸무게(kg)로 BMI 계산 (소수 1자리) */
+export function calculateMemberBmi(
+  heightCm?: number | null,
+  weightKg?: number | null,
+): number | null {
+  if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) return null
+  return Number((weightKg / Math.pow(heightCm / 100, 2)).toFixed(1))
+}
+
+/** DB bmi 없을 때 키·몸무게로 보완 */
+export function resolveMemberBmi(member: {
+  bmi?: number | null
+  height_cm?: number | null
+  weight_kg?: number | null
+}): number | null {
+  if (member.bmi != null && member.bmi > 0) return member.bmi
+  return calculateMemberBmi(member.height_cm, member.weight_kg)
+}
+
 export function formatPrimaryInstructorName(
   instructor?: { name: string } | null,
 ): string {
@@ -219,6 +238,15 @@ export function getMemberCalendarCrowdedParts(
 ): string[] {
   const { name, meta } = getMemberCalendarDisplayParts(member)
   return meta ? [name, meta] : [name]
+}
+
+/** 캘린더 라벨에서 회원 이름만 추출 (예: 조강윤(초6골프) → 조강윤) */
+export function extractMemberNameFromCalendarLabel(label: string): string {
+  const trimmed = label.trim()
+  if (!trimmed) return ''
+  const paren = trimmed.indexOf('(')
+  if (paren > 0) return trimmed.slice(0, paren).trim()
+  return trimmed
 }
 
 /** 캘린더 등에서 이름/나이종목 표시 (예: 이교직(39축구)) */

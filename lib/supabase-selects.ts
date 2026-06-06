@@ -47,6 +47,23 @@ const LESSON_RECURRENCE_SELECT = `
   recurrence_pattern
 `
 
+export const ATTENDANCE_LESSON_SELECT = `
+  id,
+  member_id,
+  instructor_id,
+  lesson_date,
+  start_time,
+  end_time,
+  lesson_type,
+  title,
+  content,
+  attendance_status,
+  session_deducted,
+  signature_id,
+  member:members(id, name, phone, sport),
+  instructor:instructors(id, name, calendar_color)
+`
+
 export const LESSON_CALENDAR_SELECT_LEGACY = `
   ${LESSON_CORE_SELECT},
   member:members(id, name, sport, age, birth_date),
@@ -100,7 +117,7 @@ export const SESSION_PACKAGE_LIST_SELECT = `
   is_active,
   created_at,
   deleted_at,
-  member:members(id, name, phone)
+  member:members(id, name, phone, deleted_at)
 `
 
 export const SESSION_PACKAGE_LIST_SELECT_LEGACY = `

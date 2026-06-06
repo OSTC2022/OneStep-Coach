@@ -1,8 +1,22 @@
 import { redirect } from 'next/navigation'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
+import {
+  getDashboardStats,
+  getInstructorDashboardStats,
+  getRecentActivity,
+} from '@/lib/actions/dashboard'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, CalendarCheck, ClipboardList, CalendarDays, ListChecks } from 'lucide-react'
+import {
+  Users,
+  CalendarCheck,
+  ClipboardList,
+  CalendarDays,
+  ListChecks,
+  AlertTriangle,
+} from 'lucide-react'
+import { profileRoleToAppRole } from '@/lib/roles'
+import { DashboardRecentPayments } from './dashboard-recent-payments'
 
 export default async function DashboardPage() {
   const profile = await getDashboardProfile()
@@ -12,8 +26,16 @@ export default async function DashboardPage() {
     redirect('/dashboard/my')
   }
 
+  const appRole = profileRoleToAppRole(profile.role)
+  const isAdmin = appRole === 'admin'
+
+  const [stats, recentActivity] = await Promise.all([
+    isAdmin ? getDashboardStats() : getInstructorDashboardStats(),
+    isAdmin ? getRecentActivity(6) : Promise.resolve([]),
+  ])
+
   const quickLinks =
-    profile.role === 'admin'
+    isAdmin
       ? [
           { href: '/dashboard/lesson-status', label: '수업현황', icon: ListChecks },
           { href: '/dashboard/members', label: '회원 관리', icon: Users },
@@ -34,10 +56,59 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-bold">대시보드</h1>
         <p className="text-muted-foreground">OneStep Coach 센터 관리</p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              오늘 수업
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{stats.todayLessons}</p>
+          </CardContent>
+        </Card>
+
+        {isAdmin && 'totalMembers' in stats ? (
+          <>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <Users className="h-4 w-4" />
+                  활성 회원
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{stats.activeMembers}</p>
+                <p className="text-xs text-muted-foreground">
+                  전체 {stats.totalMembers}명
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <AlertTriangle className="h-4 w-4" />
+                  주의
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm">
+                  만료 임박 <strong>{stats.expiringPackages}</strong>건
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  잔여 3회 이하 <strong>{stats.lowSessionMembers}</strong>건
+                </p>
+              </CardContent>
+            </Card>
+          </>
+        ) : null}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {quickLinks.map((item) => (
-          <Link key={item.href} href={item.href} prefetch>
-            <Card className="transition-colors hover:bg-muted/40 active:bg-muted/60 max-md:transition-none">
+          <Link key={item.href} href={item.href}>
+            <Card className="h-full transition-colors hover:bg-muted/40 active:bg-muted/60 max-md:transition-none">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <item.icon className="h-4 w-4" />
@@ -50,6 +121,7 @@ export default async function DashboardPage() {
             </Card>
           </Link>
         ))}
+        {isAdmin ? <DashboardRecentPayments payments={recentActivity} /> : null}
       </div>
     </div>
   )

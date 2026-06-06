@@ -24,7 +24,10 @@ import {
 } from '@/lib/lesson-recurrence'
 import { AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { getLessonPopupPosition, getLessonCalendarLabel, getDefaultLessonCalendarLabel, resolveLessonTitle, type LessonDraft, type LessonEditAnchor } from '@/lib/calendar-utils'
-import { formatMemberCalendarLabel } from '@/lib/member-utils'
+import {
+  extractMemberNameFromCalendarLabel,
+  formatMemberCalendarLabel,
+} from '@/lib/member-utils'
 import { touchMemberRecent } from '@/lib/member-recent-search'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -526,6 +529,14 @@ export function LessonCreateDialog({
       )
 
       if (result.error) {
+        if (result.error.includes('찾을 수 없습니다')) {
+          onDeleted?.([lesson.id])
+          toast.info('이미 삭제되었거나 목록에 없는 수업입니다.', {
+            description: '캘린더에서 제거했습니다.',
+          })
+          handleOpenChange(false)
+          return
+        }
         toast.error('수업 삭제 실패', { description: result.error })
         return
       }
@@ -710,16 +721,50 @@ export function LessonCreateDialog({
     }
   }
 
+  async function resolveSubmitMemberId(
+    initialMemberId: string,
+    calendarText: string,
+    nameText: string,
+  ): Promise<string | null> {
+    if (initialMemberId) return initialMemberId
+
+    const candidateName = extractMemberNameFromCalendarLabel(
+      calendarText || nameText,
+    )
+    if (!candidateName) return null
+
+    const localMatches = memberOptions.filter((m) => m.name === candidateName)
+    if (localMatches.length === 1) return localMatches[0].id
+
+    const remoteMatches = await searchMembersForPicker(candidateName)
+    const exactRemote = remoteMatches.filter((m) => m.name === candidateName)
+    if (exactRemote.length === 1) return exactRemote[0].id
+
+    return null
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const submitMemberId = memberId || null
     const trimmedCalendar = calendarDisplayText.trim()
+    if (!date) {
+      toast.error('날짜를 선택해주세요.')
+      return
+    }
+
+    setIsLoading(true)
+
+    const submitMemberId = await resolveSubmitMemberId(
+      memberId,
+      trimmedCalendar,
+      entryText.trim(),
+    )
+
+    const resolvedMember =
+      memberOptions.find((m) => m.id === submitMemberId) ??
+      lesson?.member ??
+      null
     const autoLabel = submitMemberId
-      ? formatMemberCalendarLabel(
-          memberOptions.find((m) => m.id === submitMemberId) ??
-            lesson?.member ??
-            null,
-        )
+      ? formatMemberCalendarLabel(resolvedMember)
       : entryText.trim()
     const submitTitle = trimmedCalendar
       ? trimmedCalendar === autoLabel && submitMemberId
@@ -729,15 +774,10 @@ export function LessonCreateDialog({
         ? null
         : entryText.trim() || null
     if (!submitMemberId && !submitTitle) {
+      setIsLoading(false)
       toast.error('이름을 입력해주세요.')
       return
     }
-    if (!date) {
-      toast.error('날짜를 선택해주세요.')
-      return
-    }
-
-    setIsLoading(true)
 
     const schedulePayload = {
       instructor_id: normalizePrimaryInstructorId(instructorId) || undefined,

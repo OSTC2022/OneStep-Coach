@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createMember, deleteMember, getMembers } from '@/lib/actions/members'
+import { createMember, deleteMember, getMembers, toggleMemberStatus } from '@/lib/actions/members'
+import { getInstructors } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { formatMemberAge, formatMemberAgeFromBirthDate, AUTO_INSTRUCTOR_ID, formatPrimaryInstructorName } from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
@@ -12,7 +13,7 @@ import { InstructorSelectField } from '@/components/members/instructor-select-fi
 import { Member, Instructor, MemberFormData } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
   Table,
@@ -49,14 +50,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Search, Eye, Edit, Trash2 } from 'lucide-react'
+import { Edit, Plus, Search, Trash2 } from 'lucide-react'
 import { MemberTrashSheet } from './member-trash-sheet'
 
 interface MemberListProps {
   initialMembers: (Member & { primary_instructor?: { id: string; name: string } | null })[]
   totalCount: number
   pageSize?: number
-  instructors: { id: string; name: string }[]
   initialTrashCount?: number
 }
 
@@ -64,7 +64,6 @@ export function MemberList({
   initialMembers,
   totalCount,
   pageSize = LIST_PAGE_SIZE,
-  instructors,
   initialTrashCount = 0,
 }: MemberListProps) {
   const [members, setMembers] = useState(initialMembers)
@@ -72,6 +71,8 @@ export function MemberList({
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [instructors, setInstructors] = useState<{ id: string; name: string }[]>([])
+  const [instructorsLoading, setInstructorsLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Member | null>(null)
@@ -84,6 +85,22 @@ export function MemberList({
     setMembers(initialMembers)
     setLoadedCount(initialMembers.length)
   }, [initialMembers])
+
+  useEffect(() => {
+    if (!isAddDialogOpen || instructors.length > 0 || instructorsLoading) return
+
+    let cancelled = false
+    setInstructorsLoading(true)
+    void getInstructors({ isActive: true, picker: true, limit: 100 }).then((rows) => {
+      if (cancelled) return
+      setInstructors(rows.map(({ id, name }) => ({ id, name })))
+      setInstructorsLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAddDialogOpen, instructors.length, instructorsLoading])
 
   const hasMore = loadedCount < totalCount
 
@@ -170,6 +187,25 @@ export function MemberList({
     }
 
     setIsLoading(false)
+    router.refresh()
+  }
+
+  const handleToggleMemberStatus = async (member: Member) => {
+    const nextActive = !member.is_active
+    const result = await toggleMemberStatus(member.id, nextActive)
+    if (result.error) {
+      toast.error(nextActive ? '활성화 실패' : '비활성화 실패', {
+        description: result.error,
+      })
+      return
+    }
+
+    setMembers((prev) =>
+      prev.map((item) =>
+        item.id === member.id ? { ...item, is_active: nextActive } : item,
+      ),
+    )
+    toast.success(nextActive ? '회원이 활성화되었습니다.' : '회원이 비활성화되었습니다.')
     router.refresh()
   }
 
@@ -473,22 +509,18 @@ export function MemberList({
                     {formatPrimaryInstructorName(member.primary_instructor)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={member.is_active ? 'default' : 'secondary'}>
-                      {member.is_active ? '활성' : '비활성'}
-                    </Badge>
+                    <Switch
+                      checked={member.is_active}
+                      onCheckedChange={() => void handleToggleMemberStatus(member)}
+                    />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Link href={`/dashboard/members/${member.id}`}>
-                        <Button variant="ghost" size="icon">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </Link>
-                      <Link href={`/dashboard/members/${member.id}/edit`}>
-                        <Button variant="ghost" size="icon">
+                      <Button variant="ghost" size="icon" asChild>
+                        <Link href={`/dashboard/members/${member.id}/edit`}>
                           <Edit className="h-4 w-4" />
-                        </Button>
-                      </Link>
+                        </Link>
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -515,8 +547,8 @@ export function MemberList({
           <AlertDialogHeader>
             <AlertDialogTitle>회원 삭제</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget?.name} 회원을 삭제하시겠습니까? 휴지통으로 이동하며, 휴지통에서
-              복구할 수 있습니다.
+              {deleteTarget?.name} 회원을 휴지통으로 이동합니다. 세션/결제 기록은 그대로
+              유지되며 세션/결제 화면에서 계속 검색할 수 있습니다. 휴지통에서 복구도 가능합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

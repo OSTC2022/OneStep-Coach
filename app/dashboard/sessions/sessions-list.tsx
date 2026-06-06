@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -26,6 +27,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -34,11 +45,15 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Search, CreditCard, AlertTriangle, TrendingUp } from 'lucide-react'
+import { Plus, Search, CreditCard, AlertTriangle, TrendingUp, Edit, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { getPresetPrice } from '@/lib/session-package-utils'
-import { getSessionPackagesPage } from '@/lib/actions/sessions'
+import {
+  deleteSessionPackage,
+  getSessionPackagesPage,
+  updateSessionPackage,
+} from '@/lib/actions/sessions'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
 interface SessionPackage {
@@ -53,20 +68,38 @@ interface SessionPackage {
   note: string | null
   is_active: boolean
   created_at: string
-  member: { id: string; name: string; phone: string | null } | null
+  member: {
+    id: string
+    name: string
+    phone: string | null
+    deleted_at?: string | null
+  } | null
+}
+
+function isMemberDeleted(member: SessionPackage['member']) {
+  return Boolean(member?.deleted_at)
 }
 
 interface SessionsListProps {
   initialPackages: SessionPackage[]
   totalCount: number
+  monthlyRevenue: number
   pageSize?: number
   members: { id: string; name: string }[]
   selectedMemberId?: string
 }
 
+function formatRevenueMan(value: number) {
+  if (value >= 10000) {
+    return `${Math.round(value / 10000)}만원`
+  }
+  return `${value.toLocaleString()}원`
+}
+
 export function SessionsList({
   initialPackages,
   totalCount,
+  monthlyRevenue,
   pageSize = LIST_PAGE_SIZE,
   members,
   selectedMemberId,
@@ -78,6 +111,18 @@ export function SessionsList({
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(!!selectedMemberId)
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [editTarget, setEditTarget] = useState<SessionPackage | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<SessionPackage | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [editForm, setEditForm] = useState({
+    total_sessions: 10,
+    remaining_sessions: 10,
+    price: '',
+    paid_at: '',
+    expires_at: '',
+    payment_method: '카드',
+    note: '',
+  })
   const hasMore = loadedCount < totalCount
 
   async function handleLoadMore() {
@@ -126,7 +171,7 @@ export function SessionsList({
   // Stats
   const totalActivePackages = packages.filter(p => p.is_active && p.remaining_sessions > 0).length
   const lowSessionPackages = packages.filter(p => p.is_active && p.remaining_sessions > 0 && p.remaining_sessions <= 3).length
-  const totalRevenue = packages.reduce((sum, p) => sum + (p.price || 0), 0)
+  const listedRevenue = packages.reduce((sum, p) => sum + (p.price || 0), 0)
 
   const handleAddPackage = async () => {
     if (!formData.member_id || formData.total_sessions <= 0) {
@@ -181,26 +226,96 @@ export function SessionsList({
     router.refresh()
   }
 
-  const handleToggleStatus = async (packageId: string, isActive: boolean) => {
-    const nextActive = !isActive
-    const message = nextActive
-      ? '이 수업권을 활성화하시겠습니까?'
-      : '이 수업권을 비활성화하시겠습니까?'
-    if (!confirm(message)) return
-
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('session_packages')
-      .update({ is_active: nextActive })
-      .eq('id', packageId)
-
-    if (error) {
-      toast.error(nextActive ? '활성화 실패' : '비활성화 실패', { description: error.message })
-    } else {
-      toast.success(nextActive ? '수업권이 활성화되었습니다.' : '수업권이 비활성화되었습니다.')
-      setPackages(packages.map(p => p.id === packageId ? { ...p, is_active: nextActive } : p))
-      router.refresh()
+  const handleToggleStatus = async (pkg: SessionPackage) => {
+    const nextActive = !pkg.is_active
+    const result = await updateSessionPackage(pkg.id, { is_active: nextActive })
+    if (result.error) {
+      toast.error(nextActive ? '활성화 실패' : '비활성화 실패', { description: result.error })
+      return
     }
+
+    toast.success(nextActive ? '수업권이 활성화되었습니다.' : '수업권이 비활성화되었습니다.')
+    setPackages((prev) =>
+      prev.map((item) =>
+        item.id === pkg.id ? { ...item, is_active: nextActive } : item,
+      ),
+    )
+    router.refresh()
+  }
+
+  function openEditDialog(pkg: SessionPackage) {
+    setEditTarget(pkg)
+    setEditForm({
+      total_sessions: pkg.total_sessions,
+      remaining_sessions: pkg.remaining_sessions,
+      price: pkg.price != null ? String(pkg.price) : '',
+      paid_at: pkg.paid_at?.split('T')[0] ?? '',
+      expires_at: pkg.expires_at?.split('T')[0] ?? '',
+      payment_method: pkg.payment_method || '카드',
+      note: pkg.note || '',
+    })
+  }
+
+  async function handleSaveEdit() {
+    if (!editTarget) return
+    setIsLoading(true)
+
+    const result = await updateSessionPackage(editTarget.id, {
+      total_sessions: editForm.total_sessions,
+      remaining_sessions: editForm.remaining_sessions,
+      price: editForm.price ? Number(editForm.price) : undefined,
+      paid_at: editForm.paid_at || undefined,
+      expires_at: editForm.expires_at || undefined,
+      payment_method: editForm.payment_method || undefined,
+      note: editForm.note || undefined,
+    })
+
+    setIsLoading(false)
+    if (result.error) {
+      toast.error('수업권 수정 실패', { description: result.error })
+      return
+    }
+
+    if (result.data) {
+      setPackages((prev) =>
+        prev.map((item) =>
+          item.id === editTarget.id
+            ? {
+                ...item,
+                total_sessions: result.data!.total_sessions,
+                remaining_sessions: result.data!.remaining_sessions,
+                price: result.data!.price,
+                paid_at: result.data!.paid_at,
+                expires_at: result.data!.expires_at,
+                payment_method: result.data!.payment_method,
+                note: result.data!.note,
+              }
+            : item,
+        ),
+      )
+    }
+
+    toast.success('수업권이 수정되었습니다.')
+    setEditTarget(null)
+    router.refresh()
+  }
+
+  async function handleDeletePackage() {
+    if (!deleteTarget) return
+    setDeleting(true)
+
+    const result = await deleteSessionPackage(deleteTarget.id)
+    setDeleting(false)
+
+    if (result.error) {
+      toast.error('삭제 실패', { description: result.error })
+      return
+    }
+
+    setPackages((prev) => prev.filter((item) => item.id !== deleteTarget.id))
+    setDeleteTarget(null)
+    toast.success('수업권이 휴지통으로 이동했습니다.')
+    router.refresh()
   }
 
   return (
@@ -229,12 +344,14 @@ export function SessionsList({
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">총 결제액</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">이번 달 결제</CardTitle>
             <TrendingUp className="h-4 w-4 text-success" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{(totalRevenue / 10000).toFixed(0)}만원</div>
-            <p className="text-xs text-muted-foreground">누적 금액</p>
+            <div className="text-2xl font-bold">{formatRevenueMan(monthlyRevenue)}</div>
+            <p className="text-xs text-muted-foreground">
+              목록 누적 {formatRevenueMan(listedRevenue)}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -433,7 +550,7 @@ export function SessionsList({
                 <TableRow key={pkg.id}>
                   <TableCell>
                     <div>
-                      {pkg.member_id ? (
+                      {pkg.member_id && !isMemberDeleted(pkg.member) ? (
                         <Link
                           href={`/dashboard/members/${pkg.member_id}`}
                           className="font-medium text-primary hover:underline"
@@ -441,7 +558,12 @@ export function SessionsList({
                           {pkg.member?.name}
                         </Link>
                       ) : (
-                        <p className="font-medium">{pkg.member?.name}</p>
+                        <p className="font-medium">{pkg.member?.name ?? '(삭제된 회원)'}</p>
+                      )}
+                      {isMemberDeleted(pkg.member) && (
+                        <Badge variant="outline" className="mt-1 text-[10px]">
+                          삭제된 회원
+                        </Badge>
                       )}
                       <p className="text-sm text-muted-foreground">{pkg.member?.phone}</p>
                     </div>
@@ -468,33 +590,29 @@ export function SessionsList({
                     {pkg.remaining_sessions === 0 ? (
                       <Badge variant="secondary">완료</Badge>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatus(pkg.id, pkg.is_active)}
-                        className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        {pkg.is_active ? (
-                          <Badge className="cursor-pointer bg-success text-success-foreground hover:opacity-80">
-                            활성
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="cursor-pointer hover:opacity-80">
-                            비활성
-                          </Badge>
-                        )}
-                      </button>
+                      <Switch
+                        checked={pkg.is_active}
+                        onCheckedChange={() => void handleToggleStatus(pkg)}
+                      />
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {pkg.remaining_sessions > 0 && (
+                    <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost"
-                        size="sm"
-                        onClick={() => handleToggleStatus(pkg.id, pkg.is_active)}
+                        size="icon"
+                        onClick={() => openEditDialog(pkg)}
                       >
-                        {pkg.is_active ? '비활성화' : '활성화'}
+                        <Edit className="h-4 w-4" />
                       </Button>
-                    )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeleteTarget(pkg)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -515,6 +633,144 @@ export function SessionsList({
           </Button>
         </div>
       )}
+
+      <Dialog open={editTarget != null} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>수업권 수정</DialogTitle>
+            <DialogDescription>
+              {editTarget?.member?.name ?? '회원'} · {editTarget?.total_sessions}회권
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="edit-total">전체 횟수</Label>
+                <Input
+                  id="edit-total"
+                  type="number"
+                  min={1}
+                  value={editForm.total_sessions}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      total_sessions: Number(e.target.value) || 1,
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-remaining">잔여 횟수</Label>
+                <Input
+                  id="edit-remaining"
+                  type="number"
+                  min={0}
+                  value={editForm.remaining_sessions}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      remaining_sessions: Number(e.target.value) || 0,
+                    })
+                  }
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-price">결제액</Label>
+              <Input
+                id="edit-price"
+                value={editForm.price}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    price: e.target.value.replace(/[^\d]/g, ''),
+                  })
+                }
+                placeholder="880000"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>결제일</Label>
+                <KoreanDatePicker
+                  value={editForm.paid_at}
+                  onChange={(value) => setEditForm({ ...editForm, paid_at: value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>만료일</Label>
+                <KoreanDatePicker
+                  value={editForm.expires_at}
+                  onChange={(value) => setEditForm({ ...editForm, expires_at: value })}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-payment">결제 수단</Label>
+              <Select
+                value={editForm.payment_method}
+                onValueChange={(value) =>
+                  setEditForm({ ...editForm, payment_method: value })
+                }
+              >
+                <SelectTrigger id="edit-payment">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="카드">카드</SelectItem>
+                  <SelectItem value="현금">현금</SelectItem>
+                  <SelectItem value="계좌이체">계좌이체</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-note">메모</Label>
+              <Textarea
+                id="edit-note"
+                value={editForm.note}
+                onChange={(e) => setEditForm({ ...editForm, note: e.target.value })}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>
+              취소
+            </Button>
+            <Button onClick={() => void handleSaveEdit()} disabled={isLoading}>
+              {isLoading ? '저장 중…' : '저장'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={deleteTarget != null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>수업권 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.member?.name ?? '회원'}의 {deleteTarget?.total_sessions}회권을
+              휴지통으로 이동합니다. 세션/결제 기록은 휴지통에서 복구할 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault()
+                void handleDeletePackage()
+              }}
+            >
+              {deleting ? '삭제 중…' : '삭제'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

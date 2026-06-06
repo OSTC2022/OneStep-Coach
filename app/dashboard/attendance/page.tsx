@@ -1,5 +1,6 @@
 import { getTodayAttendanceData } from '@/lib/actions/attendance'
 import { AttendanceCheck } from './attendance-check'
+import type { ComponentProps } from 'react'
 
 export default async function AttendancePage() {
   const { todayLessons, instructors } = await getTodayAttendanceData()
@@ -14,7 +15,9 @@ export default async function AttendancePage() {
       </div>
 
       <AttendanceCheck
-        initialLessons={todayLessons}
+        initialLessons={
+          todayLessons as ComponentProps<typeof AttendanceCheck>['initialLessons']
+        }
         instructors={instructors}
       />
     </div>

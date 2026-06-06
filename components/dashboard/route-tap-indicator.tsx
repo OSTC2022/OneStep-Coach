@@ -11,8 +11,26 @@ export function RouteTapIndicator() {
 
   useEffect(() => {
     setActive(true)
-    const t = window.setTimeout(() => setActive(false), 400)
+    const t = window.setTimeout(() => setActive(false), 500)
     return () => window.clearTimeout(t)
+  }, [pathname])
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      const anchor = (event.target as HTMLElement).closest(
+        'a[href^="/dashboard"]',
+      )
+      if (!anchor) return
+      const href = anchor.getAttribute('href')
+      if (!href || href === pathname) return
+      setActive(true)
+    }
+
+    document.addEventListener('pointerdown', onPointerDown, { capture: true })
+    return () =>
+      document.removeEventListener('pointerdown', onPointerDown, {
+        capture: true,
+      })
   }, [pathname])
 
   return (

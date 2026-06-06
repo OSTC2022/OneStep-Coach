@@ -66,6 +66,7 @@ export async function getInstructors(options?: {
   isActive?: boolean
   picker?: boolean
   calendar?: boolean
+  limit?: number
 }): Promise<Instructor[]> {
   const supabase = await createStaffDataClient()
   const select = options?.calendar
@@ -81,6 +82,10 @@ export async function getInstructors(options?: {
 
   if (options?.isActive !== undefined) {
     query = query.eq('is_active', options.isActive)
+  }
+
+  if (options?.limit) {
+    query = query.limit(options.limit)
   }
 
   const { data, error } = await query

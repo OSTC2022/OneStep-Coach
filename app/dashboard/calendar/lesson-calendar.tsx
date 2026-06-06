@@ -52,6 +52,16 @@ import {
   matchCalendarUndoRedo,
 } from '@/lib/calendar-shortcuts'
 
+function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
+  const map = new Map<string, Lesson>()
+  for (const list of lists) {
+    for (const lesson of list) {
+      map.set(lesson.id, lesson)
+    }
+  }
+  return Array.from(map.values())
+}
+
 const viewLoading = (
   <div className="flex min-h-[200px] flex-1 items-center justify-center">
     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -142,37 +152,31 @@ export function LessonCalendar({
     if (!editOpen) setEditDraftInstructorId(null)
   }, [editOpen])
 
+  const searchLessons = useMemo(
+    () => mergeLessonsById(searchPoolLessons, lessons),
+    [searchPoolLessons, lessons],
+  )
+
   const lessonsWithEditPreview = useMemo(() => {
     if (!editOpen || !editingLesson?.id || editDraftInstructorId == null) {
-      return lessons
+      return searchLessons
     }
 
     const normalizedId = normalizePrimaryInstructorId(editDraftInstructorId)
 
-    return lessons.map((item) => {
+    return searchLessons.map((item) => {
       if (item.id !== editingLesson.id) return item
       return enrichLessonWithInstructorCatalog(
         { ...item, instructor_id: normalizedId },
         instructors,
       )
     })
-  }, [lessons, editOpen, editingLesson, editDraftInstructorId, instructors])
+  }, [searchLessons, editOpen, editingLesson, editDraftInstructorId, instructors])
 
   const filteredLessons = useMemo(() => {
     if (instructorFilter === 'all') return lessonsWithEditPreview
     return lessonsWithEditPreview.filter((l) => l.instructor_id === instructorFilter)
   }, [lessonsWithEditPreview, instructorFilter])
-
-  const searchLessons = useMemo(() => {
-    const map = new Map<string, Lesson>()
-    for (const lesson of searchPoolLessons) {
-      map.set(lesson.id, lesson)
-    }
-    for (const lesson of lessons) {
-      map.set(lesson.id, lesson)
-    }
-    return Array.from(map.values())
-  }, [searchPoolLessons, lessons])
 
   const rangeCacheKey = useCallback((date: Date, nextView: CalendarView) => {
     const { dateFrom, dateTo } = getRangeForView(date, nextView)
@@ -213,6 +217,16 @@ export function LessonCalendar({
     })
   }, [initialLessons])
 
+  const syncMonthPool = useCallback(
+    (date: Date, data: Lesson[]) => {
+      const key = `${date.getFullYear()}-${date.getMonth() + 1}`
+      setSearchPoolKey(key)
+      setSearchPoolLessons((prev) => mergeLessonsById(prev, data))
+      setLessons((prev) => mergeLessonsById(prev, data))
+    },
+    [],
+  )
+
   const loadSearchPool = useCallback(() => {
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth() + 1
@@ -220,14 +234,12 @@ export function LessonCalendar({
     if (searchPoolKey === key) return
 
     void getLessonsForMonth(year, month).then((data) => {
-      setSearchPoolLessons((prev) => {
-        const map = new Map(prev.map((l) => [l.id, l]))
-        for (const lesson of data) map.set(lesson.id, lesson)
-        return Array.from(map.values())
-      })
-      setSearchPoolKey(key)
+      syncMonthPool(currentDate, data)
+      if (view === 'month') {
+        rangeCacheRef.current.set(rangeCacheKey(currentDate, view), data)
+      }
     })
-  }, [currentDate, searchPoolKey])
+  }, [currentDate, searchPoolKey, syncMonthPool, view, rangeCacheKey])
 
   const loadRange = useCallback(
     (date: Date, nextView: CalendarView, options?: { force?: boolean }) => {
@@ -235,24 +247,35 @@ export function LessonCalendar({
       const cached = rangeCacheRef.current.get(cacheKey)
       if (cached && !options?.force) {
         setLessons(cached)
+        if (nextView === 'month') {
+          syncMonthPool(date, cached)
+        }
         return
       }
 
       const seq = ++rangeFetchSeqRef.current
       setIsFetching(true)
       const { dateFrom, dateTo } = getRangeForView(date, nextView)
-      void getLessonsForRange(dateFrom, dateTo)
+      const fetchLessons =
+        nextView === 'month'
+          ? getLessonsForMonth(date.getFullYear(), date.getMonth() + 1)
+          : getLessonsForRange(dateFrom, dateTo)
+
+      void fetchLessons
         .then((data) => {
           if (seq !== rangeFetchSeqRef.current) return
           rangeCacheRef.current.set(cacheKey, data)
           setLessons(data)
+          if (nextView === 'month') {
+            syncMonthPool(date, data)
+          }
           lessonHistory.clear()
         })
         .finally(() => {
           if (seq === rangeFetchSeqRef.current) setIsFetching(false)
         })
     },
-    [lessonHistory, rangeCacheKey],
+    [lessonHistory, rangeCacheKey, syncMonthPool],
   )
 
   function handleViewChange(nextView: CalendarView) {
@@ -264,6 +287,9 @@ export function LessonCalendar({
       return
     }
     setAgendaSelectedDate(currentDate)
+    if (nextView === 'month') {
+      setSearchPoolKey(null)
+    }
     loadRange(currentDate, nextView)
   }
 
@@ -274,6 +300,9 @@ export function LessonCalendar({
       setAgendaSelectedDate((prev) => addWeeks(prev, direction))
     } else {
       setAgendaSelectedDate(next)
+    }
+    if (view === 'month') {
+      setSearchPoolKey(null)
     }
     loadRange(next, view)
   }
@@ -683,7 +712,10 @@ export function LessonCalendar({
         calendarRootRef.current?.focus({ preventScroll: true })
       }}
     >
-      <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div
+        className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        data-calendar-toolbar
+      >
         <div className="flex min-w-0 items-center gap-2">
           <CalendarInstructorList
             instructors={instructors}

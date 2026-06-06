@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { deleteSessionPackage } from '@/lib/actions/sessions'
+import { resolveMemberBmi } from '@/lib/member-utils'
 import { Member, SessionPackage } from '@/types/database'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -92,6 +93,8 @@ export function MemberDetail({
     () => sortLessonsForRecentDisplay(lessons, sessionNumberByLessonId),
     [lessons, sessionNumberByLessonId],
   )
+
+  const displayBmi = useMemo(() => resolveMemberBmi(member), [member])
 
   const lessonTotalPages = Math.max(
     1,
@@ -257,12 +260,20 @@ export function MemberDetail({
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">BMI</span>
-              <span className={member.bmi ? (
-                member.bmi < 18.5 ? 'text-blue-400' :
-                member.bmi < 23 ? 'text-green-400' :
-                member.bmi < 25 ? 'text-yellow-400' : 'text-red-400'
-              ) : ''}>
-                {member.bmi ? member.bmi.toFixed(1) : '-'}
+              <span
+                className={
+                  displayBmi
+                    ? displayBmi < 18.5
+                      ? 'text-blue-400'
+                      : displayBmi < 23
+                        ? 'text-green-400'
+                        : displayBmi < 25
+                          ? 'text-yellow-400'
+                          : 'text-red-400'
+                    : ''
+                }
+              >
+                {displayBmi != null ? displayBmi.toFixed(1) : '-'}
               </span>
             </div>
           </CardContent>

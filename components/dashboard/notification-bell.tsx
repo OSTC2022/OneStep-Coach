@@ -1,8 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { Bell, Loader2 } from 'lucide-react'
@@ -27,12 +26,11 @@ interface NotificationBellProps {
 }
 
 export function NotificationBell({ userId }: NotificationBellProps) {
-  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<DashboardNotification[]>([])
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set())
   const [isLoading, setIsLoading] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const hasLoadedRef = useRef(false)
 
   const loadNotifications = useCallback(async () => {
     setIsLoading(true)
@@ -46,11 +44,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   }, [userId])
 
   useEffect(() => {
-    void loadNotifications()
-  }, [loadNotifications])
-
-  useEffect(() => {
-    if (!open) return
+    if (!open || hasLoadedRef.current) return
+    hasLoadedRef.current = true
     void loadNotifications()
   }, [open, loadNotifications])
 
@@ -76,9 +71,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     markNotificationRead(userId, item.id)
     refreshReadState()
     setOpen(false)
-    startTransition(() => {
-      router.push(item.href)
-    })
   }
 
   const unreadCount = unreadItems.length
@@ -115,12 +107,12 @@ export function NotificationBell({ userId }: NotificationBellProps) {
             items.map((item) => {
               const isUnread = !readIds.has(item.id)
               return (
-                <button
+                <Link
                   key={item.id}
-                  type="button"
+                  href={item.href}
+                  prefetch
                   className="flex w-full flex-col gap-0.5 border-b border-border/60 px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
                   onClick={() => handleItemClick(item)}
-                  disabled={isPending}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span
@@ -136,7 +128,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
                   <span className="text-[11px] text-muted-foreground/80">
                     {format(parseISO(item.createdAt), 'M월 d일 HH:mm', { locale: ko })}
                   </span>
-                </button>
+                </Link>
               )
             })
           )}

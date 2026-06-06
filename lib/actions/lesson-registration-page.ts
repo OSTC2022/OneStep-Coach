@@ -1,26 +1,71 @@
 'use server'
 
+import { format, subDays } from 'date-fns'
+import { getMembers } from '@/lib/actions/members'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
+const RECENT_LESSON_DAYS = 7
+
+function getRecentLessonDateRange() {
+  const today = new Date()
+  return {
+    dateFrom: format(subDays(today, RECENT_LESSON_DAYS - 1), 'yyyy-MM-dd'),
+    dateTo: format(today, 'yyyy-MM-dd'),
+  }
+}
+
+type MemberPackageRow = {
+  id: string
+  member_id: string
+  total_sessions: number
+  remaining_sessions: number
+  is_active: boolean
+}
+
+async function fetchMemberPackages(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  memberIds: string[],
+): Promise<MemberPackageRow[]> {
+  if (memberIds.length === 0) return []
+
+  let query = supabase
+    .from('session_packages')
+    .select('id, member_id, total_sessions, remaining_sessions, is_active')
+    .in('member_id', memberIds)
+    .is('deleted_at', null)
+
+  let { data, error } = await query
+
+  if (error?.code === '42703' || error?.message?.includes('deleted_at')) {
+    const legacy = await supabase
+      .from('session_packages')
+      .select('id, member_id, total_sessions, remaining_sessions, is_active')
+      .in('member_id', memberIds)
+    data = legacy.data
+    error = legacy.error
+  }
+
+  if (error) {
+    console.error('Error fetching member packages for lesson registration:', error)
+    return []
+  }
+
+  return (data ?? []) as MemberPackageRow[]
+}
+
 export async function getLessonRegistrationPageData() {
   const supabase = await createStaffDataClient()
-  const today = new Date().toISOString().split('T')[0]
+  const { dateFrom, dateTo } = getRecentLessonDateRange()
 
-  const [{ data: members }, { data: instructors }, { data: todayLessons }] =
+  const [{ data: memberRows }, { data: instructors }, { data: recentWeekLessons }] =
     await Promise.all([
-      supabase
-        .from('members')
-        .select(`
-          id,
-          name,
-          phone,
-          sport,
-          session_packages(id, total_sessions, remaining_sessions, is_active)
-        `)
-        .eq('is_active', true)
-        .order('name')
-        .limit(LIST_PAGE_SIZE),
+      getMembers({
+        isActive: true,
+        orderBy: 'name',
+        orderAsc: true,
+        limit: LIST_PAGE_SIZE,
+      }),
       supabase
         .from('instructors')
         .select('id, name')
@@ -44,13 +89,42 @@ export async function getLessonRegistrationPageData() {
           member:members(name, phone),
           instructor:instructors(name)
         `)
-        .eq('lesson_date', today)
-        .order('start_time'),
+        .gte('lesson_date', dateFrom)
+        .lte('lesson_date', dateTo)
+        .order('lesson_date', { ascending: false })
+        .order('start_time', { ascending: false })
+        .limit(120),
     ])
 
+  const memberIds = memberRows.map((member) => member.id)
+  const packages =
+    memberIds.length > 0
+      ? await fetchMemberPackages(supabase, memberIds)
+      : []
+  const packagesByMember = new Map<string, MemberPackageRow[]>()
+
+  for (const pkg of packages) {
+    const group = packagesByMember.get(pkg.member_id) ?? []
+    group.push(pkg)
+    packagesByMember.set(pkg.member_id, group)
+  }
+
+  const members = memberRows.map((member) => ({
+    id: member.id,
+    name: member.name,
+    phone: member.phone,
+    sport: member.sport,
+    session_packages: (packagesByMember.get(member.id) ?? []).map((pkg) => ({
+      id: pkg.id,
+      total_sessions: pkg.total_sessions,
+      remaining_sessions: pkg.remaining_sessions,
+      is_active: pkg.is_active,
+    })),
+  }))
+
   return {
-    members: members ?? [],
+    members,
     instructors: instructors ?? [],
-    todayLessons: todayLessons ?? [],
+    recentWeekLessons: recentWeekLessons ?? [],
   }
 }

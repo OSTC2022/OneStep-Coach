@@ -222,6 +222,212 @@ export async function getSessionPackages(options?: {
   }
 }
 
+async function countDeductedLessonsForPackage(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  packageId: string,
+  memberId: string,
+) {
+  const { count: linkedCount, error: linkedError } = await supabase
+    .from('lessons')
+    .select('id', { count: 'exact', head: true })
+    .eq('session_package_id', packageId)
+    .eq('session_deducted', true)
+
+  if (linkedError) {
+    throw new Error(linkedError.message)
+  }
+
+  let deductedCount = linkedCount ?? 0
+
+  let packageCountQuery = supabase
+    .from('session_packages')
+    .select('id', { count: 'exact', head: true })
+    .eq('member_id', memberId)
+
+  const trashEnabled = await isSessionPackageTrashEnabled()
+  if (trashEnabled) {
+    packageCountQuery = packageCountQuery.is('deleted_at', null)
+  }
+
+  const { count: packageCount } = await packageCountQuery
+
+  if ((packageCount ?? 0) <= 1) {
+    const { count: orphanCount } = await supabase
+      .from('lessons')
+      .select('id', { count: 'exact', head: true })
+      .eq('member_id', memberId)
+      .eq('session_deducted', true)
+      .is('session_package_id', null)
+
+    deductedCount += orphanCount ?? 0
+  }
+
+  return deductedCount
+}
+
+/** 차감된 수업 수 기준으로 잔여 횟수 재계산 */
+export async function reconcileSessionPackageRemaining(
+  packageId: string,
+  client?: Awaited<ReturnType<typeof createStaffDataClient>>,
+): Promise<{ remaining?: number; error?: string }> {
+  const supabase = client ?? (await createStaffDataClient())
+
+  const { data: pkg, error: pkgError } = await supabase
+    .from('session_packages')
+    .select('id, member_id, total_sessions')
+    .eq('id', packageId)
+    .single()
+
+  if (pkgError || !pkg) {
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  try {
+    const deductedCount = await countDeductedLessonsForPackage(
+      supabase,
+      packageId,
+      pkg.member_id,
+    )
+    const remaining = Math.max(0, pkg.total_sessions - deductedCount)
+
+    const { error: updateError } = await supabase
+      .from('session_packages')
+      .update({
+        remaining_sessions: remaining,
+        is_active: remaining > 0,
+      })
+      .eq('id', packageId)
+
+    if (updateError) {
+      return { error: mapSessionPackageError(updateError.message) }
+    }
+
+    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+      p_member_id: pkg.member_id,
+    })
+    if (syncError) {
+      console.warn('sync_member_remaining_sessions:', syncError.message)
+    }
+
+    return { remaining }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '잔여 횟수 계산 실패'
+    return { error: message }
+  }
+}
+
+function getCurrentMonthStartKey() {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+}
+
+export type RecentSessionPayment = {
+  id: string
+  total_sessions: number
+  price: number | null
+  paid_at: string | null
+  created_at: string
+  payment_method: string | null
+  member: { name: string } | null
+}
+
+async function fetchSessionRevenueRows(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  options?: { paidFrom?: string; paidTo?: string },
+) {
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
+  let query = supabase
+    .from('session_packages')
+    .select('price')
+    .not('price', 'is', null)
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  if (options?.paidFrom) {
+    query = query.gte('paid_at', options.paidFrom)
+  }
+
+  if (options?.paidTo) {
+    query = query.lte('paid_at', options.paidTo)
+  }
+
+  let { data, error } = await query.limit(1000)
+
+  if (error?.code === '42703' || error?.message?.includes('deleted_at')) {
+    let legacy = supabase.from('session_packages').select('price').not('price', 'is', null)
+    if (options?.paidFrom) legacy = legacy.gte('paid_at', options.paidFrom)
+    if (options?.paidTo) legacy = legacy.lte('paid_at', options.paidTo)
+    const retry = await legacy.limit(1000)
+    data = retry.data
+    error = retry.error
+  }
+
+  if (error) {
+    console.error('Error summing session revenue:', error)
+    return []
+  }
+
+  return data ?? []
+}
+
+export async function sumSessionPackageRevenue(options?: {
+  paidFrom?: string
+  paidTo?: string
+}): Promise<number> {
+  const supabase = await createStaffDataClient()
+  const rows = await fetchSessionRevenueRows(supabase, options)
+  return rows.reduce((sum, row) => sum + (Number(row.price) || 0), 0)
+}
+
+/** 대시보드·세션/결제 공통 — 이번 달 결제 합계 (휴지통 제외) */
+export async function getMonthlySessionRevenue(): Promise<number> {
+  return sumSessionPackageRevenue({ paidFrom: getCurrentMonthStartKey() })
+}
+
+export async function getRecentSessionPayments(
+  limit = 6,
+): Promise<RecentSessionPayment[]> {
+  const supabase = await createStaffDataClient()
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
+  let query = supabase
+    .from('session_packages')
+    .select(
+      'id, total_sessions, price, paid_at, created_at, payment_method, member:members(name)',
+    )
+    .order('paid_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  let { data, error } = await query
+
+  if (error?.code === '42703' || error?.message?.includes('deleted_at')) {
+    const legacy = await supabase
+      .from('session_packages')
+      .select(
+        'id, total_sessions, price, paid_at, created_at, payment_method, member:members(name)',
+      )
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    data = legacy.data
+    error = legacy.error
+  }
+
+  if (error) {
+    console.error('Error fetching recent session payments:', error)
+    return []
+  }
+
+  return (data ?? []) as RecentSessionPayment[]
+}
+
 export async function getSessionPackagesPage(options?: {
   memberId?: string
   limit?: number
@@ -232,7 +438,49 @@ export async function getSessionPackagesPage(options?: {
     limit: options?.limit ?? LIST_PAGE_SIZE,
     offset: options?.offset ?? 0,
   })
-  return { data, count }
+
+  if (data.length === 0) {
+    return { data, count }
+  }
+
+  const supabase = await createStaffDataClient()
+  const reconciled = await Promise.all(
+    data.map(async (pkg) => {
+      const result = await reconcileSessionPackageRemaining(pkg.id, supabase)
+      if (result.remaining == null) return pkg
+      return {
+        ...pkg,
+        remaining_sessions: result.remaining,
+        is_active: result.remaining > 0,
+      }
+    }),
+  )
+
+  return { data: reconciled, count }
+}
+
+export async function queryActiveSessionPackageId(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  memberId: string,
+): Promise<string | null> {
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
+  let query = supabase
+    .from('session_packages')
+    .select('id')
+    .eq('member_id', memberId)
+    .eq('is_active', true)
+    .gt('remaining_sessions', 0)
+    .order('created_at', { ascending: true })
+    .limit(1)
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  const { data, error } = await query.maybeSingle()
+  if (error || !data) return null
+  return data.id
 }
 
 export async function getActivePackageForMember(memberId: string): Promise<SessionPackage | null> {
@@ -560,10 +808,11 @@ export async function getExpiringPackages(days: number = 7): Promise<SessionPack
 
   let query = supabase
     .from('session_packages')
-    .select('*, member:members(*)')
+    .select(`${SESSION_PACKAGE_LIST_SELECT}, member:members(id, name, phone)`)
     .eq('is_active', true)
     .lte('expires_at', futureDate.toISOString().split('T')[0])
     .order('expires_at', { ascending: true })
+    .limit(50)
 
   if (trashEnabled) {
     query = query.is('deleted_at', null)
@@ -585,11 +834,12 @@ export async function getLowSessionPackages(threshold: number = 3): Promise<Sess
 
   let query = supabase
     .from('session_packages')
-    .select('*, member:members(*)')
+    .select(`${SESSION_PACKAGE_LIST_SELECT}, member:members(id, name, phone)`)
     .eq('is_active', true)
     .lte('remaining_sessions', threshold)
     .gt('remaining_sessions', 0)
     .order('remaining_sessions', { ascending: true })
+    .limit(50)
 
   if (trashEnabled) {
     query = query.is('deleted_at', null)

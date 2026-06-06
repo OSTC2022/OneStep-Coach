@@ -2,7 +2,16 @@ import { redirect } from 'next/navigation'
 import { requireDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getInstructorsPage } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
-import { InstructorManagement } from './instructor-management'
+import dynamic from 'next/dynamic'
+import { TableSkeleton } from '@/components/dashboard/page-skeletons'
+
+const InstructorManagement = dynamic(
+  () =>
+    import('./instructor-management').then((mod) => ({
+      default: mod.InstructorManagement,
+    })),
+  { loading: () => <TableSkeleton rows={8} /> },
+)
 
 export default async function InstructorsPage() {
   const user = await requireDashboardProfile()

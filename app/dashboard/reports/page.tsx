@@ -1,5 +1,14 @@
+import dynamic from 'next/dynamic'
 import { getReportDashboardData } from '@/lib/actions/reports'
-import { ReportDashboard } from './report-dashboard'
+import { StatCardsSkeleton } from '@/components/dashboard/page-skeletons'
+
+const ReportDashboard = dynamic(
+  () =>
+    import('./report-dashboard').then((mod) => ({
+      default: mod.ReportDashboard,
+    })),
+  { loading: () => <StatCardsSkeleton count={4} /> },
+)
 
 export default async function ReportsPage() {
   const data = await getReportDashboardData()

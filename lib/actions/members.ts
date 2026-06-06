@@ -6,7 +6,11 @@ import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { Member, MemberFormData } from '@/lib/types'
-import { resolveMemberAgeAndBirthDate, normalizePrimaryInstructorId } from '@/lib/member-utils'
+import {
+  calculateMemberBmi,
+  normalizePrimaryInstructorId,
+  resolveMemberAgeAndBirthDate,
+} from '@/lib/member-utils'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import {
   MEMBER_DETAIL_SELECT,
@@ -299,11 +303,6 @@ export async function getMember(id: string): Promise<Member | null> {
   return attachPrimaryInstructors([member], lookup)[0] as Member
 }
 
-function calculateBmi(heightCm?: number, weightKg?: number): number | null {
-  if (!heightCm || !weightKg) return null
-  return Number((weightKg / Math.pow(heightCm / 100, 2)).toFixed(1))
-}
-
 function normalizeOptionalString(value?: string | null): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
@@ -366,7 +365,7 @@ export async function createMember(formData: MemberFormData): Promise<{ data?: M
       sport: normalizeOptionalString(formData.sport),
       height_cm: formData.height_cm ?? null,
       weight_kg: formData.weight_kg ?? null,
-      bmi: calculateBmi(formData.height_cm, formData.weight_kg),
+      bmi: calculateMemberBmi(formData.height_cm, formData.weight_kg),
       goal: normalizeOptionalString(formData.goal),
       injury_history: normalizeOptionalString(formData.injury_history),
       memo: normalizeOptionalString(formData.memo),
@@ -405,7 +404,7 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
   if (formData.height_cm !== undefined || formData.weight_kg !== undefined) {
     const height = formData.height_cm ?? undefined
     const weight = formData.weight_kg ?? undefined
-    updateData.bmi = calculateBmi(height, weight)
+    updateData.bmi = calculateMemberBmi(height, weight)
   }
   if (formData.goal !== undefined) updateData.goal = formData.goal || null
   if (formData.injury_history !== undefined) updateData.injury_history = formData.injury_history || null

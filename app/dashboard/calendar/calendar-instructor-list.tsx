@@ -143,6 +143,7 @@ export function CalendarInstructorList({
       if (containerRef.current?.contains(e.target as Node)) return
       const target = e.target as HTMLElement
       if (
+        target.closest('[data-calendar-toolbar]') ||
         target.closest('[role="dialog"]') ||
         target.closest('[data-slot="dialog-content"]')
       ) {

@@ -50,12 +50,6 @@ export async function upsertUserProfile(
   let { error } = await admin.from('profiles').upsert(withApproval, { onConflict: 'id' })
 
   if (error && isMissingApprovalColumn(error.message)) {
-    if (row.approval_status) {
-      return {
-        error:
-          'profiles.approval_status 컬럼이 없습니다. Supabase에서 add-profile-approval.sql을 실행해주세요.',
-      }
-    }
     const { error: legacyError } = await admin.from('profiles').upsert(
       {
         id: row.id,

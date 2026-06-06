@@ -1,5 +1,13 @@
-/** 메뉴에 손 댈 때만 해당 페이지 JS preload (전체 한꺼번에 X) */
+/**
+ * 메뉴 hover 시 클라이언트 컴포넌트 JS만 preload.
+ * page.tsx(서버 컴포넌트)는 import 금지 — next/headers 등이 클라이언트 번들로 끌려옴.
+ * 라우트 HTML prefetch는 sidebar의 router.prefetch()가 담당.
+ */
 const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
+  '/dashboard': () => void import('@/app/dashboard/dashboard-recent-payments'),
+  '/dashboard/settings': () =>
+    void import('@/app/dashboard/settings/account-role-management'),
+  '/dashboard/my': () => void import('@/app/dashboard/my/member-my-page'),
   '/dashboard/calendar': () => {
     void import('@/app/dashboard/calendar/lesson-calendar')
     void import('@/components/dashboard/lesson-schedule-fab')
@@ -11,6 +19,8 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
     void import('@/app/dashboard/instructors/instructor-management')
   },
   '/dashboard/members': () => void import('@/app/dashboard/members/member-list'),
+  '/dashboard/members/new': () =>
+    void import('@/components/members/member-form'),
   '/dashboard/lesson-status': () =>
     void import('@/app/dashboard/lesson-status/lesson-status-view'),
   '/dashboard/lessons': () =>

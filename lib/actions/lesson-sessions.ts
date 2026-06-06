@@ -5,8 +5,13 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { revalidatePath } from 'next/cache'
 import type { AttendanceStatus, Lesson, LessonSession, SessionTransaction } from '@/lib/types'
-import { getLessonCalendarDisplayParts } from '@/lib/calendar-utils'
+import { getLessonCalendarDisplayParts, resolveLessonTitle } from '@/lib/calendar-utils'
 import { countsTowardSessionNumber, getTodayDateKey } from '@/lib/lesson-record-utils'
+import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
+import {
+  queryActiveSessionPackageId,
+  reconcileSessionPackageRemaining,
+} from '@/lib/actions/sessions'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { canRoleSetAttendanceStatus } from '@/lib/roles'
 import { requireRole } from './auth'
@@ -53,21 +58,25 @@ export async function checkInLesson(
   const admin = attendanceWriteClient()
   const supabase = admin ?? (await createClient())
 
-  const { data: lesson, error: lessonError } = await supabase
+  const { data: lessonRow, error: lessonError } = await supabase
     .from('lessons')
     .select(
-      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status',
+      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status, title, content',
     )
     .eq('id', lessonId)
     .single()
 
-  if (lessonError || !lesson) {
+  if (lessonError || !lessonRow) {
     return { error: '수업을 찾을 수 없습니다.' }
   }
 
-  if (!lesson.member_id) {
-    return { error: '회원이 연결되지 않은 수업입니다.' }
+  const memberId = await ensureLessonMemberLinked(supabase, lessonRow)
+  if (!memberId) {
+    return { error: '회원이 연결되지 않은 수업입니다. 회원 검색에서 선택해 등록해주세요.' }
   }
+
+  const lesson = { ...lessonRow, member_id: memberId }
+  const sessionPackageId = await resolveSessionPackageId(supabase, lesson)
 
   const now = new Date().toISOString()
   const sessionUpdate = {
@@ -105,7 +114,7 @@ export async function checkInLesson(
           lesson_id: lessonId,
           member_id: lesson.member_id,
           instructor_id: lesson.instructor_id,
-          session_package_id: lesson.session_package_id,
+          session_package_id: sessionPackageId,
           session_date: lesson.lesson_date,
           ...sessionUpdate,
         })
@@ -124,73 +133,36 @@ export async function checkInLesson(
 
   let memberRemaining: number | undefined
 
-  if (status === 'present' && !lesson.session_deducted && lesson.session_package_id) {
-    const { data: pkg, error: pkgError } = await supabase
-      .from('session_packages')
-      .select('id, remaining_sessions')
-      .eq('id', lesson.session_package_id)
-      .single()
-
-    if (pkgError || !pkg) {
-      return { error: '수업권을 찾을 수 없습니다.' }
-    }
-
-    if (pkg.remaining_sessions <= 0) {
-      return { error: '남은 수업 횟수가 없습니다.' }
-    }
-
-    const newRemaining = pkg.remaining_sessions - 1
-
-    const { error: updatePkgError } = await supabase
-      .from('session_packages')
-      .update({
-        remaining_sessions: newRemaining,
-        is_active: newRemaining > 0,
+  if (status === 'present' && sessionPackageId) {
+    if (!lesson.session_deducted) {
+      const deduct = await tryDeductLessonSessionOnce(supabase, {
+        lessonId,
+        memberId: lesson.member_id,
+        sessionPackageId,
+        userId: user.id,
+        reason: 'lesson_check_in',
+        lessonSessionId: sessionId,
+        existingSessionPackageId: lesson.session_package_id,
       })
-      .eq('id', pkg.id)
 
-    if (updatePkgError) {
-      return { error: updatePkgError.message }
+      if (deduct.error) {
+        return { error: deduct.error }
+      }
+
+      memberRemaining = deduct.memberRemaining
     }
 
-    const { error: txError } = await supabase.from('session_transactions').insert({
-      member_id: lesson.member_id,
-      session_package_id: pkg.id,
-      lesson_session_id: sessionId ?? null,
-      delta: -1,
-      balance_after: newRemaining,
-      reason: 'lesson_check_in',
-      created_by: user.id,
-    })
-
-    if (txError && !isMissingTableError(txError.message)) {
-      console.warn('session_transactions insert:', txError.message)
+    const lessonUpdatePayload: Record<string, unknown> = {
+      attendance_status: status,
+      session_deducted: true,
     }
-
-    if (sessionId) {
-      await supabase
-        .from('lesson_sessions')
-        .update({ session_deducted: true })
-        .eq('id', sessionId)
+    if (sessionPackageId && !lesson.session_package_id) {
+      lessonUpdatePayload.session_package_id = sessionPackageId
     }
-
-    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
-      p_member_id: lesson.member_id,
-    })
-    if (syncError) {
-      console.warn('sync_member_remaining_sessions:', syncError.message)
-    }
-
-    const { data: member } = await supabase
-      .from('members')
-      .select('remaining_sessions')
-      .eq('id', lesson.member_id)
-      .single()
-    memberRemaining = member?.remaining_sessions ?? undefined
 
     const { error: lessonUpdateError } = await supabase
       .from('lessons')
-      .update({ attendance_status: status, session_deducted: true })
+      .update(lessonUpdatePayload)
       .eq('id', lessonId)
 
     if (lessonUpdateError) {
@@ -231,6 +203,7 @@ export async function checkInLesson(
   revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/members')
+  revalidatePath('/dashboard/sessions')
 
   return {
     data: {
@@ -345,6 +318,7 @@ export async function updateLessonAttendanceStatus(
   revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/members')
+  revalidatePath('/dashboard/sessions')
 
   return {
     data: {
@@ -361,6 +335,64 @@ function normalizeEndTime(value: string) {
   return null
 }
 
+function isEndAfterStart(startTime: string | null, endTime: string) {
+  if (!startTime) return true
+  const [sh, sm] = startTime.slice(0, 5).split(':').map(Number)
+  const [eh, em] = endTime.slice(0, 5).split(':').map(Number)
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return true
+  return eh * 60 + em > sh * 60 + sm
+}
+
+async function lookupMemberIdByName(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  name: string,
+): Promise<string | null> {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+
+  const { data, error } = await supabase
+    .from('members')
+    .select('id')
+    .eq('name', trimmed)
+    .limit(2)
+
+  if (error || !data || data.length !== 1) return null
+  return data[0].id
+}
+
+async function ensureLessonMemberLinked(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  lesson: {
+    id: string
+    member_id: string | null
+    title?: string | null
+    content?: string | null
+  },
+): Promise<string | null> {
+  if (lesson.member_id) return lesson.member_id
+
+  const label = resolveLessonTitle(lesson)
+  if (!label) return null
+
+  const memberId = await lookupMemberIdByName(
+    supabase,
+    extractMemberNameFromCalendarLabel(label),
+  )
+  if (!memberId) return null
+
+  const { error } = await supabase
+    .from('lessons')
+    .update({ member_id: memberId })
+    .eq('id', lesson.id)
+
+  if (error) {
+    console.warn('ensureLessonMemberLinked:', error.message)
+    return null
+  }
+
+  return memberId
+}
+
 async function resolveSessionPackageId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   lesson: {
@@ -369,19 +401,110 @@ async function resolveSessionPackageId(
   },
 ) {
   if (lesson.session_package_id) return lesson.session_package_id
+  return queryActiveSessionPackageId(supabase, lesson.member_id)
+}
 
-  const { data: pkg } = await supabase
+async function tryDeductLessonSessionOnce(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    lessonId: string
+    memberId: string
+    sessionPackageId: string
+    userId: string
+    reason: 'lesson_check_in' | 'lesson_complete'
+    lessonSessionId?: string
+    existingSessionPackageId?: string | null
+  },
+): Promise<{
+  deducted: boolean
+  newRemaining?: number
+  memberRemaining?: number
+  error?: string
+}> {
+  const {
+    lessonId,
+    memberId,
+    sessionPackageId,
+    userId,
+    reason,
+    lessonSessionId,
+    existingSessionPackageId,
+  } = params
+
+  const { data: pkg, error: pkgError } = await supabase
     .from('session_packages')
+    .select('remaining_sessions')
+    .eq('id', sessionPackageId)
+    .single()
+
+  if (pkgError || !pkg) {
+    return { deducted: false, error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (pkg.remaining_sessions <= 0) {
+    return { deducted: false, error: '남은 수업 횟수가 없습니다.' }
+  }
+
+  const claimPayload: Record<string, unknown> = { session_deducted: true }
+  if (!existingSessionPackageId) {
+    claimPayload.session_package_id = sessionPackageId
+  }
+
+  const { data: claimed, error: claimError } = await supabase
+    .from('lessons')
+    .update(claimPayload)
+    .eq('id', lessonId)
+    .eq('session_deducted', false)
     .select('id')
-    .eq('member_id', lesson.member_id)
-    .eq('is_active', true)
-    .gt('remaining_sessions', 0)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: true })
-    .limit(1)
     .maybeSingle()
 
-  return pkg?.id ?? null
+  if (claimError) {
+    return { deducted: false, error: claimError.message }
+  }
+
+  if (!claimed) {
+    return { deducted: false }
+  }
+
+  const reconcile = await reconcileSessionPackageRemaining(sessionPackageId)
+
+  if (reconcile.error || reconcile.remaining == null) {
+    await supabase.from('lessons').update({ session_deducted: false }).eq('id', lessonId)
+    return { deducted: false, error: reconcile.error ?? '잔여 횟수 계산에 실패했습니다.' }
+  }
+
+  const { error: txError } = await supabase.from('session_transactions').insert({
+    member_id: memberId,
+    session_package_id: sessionPackageId,
+    lesson_session_id: lessonSessionId ?? null,
+    delta: -1,
+    balance_after: reconcile.remaining,
+    reason,
+    created_by: userId,
+  })
+
+  if (txError && !isMissingTableError(txError.message)) {
+    console.warn('session_transactions insert:', txError.message)
+  }
+
+  if (lessonSessionId) {
+    await supabase
+      .from('lesson_sessions')
+      .update({ session_deducted: true })
+      .eq('id', lessonSessionId)
+  }
+
+  const { data: member } = await supabase
+    .from('members')
+    .select('remaining_sessions')
+    .eq('id', memberId)
+    .single()
+
+  return {
+    deducted: true,
+    newRemaining: reconcile.remaining,
+    memberRemaining: member?.remaining_sessions ?? undefined,
+  }
 }
 
 /** 수업 종료 — 서명 + 종료 시간 저장 + 세션 1회 차감 */
@@ -414,21 +537,24 @@ export async function completeLessonWithSignature(
   const admin = attendanceWriteClient()
   const supabase = admin ?? (await createClient())
 
-  const { data: lesson, error: lessonError } = await supabase
+  const { data: lessonRow, error: lessonError } = await supabase
     .from('lessons')
     .select(
-      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status, end_time, lesson_no',
+      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status, end_time, lesson_no, title, content',
     )
     .eq('id', lessonId)
     .single()
 
-  if (lessonError || !lesson) {
+  if (lessonError || !lessonRow) {
     return { error: '수업을 찾을 수 없습니다.' }
   }
 
-  if (!lesson.member_id) {
-    return { error: '회원이 연결되지 않은 수업입니다.' }
+  const memberId = await ensureLessonMemberLinked(supabase, lessonRow)
+  if (!memberId) {
+    return { error: '회원이 연결되지 않은 수업입니다. 회원 검색에서 선택해 등록해주세요.' }
   }
+
+  const lesson = { ...lessonRow, member_id: memberId }
 
   if (lesson.session_deducted && lesson.end_time) {
     return { error: '이미 종료 처리된 수업입니다.' }
@@ -436,6 +562,10 @@ export async function completeLessonWithSignature(
 
   if (lesson.attendance_status === 'cancelled') {
     return { error: '취소된 수업은 종료할 수 없습니다.' }
+  }
+
+  if (!isEndAfterStart(lesson.start_time ?? null, normalizedEndTime)) {
+    return { error: '종료 시간은 시작 시간 이후여야 합니다.' }
   }
 
   const now = new Date().toISOString()
@@ -518,68 +648,21 @@ export async function completeLessonWithSignature(
       return { error: '차감할 수업권이 없습니다.' }
     }
 
-    const { data: pkg, error: pkgError } = await supabase
-      .from('session_packages')
-      .select('id, remaining_sessions')
-      .eq('id', sessionPackageId)
-      .single()
-
-    if (pkgError || !pkg) {
-      return { error: '수업권을 찾을 수 없습니다.' }
-    }
-
-    if (pkg.remaining_sessions <= 0) {
-      return { error: '남은 수업 횟수가 없습니다.' }
-    }
-
-    const newRemaining = pkg.remaining_sessions - 1
-
-    const { error: updatePkgError } = await supabase
-      .from('session_packages')
-      .update({
-        remaining_sessions: newRemaining,
-        is_active: newRemaining > 0,
-      })
-      .eq('id', pkg.id)
-
-    if (updatePkgError) {
-      return { error: updatePkgError.message }
-    }
-
-    const { error: txError } = await supabase.from('session_transactions').insert({
-      member_id: lesson.member_id,
-      session_package_id: pkg.id,
-      lesson_session_id: sessionId ?? null,
-      delta: -1,
-      balance_after: newRemaining,
+    const deduct = await tryDeductLessonSessionOnce(supabase, {
+      lessonId,
+      memberId: lesson.member_id,
+      sessionPackageId,
+      userId: user.id,
       reason: 'lesson_complete',
-      created_by: user.id,
+      lessonSessionId: sessionId,
+      existingSessionPackageId: lesson.session_package_id,
     })
 
-    if (txError && !isMissingTableError(txError.message)) {
-      console.warn('session_transactions insert:', txError.message)
+    if (deduct.error) {
+      return { error: deduct.error }
     }
 
-    if (sessionId) {
-      await supabase
-        .from('lesson_sessions')
-        .update({ session_deducted: true })
-        .eq('id', sessionId)
-    }
-
-    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
-      p_member_id: lesson.member_id,
-    })
-    if (syncError) {
-      console.warn('sync_member_remaining_sessions:', syncError.message)
-    }
-
-    const { data: member } = await supabase
-      .from('members')
-      .select('remaining_sessions')
-      .eq('id', lesson.member_id)
-      .single()
-    memberRemaining = member?.remaining_sessions ?? undefined
+    memberRemaining = deduct.memberRemaining
     sessionDeducted = true
   }
 
@@ -638,6 +721,7 @@ export async function completeLessonWithSignature(
   revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/members')
+  revalidatePath('/dashboard/sessions')
 
   return {
     data: {
@@ -651,6 +735,71 @@ export async function completeLessonWithSignature(
       member_remaining_sessions: memberRemaining,
     },
   }
+}
+
+/** 종료 시간 수정 (관리자) */
+export async function updateLessonEndTime(
+  lessonId: string,
+  endTime: string,
+): Promise<{
+  data?: { id: string; end_time: string }
+  error?: string
+}> {
+  await requireRole(['admin'])
+
+  const normalizedEndTime = normalizeEndTime(endTime)
+  if (!normalizedEndTime) {
+    return { error: '종료 시간 형식이 올바르지 않습니다.' }
+  }
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select('id, start_time, end_time')
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  if (!lesson.end_time) {
+    return { error: '종료 처리된 수업만 시간을 수정할 수 있습니다.' }
+  }
+
+  if (!isEndAfterStart(lesson.start_time ?? null, normalizedEndTime)) {
+    return { error: '종료 시간은 시작 시간 이후여야 합니다.' }
+  }
+
+  const { data, error } = await supabase
+    .from('lessons')
+    .update({ end_time: normalizedEndTime })
+    .eq('id', lessonId)
+    .select('id, end_time')
+    .single()
+
+  if (error) {
+    if (
+      error.message.includes('row-level security') ||
+      error.message.includes('permission denied')
+    ) {
+      return {
+        error:
+          '종료 시간 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인해주세요.',
+      }
+    }
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/attendance')
+  revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/members')
+  revalidatePath('/dashboard/sessions')
+
+  return { data: data as { id: string; end_time: string } }
 }
 
 /** 수업 종료 취소 — 종료 시간·서명 제거 + 세션 차감 복구 */
@@ -700,60 +849,6 @@ export async function cancelLessonCompletion(lessonId: string): Promise<{
   const sessionPackageId =
     lesson.session_package_id ??
     (await resolveSessionPackageId(supabase, lesson))
-
-  if (sessionPackageId) {
-    const { data: pkg, error: pkgError } = await supabase
-      .from('session_packages')
-      .select('id, remaining_sessions')
-      .eq('id', sessionPackageId)
-      .single()
-
-    if (pkgError || !pkg) {
-      return { error: '수업권을 찾을 수 없습니다.' }
-    }
-
-    const newRemaining = pkg.remaining_sessions + 1
-
-    const { error: updatePkgError } = await supabase
-      .from('session_packages')
-      .update({
-        remaining_sessions: newRemaining,
-        is_active: true,
-      })
-      .eq('id', pkg.id)
-
-    if (updatePkgError) {
-      return { error: updatePkgError.message }
-    }
-
-    const { error: txError } = await supabase.from('session_transactions').insert({
-      member_id: lesson.member_id,
-      session_package_id: pkg.id,
-      lesson_session_id: existingSession?.id ?? null,
-      delta: 1,
-      balance_after: newRemaining,
-      reason: 'lesson_complete_cancel',
-      created_by: user.id,
-    })
-
-    if (txError && !isMissingTableError(txError.message)) {
-      console.warn('session_transactions insert:', txError.message)
-    }
-
-    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
-      p_member_id: lesson.member_id,
-    })
-    if (syncError) {
-      console.warn('sync_member_remaining_sessions:', syncError.message)
-    }
-
-    const { data: member } = await supabase
-      .from('members')
-      .select('remaining_sessions')
-      .eq('id', lesson.member_id)
-      .single()
-    memberRemaining = member?.remaining_sessions ?? undefined
-  }
 
   if (existingSession?.id) {
     await supabase
@@ -805,12 +900,41 @@ export async function cancelLessonCompletion(lessonId: string): Promise<{
     return { error: lessonUpdateError.message }
   }
 
+  if (sessionPackageId) {
+    const reconcile = await reconcileSessionPackageRemaining(sessionPackageId)
+    if (reconcile.error) {
+      return { error: reconcile.error }
+    }
+
+    const { error: txError } = await supabase.from('session_transactions').insert({
+      member_id: lesson.member_id,
+      session_package_id: sessionPackageId,
+      lesson_session_id: existingSession?.id ?? null,
+      delta: 1,
+      balance_after: reconcile.remaining ?? null,
+      reason: 'lesson_complete_cancel',
+      created_by: user.id,
+    })
+
+    if (txError && !isMissingTableError(txError.message)) {
+      console.warn('session_transactions insert:', txError.message)
+    }
+
+    const { data: member } = await supabase
+      .from('members')
+      .select('remaining_sessions')
+      .eq('id', lesson.member_id)
+      .single()
+    memberRemaining = member?.remaining_sessions ?? undefined
+  }
+
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/members')
+  revalidatePath('/dashboard/sessions')
 
   return {
     data: {
@@ -1486,6 +1610,7 @@ export async function addSignatureToPastLesson(
 
     revalidatePath('/dashboard/lesson-status')
     revalidatePath('/dashboard/members')
+  revalidatePath('/dashboard/sessions')
 
     return {
       data: {

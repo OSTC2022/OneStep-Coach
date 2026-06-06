@@ -93,12 +93,15 @@ export function AdminCreateAccountPanel({
       return
     }
 
-    toast.success('계정이 생성되었습니다.', {
-      description: result.loginEmail
-        ? `로그인 ID: ${result.loginEmail} · 가입 승인 탭에서 승인해주세요.`
-        : '가입 승인 탭에서 승인해주세요.',
-      duration: 12000,
-    })
+    toast.success(
+      result.recovered ? '미완료 계정을 복구했습니다.' : '계정이 생성되었습니다.',
+      {
+        description: result.loginEmail
+          ? `로그인 ID: ${result.loginEmail} · 가입 승인 탭에서 승인해주세요.`
+          : '가입 승인 탭에서 승인해주세요.',
+        duration: 12000,
+      },
+    )
 
     setFullName('')
     setEmail('')

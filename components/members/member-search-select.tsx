@@ -71,6 +71,8 @@ interface MemberSearchSelectProps {
   maxRecentSearches?: number
   /** 서버 검색 (캘린더 등 전체 회원 미로드 시) */
   onSearchMembers?: (query: string) => Promise<MemberSearchOption[]>
+  /** 제안 목록을 입력 위·아래 중 어디에 띄울지 */
+  suggestionsPlacement?: 'below' | 'above'
 }
 
 export function MemberSearchSelect({
@@ -88,6 +90,7 @@ export function MemberSearchSelect({
   enableRecentSearches = false,
   maxRecentSearches = 10,
   onSearchMembers,
+  suggestionsPlacement = 'below',
 }: MemberSearchSelectProps) {
   const [open, setOpen] = useState(false)
   const [remoteMatches, setRemoteMatches] = useState<MemberSearchOption[]>([])
@@ -245,6 +248,11 @@ export function MemberSearchSelect({
 
   useEffect(() => () => clearBlurTimeout(), [])
 
+  const suggestionListClass =
+    suggestionsPlacement === 'above'
+      ? 'absolute bottom-full left-0 right-0 z-50 mb-1 max-h-48 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md'
+      : 'relative z-50 max-h-48 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md'
+
   if (inlineSearch || allowFreeText) {
     return (
       <div ref={containerRef} className={cn('space-y-1.5', className)}>
@@ -288,59 +296,59 @@ export function MemberSearchSelect({
             }}
             className={cn('pl-8', compact && 'h-8 text-sm')}
           />
-        </div>
-        {enableRecentSearches && suggestOpen && !query.trim() && recentRows.length > 0 && (
-          <div
-            className="relative z-50 max-h-48 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
-              {hasStoredRecent ? '최근 검색' : '회원 목록'}
-            </p>
-            {recentRows.map((row) => (
-              <button
-                key={row.key}
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
-                onClick={() => selectRecentRow(row)}
-              >
-                <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                {row.label}
-              </button>
-            ))}
-          </div>
-        )}
-        {searchOpen && query.trim() && filtered.length > 0 && (
-          <div
-            className="relative z-50 max-h-48 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {filtered.map((m) => {
-              const blocked = isMemberDisabled(m)
-              return (
+          {enableRecentSearches && suggestOpen && !query.trim() && recentRows.length > 0 && (
+            <div
+              className={suggestionListClass}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                {hasStoredRecent ? '최근 검색' : '회원 목록'}
+              </p>
+              {recentRows.map((row) => (
                 <button
-                  key={m.id}
+                  key={row.key}
                   type="button"
-                  disabled={blocked}
-                  className={cn(
-                    'flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm',
-                    blocked
-                      ? 'cursor-not-allowed opacity-50'
-                      : 'hover:bg-accent',
-                  )}
-                  onClick={() => selectMember(m)}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  onClick={() => selectRecentRow(row)}
                 >
-                  <MemberOptionLabel member={m} />
-                  {blocked ? (
-                    <span className="ml-auto text-[10px] text-muted-foreground">
-                      배정됨
-                    </span>
-                  ) : null}
+                  <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  {row.label}
                 </button>
-              )
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+          {searchOpen && query.trim() && filtered.length > 0 && (
+            <div
+              className={suggestionListClass}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {filtered.map((m) => {
+                const blocked = isMemberDisabled(m)
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    disabled={blocked}
+                    className={cn(
+                      'flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm',
+                      blocked
+                        ? 'cursor-not-allowed opacity-50'
+                        : 'hover:bg-accent',
+                    )}
+                    onClick={() => selectMember(m)}
+                  >
+                    <MemberOptionLabel member={m} />
+                    {blocked ? (
+                      <span className="ml-auto text-[10px] text-muted-foreground">
+                        배정됨
+                      </span>
+                    ) : null}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
         {searchOpen && !allowFreeText && query.trim() && filtered.length === 0 && (
           <p className="px-1 text-xs text-muted-foreground">회원을 찾을 수 없습니다.</p>
         )}

@@ -31,7 +31,12 @@ import {
   Plus,
 } from 'lucide-react'
 import { deleteMember, toggleMemberStatus } from '@/lib/actions/members'
-import { formatMemberAge, formatBirthDateDisplay, formatPrimaryInstructorName } from '@/lib/member-utils'
+import {
+  formatMemberAge,
+  formatBirthDateDisplay,
+  formatPrimaryInstructorName,
+  resolveMemberBmi,
+} from '@/lib/member-utils'
 import { toast } from 'sonner'
 import type { Member, SessionPackage, Lesson } from '@/lib/types'
 
@@ -44,6 +49,7 @@ interface MemberDetailProps {
 export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
   const router = useRouter()
   const activePackage = packages.find(p => p.is_active && p.remaining_sessions > 0)
+  const displayBmi = resolveMemberBmi(member)
 
   function getBmiCategory(bmi: number) {
     if (bmi < 18.5) return { label: '저체중', color: 'text-chart-2', bg: 'bg-chart-2/10' }
@@ -187,9 +193,17 @@ export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
                   <p className="text-2xl font-bold">{member.weight_kg || '-'}</p>
                   <p className="text-sm text-muted-foreground">몸무게 (kg)</p>
                 </div>
-                <div className={`p-4 rounded-lg text-center ${member.bmi ? getBmiCategory(member.bmi).bg : 'bg-secondary/50'}`}>
-                  <p className={`text-2xl font-bold font-mono ${member.bmi ? getBmiCategory(member.bmi).color : ''}`}>
-                    {member.bmi?.toFixed(1) || '-'}
+                <div
+                  className={`p-4 rounded-lg text-center ${
+                    displayBmi ? getBmiCategory(displayBmi).bg : 'bg-secondary/50'
+                  }`}
+                >
+                  <p
+                    className={`text-2xl font-bold font-mono ${
+                      displayBmi ? getBmiCategory(displayBmi).color : ''
+                    }`}
+                  >
+                    {displayBmi != null ? displayBmi.toFixed(1) : '-'}
                   </p>
                   <p className="text-sm text-muted-foreground">BMI</p>
                 </div>

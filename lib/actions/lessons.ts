@@ -7,6 +7,8 @@ import { revalidatePath } from 'next/cache'
 import type { Lesson, LessonFormData, AttendanceStatus } from '@/lib/types'
 import { getCurrentUser, requireRole } from './auth'
 import { checkInLesson } from './lesson-sessions'
+import { queryActiveSessionPackageId } from './sessions'
+import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
 import {
   LESSON_TITLE_CONTENT_PREFIX,
   resolveLessonTitle,
@@ -61,7 +63,23 @@ const LESSON_RECURRENCE_MIGRATION_HINT =
 
 export type LessonSeriesScope = 'single' | 'future' | 'all'
 
+function isRowNotFoundError(error?: { message?: string; code?: string } | null) {
+  if (!error) return false
+  const message = error.message ?? ''
+  return (
+    error.code === 'PGRST116' ||
+    message.includes('Cannot coerce the result to a single JSON object') ||
+    message.includes('JSON object requested, multiple (or no) rows returned')
+  )
+}
+
 function mapLessonError(message: string): string {
+  if (
+    message.includes('Cannot coerce the result to a single JSON object') ||
+    message.includes('JSON object requested, multiple (or no) rows returned')
+  ) {
+    return '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.'
+  }
   if (message.includes('row-level security') || message.includes('permission denied')) {
     return (
       '수업 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY가 있는지 확인하거나, ' +
@@ -288,18 +306,22 @@ async function fetchLessonSeriesRow(
     .from('lessons')
     .select(LESSON_SERIES_SELECT)
     .eq('id', lessonId)
-    .single()
+    .maybeSingle()
 
   if (result.error && isMissingRecurrenceColumn(result.error)) {
     result = await supabase
       .from('lessons')
       .select(LESSON_SERIES_SELECT_LEGACY)
       .eq('id', lessonId)
-      .single()
+      .maybeSingle()
   }
 
-  if (result.error || !result.data) {
-    return { data: null, error: result.error?.message ?? '수업을 찾을 수 없습니다.' }
+  if (result.error && !isRowNotFoundError(result.error)) {
+    return { data: null, error: mapLessonError(result.error.message) }
+  }
+
+  if (!result.data) {
+    return { data: null, error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.' }
   }
 
   return { data: result.data as LessonSeriesRow }
@@ -310,6 +332,52 @@ function buildLessonIdentityFields(memberId: string | null, title: string | null
     member_id: memberId,
     title: title?.trim() || null,
   }
+}
+
+async function lookupMemberIdByName(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+  name: string,
+): Promise<string | null> {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+
+  const { data, error } = await supabase
+    .from('members')
+    .select('id')
+    .eq('name', trimmed)
+    .limit(2)
+
+  if (error || !data || data.length !== 1) return null
+  return data[0].id
+}
+
+async function enrichLessonIdentity(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+  formData: LessonFormData,
+): Promise<{
+  memberId: string | null
+  title: string | null
+  sessionPackageId: string | null
+}> {
+  let memberId = formData.member_id?.trim() || null
+  let title = formData.title?.trim() || null
+
+  if (!memberId) {
+    const label = title || ''
+    if (label) {
+      memberId = await lookupMemberIdByName(
+        supabase,
+        extractMemberNameFromCalendarLabel(label),
+      )
+    }
+  }
+
+  let sessionPackageId = formData.session_package_id?.trim() || null
+  if (memberId && !sessionPackageId) {
+    sessionPackageId = await queryActiveSessionPackageId(supabase, memberId)
+  }
+
+  return { memberId, title, sessionPackageId }
 }
 
 function buildInsertPayload(
@@ -482,18 +550,21 @@ export async function getLessons(options?: {
   return lessons
 }
 
+const CALENDAR_MONTH_LESSON_LIMIT = 400
+const CALENDAR_RANGE_LESSON_LIMIT = 300
+
 export async function getLessonsForMonth(year: number, month: number): Promise<Lesson[]> {
   const dateFrom = `${year}-${String(month).padStart(2, '0')}-01`
   const lastDay = new Date(year, month, 0).getDate()
   const dateTo = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-  return getLessons({ dateFrom, dateTo })
+  return getLessons({ dateFrom, dateTo, limit: CALENDAR_MONTH_LESSON_LIMIT })
 }
 
 export async function getLessonsForRange(
   dateFrom: string,
   dateTo: string,
 ): Promise<Lesson[]> {
-  return getLessons({ dateFrom, dateTo })
+  return getLessons({ dateFrom, dateTo, limit: CALENDAR_RANGE_LESSON_LIMIT })
 }
 
 export async function getTodayLessons(): Promise<Lesson[]> {
@@ -506,8 +577,10 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   const supabase = await lessonWriteClient()
   const user = await getCurrentUser()
 
-  const memberId = formData.member_id?.trim() || null
-  const title = formData.title?.trim() || null
+  const enriched = await enrichLessonIdentity(supabase, formData)
+  const memberId = enriched.memberId
+  const title = enriched.title
+  const sessionPackageId = enriched.sessionPackageId
 
   if (!memberId && !title) {
     return { error: '이름을 입력해주세요.' }
@@ -527,7 +600,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   }
 
   const payload = buildInsertPayload(
-    formData,
+    { ...formData, session_package_id: sessionPackageId ?? formData.session_package_id },
     memberId,
     title,
     lessonNo,
@@ -578,6 +651,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
   return { data: normalizeLessonRecord(data as Lesson), warning }
 }
 
@@ -595,8 +669,10 @@ export async function createRecurringLessons(
   const supabase = await lessonWriteClient()
   const user = await getCurrentUser()
 
-  const memberId = formData.member_id?.trim() || null
-  const title = formData.title?.trim() || null
+  const enriched = await enrichLessonIdentity(supabase, formData)
+  const memberId = enriched.memberId
+  const title = enriched.title
+  const sessionPackageId = enriched.sessionPackageId
 
   if (!memberId && !title) {
     return { error: '이름을 입력해주세요.' }
@@ -641,7 +717,11 @@ export async function createRecurringLessons(
 
   const payloads = dates.map((lessonDate, index) =>
     buildInsertPayload(
-      { ...formData, lesson_date: lessonDate },
+      {
+        ...formData,
+        lesson_date: lessonDate,
+        session_package_id: sessionPackageId ?? formData.session_package_id,
+      },
       memberId,
       title,
       memberId ? baseLessonNo + index + 1 : null,
@@ -738,6 +818,7 @@ export async function createRecurringLessons(
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
 
   return {
     data: lessons,
@@ -754,14 +835,21 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   let titleForFallback: string | null = null
 
   if ('member_id' in updates || 'title' in updates) {
-    const memberId = updates.member_id?.trim() || null
-    const title = updates.title?.trim() || null
+    const enriched = await enrichLessonIdentity(supabase, {
+      ...updates,
+      lesson_date: updates.lesson_date ?? '',
+    })
+    const memberId = enriched.memberId
+    const title = enriched.title
     if (!memberId && !title) {
       return { error: '이름을 입력해주세요.' }
     }
     payload.member_id = memberId
     titleForFallback = title
     payload.title = title
+    if (enriched.sessionPackageId && !updates.session_package_id) {
+      payload.session_package_id = enriched.sessionPackageId
+    }
   }
 
   let warning: string | undefined
@@ -824,6 +912,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
   return { data: normalizeLessonRecord(data as Lesson), warning }
 }
 
@@ -881,13 +970,24 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
   await requireRole(['admin', 'instructor'])
   const supabase = await createStaffDataClient()
 
-  const { data: lesson, error } = await supabase
+  let { data: lesson, error } = await supabase
     .from('lessons')
     .select(LESSON_SERIES_SELECT)
     .eq('id', lessonId)
-    .single()
+    .maybeSingle()
 
-  if (error || !lesson) return null
+  if (error && isMissingRecurrenceColumn(error)) {
+    const legacy = await supabase
+      .from('lessons')
+      .select(LESSON_SERIES_SELECT_LEGACY)
+      .eq('id', lessonId)
+      .maybeSingle()
+    lesson = legacy.data
+    error = legacy.error
+  }
+
+  if (error && !isRowNotFoundError(error)) return null
+  if (!lesson) return null
 
   const resolved = resolveLessonRecurrence(lesson)
   if (resolved.groupId && resolved.pattern !== 'none') {
@@ -1046,6 +1146,7 @@ export async function updateLessonSeries(
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
 
   return { data: updatedLessons, warning }
 }
@@ -1090,11 +1191,7 @@ export async function deleteLessonsInSeries(
 
   for (let i = 0; i < uniqueTargetIds.length; i += chunkSize) {
     const chunk = uniqueTargetIds.slice(i, i + chunkSize)
-    const { data, error } = await supabase
-      .from('lessons')
-      .delete()
-      .in('id', chunk)
-      .select('id')
+    const { error } = await supabase.from('lessons').delete().in('id', chunk)
 
     if (error) {
       console.error('Error deleting lesson series:', error)
@@ -1104,19 +1201,13 @@ export async function deleteLessonsInSeries(
       }
     }
 
-    if (data?.length) {
-      for (const row of data) {
-        deletedIds.push(row.id)
-      }
-    } else {
-      const { data: remaining } = await supabase
-        .from('lessons')
-        .select('id')
-        .in('id', chunk)
-      const remainingIds = new Set((remaining ?? []).map((row) => row.id))
-      for (const id of chunk) {
-        if (!remainingIds.has(id)) deletedIds.push(id)
-      }
+    const { data: remaining } = await supabase
+      .from('lessons')
+      .select('id')
+      .in('id', chunk)
+    const remainingIds = new Set((remaining ?? []).map((row) => row.id))
+    for (const id of chunk) {
+      if (!remainingIds.has(id)) deletedIds.push(id)
     }
   }
 
@@ -1131,6 +1222,7 @@ export async function deleteLessonsInSeries(
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
   return { deletedIds: uniqueDeletedIds }
 }
 

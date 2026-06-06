@@ -8,9 +8,8 @@ export default async function SessionsPage({
   searchParams: Promise<{ member?: string }>
 }) {
   const params = await searchParams
-  const { packages, totalCount, members } = await getSessionsPageData(
-    params.member,
-  )
+  const { packages, totalCount, monthlyRevenue, members } =
+    await getSessionsPageData(params.member)
 
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
@@ -24,6 +23,7 @@ export default async function SessionsPage({
       <SessionsList
         initialPackages={packages}
         totalCount={totalCount}
+        monthlyRevenue={monthlyRevenue}
         pageSize={LIST_PAGE_SIZE}
         members={members}
         selectedMemberId={params.member}

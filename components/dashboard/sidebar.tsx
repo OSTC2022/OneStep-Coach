@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -127,6 +128,15 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     preloadRouteChunk(href)
   }
 
+  useEffect(() => {
+    if (!isMobile) return
+    for (const item of filteredItems.slice(0, 4)) {
+      if (item.url === pathname) continue
+      prefetchMenuRoute(item.url)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, pathname])
+
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border p-4">
@@ -159,7 +169,6 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
                     >
                       <Link
                         href={item.url}
-                        prefetch={false}
                         onPointerEnter={() => prefetchMenuRoute(item.url)}
                         onTouchStart={() => prefetchMenuRoute(item.url)}
                         onClick={() => {

@@ -1,107 +1,95 @@
 'use server'
 
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
-import { createClient } from '@/lib/supabase/server'
 import type { DashboardStats } from '@/lib/types'
+import {
+  getMonthlySessionRevenue,
+  getRecentSessionPayments,
+} from '@/lib/actions/sessions'
 
+async function countMembers(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  activeOnly?: boolean,
+) {
+  let query = supabase
+    .from('members')
+    .select('id', { count: 'exact', head: true })
+    .is('deleted_at', null)
+
+  if (activeOnly) {
+    query = query.eq('is_active', true)
+  }
+
+  let result = await query
+
+  if (result.error?.code === '42703') {
+    let fallback = supabase.from('members').select('id', { count: 'exact', head: true })
+    if (activeOnly) fallback = fallback.eq('is_active', true)
+    result = await fallback
+  }
+
+  return result.count ?? 0
+}
+
+/** count·sum·최근 데이터만 — 전체 테이블 로드 없음 */
 export async function getDashboardStats(): Promise<DashboardStats> {
   const supabase = await createStaffDataClient()
   const today = new Date().toISOString().split('T')[0]
-  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
-  const sevenDaysLater = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const sevenDaysLater = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split('T')[0]
 
-  // Total members
-  let totalMembersRes = await supabase
-    .from('members')
-    .select('id', { count: 'exact', head: true })
-    .is('deleted_at', null)
-
-  if (totalMembersRes.error?.code === '42703') {
-    totalMembersRes = await supabase
-      .from('members')
+  const [
+    totalMembers,
+    activeMembers,
+    todayLessonsRes,
+    expiringRes,
+    lowSessionRes,
+    monthlyRevenue,
+  ] = await Promise.all([
+    countMembers(supabase),
+    countMembers(supabase, true),
+    supabase
+      .from('lessons')
       .select('id', { count: 'exact', head: true })
-  }
-
-  // Active members
-  let activeMembersRes = await supabase
-    .from('members')
-    .select('id', { count: 'exact', head: true })
-    .eq('is_active', true)
-    .is('deleted_at', null)
-
-  if (activeMembersRes.error?.code === '42703') {
-    activeMembersRes = await supabase
-      .from('members')
+      .eq('lesson_date', today),
+    supabase
+      .from('session_packages')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
+      .lte('expires_at', sevenDaysLater)
+      .gte('expires_at', today),
+    supabase
+      .from('session_packages')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true)
+      .lte('remaining_sessions', 3)
+      .gt('remaining_sessions', 0),
+    getMonthlySessionRevenue(),
+  ])
+
+  return {
+    totalMembers,
+    activeMembers,
+    todayLessons: todayLessonsRes.count ?? 0,
+    monthlyRevenue,
+    expiringPackages: expiringRes.count ?? 0,
+    lowSessionMembers: lowSessionRes.count ?? 0,
   }
+}
 
-  const totalMembers = totalMembersRes.count
-  const activeMembers = activeMembersRes.count
+export async function getInstructorDashboardStats(): Promise<Pick<DashboardStats, 'todayLessons'>> {
+  const supabase = await createStaffDataClient()
+  const today = new Date().toISOString().split('T')[0]
 
-  // Today's lessons
-  const { count: todayLessons } = await supabase
+  const { count } = await supabase
     .from('lessons')
     .select('id', { count: 'exact', head: true })
     .eq('lesson_date', today)
 
-  // Monthly revenue (sum of session packages paid this month)
-  const { data: packages } = await supabase
-    .from('session_packages')
-    .select('price')
-    .gte('paid_at', startOfMonth)
-
-  const monthlyRevenue = packages?.reduce((sum, pkg) => sum + (pkg.price || 0), 0) || 0
-
-  // Expiring packages (within 7 days)
-  const { count: expiringPackages } = await supabase
-    .from('session_packages')
-    .select('id', { count: 'exact', head: true })
-    .eq('is_active', true)
-    .lte('expires_at', sevenDaysLater)
-    .gte('expires_at', today)
-
-  // Low session members (3 or less)
-  const { count: lowSessionMembers } = await supabase
-    .from('session_packages')
-    .select('id', { count: 'exact', head: true })
-    .eq('is_active', true)
-    .lte('remaining_sessions', 3)
-    .gt('remaining_sessions', 0)
-
-  return {
-    totalMembers: totalMembers || 0,
-    activeMembers: activeMembers || 0,
-    todayLessons: todayLessons || 0,
-    monthlyRevenue,
-    expiringPackages: expiringPackages || 0,
-    lowSessionMembers: lowSessionMembers || 0,
-  }
+  return { todayLessons: count ?? 0 }
 }
 
-export async function getRecentActivity(limit: number = 10) {
-  const supabase = await createClient()
-  
-  const { data: lessons } = await supabase
-    .from('lessons')
-    .select('*, member:members(name), instructor:instructors(name)')
-    .order('created_at', { ascending: false })
-    .limit(limit)
-
-  return lessons || []
-}
-
-export async function getUpcomingLessons(limit: number = 5) {
-  const supabase = await createClient()
-  const today = new Date().toISOString().split('T')[0]
-  
-  const { data: lessons } = await supabase
-    .from('lessons')
-    .select('*, member:members(name), instructor:instructors(name)')
-    .gte('lesson_date', today)
-    .order('lesson_date', { ascending: true })
-    .order('start_time', { ascending: true })
-    .limit(limit)
-
-  return lessons || []
+export async function getRecentActivity(limit: number = 8) {
+  return getRecentSessionPayments(limit)
 }
