@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,7 +17,6 @@ import {
   createLesson,
   deleteLesson,
   getLessonsForMonth,
-  getLessonsForRange,
   updateLesson,
 } from '@/lib/actions/lessons'
 import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
@@ -27,7 +26,6 @@ import { normalizePrimaryInstructorId } from '@/lib/member-utils'
 import { parseMemoQuickAdd } from '@/lib/memo-quick-add'
 import type { MemoQuickAddPayload } from './month-memo-input'
 import {
-  getRangeForView,
   getViewTitle,
   getWeekDates,
   getDefaultLessonCalendarLabel,
@@ -51,6 +49,15 @@ import {
   matchCalendarShortcut,
   matchCalendarUndoRedo,
 } from '@/lib/calendar-shortcuts'
+import {
+  fetchCalendarLessons,
+  filterLessonsByCoach,
+  getCachedLessons,
+  prefetchAdjacentCalendarRanges,
+  resolveRangeKey,
+  seedCalendarCache,
+  setCachedLessons,
+} from '@/lib/calendar-data-store'
 import {
   logCalendarFetch,
   withCalendarFetchTimeout,
@@ -112,13 +119,16 @@ export function LessonCalendar({
   const [searchPoolKey, setSearchPoolKey] = useState<string | null>(null)
   const [highlight, setHighlight] = useState<CalendarHighlight | null>(null)
   const [agendaSelectedDate, setAgendaSelectedDate] = useState(() => new Date())
-  const [isFetching, setIsFetching] = useState(false)
-  const rangeCacheRef = useRef(new Map<string, Lesson[]>())
-  const rangeFetchSeqRef = useRef(0)
-  const rangeFetchInFlightKeyRef = useRef<string | null>(null)
-  const isFetchingRef = useRef(false)
+  const [loadState, setLoadState] = useState({
+    initialLoading: false,
+    backgroundLoading: false,
+    refreshing: false,
+    error: null as string | null,
+    hasRangeCache: true,
+  })
   const monthPoolInFlightRef = useRef(false)
   const calendarRootRef = useRef<HTMLDivElement>(null)
+  const hasSeededCacheRef = useRef(false)
   const {
     selectedIds: selectedLessonIds,
     count: selectionCount,
@@ -167,24 +177,124 @@ export function LessonCalendar({
     })
   }, [searchLessons, editOpen, editingLesson, editDraftInstructorId, instructors])
 
-  const filteredLessons = useMemo(() => {
-    if (instructorFilter === 'all') return lessonsWithEditPreview
-    return lessonsWithEditPreview.filter((l) => l.instructor_id === instructorFilter)
-  }, [lessonsWithEditPreview, instructorFilter])
+  const filteredLessons = useMemo(
+    () => filterLessonsByCoach(lessonsWithEditPreview, instructorFilter),
+    [lessonsWithEditPreview, instructorFilter],
+  )
 
-  const rangeCacheKey = useCallback((date: Date, nextView: CalendarView) => {
-    const { dateFrom, dateTo } = getRangeForView(date, nextView)
-    return `${dateFrom}|${dateTo}`
+  const syncMonthPool = useCallback(
+    (date: Date, data: Lesson[]) => {
+      const key = `${date.getFullYear()}-${date.getMonth() + 1}`
+      setSearchPoolKey(key)
+      setSearchPoolLessons((prev) => mergeLessonsById(prev, data))
+      setLessons((prev) => mergeLessonsById(prev, data))
+      const { cacheKey } = resolveRangeKey(date, 'month', 'all')
+      setCachedLessons(cacheKey, data)
+    },
+    [],
+  )
+
+  const applyCachedRange = useCallback((date: Date, nextView: CalendarView) => {
+    const { cacheKey } = resolveRangeKey(date, nextView, 'all')
+    const cached = getCachedLessons(cacheKey)
+    if (cached) {
+      setLessons(cached)
+      setLoadState((prev) => ({ ...prev, hasRangeCache: true }))
+      return true
+    }
+    setLessons([])
+    setLoadState((prev) => ({ ...prev, hasRangeCache: false }))
+    return false
   }, [])
 
-  useEffect(() => {
-    rangeCacheRef.current.set(rangeCacheKey(currentDate, view), initialLessons)
-  }, [initialLessons, currentDate, view, rangeCacheKey])
+  const syncRange = useCallback(
+    async (
+      date: Date,
+      nextView: CalendarView,
+      options?: { force?: boolean; refreshing?: boolean },
+    ) => {
+      const { cacheKey } = resolveRangeKey(date, nextView, 'all')
+      const hadCache = getCachedLessons(cacheKey) != null
+
+      setLoadState((prev) => ({
+        ...prev,
+        hasRangeCache: hadCache,
+        backgroundLoading: hadCache && !options?.refreshing,
+        refreshing: Boolean(options?.refreshing),
+        initialLoading: !hadCache && !options?.refreshing,
+        error: null,
+      }))
+
+      try {
+        const data = await fetchCalendarLessons({
+          date,
+          view: nextView,
+          coachId: 'all',
+          mode: options?.refreshing
+            ? 'refresh'
+            : hadCache
+              ? 'background'
+              : 'initial',
+          force: options?.force,
+        })
+        setLessons(data)
+        setCachedLessons(cacheKey, data)
+        if (nextView === 'month') {
+          syncMonthPool(date, data)
+        }
+        if (!options?.refreshing) {
+          lessonHistory.clear()
+        }
+        setLoadState({
+          initialLoading: false,
+          backgroundLoading: false,
+          refreshing: false,
+          error: null,
+          hasRangeCache: true,
+        })
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : '일정 로드 실패'
+        setLoadState((prev) => ({
+          ...prev,
+          initialLoading: false,
+          backgroundLoading: false,
+          refreshing: false,
+          error: message,
+          hasRangeCache: hadCache,
+        }))
+        if (!hadCache) {
+          toast.error('일정을 불러오지 못했습니다.', {
+            description: message.includes('timeout')
+              ? '7초 이상 응답이 없습니다.'
+              : undefined,
+          })
+        }
+      }
+
+      prefetchAdjacentCalendarRanges(date, nextView, 'all')
+    },
+    [lessonHistory, syncMonthPool],
+  )
+
+  const navigateRange = useCallback(
+    (
+      date: Date,
+      nextView: CalendarView,
+      options?: { force?: boolean; refreshing?: boolean },
+    ) => {
+      applyCachedRange(date, nextView)
+      void syncRange(date, nextView, options)
+    },
+    [applyCachedRange, syncRange],
+  )
 
   useEffect(() => {
-    if (isFetching) return
-    rangeCacheRef.current.set(rangeCacheKey(currentDate, view), lessons)
-  }, [lessons, currentDate, view, isFetching, rangeCacheKey])
+    if (hasSeededCacheRef.current) return
+    hasSeededCacheRef.current = true
+    seedCalendarCache(currentDate, view, initialLessons, 'all')
+    prefetchAdjacentCalendarRanges(currentDate, view, 'all')
+  }, [currentDate, view, initialLessons])
 
   useEffect(() => {
     setLessons((prev) => {
@@ -211,16 +321,6 @@ export function LessonCalendar({
     })
   }, [initialLessons])
 
-  const syncMonthPool = useCallback(
-    (date: Date, data: Lesson[]) => {
-      const key = `${date.getFullYear()}-${date.getMonth() + 1}`
-      setSearchPoolKey(key)
-      setSearchPoolLessons((prev) => mergeLessonsById(prev, data))
-      setLessons((prev) => mergeLessonsById(prev, data))
-    },
-    [],
-  )
-
   const loadSearchPool = useCallback(() => {
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth() + 1
@@ -244,9 +344,6 @@ export function LessonCalendar({
       .then((data) => {
         logCalendarFetch('success', data.length)
         syncMonthPool(currentDate, data)
-        if (view === 'month') {
-          rangeCacheRef.current.set(rangeCacheKey(currentDate, view), data)
-        }
       })
       .catch((error) => {
         console.error(error)
@@ -262,90 +359,29 @@ export function LessonCalendar({
     searchPoolKey,
     syncMonthPool,
     view,
-    rangeCacheKey,
     instructorFilter,
   ])
 
-  const loadRange = useCallback(
-    (date: Date, nextView: CalendarView, options?: { force?: boolean }) => {
-      const cacheKey = rangeCacheKey(date, nextView)
-      const cached = rangeCacheRef.current.get(cacheKey)
-      if (cached && !options?.force) {
-        setLessons(cached)
-        if (nextView === 'month') {
-          syncMonthPool(date, cached)
-        }
-        return
-      }
-
-      if (
-        isFetchingRef.current &&
-        rangeFetchInFlightKeyRef.current === cacheKey &&
-        !options?.force
-      ) {
-        return
-      }
-
-      const { dateFrom, dateTo } = getRangeForView(date, nextView)
-      const seq = ++rangeFetchSeqRef.current
-      rangeFetchInFlightKeyRef.current = cacheKey
-      isFetchingRef.current = true
-      setIsFetching(true)
-
-      logCalendarFetch('start', {
-        rangeStart: dateFrom,
-        rangeEnd: dateTo,
-        coachId: instructorFilter,
-        view: nextView,
-      })
-
-      const fetchLessons =
-        nextView === 'month'
-          ? getLessonsForMonth(date.getFullYear(), date.getMonth() + 1)
-          : getLessonsForRange(dateFrom, dateTo)
-
-      void withCalendarFetchTimeout(fetchLessons)
-        .then((data) => {
-          if (seq !== rangeFetchSeqRef.current) return
-          logCalendarFetch('success', data.length)
-          rangeCacheRef.current.set(cacheKey, data)
-          setLessons(data)
-          if (nextView === 'month') {
-            syncMonthPool(date, data)
-          }
-          lessonHistory.clear()
-        })
-        .catch((error) => {
-          if (seq !== rangeFetchSeqRef.current) return
-          console.error(error)
-          logCalendarFetch('error', error)
-          toast.error('일정을 불러오지 못했습니다.')
-        })
-        .finally(() => {
-          if (seq === rangeFetchSeqRef.current) {
-            rangeFetchInFlightKeyRef.current = null
-            isFetchingRef.current = false
-            setIsFetching(false)
-            logCalendarFetch('end')
-          }
-        })
-    },
-    [lessonHistory, rangeCacheKey, syncMonthPool, instructorFilter],
-  )
+  function handleRefresh() {
+    if (loadState.refreshing) return
+    navigateRange(currentDate, view, { force: true, refreshing: true })
+  }
 
   function handleViewChange(nextView: CalendarView) {
     if (nextView === view) return
     setView(nextView)
     if (nextView === 'day') {
       setCurrentDate(agendaSelectedDate)
-      loadRange(agendaSelectedDate, nextView)
+      applyCachedRange(agendaSelectedDate, nextView)
+      void syncRange(agendaSelectedDate, nextView)
       return
     }
     setAgendaSelectedDate(currentDate)
     if (nextView === 'month') {
       setSearchPoolKey(null)
     }
-    loadRange(currentDate, nextView)
+    applyCachedRange(currentDate, nextView)
+    void syncRange(currentDate, nextView)
   }
 
   function handleNavigate(direction: -1 | 1) {
@@ -359,14 +395,16 @@ export function LessonCalendar({
     if (view === 'month') {
       setSearchPoolKey(null)
     }
-    loadRange(next, view)
+    applyCachedRange(next, view)
+    void syncRange(next, view)
   }
 
   function goToToday() {
     const today = new Date()
     setCurrentDate(today)
     setAgendaSelectedDate(today)
-    loadRange(today, view)
+    applyCachedRange(today, view)
+    void syncRange(today, view)
   }
 
   const handleViewChangeRef = useRef(handleViewChange)
@@ -577,7 +615,8 @@ export function LessonCalendar({
       lessonIds: [lesson.id],
     })
 
-    loadRange(lessonDate, nextView, { force: true })
+    applyCachedRange(lessonDate, nextView)
+    void syncRange(lessonDate, nextView, { force: true })
   }
 
   function handleLessonDeleted(lessonIds: string[]) {
@@ -589,19 +628,22 @@ export function LessonCalendar({
       new Map(removed.map((lesson) => [lesson.id, lesson])).values(),
     )
 
-    setLessons((prev) => prev.filter((l) => !idSet.has(l.id)))
+    setLessons((prev) => {
+      const next = prev.filter((l) => !idSet.has(l.id))
+      const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+      setCachedLessons(cacheKey, next)
+      return next
+    })
     setSearchPoolLessons((prev) => prev.filter((l) => !idSet.has(l.id)))
     for (const lesson of uniqueRemoved) {
       lessonHistory.pushLessonDelete(lesson)
     }
 
-    rangeCacheRef.current.delete(rangeCacheKey(currentDate, view))
-    loadRange(currentDate, view, { force: true })
+    void syncRange(currentDate, view, { force: true })
   }
 
   const handleLessonSaved = useCallback(
     (lesson: Lesson) => {
-      rangeFetchSeqRef.current += 1
       const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
 
       setLessons((prev) => {
@@ -617,7 +659,8 @@ export function LessonCalendar({
         const next = exists
           ? prev.map((l) => (l.id === enriched.id ? enriched : l))
           : [...prev, enriched]
-        rangeCacheRef.current.set(rangeCacheKey(currentDate, view), next)
+        const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+        setCachedLessons(cacheKey, next)
         return next
       })
       setSearchPoolLessons((prev) => {
@@ -628,7 +671,7 @@ export function LessonCalendar({
         return [...prev, enriched]
       })
     },
-    [lessonHistory, currentDate, view, rangeCacheKey, instructors],
+    [lessonHistory, currentDate, view, instructors],
   )
 
   const lessonSavedRef = useRef(handleLessonSaved)
@@ -747,6 +790,12 @@ export function LessonCalendar({
   }
 
   const title = getViewTitle(currentDate, view)
+  const rangeLoading =
+    loadState.initialLoading ||
+    loadState.backgroundLoading ||
+    loadState.refreshing
+  const showToolbarSpinner =
+    loadState.backgroundLoading || loadState.refreshing
   const weekDates = getWeekDates(currentDate)
   const dayDates = [currentDate]
 
@@ -804,9 +853,21 @@ export function LessonCalendar({
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRefresh}
+            disabled={loadState.refreshing}
+            title="일정 새로고침"
+            aria-label="일정 새로고침"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${loadState.refreshing ? 'animate-spin' : ''}`}
+            />
+          </Button>
           <h2 className="ml-1 flex items-center gap-2 text-base font-semibold sm:text-lg">
             {title}
-            {isFetching && (
+            {showToolbarSpinner && (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             )}
           </h2>
@@ -915,6 +976,8 @@ export function LessonCalendar({
             selectedLessonIds={selectedLessonIds}
             isLessonSelected={isLessonSelected}
             onClearLessonSelection={clearLessonSelection}
+            rangeLoading={rangeLoading}
+            hasRangeCache={loadState.hasRangeCache}
           />
         )}
 
@@ -936,6 +999,8 @@ export function LessonCalendar({
             selectedLessonIds={selectedLessonIds}
             isLessonSelected={isLessonSelected}
             onClearLessonSelection={clearLessonSelection}
+            rangeLoading={rangeLoading}
+            hasRangeCache={loadState.hasRangeCache}
           />
         )}
       </div>

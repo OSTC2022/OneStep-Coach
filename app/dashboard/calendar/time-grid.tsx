@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { Minus, Plus } from 'lucide-react'
+import { Loader2, Minus, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -66,6 +66,8 @@ interface TimeGridProps {
   className?: string
   highlightedLessonIds?: string[]
   selectedLessonIds?: ReadonlySet<string>
+  rangeLoading?: boolean
+  hasRangeCache?: boolean
 }
 
 const HOURS = Array.from(
@@ -331,6 +333,8 @@ export function TimeGrid({
   className,
   highlightedLessonIds,
   selectedLessonIds,
+  rangeLoading = false,
+  hasRangeCache = true,
 }: TimeGridProps) {
   const activateLesson = onLessonActivate ?? onLessonEdit
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1060,7 +1064,7 @@ export function TimeGrid({
       : null
 
   return (
-    <div className={cn('flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
+    <div className={cn('relative flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/20 px-2 py-1 md:hidden">
         <p className="text-[10px] text-muted-foreground">핀치 또는 버튼으로 확대·축소</p>
         <div className="flex items-center gap-1">
@@ -1379,6 +1383,18 @@ export function TimeGrid({
           </div>
         </div>
       </div>
+      {rangeLoading && !hasRangeCache ? (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-card/85 text-sm text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          일정 불러오는 중…
+        </div>
+      ) : null}
+      {rangeLoading && hasRangeCache ? (
+        <div className="pointer-events-none absolute right-3 top-12 z-20 flex items-center gap-1 rounded-full bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          갱신 중
+        </div>
+      ) : null}
     </div>
   )
 }

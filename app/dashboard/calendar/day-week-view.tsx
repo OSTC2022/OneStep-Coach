@@ -2,6 +2,7 @@
 
 import { MonthDayPanel } from './month-day-panel'
 import { TimeGrid } from './time-grid'
+import { CalendarMobileWeek } from './calendar-mobile-week'
 import type { MemoQuickAddPayload } from './month-memo-input'
 import type {
   CalendarMemberSearchItem,
@@ -35,6 +36,8 @@ interface DayWeekViewProps {
   selectedLessonIds?: ReadonlySet<string>
   isLessonSelected?: (lessonId: string) => boolean
   onClearLessonSelection?: () => void
+  rangeLoading?: boolean
+  hasRangeCache?: boolean
 }
 
 export function DayWeekView({
@@ -55,10 +58,35 @@ export function DayWeekView({
   selectedLessonIds,
   isLessonSelected,
   onClearLessonSelection,
+  rangeLoading = false,
+  hasRangeCache = true,
 }: DayWeekViewProps) {
+  const isWeekView = dates.length > 1
+
   return (
     <div className="flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <div className="min-h-0 flex-1 overflow-hidden md:flex-[1.1]">
+      {isWeekView ? (
+        <div className="min-h-0 flex-1 overflow-hidden md:hidden">
+          <CalendarMobileWeek
+            dates={dates}
+            selectedDate={selectedDate}
+            lessons={lessons}
+            onSelectDate={onSelectDate}
+            onLessonActivate={onLessonActivate}
+            highlightedLessonIds={highlightedLessonIds}
+            rangeLoading={rangeLoading}
+            hasCache={hasRangeCache}
+          />
+        </div>
+      ) : null}
+
+      <div
+        className={
+          isWeekView
+            ? 'hidden min-h-0 flex-1 overflow-hidden md:flex md:flex-[1.1]'
+            : 'min-h-0 flex-1 overflow-hidden md:flex-[1.1]'
+        }
+      >
         <TimeGrid
           dates={dates}
           lessons={lessons}
@@ -74,21 +102,23 @@ export function DayWeekView({
           compactHeader={compactHeader}
           highlightedLessonIds={highlightedLessonIds}
           selectedLessonIds={selectedLessonIds}
+          rangeLoading={rangeLoading}
+          hasRangeCache={hasRangeCache}
           className="h-full min-h-0 rounded-none border-0"
         />
       </div>
 
       <div className="max-h-[32vh] min-h-0 shrink-0 overflow-hidden border-t border-border md:max-h-none md:flex-1">
-      <MonthDayPanel
-        selectedDate={selectedDate}
-        lessons={lessons}
-        members={members}
-        onLessonActivate={onLessonActivate}
-        onLessonEdit={onLessonEdit}
-        onLessonLineUpdate={onLessonLineUpdate}
-        onMemoSubmit={onMemoSubmit}
-        isLessonSelected={isLessonSelected}
-      />
+        <MonthDayPanel
+          selectedDate={selectedDate}
+          lessons={lessons}
+          members={members}
+          onLessonActivate={onLessonActivate}
+          onLessonEdit={onLessonEdit}
+          onLessonLineUpdate={onLessonLineUpdate}
+          onMemoSubmit={onMemoSubmit}
+          isLessonSelected={isLessonSelected}
+        />
       </div>
     </div>
   )
