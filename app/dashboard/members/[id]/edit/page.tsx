@@ -1,5 +1,6 @@
 import { getMember } from '@/lib/actions/members'
 import { getInstructors } from '@/lib/actions/instructors'
+import { requireMemberManager } from '@/lib/auth/member-access'
 import { notFound } from 'next/navigation'
 import { MemberEditForm } from './member-edit-form'
 
@@ -8,6 +9,7 @@ export default async function MemberEditPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  await requireMemberManager()
   const { id } = await params
   const [member, instructors] = await Promise.all([
     getMember(id),

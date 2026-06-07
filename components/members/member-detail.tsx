@@ -33,6 +33,7 @@ import {
 import { deleteMember, toggleMemberStatus } from '@/lib/actions/members'
 import {
   formatMemberAge,
+  formatMemberContactDisplay,
   formatBirthDateDisplay,
   formatPrimaryInstructorName,
   resolveMemberBmi,
@@ -152,14 +153,22 @@ export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
               </CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div>
+              <div className="sm:col-span-2">
                 <p className="text-sm text-muted-foreground">연락처</p>
-                <p className="font-medium">{member.phone || '-'}</p>
+                <p className="font-medium">{formatMemberContactDisplay(member)}</p>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">보호자 연락처</p>
-                <p className="font-medium">{member.parent_phone || '-'}</p>
-              </div>
+              {member.phone?.trim() && member.parent_phone?.trim() ? (
+                <>
+                  <div>
+                    <p className="text-sm text-muted-foreground">본인</p>
+                    <p className="font-medium">{member.phone}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">보호자</p>
+                    <p className="font-medium">{member.parent_phone}</p>
+                  </div>
+                </>
+              ) : null}
               <div>
                 <p className="text-sm text-muted-foreground">생년월일</p>
                 <p className="font-medium">{formatBirthDateDisplay(member.birth_date)}</p>

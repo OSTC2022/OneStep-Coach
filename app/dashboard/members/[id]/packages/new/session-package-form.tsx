@@ -21,7 +21,21 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
-import { PACKAGE_PRESETS, getPresetPrice } from '@/lib/session-package-utils'
+import {
+  MONTHLY_PLAN_PRESETS,
+  PACKAGE_PRESETS,
+  UNLIMITED_SESSIONS_DISPLAY,
+  addMonthsToDate,
+  adjustPriceForPaymentMethod,
+  calculateMonthlyPlanExpiryDate,
+  clearMonthlyPlanNote,
+  formatPackageRemainingDisplay,
+  formatPackageSessionsDisplay,
+  getPresetPrice,
+  mergeMonthlyPlanNote,
+  parseMonthlyPlanMonthsFromNote,
+  type MonthlyPlanMonths,
+} from '@/lib/session-package-utils'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,7 +47,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { ArrowLeft, Save, CreditCard, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, CreditCard, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { SessionPackage } from '@/types/database'
 
@@ -86,6 +100,17 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   const [isLoading, setIsLoading] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [formData, setFormData] = useState(() => buildInitialFormData(sessionPackage))
+  const initialMonthlyMonths = parseMonthlyPlanMonthsFromNote(sessionPackage?.note)
+  const [activeMonthlyMonths, setActiveMonthlyMonths] = useState<MonthlyPlanMonths | null>(
+    () => {
+      if (initialMonthlyMonths === 1 || initialMonthlyMonths === 3 || initialMonthlyMonths === 6) {
+        return initialMonthlyMonths
+      }
+      return null
+    },
+  )
+  const [periodMonths, setPeriodMonths] = useState<number | null>(initialMonthlyMonths)
+  const [expiresAtManual, setExpiresAtManual] = useState(false)
 
   async function handleDelete() {
     if (!sessionPackage) return
@@ -100,7 +125,6 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
 
     toast.success('수업권이 휴지통으로 이동했습니다.')
     router.push(`/dashboard/members/${member.id}`)
-    router.refresh()
   }
 
   function applyPresetPrice(sessions: number, paymentMethod: string) {
@@ -110,31 +134,108 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
 
   function handlePresetSelect(sessions: number) {
     const price = applyPresetPrice(sessions, formData.payment_method)
+    setActiveMonthlyMonths(null)
+    setPeriodMonths(null)
     setFormData({
       ...formData,
       total_sessions: sessions,
-      ...(isEditing ? {} : { remaining_sessions: sessions }),
+      remaining_sessions: sessions,
+      note: clearMonthlyPlanNote(formData.note),
       ...(price !== undefined ? { price } : {}),
     })
   }
 
+  function applyMonthlyPeriod(
+    months: number,
+    options?: { extendFromExpiry?: boolean; autoExpiry?: boolean },
+  ) {
+    const paidAt = formData.paid_at || new Date().toISOString().split('T')[0]
+    const presetMatch = MONTHLY_PLAN_PRESETS.find((item) => item.months === months)
+    const shouldAutoExpiry = options?.autoExpiry !== false && !expiresAtManual
+    const expiresAt =
+      shouldAutoExpiry &&
+      (options?.extendFromExpiry && formData.expires_at
+        ? addMonthsToDate(formData.expires_at, 1)
+        : calculateMonthlyPlanExpiryDate(paidAt, months))
+
+    setPeriodMonths(months)
+    setActiveMonthlyMonths(presetMatch ? presetMatch.months : null)
+    setFormData({
+      ...formData,
+      total_sessions: 0,
+      ...(isEditing ? {} : { remaining_sessions: 0 }),
+      paid_at: paidAt,
+      ...(expiresAt ? { expires_at: expiresAt } : {}),
+      note: mergeMonthlyPlanNote(formData.note, months),
+    })
+  }
+
+  function handleMonthlyPlanSelect(months: MonthlyPlanMonths) {
+    setExpiresAtManual(false)
+    applyMonthlyPeriod(months, { autoExpiry: true })
+  }
+
+  function handlePeriodMonthsChange(rawMonths: number) {
+    const months = Math.max(1, Math.floor(rawMonths) || 1)
+    applyMonthlyPeriod(months)
+  }
+
+  function handleExtendPeriod() {
+    const currentMonths = periodMonths ?? parseMonthlyPlanMonthsFromNote(formData.note) ?? 1
+    setExpiresAtManual(false)
+    applyMonthlyPeriod(currentMonths + 1, {
+      extendFromExpiry: Boolean(formData.expires_at),
+      autoExpiry: true,
+    })
+  }
+
+  function handleExpiresAtChange(expires_at: string) {
+    setExpiresAtManual(true)
+    setFormData((prev) => ({ ...prev, expires_at }))
+  }
+
   function handleSessionsChange(sessions: number) {
     const price = applyPresetPrice(sessions, formData.payment_method)
+    setActiveMonthlyMonths(null)
+    setPeriodMonths(null)
     setFormData({
       ...formData,
       total_sessions: sessions,
       ...(isEditing ? {} : { remaining_sessions: sessions }),
+      note: clearMonthlyPlanNote(formData.note),
       ...(price !== undefined ? { price } : {}),
     })
   }
 
   function handlePaymentMethodChange(paymentMethod: string) {
-    const price = applyPresetPrice(formData.total_sessions, paymentMethod)
+    const currentPrice = Number(formData.price) || 0
+    const isMonthly = periodMonths != null
+    const nextPrice =
+      currentPrice > 0
+        ? adjustPriceForPaymentMethod(
+            currentPrice,
+            formData.payment_method,
+            paymentMethod,
+          )
+        : isMonthly
+          ? null
+          : getPresetPrice(formData.total_sessions, paymentMethod)
+
     setFormData({
       ...formData,
       payment_method: paymentMethod,
-      ...(price !== undefined ? { price } : {}),
+      ...(nextPrice != null ? { price: String(nextPrice) } : {}),
     })
+  }
+
+  function handlePaidAtChange(paidAt: string) {
+    setFormData((prev) => ({
+      ...prev,
+      paid_at: paidAt,
+      ...(periodMonths && !expiresAtManual
+        ? { expires_at: calculateMonthlyPlanExpiryDate(paidAt, periodMonths) }
+        : {}),
+    }))
   }
 
   function handlePriceChange(value: string) {
@@ -147,15 +248,19 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     return Number(value).toLocaleString('en-US')
   }
 
+  const isMonthlyPlanMode = periodMonths != null
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
+    const totalSessions = isMonthlyPlanMode ? 0 : formData.total_sessions
+
     const payload = {
-      total_sessions: formData.total_sessions,
+      total_sessions: totalSessions,
       price: formData.price ? Number(formData.price) : undefined,
-      paid_at: formData.paid_at || undefined,
-      expires_at: formData.expires_at || undefined,
+      paid_at: formData.paid_at.trim() ? formData.paid_at : null,
+      expires_at: formData.expires_at.trim() ? formData.expires_at : null,
       payment_method: formData.payment_method || undefined,
       note: formData.note || undefined,
     }
@@ -163,7 +268,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     const result = isEditing && sessionPackage
       ? await updateSessionPackage(sessionPackage.id, {
           ...payload,
-          remaining_sessions: formData.remaining_sessions,
+          remaining_sessions: isMonthlyPlanMode ? 0 : formData.remaining_sessions,
           is_active: formData.is_active,
         })
       : await createSessionPackage({
@@ -182,31 +287,37 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
 
     toast.success(isEditing ? '수업권이 수정되었습니다.' : '수업권이 등록되었습니다.')
     router.push(`/dashboard/members/${member.id}`)
-    router.refresh()
   }
 
+  const confirmLabel = isLoading ? '저장 중…' : '확인'
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+    <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <div className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+        <div className="flex min-w-0 items-center gap-3">
           <Link href={`/dashboard/members/${member.id}`}>
-            <Button type="button" variant="ghost" size="icon">
+            <Button type="button" variant="ghost" size="icon" className="shrink-0">
               <ArrowLeft className="h-5 w-5" />
             </Button>
           </Link>
-          <div>
-            <h1 className="text-2xl lg:text-3xl font-bold">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold lg:text-3xl">
               {isEditing ? '수업권 수정' : '수업권 추가'}
             </h1>
             <p className="text-muted-foreground">{member.name} 회원</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
           {isEditing && sessionPackage && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button type="button" variant="destructive" disabled={isLoading || isDeleting}>
-                  <Trash2 className="h-4 w-4 mr-2" />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="lg"
+                  disabled={isLoading || isDeleting}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
                   삭제
                 </Button>
               </AlertDialogTrigger>
@@ -234,15 +345,19 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
               </AlertDialogContent>
             </AlertDialog>
           )}
-          <Button type="submit" disabled={isLoading || isDeleting}>
-            <Save className="h-4 w-4 mr-2" />
-            {isLoading ? '저장 중...' : '저장'}
+          <Button
+            type="submit"
+            size="lg"
+            className="min-w-[7.5rem]"
+            disabled={isLoading || isDeleting}
+          >
+            <Check className="mr-2 h-4 w-4" />
+            {confirmLabel}
           </Button>
         </div>
       </div>
 
-      <div className="max-w-2xl">
-        <Card>
+      <Card className="w-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CreditCard className="h-5 w-5 text-primary" />
@@ -262,7 +377,13 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                   <Button
                     key={preset.sessions}
                     type="button"
-                    variant={formData.total_sessions === preset.sessions ? 'default' : 'outline'}
+                    variant={
+                      !isMonthlyPlanMode &&
+                      activeMonthlyMonths == null &&
+                      formData.total_sessions === preset.sessions
+                        ? 'default'
+                        : 'outline'
+                    }
                     size="sm"
                     onClick={() => handlePresetSelect(preset.sessions)}
                   >
@@ -272,38 +393,110 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
               </div>
             </div>
 
+            <div className="space-y-2">
+              <Label>월 정액</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                {MONTHLY_PLAN_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.months}
+                    type="button"
+                    variant={
+                      activeMonthlyMonths === preset.months ? 'default' : 'outline'
+                    }
+                    size="sm"
+                    onClick={() => handleMonthlyPlanSelect(preset.months)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+                <div className="flex flex-wrap items-center gap-2 border-l border-border pl-2">
+                  <Label htmlFor="period_months" className="text-sm font-normal text-muted-foreground">
+                    기간
+                  </Label>
+                  <Input
+                    id="period_months"
+                    type="number"
+                    min={1}
+                    value={periodMonths ?? ''}
+                    onChange={(e) => handlePeriodMonthsChange(Number(e.target.value))}
+                    disabled={!isMonthlyPlanMode}
+                    placeholder="-"
+                    className="h-8 w-16 px-2 text-center"
+                  />
+                  <span className="text-sm text-muted-foreground">개월</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!isMonthlyPlanMode}
+                    onClick={handleExtendPeriod}
+                  >
+                    +1개월 연장
+                  </Button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                월정액은 횟수 제한 없음 · 금액 직접 입력 · 기간 수정·연장 가능
+              </p>
+            </div>
+
             <div className={`grid gap-4 ${isEditing ? 'grid-cols-2' : 'grid-cols-1'}`}>
               <div className="space-y-2">
-                <Label htmlFor="total_sessions">총 회차</Label>
-                <Input
-                  id="total_sessions"
-                  type="number"
-                  min="1"
-                  value={formData.total_sessions}
-                  onChange={(e) => handleSessionsChange(Number(e.target.value))}
-                  required
-                />
+                <Label htmlFor="total_sessions">
+                  총 회차
+                  {periodMonths != null ? (
+                    <span className="ml-1 text-primary">({periodMonths}개월)</span>
+                  ) : null}
+                </Label>
+                {isMonthlyPlanMode ? (
+                  <Input
+                    id="total_sessions"
+                    value={UNLIMITED_SESSIONS_DISPLAY}
+                    readOnly
+                    disabled
+                    className="text-muted-foreground"
+                  />
+                ) : (
+                  <Input
+                    id="total_sessions"
+                    type="number"
+                    min={1}
+                    value={formData.total_sessions}
+                    onChange={(e) => handleSessionsChange(Number(e.target.value))}
+                    required
+                  />
+                )}
               </div>
               {isEditing && (
                 <div className="space-y-2">
                   <Label htmlFor="remaining_sessions">잔여 회차</Label>
-                  <Input
-                    id="remaining_sessions"
-                    type="number"
-                    min="0"
-                    max={formData.total_sessions}
-                    value={formData.remaining_sessions}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        remaining_sessions: Math.min(
-                          Number(e.target.value),
-                          formData.total_sessions,
-                        ),
-                      })
-                    }
-                    required
-                  />
+                  {isMonthlyPlanMode ? (
+                    <Input
+                      id="remaining_sessions"
+                      value={UNLIMITED_SESSIONS_DISPLAY}
+                      readOnly
+                      disabled
+                      className="text-muted-foreground"
+                    />
+                  ) : (
+                    <Input
+                      id="remaining_sessions"
+                      type="number"
+                      min="0"
+                      max={formData.total_sessions}
+                      value={formData.remaining_sessions}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          remaining_sessions: Math.min(
+                            Number(e.target.value),
+                            formData.total_sessions,
+                          ),
+                        })
+                      }
+                      required
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -340,18 +533,18 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     </SelectContent>
                   </Select>
                 </div>
-                {formData.total_sessions === 8 && (
-                  <p className="text-xs text-muted-foreground">
-                    8회 기준 88만원 · 현금·계좌이체 선택 시 80만원
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  {isMonthlyPlanMode
+                    ? '월정액 금액은 직접 입력해주세요.'
+                    : '카드·복합결제는 부가세 포함 · 현금·계좌이체는 부가세 제외 (8회 기준 88만/80만원)'}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="paid_at">결제일</Label>
                 <KoreanDatePicker
                   id="paid_at"
                   value={formData.paid_at}
-                  onChange={(paid_at) => setFormData({ ...formData, paid_at })}
+                  onChange={handlePaidAtChange}
                   placeholder="결제일 선택"
                 />
               </div>
@@ -360,7 +553,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                 <KoreanDatePicker
                   id="expires_at"
                   value={formData.expires_at}
-                  onChange={(expires_at) => setFormData({ ...formData, expires_at })}
+                  onChange={handleExpiresAtChange}
                   placeholder="만료일 선택"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -404,18 +597,25 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
               <h4 className="font-medium mb-2">{isEditing ? '수정 정보 요약' : '등록 정보 요약'}</h4>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <span className="text-muted-foreground">총 회차:</span>
-                <span>{formData.total_sessions}회</span>
+                <span>
+                  {formatPackageSessionsDisplay(formData.total_sessions, formData.note)}
+                </span>
                 {isEditing && (
                   <>
                     <span className="text-muted-foreground">잔여 회차:</span>
-                    <span>{formData.remaining_sessions}회</span>
+                    <span>
+                      {formatPackageRemainingDisplay(
+                        formData.remaining_sessions,
+                        formData.note,
+                      )}
+                    </span>
                   </>
                 )}
                 <span className="text-muted-foreground">금액:</span>
                 <span>{formData.price ? `${Number(formData.price).toLocaleString()}원` : '-'}</span>
                 <span className="text-muted-foreground">회당 금액:</span>
                 <span>
-                  {formData.price
+                  {formData.price && !isMonthlyPlanMode && formData.total_sessions > 0
                     ? `${Math.round(Number(formData.price) / formData.total_sessions).toLocaleString()}원`
                     : '-'}
                 </span>
@@ -423,9 +623,23 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                 <span>{formData.expires_at || '미선택'}</span>
               </div>
             </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-5">
+              <Button type="button" variant="outline" size="lg" className="min-w-[7.5rem]" asChild>
+                <Link href={`/dashboard/members/${member.id}`}>취소</Link>
+              </Button>
+              <Button
+                type="submit"
+                size="lg"
+                className="min-w-[7.5rem]"
+                disabled={isLoading || isDeleting}
+              >
+                <Check className="mr-2 h-4 w-4" />
+                {confirmLabel}
+              </Button>
+            </div>
           </CardContent>
         </Card>
-      </div>
     </form>
   )
 }

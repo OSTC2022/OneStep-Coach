@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronsUpDown, Clock, Search } from 'lucide-react'
+import { Check, ChevronsUpDown, Clock, Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   addMemberRecentQuery,
@@ -94,6 +94,8 @@ export function MemberSearchSelect({
 }: MemberSearchSelectProps) {
   const [open, setOpen] = useState(false)
   const [remoteMatches, setRemoteMatches] = useState<MemberSearchOption[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const searchGenerationRef = useRef(0)
   const [internalQuery, setInternalQuery] = useState('')
   const [suggestOpen, setSuggestOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -125,33 +127,63 @@ export function MemberSearchSelect({
   useEffect(() => {
     if (!onSearchMembers) {
       setRemoteMatches([])
+      setIsSearching(false)
       return
     }
     const q = query.trim()
     if (q.length < 1) {
       setRemoteMatches([])
+      setIsSearching(false)
       return
     }
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      void onSearchMembers(q).then((rows) => {
-        if (!cancelled) setRemoteMatches(rows)
+
+    const generation = ++searchGenerationRef.current
+    setIsSearching(true)
+
+    void onSearchMembers(q)
+      .then((rows) => {
+        if (searchGenerationRef.current !== generation) return
+        setRemoteMatches(rows)
+        setIsSearching(false)
       })
-    }, 280)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
+      .catch(() => {
+        if (searchGenerationRef.current === generation) {
+          setIsSearching(false)
+        }
+      })
   }, [query, onSearchMembers])
+
+  const localFiltered = useMemo(() => {
+    const q = query.trim()
+    if (!q) return []
+    return filterAndSortKoreanNames(members, q, 15)
+  }, [members, query])
 
   const filtered = useMemo(() => {
     const q = query.trim()
-    if (onSearchMembers && q.length >= 1) {
-      return remoteMatches.slice(0, 15)
-    }
     if (!q) return members.slice(0, 12)
-    return filterAndSortKoreanNames(members, q, 15)
-  }, [members, query, onSearchMembers, remoteMatches])
+    if (!onSearchMembers) {
+      return filterAndSortKoreanNames(members, q, 15)
+    }
+
+    const merged = new Map<string, MemberSearchOption>()
+    for (const member of localFiltered) {
+      merged.set(member.id, member)
+    }
+    for (const member of remoteMatches) {
+      if (!merged.has(member.id)) {
+        merged.set(member.id, member)
+      }
+    }
+    return Array.from(merged.values()).slice(0, 15)
+  }, [members, query, onSearchMembers, localFiltered, remoteMatches])
+
+  const hasLocalMatches = localFiltered.length > 0
+  const showSearchingHint =
+    Boolean(onSearchMembers) &&
+    query.trim().length >= 1 &&
+    isSearching &&
+    !hasLocalMatches
 
   function isMemberDisabled(member: MemberSearchOption) {
     return disabledIds.includes(member.id) && member.id !== value
@@ -317,11 +349,17 @@ export function MemberSearchSelect({
               ))}
             </div>
           )}
-          {searchOpen && query.trim() && filtered.length > 0 && (
+          {searchOpen && query.trim() && (filtered.length > 0 || showSearchingHint) && (
             <div
               className={suggestionListClass}
               onMouseDown={(e) => e.preventDefault()}
             >
+              {showSearchingHint ? (
+                <p className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  검색중…
+                </p>
+              ) : null}
               {filtered.map((m) => {
                 const blocked = isMemberDisabled(m)
                 return (
@@ -346,10 +384,20 @@ export function MemberSearchSelect({
                   </button>
                 )
               })}
+              {isSearching && filtered.length > 0 ? (
+                <p className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  검색중…
+                </p>
+              ) : null}
             </div>
           )}
         </div>
-        {searchOpen && !allowFreeText && query.trim() && filtered.length === 0 && (
+        {searchOpen &&
+          !allowFreeText &&
+          query.trim() &&
+          !isSearching &&
+          filtered.length === 0 && (
           <p className="px-1 text-xs text-muted-foreground">회원을 찾을 수 없습니다.</p>
         )}
         {!allowFreeText && selected && !query && (

@@ -32,12 +32,26 @@ export function LessonStatusWeightInput({
   )
   const [saving, setSaving] = useState(false)
   const lastSavedRef = useRef(initialWeight ?? null)
+  const boundRef = useRef({ memberId, lessonDate })
 
   useEffect(() => {
-    const next =
-      initialWeight != null ? String(initialWeight) : ''
-    setValue(next)
-    lastSavedRef.current = initialWeight ?? null
+    const memberOrDateChanged =
+      boundRef.current.memberId !== memberId ||
+      boundRef.current.lessonDate !== lessonDate
+    boundRef.current = { memberId, lessonDate }
+
+    if (memberOrDateChanged) {
+      const next = initialWeight != null ? String(initialWeight) : ''
+      setValue(next)
+      lastSavedRef.current = initialWeight ?? null
+      return
+    }
+
+    if (initialWeight != null) {
+      const next = String(initialWeight)
+      setValue(next)
+      lastSavedRef.current = initialWeight
+    }
   }, [initialWeight, memberId, lessonDate])
 
   async function commit(nextRaw: string) {
@@ -115,10 +129,7 @@ export function LessonStatusWeightInput({
   }
 
   return (
-    <div className={cn('mt-1 flex items-center gap-1', className)}>
-      <span className="shrink-0 text-[9px] font-medium text-muted-foreground">
-        체중
-      </span>
+    <div className={cn('mt-1 flex w-full items-center gap-1', className)}>
       <div className="relative min-w-0 flex-1">
         <Input
           type="number"

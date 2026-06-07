@@ -9,7 +9,11 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2, ArrowLeft } from 'lucide-react'
 import { createMember, updateMember } from '@/lib/actions/members'
-import { formatMemberAgeFromBirthDate, AUTO_INSTRUCTOR_ID } from '@/lib/member-utils'
+import {
+  getMemberAge,
+  suggestAgeFromBirthDate,
+  AUTO_INSTRUCTOR_ID,
+} from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
@@ -28,6 +32,7 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
   const [formData, setFormData] = useState<MemberFormData>({
     name: member?.name || '',
     birth_date: member?.birth_date || '',
+    age: member ? (getMemberAge(member) ?? undefined) : undefined,
     grade: member?.grade || '',
     phone: member?.phone || '',
     parent_phone: member?.parent_phone || '',
@@ -69,7 +74,6 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
 
       toast.success(member ? '회원 정보가 수정되었습니다.' : '새 회원이 추가되었습니다.')
       router.push('/dashboard/members')
-      router.refresh()
     } catch {
       toast.error('오류가 발생했습니다.')
     } finally {
@@ -103,15 +107,30 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
               </div>
               <BirthDateInput
                 value={formData.birth_date}
-                onChange={(birth_date) => setFormData({ ...formData, birth_date })}
+                onChange={(birth_date) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    birth_date,
+                    age: suggestAgeFromBirthDate(birth_date) ?? prev.age,
+                  }))
+                }
               />
               <div className="space-y-2">
-                <Label htmlFor="age-preview">나이 (자동)</Label>
+                <Label htmlFor="age">나이</Label>
                 <Input
-                  id="age-preview"
-                  value={formatMemberAgeFromBirthDate(formData.birth_date)}
-                  disabled
-                  className="bg-muted border-border"
+                  id="age"
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={formData.age ?? ''}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      age: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  placeholder="생년월일 입력 시 자동 계산"
+                  className="bg-input border-border"
                 />
               </div>
             </div>

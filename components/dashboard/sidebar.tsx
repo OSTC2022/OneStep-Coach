@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -33,6 +33,7 @@ import {
 import type { User } from '@/lib/types'
 import { getRoleLabel } from '@/lib/roles'
 import { preloadRouteChunk } from '@/lib/chunk-preload'
+import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
 
 const menuItems = [
   {
@@ -57,7 +58,7 @@ const menuItems = [
     title: '회원 관리',
     url: '/dashboard/members',
     icon: Users,
-    roles: ['admin'],
+    roles: ['admin', 'instructor'],
   },
   {
     title: '회원 추가',
@@ -123,13 +124,18 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     item.roles.includes(userRole),
   )
 
+  const prefetchedRoutesRef = useRef(new Set<string>())
+
   function prefetchMenuRoute(href: string) {
+    if (!shouldBackgroundPrefetch()) return
+    if (prefetchedRoutesRef.current.has(href)) return
+    prefetchedRoutesRef.current.add(href)
     router.prefetch(href)
     preloadRouteChunk(href)
   }
 
   useEffect(() => {
-    if (!isMobile) return
+    if (!shouldBackgroundPrefetch() || !isMobile) return
     for (const item of filteredItems.slice(0, 4)) {
       if (item.url === pathname) continue
       prefetchMenuRoute(item.url)
@@ -140,7 +146,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <Link href="/dashboard" className="flex items-center gap-3">
+        <Link href="/dashboard" prefetch={false} className="flex items-center gap-3">
           <div className="w-10 h-10 bg-sidebar-primary/10 rounded-xl flex items-center justify-center">
             <Dumbbell className="w-5 h-5 text-sidebar-primary" />
           </div>
@@ -169,7 +175,8 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
                     >
                       <Link
                         href={item.url}
-                        onPointerEnter={() => prefetchMenuRoute(item.url)}
+                        prefetch={false}
+                        onPointerDown={() => prefetchMenuRoute(item.url)}
                         onTouchStart={() => prefetchMenuRoute(item.url)}
                         onClick={() => {
                           if (isMobile) setOpenMobile(false)

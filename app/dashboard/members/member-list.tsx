@@ -1,12 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createMember, deleteMember, getMembers, toggleMemberStatus } from '@/lib/actions/members'
 import { getInstructors } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
-import { formatMemberAge, formatMemberAgeFromBirthDate, AUTO_INSTRUCTOR_ID, formatPrimaryInstructorName } from '@/lib/member-utils'
+import {
+  formatMemberAge,
+  formatMemberContactDisplay,
+  suggestAgeFromBirthDate,
+  AUTO_INSTRUCTOR_ID,
+  formatPrimaryInstructorName,
+} from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
@@ -52,12 +57,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Edit, Plus, Search, Trash2 } from 'lucide-react'
 import { MemberTrashSheet } from './member-trash-sheet'
+import { LIST_ROW_LINK_PREFETCH } from '@/lib/navigation-prefetch'
 
 interface MemberListProps {
   initialMembers: (Member & { primary_instructor?: { id: string; name: string } | null })[]
   totalCount: number
   pageSize?: number
   initialTrashCount?: number
+  canManage?: boolean
 }
 
 export function MemberList({
@@ -65,6 +72,7 @@ export function MemberList({
   totalCount,
   pageSize = LIST_PAGE_SIZE,
   initialTrashCount = 0,
+  canManage = true,
 }: MemberListProps) {
   const [members, setMembers] = useState(initialMembers)
   const [loadedCount, setLoadedCount] = useState(initialMembers.length)
@@ -79,7 +87,6 @@ export function MemberList({
   const [deleting, setDeleting] = useState(false)
   const [trashCount, setTrashCount] = useState(initialTrashCount)
   const [recentTrashItems, setRecentTrashItems] = useState<Member[]>([])
-  const router = useRouter()
 
   useEffect(() => {
     setMembers(initialMembers)
@@ -129,6 +136,7 @@ export function MemberList({
   const [formData, setFormData] = useState<MemberFormData>({
     name: '',
     birth_date: '',
+    age: undefined,
     grade: '',
     phone: '',
     parent_phone: '',
@@ -144,6 +152,7 @@ export function MemberList({
   const filteredMembers = members.filter((member) => {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       member.phone?.includes(searchTerm) ||
+      member.parent_phone?.includes(searchTerm) ||
       member.sport?.toLowerCase().includes(searchTerm.toLowerCase())
     
     const matchesStatus = statusFilter === 'all' || 
@@ -171,6 +180,7 @@ export function MemberList({
       setFormData({
         name: '',
         birth_date: '',
+        age: undefined,
         grade: '',
         phone: '',
         parent_phone: '',
@@ -187,7 +197,6 @@ export function MemberList({
     }
 
     setIsLoading(false)
-    router.refresh()
   }
 
   const handleToggleMemberStatus = async (member: Member) => {
@@ -206,7 +215,6 @@ export function MemberList({
       ),
     )
     toast.success(nextActive ? '회원이 활성화되었습니다.' : '회원이 비활성화되었습니다.')
-    router.refresh()
   }
 
   const handleDeleteMember = async () => {
@@ -234,7 +242,6 @@ export function MemberList({
     setDeleteTarget(null)
     setDeleting(false)
     toast.success(`${deleteTarget.name} 회원이 휴지통으로 이동했습니다.`)
-    router.refresh()
   }
 
   return (
@@ -264,6 +271,8 @@ export function MemberList({
         </div>
 
         <div className="flex gap-2 items-center">
+          {canManage ? (
+            <>
           <MemberTrashSheet
             initialCount={trashCount}
             recentTrashItems={recentTrashItems}
@@ -305,14 +314,29 @@ export function MemberList({
                 <BirthDateInput
                   id="quick-birth_date"
                   value={formData.birth_date}
-                  onChange={(birth_date) => setFormData({ ...formData, birth_date })}
+                  onChange={(birth_date) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      birth_date,
+                      age: suggestAgeFromBirthDate(birth_date) ?? prev.age,
+                    }))
+                  }
                 />
                 <div className="space-y-2">
-                  <Label>나이 (자동)</Label>
+                  <Label htmlFor="quick-age">나이</Label>
                   <Input
-                    value={formatMemberAgeFromBirthDate(formData.birth_date)}
-                    disabled
-                    className="bg-muted"
+                    id="quick-age"
+                    type="number"
+                    min={0}
+                    max={120}
+                    value={formData.age ?? ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        age: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                    placeholder="생년월일 입력 시 자동 계산"
                   />
                 </div>
               </div>
@@ -441,6 +465,8 @@ export function MemberList({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -461,20 +487,20 @@ export function MemberList({
               <TableHead className="hidden lg:table-cell">종목</TableHead>
               <TableHead className="hidden lg:table-cell">담당 강사</TableHead>
               <TableHead>상태</TableHead>
-              <TableHead className="text-right">관리</TableHead>
+              {canManage ? <TableHead className="text-right">관리</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredMembers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-12">
+                <TableCell colSpan={canManage ? 7 : 6} className="text-center py-12">
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
                     <p>
                       {searchTerm || statusFilter !== 'all'
                         ? '검색 결과가 없습니다.'
                         : '등록된 회원이 없습니다.'}
                     </p>
-                    {!searchTerm && statusFilter === 'all' && (
+                    {canManage && !searchTerm && statusFilter === 'all' && (
                       <Button asChild>
                         <Link href="/dashboard/members/new">
                           <Plus className="h-4 w-4 mr-2" />
@@ -491,6 +517,7 @@ export function MemberList({
                   <TableCell className="font-medium">
                     <Link
                       href={`/dashboard/members/${member.id}`}
+                      prefetch={LIST_ROW_LINK_PREFETCH}
                       className="hover:text-primary hover:underline underline-offset-4"
                     >
                       {member.name}
@@ -500,7 +527,7 @@ export function MemberList({
                     {formatMemberAge(member)}
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
-                    {member.phone || '-'}
+                    {formatMemberContactDisplay(member)}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     {member.sport || '-'}
@@ -509,27 +536,38 @@ export function MemberList({
                     {formatPrimaryInstructorName(member.primary_instructor)}
                   </TableCell>
                   <TableCell>
-                    <Switch
-                      checked={member.is_active}
-                      onCheckedChange={() => void handleToggleMemberStatus(member)}
-                    />
+                    {canManage ? (
+                      <Switch
+                        checked={member.is_active}
+                        onCheckedChange={() => void handleToggleMemberStatus(member)}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {member.is_active ? '활성' : '비활성'}
+                      </span>
+                    )}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" asChild>
-                        <Link href={`/dashboard/members/${member.id}/edit`}>
-                          <Edit className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setDeleteTarget(member)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
+                  {canManage ? (
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="icon" asChild>
+                          <Link
+                            href={`/dashboard/members/${member.id}/edit`}
+                            prefetch={LIST_ROW_LINK_PREFETCH}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteTarget(member)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  ) : null}
                 </TableRow>
               ))
             )}

@@ -42,7 +42,12 @@ import {
   CreditCard,
   Trash2,
 } from 'lucide-react'
-import { formatMemberAge, formatBirthDateDisplay, formatPrimaryInstructorName } from '@/lib/member-utils'
+import {
+  formatMemberAge,
+  formatMemberContactDisplay,
+  formatBirthDateDisplay,
+  formatPrimaryInstructorName,
+} from '@/lib/member-utils'
 import { MemberAccountLink } from '@/components/members/member-account-link'
 import { SessionPackageTrashSheet } from './session-package-trash-sheet'
 import {
@@ -55,6 +60,14 @@ import {
   sortLessonsForRecentDisplay,
   linkPackageTallyToSessions,
 } from '@/lib/lesson-record-utils'
+import {
+  formatPackageRemainingDisplay,
+  formatPackageSessionsDisplay,
+  formatPackageTallyRemainingDisplay,
+  formatPackageTallyTotalDisplay,
+  isPackageUsableForLesson,
+  UNLIMITED_SESSIONS_DISPLAY,
+} from '@/lib/session-package-utils'
 
 const LESSON_RECORD_PAGE_SIZE = 10
 
@@ -68,6 +81,7 @@ interface MemberDetailProps {
   accountEmailSource?: 'auth' | 'invite' | null
   bodyRecords?: MemberBodyRecord[]
   bodyTableReady?: boolean
+  canManage?: boolean
 }
 
 function formatPackageDate(value: string | null | undefined) {
@@ -85,6 +99,7 @@ export function MemberDetail({
   accountEmailSource = null,
   bodyRecords = [],
   bodyTableReady = true,
+  canManage = true,
 }: MemberDetailProps) {
   const router = useRouter()
   const [memberState, setMemberState] = useState(member)
@@ -139,7 +154,18 @@ export function MemberDetail({
     () => linkPackageTallyToSessions(sessionPackages, sessionNumberByLessonId),
     [sessionPackages, sessionNumberByLessonId],
   )
-  const activePackage = sessionPackages.find((p) => p.is_active && p.remaining_sessions > 0)
+  const tallyTotalDisplay = useMemo(
+    () => formatPackageTallyTotalDisplay(sessionPackages),
+    [sessionPackages],
+  )
+  const tallyRemainingDisplay = useMemo(
+    () => formatPackageTallyRemainingDisplay(sessionPackages),
+    [sessionPackages],
+  )
+  const isTallyUnlimited =
+    tallyTotalDisplay === UNLIMITED_SESSIONS_DISPLAY ||
+    tallyRemainingDisplay === UNLIMITED_SESSIONS_DISPLAY
+  const activePackage = sessionPackages.find((p) => isPackageUsableForLesson(p))
   const totalRemainingSessions = packageTally.remaining
 
   async function handleDeletePackage() {
@@ -195,12 +221,14 @@ export function MemberDetail({
             </p>
           </div>
         </div>
-        <Link href={`/dashboard/members/${memberState.id}/edit`}>
-          <Button>
-            <Edit className="h-4 w-4 mr-2" />
-            수정
-          </Button>
-        </Link>
+        {canManage ? (
+          <Link href={`/dashboard/members/${memberState.id}/edit`}>
+            <Button>
+              <Edit className="h-4 w-4 mr-2" />
+              수정
+            </Button>
+          </Link>
+        ) : null}
       </div>
 
       {/* Info Cards Grid */}
@@ -242,14 +270,22 @@ export function MemberDetail({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">본인</span>
-              <span>{member.phone || '-'}</span>
+            <div className="flex justify-between gap-3">
+              <span className="text-muted-foreground shrink-0">연락처</span>
+              <span className="text-right">{formatMemberContactDisplay(member)}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">보호자</span>
-              <span>{member.parent_phone || '-'}</span>
-            </div>
+            {member.phone?.trim() && member.parent_phone?.trim() ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">본인</span>
+                  <span>{member.phone}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">보호자</span>
+                  <span>{member.parent_phone}</span>
+                </div>
+              </>
+            ) : null}
             <div className="flex justify-between">
               <span className="text-muted-foreground">담당 강사</span>
               <span>{formatPrimaryInstructorName(member.primary_instructor)}</span>
@@ -313,18 +349,33 @@ export function MemberDetail({
           <CardContent>
             <div className="grid grid-cols-2 gap-3 py-2 text-center">
               <div>
-                <p className="text-2xl font-bold tabular-nums">{packageTally.total}</p>
-                <p className="text-xs text-muted-foreground mt-1">회차</p>
+                <p className="text-2xl font-bold tabular-nums">{tallyTotalDisplay}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {isTallyUnlimited ? '회차 (무제한)' : '회차'}
+                </p>
               </div>
               <div>
                 <p className="text-2xl font-bold tabular-nums text-primary">
-                  {packageTally.remaining}
+                  {tallyRemainingDisplay}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">잔여</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {isTallyUnlimited ? '잔여 (무제한)' : '잔여'}
+                </p>
               </div>
             </div>
             {activePackage && (
               <div className="text-sm text-muted-foreground space-y-1 border-t border-border pt-3 mt-3">
+                <p>
+                  {formatPackageSessionsDisplay(
+                    activePackage.total_sessions,
+                    activePackage.note,
+                  )}{' '}
+                  · 잔여{' '}
+                  {formatPackageRemainingDisplay(
+                    activePackage.remaining_sessions,
+                    activePackage.note,
+                  )}
+                </p>
                 {activePackage.expires_at && (
                   <p>만료일: {formatPackageDate(activePackage.expires_at)}</p>
                 )}
@@ -382,25 +433,27 @@ export function MemberDetail({
             <Calendar className="h-5 w-5 text-primary" />
             수업권 내역
           </CardTitle>
-          <div className="flex items-center gap-2">
-            <SessionPackageTrashSheet
-              memberId={member.id}
-              initialCount={trashCount}
-              recentTrashItems={recentTrashItems}
-              onTrashCountChange={setTrashCount}
-              onRestore={(pkg) => {
-                setSessionPackages((prev) => {
-                  const ids = new Set(prev.map((p) => p.id))
-                  if (ids.has(pkg.id)) return prev
-                  return [pkg, ...prev]
-                })
-                setRecentTrashItems((prev) => prev.filter((p) => p.id !== pkg.id))
-              }}
-            />
-            <Link href={`/dashboard/members/${member.id}/packages/new`}>
-              <Button size="sm">수업권 추가</Button>
-            </Link>
-          </div>
+          {canManage ? (
+            <div className="flex items-center gap-2">
+              <SessionPackageTrashSheet
+                memberId={member.id}
+                initialCount={trashCount}
+                recentTrashItems={recentTrashItems}
+                onTrashCountChange={setTrashCount}
+                onRestore={(pkg) => {
+                  setSessionPackages((prev) => {
+                    const ids = new Set(prev.map((p) => p.id))
+                    if (ids.has(pkg.id)) return prev
+                    return [pkg, ...prev]
+                  })
+                  setRecentTrashItems((prev) => prev.filter((p) => p.id !== pkg.id))
+                }}
+              />
+              <Link href={`/dashboard/members/${member.id}/packages/new`}>
+                <Button size="sm">수업권 추가</Button>
+              </Link>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent>
           {sessionPackages.length === 0 ? (
@@ -410,15 +463,16 @@ export function MemberDetail({
             <div className="mb-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm tabular-nums">
               <span>
                 회차{' '}
-                <strong className="text-base font-bold">{packageTally.total}</strong>회
+                <strong className="text-base font-bold">{tallyTotalDisplay}</strong>
+                {isTallyUnlimited ? '' : '회'}
               </span>
               <span className="text-muted-foreground">·</span>
               <span>
                 잔여{' '}
                 <strong className="text-base font-bold text-primary">
-                  {packageTally.remaining}
+                  {tallyRemainingDisplay}
                 </strong>
-                회
+                {isTallyUnlimited ? '' : '회'}
               </span>
             </div>
             <Table>
@@ -430,15 +484,25 @@ export function MemberDetail({
                   <TableHead>결제일</TableHead>
                   <TableHead>만료일</TableHead>
                   <TableHead className="w-[1%] whitespace-nowrap text-center">상태</TableHead>
-                  <TableHead className="w-[1%] whitespace-nowrap text-right" />
+                  {canManage ? (
+                    <TableHead className="w-[1%] whitespace-nowrap text-right" />
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sessionPackages.map((pkg) => (
                   <TableRow key={pkg.id}>
-                    <TableCell>{pkg.total_sessions}회</TableCell>
-                    <TableCell className={pkg.remaining_sessions <= 3 ? 'text-warning font-medium' : ''}>
-                      {pkg.remaining_sessions}회
+                    <TableCell>
+                      {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
+                    </TableCell>
+                    <TableCell
+                      className={
+                        pkg.remaining_sessions <= 3 && pkg.remaining_sessions > 0
+                          ? 'text-warning font-medium'
+                          : ''
+                      }
+                    >
+                      {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}
                     </TableCell>
                     <TableCell>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</TableCell>
                     <TableCell>{formatPackageDate(pkg.paid_at)}</TableCell>
@@ -448,26 +512,28 @@ export function MemberDetail({
                         {pkg.is_active ? '사용중' : '종료'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Link href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}>
-                          <Button variant="ghost" size="sm" className="h-7 px-2">
-                            <Edit className="h-3.5 w-3.5 mr-1" />
-                            수정
+                    {canManage ? (
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Link href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}>
+                            <Button variant="ghost" size="sm" className="h-7 px-2">
+                              <Edit className="h-3.5 w-3.5 mr-1" />
+                              수정
+                            </Button>
+                          </Link>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-destructive hover:text-destructive"
+                            onClick={() => setDeleteTarget(pkg)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            삭제
                           </Button>
-                        </Link>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(pkg)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-1" />
-                          삭제
-                        </Button>
-                      </div>
-                    </TableCell>
+                        </div>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))}
               </TableBody>
@@ -640,15 +706,17 @@ export function MemberDetail({
         </AlertDialogContent>
       </AlertDialog>
 
-      <MemberAccountLink
-        memberId={member.id}
-        memberName={member.name}
-        linkedAuthUserId={
-          ('auth_user_id' in member ? member.auth_user_id : null) ?? member.user_id
-        }
-        registeredEmail={accountEmail}
-        emailSource={accountEmailSource}
-      />
+      {canManage ? (
+        <MemberAccountLink
+          memberId={member.id}
+          memberName={member.name}
+          linkedAuthUserId={
+            ('auth_user_id' in member ? member.auth_user_id : null) ?? member.user_id
+          }
+          registeredEmail={accountEmail}
+          emailSource={accountEmailSource}
+        />
+      ) : null}
     </div>
   )
 }

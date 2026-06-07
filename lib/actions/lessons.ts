@@ -33,6 +33,7 @@ import {
   filterLessonsUpToNow,
   getTodayDateKey,
 } from '@/lib/lesson-record-utils'
+import { syncTrialLessonPayOverride } from '@/lib/trial-lesson-pay-sync'
 import {
   LESSON_CALENDAR_SELECT,
   LESSON_CALENDAR_SELECT_LEGACY,
@@ -434,6 +435,25 @@ function logSupabaseError(context: string, error: { message?: string; code?: str
   })
 }
 
+async function syncTrialPayForLesson(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+  lesson: Lesson,
+  userId?: string | null,
+) {
+  await syncTrialLessonPayOverride(
+    supabase,
+    {
+      id: lesson.id,
+      instructor_id: lesson.instructor_id,
+      lesson_date: lesson.lesson_date,
+      start_time: lesson.start_time,
+      lesson_type: lesson.lesson_type,
+      attendance_status: lesson.attendance_status,
+    },
+    userId,
+  )
+}
+
 export async function getLessons(options?: {
   memberId?: string
   instructorId?: string
@@ -445,11 +465,16 @@ export async function getLessons(options?: {
   includeSessionPackage?: boolean
   /** 미래 일정 제외 — 회원 최근 기록 등 */
   upToNow?: boolean
+  /** 수업현황 — 출석 체크 여부 판별용 */
+  includeCheckIn?: boolean
 }): Promise<Lesson[]> {
   const supabase = await createStaffDataClient()
-  const select = options?.includeSessionPackage
+  const baseSelect = options?.includeSessionPackage
     ? LESSON_LIST_SELECT_LEGACY
     : LESSON_CALENDAR_SELECT_LEGACY
+  const select = options?.includeCheckIn
+    ? `${baseSelect}, lesson_sessions(checked_in_at)`
+    : baseSelect
 
   let query = supabase.from('lessons').select(select)
 
@@ -648,11 +673,16 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
     return { error: message }
   }
 
+  const lesson = normalizeLessonRecord(data as Lesson)
+  await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
+
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard/lesson-status')
-  return { data: normalizeLessonRecord(data as Lesson), warning }
+  revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/reports')
+  return { data: lesson, warning }
 }
 
 export async function createRecurringLessons(
@@ -814,11 +844,16 @@ export async function createRecurringLessons(
   }
 
   const lessons = ((data ?? []) as Lesson[]).map(normalizeLessonRecord)
+  for (const lesson of lessons) {
+    await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
+  }
 
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/reports')
 
   return {
     data: lessons,
@@ -909,11 +944,17 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     }
   }
 
+  const lesson = normalizeLessonRecord(data as Lesson)
+  const user = await getCurrentUser()
+  await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
+
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard/lesson-status')
-  return { data: normalizeLessonRecord(data as Lesson), warning }
+  revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/reports')
+  return { data: lesson, warning }
 }
 
 export async function markAttendance(
@@ -1058,7 +1099,7 @@ export async function updateLessonSeries(
   scope: LessonSeriesScope,
   anchorDate: string,
 ): Promise<{ data?: Lesson[]; error?: string; warning?: string }> {
-  await requireRole(['admin', 'instructor'])
+  const user = await requireRole(['admin', 'instructor'])
   const supabase = await lessonWriteClient()
 
   const { data: lesson, error: lessonError } = await fetchLessonSeriesRow(
@@ -1139,7 +1180,9 @@ export async function updateLessonSeries(
     }
 
     if (data) {
-      updatedLessons.push(normalizeLessonRecord(data as Lesson))
+      const normalized = normalizeLessonRecord(data as Lesson)
+      updatedLessons.push(normalized)
+      await syncTrialPayForLesson(supabase, normalized, user.id)
     }
   }
 
@@ -1147,6 +1190,8 @@ export async function updateLessonSeries(
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/instructors')
+  revalidatePath('/dashboard/reports')
 
   return { data: updatedLessons, warning }
 }

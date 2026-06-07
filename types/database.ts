@@ -93,6 +93,7 @@ export interface Lesson {
   instructor?: Instructor
   session_package?: SessionPackage
   signature?: Signature
+  lesson_sessions?: Array<{ checked_in_at: string | null }> | null
 }
 
 export interface Signature {
@@ -107,6 +108,7 @@ export interface Signature {
 export interface MemberFormData {
   name: string
   birth_date?: string
+  age?: number
   grade?: string
   phone?: string
   parent_phone?: string

@@ -60,6 +60,7 @@ export const ATTENDANCE_LESSON_SELECT = `
   attendance_status,
   session_deducted,
   signature_id,
+  lesson_sessions(checked_in_at),
   member:members(id, name, phone, sport),
   instructor:instructors(id, name, calendar_color)
 `
@@ -117,6 +118,7 @@ export const SESSION_PACKAGE_LIST_SELECT = `
   is_active,
   created_at,
   deleted_at,
+  note,
   member:members(id, name, phone, deleted_at)
 `
 
@@ -131,6 +133,7 @@ export const SESSION_PACKAGE_LIST_SELECT_LEGACY = `
   payment_method,
   is_active,
   created_at,
+  note,
   member:members(id, name, phone)
 `
 

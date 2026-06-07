@@ -29,6 +29,6 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
 }
 
 export function preloadRouteChunk(pathname: string) {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined' || process.env.NODE_ENV !== 'production') return
   ROUTE_CHUNK_LOADERS[pathname]?.()
 }

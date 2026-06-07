@@ -19,6 +19,8 @@ interface TimeInput24Props {
   onChange: (value: string) => void
   className?: string
   compact?: boolean
+  /** 팝오버 없이 시·분 컬럼을 바로 표시 (중첩 팝오버 방지) */
+  inline?: boolean
 }
 
 function parseTime(value: string) {
@@ -53,8 +55,12 @@ function TimeColumn({
   })
 
   useEffect(() => {
-    const el = listRef.current?.querySelector(`[data-value="${selected}"]`)
-    el?.scrollIntoView({ block: 'center' })
+    const list = listRef.current
+    if (!list) return
+    const el = list.querySelector<HTMLElement>(`[data-value="${selected}"]`)
+    if (!el) return
+    const top = el.offsetTop - list.clientHeight / 2 + el.offsetHeight / 2
+    list.scrollTop = Math.max(0, top)
   }, [selected])
 
   useEffect(() => {
@@ -75,8 +81,17 @@ function TimeColumn({
     const el = listRef.current
     if (!el) return
 
+    function isItemButton(target: EventTarget | null) {
+      return Boolean(
+        target instanceof Element &&
+          target.closest('button[data-value]'),
+      )
+    }
+
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return
+      if (isItemButton(e.target)) return
+
       dragRef.current = {
         active: false,
         didDrag: false,
@@ -110,6 +125,9 @@ function TimeColumn({
       }
       dragRef.current.active = false
       dragRef.current.pointerId = -1
+      window.setTimeout(() => {
+        dragRef.current.didDrag = false
+      }, 0)
     }
 
     el.addEventListener('pointerdown', onPointerDown)
@@ -125,14 +143,6 @@ function TimeColumn({
     }
   }, [])
 
-  function handleSelect(item: string) {
-    if (dragRef.current.didDrag) {
-      dragRef.current.didDrag = false
-      return
-    }
-    onSelect(item)
-  }
-
   return (
     <div className="flex w-14 flex-col">
       <div className="border-b border-border px-2 py-1.5 text-center text-[10px] font-medium text-muted-foreground">
@@ -142,21 +152,68 @@ function TimeColumn({
         ref={listRef}
         className="max-h-44 cursor-grab overflow-y-auto overscroll-contain py-1 active:cursor-grabbing"
       >
-        {items.map((item) => (
-          <button
-            key={item}
-            type="button"
-            data-value={item}
-            onClick={() => handleSelect(item)}
-            className={cn(
-              'flex w-full items-center justify-center py-1.5 text-sm tabular-nums hover:bg-accent',
-              selected === item && 'bg-primary text-primary-foreground hover:bg-primary',
-            )}
-          >
-            {item}
-          </button>
-        ))}
+        {items.map((item) => {
+          const isSelected = selected === item
+          return (
+            <button
+              key={item}
+              type="button"
+              data-value={item}
+              aria-selected={isSelected}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onSelect(item)
+              }}
+              className={cn(
+                'flex w-full cursor-pointer items-center justify-center py-1.5 text-sm tabular-nums transition-colors touch-manipulation',
+                isSelected
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-foreground hover:bg-accent',
+              )}
+            >
+              {item}
+            </button>
+          )
+        })}
       </div>
+    </div>
+  )
+}
+
+function TimePickerColumns({
+  value,
+  onChange,
+  closeOnMinutePick = false,
+  onMinutePicked,
+}: {
+  value: string
+  onChange: (value: string) => void
+  closeOnMinutePick?: boolean
+  onMinutePicked?: () => void
+}) {
+  const { hour, minute } = parseTime(value)
+
+  function pickHour(nextHour: string) {
+    onChange(`${nextHour}:${minute || '00'}`)
+  }
+
+  function pickMinute(nextMinute: string) {
+    onChange(`${hour || '09'}:${nextMinute}`)
+    if (closeOnMinutePick) {
+      onMinutePicked?.()
+    }
+  }
+
+  return (
+    <div className="flex divide-x divide-border">
+      <TimeColumn label="시" items={HOURS} selected={hour || '09'} onSelect={pickHour} />
+      <TimeColumn
+        label="분"
+        items={MINUTES}
+        selected={minute || '00'}
+        onSelect={pickMinute}
+      />
     </div>
   )
 }
@@ -167,18 +224,27 @@ export function TimeInput24({
   onChange,
   className,
   compact = false,
+  inline = false,
 }: TimeInput24Props) {
   const [open, setOpen] = useState(false)
   const { hour, minute } = parseTime(value)
   const display = hour && minute ? `${hour}:${minute}` : ''
 
-  function pickHour(nextHour: string) {
-    onChange(`${nextHour}:${minute || '00'}`)
-  }
-
-  function pickMinute(nextMinute: string) {
-    onChange(`${hour || '09'}:${nextMinute}`)
-    setOpen(false)
+  if (inline) {
+    return (
+      <div className={cn('space-y-2', className)}>
+        <TimePickerColumns value={value} onChange={onChange} />
+        <div
+          className={cn(
+            'flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2 py-1.5 tabular-nums',
+            compact ? 'text-xs' : 'text-sm',
+          )}
+        >
+          <Clock className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          {display || '시간 선택'}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -209,15 +275,12 @@ export function TimeInput24({
         align="start"
         onWheel={(e) => e.stopPropagation()}
       >
-        <div className="flex divide-x divide-border">
-          <TimeColumn label="시" items={HOURS} selected={hour || '09'} onSelect={pickHour} />
-          <TimeColumn
-            label="분"
-            items={MINUTES}
-            selected={minute || '00'}
-            onSelect={pickMinute}
-          />
-        </div>
+        <TimePickerColumns
+          value={value}
+          onChange={onChange}
+          closeOnMinutePick
+          onMinutePicked={() => setOpen(false)}
+        />
       </PopoverContent>
     </Popover>
   )

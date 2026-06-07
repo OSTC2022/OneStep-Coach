@@ -254,6 +254,46 @@ export async function getMembers(options?: {
   }
 }
 
+export type MemberPickerOption = {
+  id: string
+  name: string
+  sport?: string | null
+  age?: number | null
+  birth_date?: string | null
+}
+
+function mapMembersToPickerOptions(
+  members: Array<{
+    id: string
+    name: string
+    sport?: string | null
+    age?: number | null
+    birth_date?: string | null
+  }>,
+): MemberPickerOption[] {
+  return members.map((m) => ({
+    id: m.id,
+    name: m.name,
+    sport: m.sport,
+    age: m.age,
+    birth_date: m.birth_date,
+  }))
+}
+
+const pickerSearchCache = new Map<string, MemberPickerOption[]>()
+const pickerSearchInflight = new Map<string, Promise<MemberPickerOption[]>>()
+
+/** 빠른 등록 등 — 활성 회원 목록 선로드 */
+export async function listMembersForPicker(limit = 80): Promise<MemberPickerOption[]> {
+  const { data } = await getMembers({
+    isActive: true,
+    limit,
+    orderBy: 'name',
+    orderAsc: true,
+  })
+  return mapMembersToPickerOptions(data)
+}
+
 export async function searchMembersForPicker(search: string) {
   const q = search.trim()
   if (!q) return []
@@ -262,13 +302,35 @@ export async function searchMembersForPicker(search: string) {
     isActive: true,
     limit: LIST_PAGE_SIZE,
   })
-  return data.map((m) => ({
-    id: m.id,
-    name: m.name,
-    sport: m.sport,
-    age: m.age,
-    birth_date: m.birth_date,
-  }))
+  return mapMembersToPickerOptions(data)
+}
+
+/** 클라이언트 검색 — 동일 쿼리 재요청·캐시 재사용 */
+export async function searchMembersForPickerCached(
+  search: string,
+): Promise<MemberPickerOption[]> {
+  const q = search.trim()
+  if (!q) return []
+
+  const cached = pickerSearchCache.get(q)
+  if (cached) return cached
+
+  const inflight = pickerSearchInflight.get(q)
+  if (inflight) return inflight
+
+  const promise = searchMembersForPicker(q)
+    .then((rows) => {
+      pickerSearchCache.set(q, rows)
+      pickerSearchInflight.delete(q)
+      return rows
+    })
+    .catch((error) => {
+      pickerSearchInflight.delete(q)
+      throw error
+    })
+
+  pickerSearchInflight.set(q, promise)
+  return promise
 }
 
 export async function getMember(id: string): Promise<Member | null> {
@@ -352,7 +414,10 @@ export async function createMember(formData: MemberFormData): Promise<{ data?: M
     return { error: '이름을 입력해주세요.' }
   }
 
-  const { birth_date, age } = resolveMemberAgeAndBirthDate(formData.birth_date)
+  const { birth_date, age } = resolveMemberAgeAndBirthDate(
+    formData.birth_date,
+    formData.age,
+  )
 
   const { data, error } = await supabase
     .from('members')
@@ -391,10 +456,20 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
   const updateData: Record<string, unknown> = {}
   
   if (formData.name !== undefined) updateData.name = formData.name
-  if (formData.birth_date !== undefined) {
-    const resolved = resolveMemberAgeAndBirthDate(formData.birth_date)
-    updateData.birth_date = resolved.birth_date
-    updateData.age = resolved.age
+  if (formData.birth_date !== undefined || formData.age !== undefined) {
+    if (formData.birth_date !== undefined) {
+      const resolved = resolveMemberAgeAndBirthDate(
+        formData.birth_date,
+        formData.age,
+      )
+      updateData.birth_date = resolved.birth_date
+      updateData.age = resolved.age
+    } else if (formData.age !== undefined) {
+      updateData.age =
+        formData.age != null && formData.age >= 0 && formData.age <= 120
+          ? Math.round(formData.age)
+          : null
+    }
   }
   if (formData.grade !== undefined) updateData.grade = formData.grade || null
   if (formData.phone !== undefined) updateData.phone = formData.phone || null

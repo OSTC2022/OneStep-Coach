@@ -123,7 +123,12 @@ async function memberBodyWriteClient() {
 export async function addMemberBodyRecord(
   memberId: string,
   weightKg: number,
-  options?: { recordedAt?: string; heightCm?: number | null },
+  options?: {
+    recordedAt?: string
+    heightCm?: number | null
+    /** 수업현황 체중 입력 등 — 클라이언트 상태가 있어 전체 갱신 생략 */
+    skipDashboardRevalidate?: boolean
+  },
 ): Promise<{ record?: MemberBodyRecord; error?: string; migrationHint?: string }> {
   await requireRole(['admin', 'instructor'])
 
@@ -201,10 +206,12 @@ export async function addMemberBodyRecord(
     })
     .eq('id', memberId)
 
-  revalidatePath(`/dashboard/members/${memberId}`)
-  revalidatePath(`/dashboard/members/${memberId}/body`)
-  revalidatePath('/dashboard/members')
-  revalidatePath('/dashboard/lesson-status')
+  if (!options?.skipDashboardRevalidate) {
+    revalidatePath(`/dashboard/members/${memberId}`)
+    revalidatePath(`/dashboard/members/${memberId}/body`)
+    revalidatePath('/dashboard/members')
+    revalidatePath('/dashboard/lesson-status')
+  }
 
   return { record: saved }
 }
@@ -217,6 +224,7 @@ export async function recordLessonStatusWeight(
 ): Promise<{ error?: string; migrationHint?: string }> {
   const result = await addMemberBodyRecord(memberId, weightKg, {
     recordedAt: lessonDate,
+    skipDashboardRevalidate: true,
   })
   if (result.error) {
     return { error: result.error, migrationHint: result.migrationHint }
@@ -268,10 +276,6 @@ export async function clearLessonStatusWeight(
     }
     return { error: error.message }
   }
-
-  revalidatePath(`/dashboard/members/${memberId}`)
-  revalidatePath(`/dashboard/members/${memberId}/body`)
-  revalidatePath('/dashboard/lesson-status')
 
   return { deleted: true }
 }

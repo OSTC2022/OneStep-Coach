@@ -13,7 +13,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { ArrowLeft, Save } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
-import { formatMemberAgeFromBirthDate, AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
+import {
+  getMemberAge,
+  suggestAgeFromBirthDate,
+  AUTO_INSTRUCTOR_ID,
+  normalizePrimaryInstructorId,
+} from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
@@ -29,6 +34,7 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
   const [formData, setFormData] = useState({
     name: member.name,
     birth_date: member.birth_date || '',
+    age: getMemberAge(member) ?? undefined,
     grade: member.grade || '',
     phone: member.phone || '',
     parent_phone: member.parent_phone || '',
@@ -49,6 +55,7 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
     const result = await updateMember(member.id, {
       name: formData.name,
       birth_date: formData.birth_date,
+      age: formData.age,
       grade: formData.grade || undefined,
       phone: formData.phone || undefined,
       parent_phone: formData.parent_phone || undefined,
@@ -125,16 +132,30 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
 
             <BirthDateInput
               value={formData.birth_date}
-              onChange={(birth_date) => setFormData({ ...formData, birth_date })}
+              onChange={(birth_date) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  birth_date,
+                  age: suggestAgeFromBirthDate(birth_date) ?? prev.age,
+                }))
+              }
             />
 
             <div className="space-y-2">
-              <Label htmlFor="age-preview">나이 (자동)</Label>
+              <Label htmlFor="age">나이</Label>
               <Input
-                id="age-preview"
-                value={formatMemberAgeFromBirthDate(formData.birth_date)}
-                disabled
-                className="bg-muted"
+                id="age"
+                type="number"
+                min={0}
+                max={120}
+                value={formData.age ?? ''}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    age: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+                placeholder="생년월일 입력 시 자동 계산"
               />
             </div>
 

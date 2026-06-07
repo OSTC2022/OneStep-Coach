@@ -1064,7 +1064,7 @@ export function TimeGrid({
       : null
 
   return (
-    <div className={cn('relative flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
+    <div className={cn('relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/20 px-2 py-1 md:hidden">
         <p className="text-[10px] text-muted-foreground">핀치 또는 버튼으로 확대·축소</p>
         <div className="flex items-center gap-1">
@@ -1098,17 +1098,20 @@ export function TimeGrid({
 
       <div
         ref={scrollRef}
-        className="relative min-h-0 flex-1 overflow-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]"
+        className="relative min-h-0 w-full min-w-0 flex-1 overflow-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]"
       >
         <div
-          className={cn('flex w-full flex-col', isMultiDay && 'max-md:w-max')}
+          className={cn(
+            'flex w-full min-w-full flex-col',
+            isMultiDay && 'max-md:w-max max-md:min-w-[max(100%,var(--calendar-grid-min))]',
+          )}
           style={
             gridMinWidth != null
-              ? { minWidth: `max(100%, ${gridMinWidth}px)` }
+              ? ({ ['--calendar-grid-min' as string]: `${gridMinWidth}px` } as React.CSSProperties)
               : undefined
           }
         >
-          <div className="sticky top-0 z-20 flex shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm">
+          <div className="sticky top-0 z-20 flex w-full shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm">
             <div className="sticky left-0 z-30 w-14 shrink-0 border-r border-border bg-card max-md:bg-card md:bg-card/95" />
             {dates.map((date) => {
               const isToday = isSameDay(date, now)
@@ -1159,7 +1162,7 @@ export function TimeGrid({
             })}
           </div>
 
-          <div className="flex">
+          <div className="flex w-full min-w-full">
           <div
             className="sticky left-0 z-10 w-14 shrink-0 border-r border-border bg-card relative"
             style={{ height: gridHeight }}

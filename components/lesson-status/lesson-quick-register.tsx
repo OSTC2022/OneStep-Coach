@@ -1,11 +1,15 @@
 'use client'
 
-import { useCallback, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { createLesson } from '@/lib/actions/lessons'
-import { searchMembersForPicker } from '@/lib/actions/members'
+import {
+  listMembersForPicker,
+  searchMembersForPickerCached,
+  type MemberPickerOption,
+} from '@/lib/actions/members'
 import { MemberSearchSelect } from '@/components/members/member-search-select'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
@@ -35,11 +39,13 @@ interface LessonQuickRegisterProps {
 function LessonQuickRegisterForm({
   lessonDate,
   instructors,
+  pickerMembers,
   onCreated,
   onClose,
 }: {
   lessonDate: string
   instructors: Instructor[]
+  pickerMembers: MemberPickerOption[]
   onCreated: (lesson: Lesson) => void
   onClose: () => void
 }) {
@@ -51,7 +57,7 @@ function LessonQuickRegisterForm({
   const [saving, setSaving] = useState(false)
 
   const searchMembers = useCallback(
-    (query: string) => searchMembersForPicker(query),
+    (query: string) => searchMembersForPickerCached(query),
     [],
   )
 
@@ -123,7 +129,7 @@ function LessonQuickRegisterForm({
               setMemberId(id)
               setMemberName(member?.name ?? '')
             }}
-            members={[]}
+            members={pickerMembers}
             placeholder="이름 검색"
             compact
             inlineSearch
@@ -180,7 +186,18 @@ export function LessonQuickRegister({
   className,
 }: LessonQuickRegisterProps) {
   const [open, setOpen] = useState(false)
+  const [pickerMembers, setPickerMembers] = useState<MemberPickerOption[]>([])
   const panelHost = panelContainerRef.current
+
+  useEffect(() => {
+    let cancelled = false
+    void listMembersForPicker(100).then((rows) => {
+      if (!cancelled) setPickerMembers(rows)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <>
@@ -200,6 +217,7 @@ export function LessonQuickRegister({
             <LessonQuickRegisterForm
               lessonDate={lessonDate}
               instructors={instructors}
+              pickerMembers={pickerMembers}
               onCreated={onCreated}
               onClose={() => setOpen(false)}
             />,

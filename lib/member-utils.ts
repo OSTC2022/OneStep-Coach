@@ -192,15 +192,35 @@ export function calculateAgeFromBirthDate(birthDate: string): number | null {
   return age >= 0 ? age : null
 }
 
-/** 회원 나이 표시 (생년월일 우선 계산, 없으면 저장된 age) */
+/** 회원 나이 표시 (저장된 age 우선, 없으면 생년월일 계산) */
 export function getMemberAge(member: Pick<Member, 'age' | 'birth_date'>): number | null {
-  if (member.birth_date) {
-    return calculateAgeFromBirthDate(member.birth_date)
-  }
   if (member.age != null && member.age >= 0) {
     return member.age
   }
+  if (member.birth_date) {
+    return calculateAgeFromBirthDate(member.birth_date)
+  }
   return null
+}
+
+/** 회원 목록·상세 연락처 — 선수 없으면 보호자, 둘 다 있으면 함께 표기 */
+export function formatMemberContactDisplay(
+  member: Pick<Member, 'phone' | 'parent_phone'>,
+): string {
+  const phone = member.phone?.trim()
+  const parentPhone = member.parent_phone?.trim()
+
+  if (phone && parentPhone) {
+    return `${phone} · 보호자 ${parentPhone}`
+  }
+  if (phone) return phone
+  if (parentPhone) return parentPhone
+  return '-'
+}
+
+export function suggestAgeFromBirthDate(birthDate?: string | null): number | null {
+  if (!birthDate?.trim()) return null
+  return calculateAgeFromBirthDate(birthDate)
 }
 
 export function formatMemberAge(member: Pick<Member, 'age' | 'birth_date'>): string {
@@ -291,11 +311,23 @@ export function formatMemberAgeFromBirthDate(birthDate?: string): string {
   return age != null ? `${age}세` : '-'
 }
 
-export function resolveMemberAgeAndBirthDate(birthDate?: string | null): {
+export function resolveMemberAgeAndBirthDate(
+  birthDate?: string | null,
+  manualAge?: number | null,
+): {
   birth_date: string | null
   age: number | null
 } {
   const birth_date = birthDate?.trim() || null
-  const age = birth_date ? calculateAgeFromBirthDate(birth_date) : null
+  const parsedManual =
+    manualAge != null && manualAge >= 0 && manualAge <= 120
+      ? Math.round(manualAge)
+      : null
+  const age =
+    parsedManual != null
+      ? parsedManual
+      : birth_date
+        ? calculateAgeFromBirthDate(birth_date)
+        : null
   return { birth_date, age }
 }

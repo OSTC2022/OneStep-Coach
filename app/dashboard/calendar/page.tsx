@@ -55,7 +55,7 @@ export default async function CalendarPage() {
   })()
 
   return (
-    <div className="-m-4 md:-m-6 flex min-h-[calc(100dvh-3.5rem)] flex-col">
+    <div className="-m-4 md:-m-6 flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
       <CalendarView
         initialLessons={lessons}
         instructors={instructors}

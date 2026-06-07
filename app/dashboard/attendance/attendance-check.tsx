@@ -4,7 +4,11 @@ import Link from 'next/link'
 import { memo, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { markAttendance } from '@/lib/actions/lessons'
-import { cancelLessonCompletion } from '@/lib/actions/lesson-sessions'
+import {
+  cancelLessonCompletion,
+  clearLessonAttendanceCheck,
+} from '@/lib/actions/lesson-sessions'
+import { isAttendanceMarked } from '@/lib/lesson-record-utils'
 import { toast } from 'sonner'
 import { Lesson, AttendanceStatus } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -89,6 +93,7 @@ interface AttendanceTileProps {
   instructorLookup: Map<string, AttendanceInstructor>
   inInstructorGroup?: boolean
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
+  onClearPresentCheck: (lessonId: string) => void
   onAttendanceCancelled: (
     lessonId: string,
     update: {
@@ -118,6 +123,7 @@ const AttendanceTile = memo(function AttendanceTile({
   instructorLookup,
   inInstructorGroup = false,
   onStatusChange,
+  onClearPresentCheck,
   onAttendanceCancelled,
   onCancelStart,
   onCancelEnd,
@@ -186,17 +192,34 @@ const AttendanceTile = memo(function AttendanceTile({
         aria-label={`${label} 출석 상태`}
       >
         {ATTENDANCE_OPTIONS.map((option) => {
-          const isActive = lesson.attendance_status === option.value
+          const isPresentMarked =
+            lesson.attendance_status === 'present' && isAttendanceMarked(lesson)
+          const isActive =
+            option.value === 'present'
+              ? isPresentMarked
+              : lesson.attendance_status === option.value
+          const canClearPresent =
+            option.value === 'present' && isPresentMarked && !completed
           const canCancelByRetap = completed && isActive
           return (
             <button
               key={option.value}
               type="button"
               disabled={isLoading || isCancelling || (completed && !isActive)}
-              title={canCancelByRetap ? '출석 체크 취소' : option.label}
+              title={
+                canCancelByRetap
+                  ? '출석 체크 취소'
+                  : canClearPresent
+                    ? '출석 취소'
+                    : option.label
+              }
               onClick={() => {
                 if (canCancelByRetap) {
                   setCancelOpen(true)
+                  return
+                }
+                if (canClearPresent) {
+                  onClearPresentCheck(lesson.id)
                   return
                 }
                 onStatusChange(lesson.id, option.value)
@@ -306,7 +329,9 @@ export function AttendanceCheck({ initialLessons, instructors }: AttendanceCheck
   const stats = useMemo(
     () => ({
       total: filteredLessons.length,
-      present: filteredLessons.filter((l) => l.attendance_status === 'present').length,
+      present: filteredLessons.filter(
+        (l) => l.attendance_status === 'present' && isAttendanceMarked(l),
+      ).length,
       absent: filteredLessons.filter((l) => l.attendance_status === 'absent').length,
       makeup: filteredLessons.filter((l) => l.attendance_status === 'makeup').length,
       cancelled: filteredLessons.filter((l) => l.attendance_status === 'cancelled').length,
@@ -335,13 +360,44 @@ export function AttendanceCheck({ initialLessons, instructors }: AttendanceCheck
       setLessons((prev) =>
         prev.map((lesson) =>
           lesson.id === lessonId
-            ? { ...lesson, ...result.data, attendance_status: newStatus }
+            ? {
+                ...lesson,
+                ...result.data,
+                attendance_status: newStatus,
+                ...(newStatus === 'present'
+                  ? { lesson_sessions: [{ checked_in_at: new Date().toISOString() }] }
+                  : {}),
+              }
             : lesson,
         ),
       )
     }
 
     setIsUpdating(null)
+  }
+
+  async function handleClearPresentCheck(lessonId: string) {
+    setIsUpdating(lessonId)
+    const result = await clearLessonAttendanceCheck(lessonId)
+    setIsUpdating(null)
+
+    if (result.error) {
+      toast.error('출석 취소 실패', { description: result.error })
+      return
+    }
+
+    setLessons((prev) =>
+      prev.map((lesson) =>
+        lesson.id === lessonId
+          ? {
+              ...lesson,
+              attendance_status: 'present',
+              lesson_sessions: [],
+              session_deducted: false,
+            }
+          : lesson,
+      ),
+    )
   }
 
   function handleAttendanceCancelled(
@@ -468,6 +524,7 @@ export function AttendanceCheck({ initialLessons, instructors }: AttendanceCheck
                             instructorLookup={instructorLookup}
                             inInstructorGroup
                             onStatusChange={handleStatusChange}
+                            onClearPresentCheck={handleClearPresentCheck}
                             onAttendanceCancelled={handleAttendanceCancelled}
                             onCancelStart={setIsCancelling}
                             onCancelEnd={() => setIsCancelling(null)}

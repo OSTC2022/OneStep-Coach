@@ -809,8 +809,9 @@ export function LessonCalendar({
   return (
     <div
       ref={calendarRootRef}
+      data-calendar-scope
       tabIndex={-1}
-      className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-4 pt-2 outline-none md:px-6"
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-2 px-4 pb-4 pt-2 outline-none md:px-6"
       onPointerDown={(e) => {
         if (isEditableTarget(e.target)) return
         calendarRootRef.current?.focus({ preventScroll: true })
@@ -943,7 +944,7 @@ export function LessonCalendar({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 w-full min-w-0 flex-1">
         {view === 'month' && (
           <MonthView
             currentDate={currentDate}

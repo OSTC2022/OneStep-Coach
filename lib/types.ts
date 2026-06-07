@@ -123,6 +123,7 @@ export interface Lesson {
 export interface MemberFormData {
   name: string
   birth_date?: string
+  age?: number
   grade?: string
   phone?: string
   parent_phone?: string
@@ -139,8 +140,8 @@ export interface SessionPackageFormData {
   member_id: string
   total_sessions: number
   price?: number
-  paid_at?: string
-  expires_at?: string
+  paid_at?: string | null
+  expires_at?: string | null
   payment_method?: string
   note?: string
 }

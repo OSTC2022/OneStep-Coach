@@ -3,19 +3,13 @@
 import { useEffect, useRef } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { preloadRouteChunk } from '@/lib/chunk-preload'
+import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
 
-const DASHBOARD_ROUTES = [
-  '/dashboard',
-  '/dashboard/members',
-  '/dashboard/calendar',
+/** 한꺼번에 prefetch하면 dev 서버가 멈춘 것처럼 느껴질 수 있어 핵심만 */
+const DESKTOP_PREFETCH_ROUTES = [
   '/dashboard/lesson-status',
-  '/dashboard/lessons',
+  '/dashboard/calendar',
   '/dashboard/attendance',
-  '/dashboard/sessions',
-  '/dashboard/instructors',
-  '/dashboard/reports',
-  '/dashboard/my',
-  '/dashboard/settings',
 ] as const
 
 const MOBILE_LIGHT_ROUTES = [
@@ -27,6 +21,7 @@ const HEAVY_ROUTES = new Set([
   '/dashboard/calendar',
   '/dashboard/lessons',
   '/dashboard/members',
+  '/dashboard/sessions',
 ])
 
 function isSaveDataMode() {
@@ -71,27 +66,23 @@ export function NavPrefetch() {
   const didPrefetchRef = useRef(false)
 
   useEffect(() => {
+    if (!shouldBackgroundPrefetch()) return
     if (didPrefetchRef.current || isSaveDataMode() || isSlowConnection()) return
     didPrefetchRef.current = true
 
     const mobile = isMobileViewport()
     const onHeavyPage = HEAVY_ROUTES.has(pathname)
-    const idleDelay = mobile ? (onHeavyPage ? 6000 : 3000) : 1200
+    const idleDelay = mobile ? (onHeavyPage ? 8000 : 4000) : 4000
 
     scheduleIdle(() => {
-      if (mobile) {
-        if (onHeavyPage) return
+      if (onHeavyPage) return
 
-        for (const href of MOBILE_LIGHT_ROUTES) {
-          if (href === pathname) continue
-          prefetchRoute(router, href)
-        }
-        return
-      }
-
-      for (const href of DASHBOARD_ROUTES) {
+      const routes = mobile ? MOBILE_LIGHT_ROUTES : DESKTOP_PREFETCH_ROUTES
+      let delay = 0
+      for (const href of routes) {
         if (href === pathname) continue
-        prefetchRoute(router, href)
+        window.setTimeout(() => prefetchRoute(router, href), delay)
+        delay += 800
       }
     }, idleDelay)
     // router는 refresh 때마다 참조가 바뀌어 무한 prefetch가 날 수 있어 의존성에서 제외

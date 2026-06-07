@@ -55,8 +55,16 @@ export default async function LessonStatusPage({
 
   const [lessons, instructors] = await Promise.all([
     viewMode === 'day'
-      ? getLessons({ date: selectedDate, limit: LESSON_STATUS_LIMIT })
-      : getLessons({ ...lessonsQuery, limit: LESSON_STATUS_LIMIT }),
+      ? getLessons({
+          date: selectedDate,
+          limit: LESSON_STATUS_LIMIT,
+          includeCheckIn: true,
+        })
+      : getLessons({
+          ...lessonsQuery,
+          limit: LESSON_STATUS_LIMIT,
+          includeCheckIn: true,
+        }),
     getInstructors({
       isActive: true,
       calendar: true,

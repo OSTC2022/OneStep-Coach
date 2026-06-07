@@ -1,4 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
+import { createServerClient, type SupabaseClient } from '@supabase/ssr'
+import type { User } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import {
@@ -9,6 +10,78 @@ import { getDefaultDashboardPath, profileRoleToAppRole } from '@/lib/roles'
 import type { ProfileApprovalStatus } from '@/lib/types'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
+const DEV_AUTH_CACHE_TTL_MS = 5000
+
+let devAuthCache: {
+  cookieKey: string
+  user: User | null
+  expiresAt: number
+} | null = null
+
+function isDevEnvironment() {
+  return process.env.NODE_ENV === 'development'
+}
+
+function devCookieKey(request: NextRequest) {
+  const authCookies = request.cookies
+    .getAll()
+    .filter((cookie) => cookie.name.startsWith('sb-'))
+  if (authCookies.length === 0) return ''
+  return authCookies
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .sort()
+    .join('|')
+}
+
+async function getSessionUser(
+  supabase: SupabaseClient,
+  request: NextRequest,
+): Promise<User | null> {
+  if (!isDevEnvironment()) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    return user
+  }
+
+  const cookieKey = devCookieKey(request)
+  const now = Date.now()
+  if (
+    devAuthCache &&
+    devAuthCache.cookieKey === cookieKey &&
+    devAuthCache.expiresAt > now
+  ) {
+    return devAuthCache.user
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  devAuthCache = {
+    cookieKey,
+    user,
+    expiresAt: now + DEV_AUTH_CACHE_TTL_MS,
+  }
+  return user
+}
+
+function shouldUseDevDashboardFastPath(
+  request: NextRequest,
+  user: User,
+  fastApproval: ProfileApprovalStatus | null,
+) {
+  if (!isDevEnvironment() || !fastApproval) return false
+  if (!request.nextUrl.pathname.startsWith('/dashboard')) return false
+  return isProfileAccessAllowed(fastApproval, user.email)
+}
+
+function isRscPrefetch(request: NextRequest) {
+  return (
+    request.headers.get('RSC') === '1' ||
+    request.headers.get('Next-Router-Prefetch') === '1' ||
+    request.headers.get('Purpose') === 'prefetch'
+  )
+}
 
 function isAuthStatusPath(pathname: string) {
   return AUTH_STATUS_PATHS.some((p) => pathname.startsWith(p))
@@ -76,6 +149,10 @@ function missingSupabaseEnvResponse() {
 }
 
 export async function updateSession(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith('/_next')) {
+    return NextResponse.next({ request })
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
@@ -110,9 +187,7 @@ export async function updateSession(request: NextRequest) {
       },
     })
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getSessionUser(supabase, request)
 
     if (
       request.nextUrl.pathname.startsWith('/dashboard') &&
@@ -133,11 +208,26 @@ export async function updateSession(request: NextRequest) {
     }
 
     if (user) {
+      const metadataStatus = user.user_metadata?.approval_status as
+        | ProfileApprovalStatus
+        | undefined
+      const fastApproval = resolveApprovalFast(user.email, metadataStatus)
+
+      if (
+        shouldUseDevDashboardFastPath(request, user, fastApproval) ||
+        (fastApproval &&
+          isRscPrefetch(request) &&
+          request.nextUrl.pathname.startsWith('/dashboard') &&
+          isProfileAccessAllowed(fastApproval, user.email))
+      ) {
+        return supabaseResponse
+      }
+
       const approvalStatus = await getProfileApprovalStatus(
         supabase,
         user.id,
         user.email,
-        user.user_metadata?.approval_status as ProfileApprovalStatus | undefined,
+        metadataStatus,
       )
 
       if (

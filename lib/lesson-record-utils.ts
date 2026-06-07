@@ -88,25 +88,16 @@ export function tallyActiveSessionPackages(
   return sumSessionPackages(packages.filter((pkg) => pkg.is_active))
 }
 
-function countLinkedDeductedSessions(
-  sessionNumberByLessonId: Record<string, number> | Map<string, number>,
-) {
-  return sessionNumberByLessonId instanceof Map
-    ? sessionNumberByLessonId.size
-    : Object.keys(sessionNumberByLessonId).length
-}
-
-/** 수업권 합산 + 차감된 수업(회차) 수만큼 잔여 반영 */
+/** 수업권 내역 합산 — 잔여는 각 수업권 remaining_sessions 합 */
 export function linkPackageTallyToSessions(
   packages: Array<{ total_sessions: number; remaining_sessions: number }>,
-  sessionNumberByLessonId: Record<string, number> | Map<string, number>,
+  _sessionNumberByLessonId?: Record<string, number> | Map<string, number>,
 ): SessionPackageTally {
   const base = tallySessionPackages(packages)
-  const deducted = countLinkedDeductedSessions(sessionNumberByLessonId)
   return {
     total: base.total,
-    remaining: Math.max(0, base.total - deducted),
-    used: deducted,
+    remaining: base.remaining,
+    used: Math.max(0, base.total - base.remaining),
   }
 }
 
@@ -274,14 +265,11 @@ export type LessonAttendanceRow = LessonScheduleTiming & {
   lesson_sessions?: Array<{ checked_in_at?: string | null }> | null
 }
 
-/** 출석 버튼을 눌렀거나 종료·체크인이 기록된 경우만 true */
+/** 출석 버튼을 눌렀거나 종료·차감이 기록된 경우만 true (예정 end_time 제외) */
 export function isAttendanceMarked(lesson: LessonAttendanceRow): boolean {
   if (lesson.attendance_status !== 'present') return true
-  return Boolean(
-    lesson.session_deducted ||
-      lesson.end_time ||
-      lesson.lesson_sessions?.[0]?.checked_in_at,
-  )
+  if (lesson.lesson_sessions?.[0]?.checked_in_at) return true
+  return Boolean(lesson.session_deducted && lesson.end_time)
 }
 
 export function getAttendanceDisplay(

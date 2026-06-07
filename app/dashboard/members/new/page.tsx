@@ -1,7 +1,9 @@
 import { getInstructors } from '@/lib/actions/instructors'
+import { requireMemberManager } from '@/lib/auth/member-access'
 import { MemberForm } from '@/components/members/member-form'
 
 export default async function NewMemberPage() {
+  await requireMemberManager()
   const instructors = await getInstructors({ isActive: true })
 
   return (

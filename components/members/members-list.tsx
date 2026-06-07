@@ -3,7 +3,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Member } from '@/lib/types'
-import { formatPrimaryInstructorName, resolveMemberBmi } from '@/lib/member-utils'
+import {
+  formatMemberContactDisplay,
+  formatPrimaryInstructorName,
+  resolveMemberBmi,
+} from '@/lib/member-utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -116,7 +120,7 @@ export function MembersList({ members, currentPage, totalPages }: MembersListPro
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {member.phone || '-'}
+                      {formatMemberContactDisplay(member)}
                     </TableCell>
                     <TableCell>
                       {member.sport ? (

@@ -52,6 +52,22 @@ export function isAdminPath(pathname: string): boolean {
   return ADMIN_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 }
 
+export function canManageMembers(role: AppRole): boolean {
+  return role === 'admin'
+}
+
+export function canViewMembers(role: AppRole): boolean {
+  return role === 'admin' || role === 'instructor'
+}
+
+/** 회원 등록·수정·수업권 관리 등 쓰기 전용 경로 */
+export function isMemberWritePath(pathname: string): boolean {
+  if (pathname === '/dashboard/members/new') return true
+  if (/\/dashboard\/members\/[^/]+\/edit\/?$/.test(pathname)) return true
+  if (/\/dashboard\/members\/[^/]+\/packages(\/|$)/.test(pathname)) return true
+  return false
+}
+
 /** 수업현황·출석에서 역할별로 설정 가능한 상태 */
 export function getAttendanceStatusesForRole(role: AppRole): AttendanceStatus[] {
   if (role === 'admin') return ['present', 'absent', 'makeup', 'cancelled']
@@ -73,9 +89,13 @@ export function canAccessPath(role: AppRole, pathname: string): boolean {
     return pathname === '/dashboard/my' || pathname.startsWith('/dashboard/my/')
   }
 
-  // coach / instructor — 회원 관리는 관리자 전용, 수업·캘린더·출석만 이용
   if (isAdminPath(pathname)) return false
-  if (pathname.startsWith('/dashboard/members')) return false
+
+  if (pathname.startsWith('/dashboard/members')) {
+    if (!canViewMembers(role)) return false
+    return !isMemberWritePath(pathname)
+  }
+
   return (
     pathname === '/dashboard' ||
     pathname.startsWith('/dashboard/lesson-status') ||

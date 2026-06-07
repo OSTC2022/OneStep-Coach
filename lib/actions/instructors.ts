@@ -458,7 +458,7 @@ export async function getInstructorMonthlyPayDetail(
   const { data: lessons, error } = await supabase
     .from('lessons')
     .select(
-      'id, lesson_date, start_time, attendance_status, title, content, member:members(id, name)',
+      'id, lesson_date, start_time, attendance_status, lesson_type, title, content, member:members(id, name)',
     )
     .eq('instructor_id', instructorId)
     .neq('attendance_status', 'cancelled')

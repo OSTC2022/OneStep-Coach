@@ -45,6 +45,7 @@ export default async function DashboardPage() {
         ]
       : [
           { href: '/dashboard/lesson-status', label: '수업현황', icon: ListChecks },
+          { href: '/dashboard/members', label: '회원 관리', icon: Users },
           { href: '/dashboard/attendance', label: '출석 체크', icon: CalendarCheck },
           { href: '/dashboard/lessons', label: '수업 등록', icon: ClipboardList },
           { href: '/dashboard/calendar', label: '캘린더', icon: CalendarDays },

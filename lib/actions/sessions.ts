@@ -12,6 +12,10 @@ import {
   SESSION_PACKAGE_LIST_SELECT_LEGACY,
 } from '@/lib/supabase-selects'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+import {
+  isMonthlyPlanPackage,
+  isPackageUsableForLesson,
+} from '@/lib/session-package-utils'
 
 function mapSessionPackageError(message: string): string {
   if (message.includes('row-level security') || message.includes('permission denied')) {
@@ -274,7 +278,7 @@ export async function reconcileSessionPackageRemaining(
 
   const { data: pkg, error: pkgError } = await supabase
     .from('session_packages')
-    .select('id, member_id, total_sessions')
+    .select('id, member_id, total_sessions, note, expires_at, is_active')
     .eq('id', packageId)
     .single()
 
@@ -283,6 +287,26 @@ export async function reconcileSessionPackageRemaining(
   }
 
   try {
+    if (isMonthlyPlanPackage(pkg.note)) {
+      const stillActive = isPackageUsableForLesson({
+        is_active: pkg.is_active,
+        remaining_sessions: 0,
+        note: pkg.note,
+        expires_at: pkg.expires_at,
+      })
+
+      const { error: updateError } = await supabase
+        .from('session_packages')
+        .update({ is_active: stillActive })
+        .eq('id', packageId)
+
+      if (updateError) {
+        return { error: mapSessionPackageError(updateError.message) }
+      }
+
+      return { remaining: 0 }
+    }
+
     const deductedCount = await countDeductedLessonsForPackage(
       supabase,
       packageId,
@@ -448,10 +472,18 @@ export async function getSessionPackagesPage(options?: {
     data.map(async (pkg) => {
       const result = await reconcileSessionPackageRemaining(pkg.id, supabase)
       if (result.remaining == null) return pkg
+      const monthly = isMonthlyPlanPackage(pkg.note)
       return {
         ...pkg,
         remaining_sessions: result.remaining,
-        is_active: result.remaining > 0,
+        is_active: monthly
+          ? isPackageUsableForLesson({
+              is_active: pkg.is_active,
+              remaining_sessions: result.remaining,
+              note: pkg.note,
+              expires_at: pkg.expires_at,
+            })
+          : result.remaining > 0,
       }
     }),
   )
@@ -467,20 +499,20 @@ export async function queryActiveSessionPackageId(
 
   let query = supabase
     .from('session_packages')
-    .select('id')
+    .select('id, remaining_sessions, note, expires_at, is_active, created_at')
     .eq('member_id', memberId)
     .eq('is_active', true)
-    .gt('remaining_sessions', 0)
     .order('created_at', { ascending: true })
-    .limit(1)
 
   if (trashEnabled) {
     query = query.is('deleted_at', null)
   }
 
-  const { data, error } = await query.maybeSingle()
-  if (error || !data) return null
-  return data.id
+  const { data, error } = await query
+  if (error || !data?.length) return null
+
+  const usable = data.find((pkg) => isPackageUsableForLesson(pkg))
+  return usable?.id ?? null
 }
 
 export async function getActivePackageForMember(memberId: string): Promise<SessionPackage | null> {
@@ -492,24 +524,26 @@ export async function getActivePackageForMember(memberId: string): Promise<Sessi
     .select(SESSION_PACKAGE_DETAIL_SELECT)
     .eq('member_id', memberId)
     .eq('is_active', true)
-    .gt('remaining_sessions', 0)
     .order('created_at', { ascending: false })
-    .limit(1)
 
   if (trashEnabled) {
     query = query.is('deleted_at', null)
   }
 
-  const { data, error } = await query.single()
+  const { data, error } = await query
 
   if (error) {
-    if (error.code !== 'PGRST116') { // No rows found
-      console.error('Error fetching active package:', error)
-    }
+    console.error('Error fetching active package:', error)
     return null
   }
 
-  return data as SessionPackage
+  const usable = (data ?? []).find((pkg) => isPackageUsableForLesson(pkg))
+  return (usable as SessionPackage | undefined) ?? null
+}
+
+function normalizeOptionalDate(value?: string | null): string | null {
+  if (!value?.trim()) return null
+  return value.split('T')[0]
 }
 
 export async function createSessionPackage(formData: SessionPackageFormData): Promise<{ data?: SessionPackage; error?: string }> {
@@ -523,8 +557,8 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
       total_sessions: formData.total_sessions,
       remaining_sessions: formData.total_sessions,
       price: formData.price || null,
-      paid_at: formData.paid_at || null,
-      expires_at: formData.expires_at || null,
+      paid_at: normalizeOptionalDate(formData.paid_at),
+      expires_at: normalizeOptionalDate(formData.expires_at),
       payment_method: formData.payment_method || null,
       note: formData.note || null,
       is_active: true,
@@ -595,9 +629,17 @@ export async function updateSessionPackage(
   await requireRole(['admin'])
   const supabase = await sessionWriteClient()
 
+  const payload = { ...updates }
+  if ('paid_at' in updates) {
+    payload.paid_at = normalizeOptionalDate(updates.paid_at)
+  }
+  if ('expires_at' in updates) {
+    payload.expires_at = normalizeOptionalDate(updates.expires_at)
+  }
+
   const { data, error } = await supabase
     .from('session_packages')
-    .update(updates)
+    .update(payload)
     .eq('id', id)
     .select()
     .single()

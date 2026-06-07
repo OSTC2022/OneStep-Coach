@@ -66,7 +66,7 @@ export const CalendarMobileWeek = memo(function CalendarMobileWeek({
   const selectedKey = toDateKey(selectedDate)
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-2">
         {dates.map((date) => {
           const key = toDateKey(date)

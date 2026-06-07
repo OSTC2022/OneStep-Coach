@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation'
 import { format, parseISO, subDays } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { createClient } from '@/lib/supabase/client'
+import {
+  isPackageUsableForLesson,
+  shouldDeductSessionOnLesson,
+} from '@/lib/session-package-utils'
 import { Lesson, SessionPackage } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,7 +55,10 @@ interface MemberWithPackages {
   name: string
   phone: string | null
   sport: string | null
-  session_packages: Pick<SessionPackage, 'id' | 'total_sessions' | 'remaining_sessions' | 'is_active'>[]
+  session_packages: Pick<
+    SessionPackage,
+    'id' | 'total_sessions' | 'remaining_sessions' | 'is_active' | 'note' | 'expires_at'
+  >[]
 }
 
 interface LessonWithRelations extends Lesson {
@@ -144,7 +151,7 @@ export function LessonRegistration({
   )
 
   const getActivePackage = (member: MemberWithPackages) => {
-    return member.session_packages.find(p => p.is_active && p.remaining_sessions > 0)
+    return member.session_packages.find((p) => isPackageUsableForLesson(p))
   }
 
   const getRemainingSession = (member: MemberWithPackages) => {
@@ -291,11 +298,15 @@ export function LessonRegistration({
       .single()
 
     if (!error && lesson) {
-      // Decrement session count
-      await supabase
-        .from('session_packages')
-        .update({ remaining_sessions: activePackage.remaining_sessions - 1 })
-        .eq('id', activePackage.id)
+      if (shouldDeductSessionOnLesson(activePackage.note)) {
+        await supabase
+          .from('session_packages')
+          .update({
+            remaining_sessions: activePackage.remaining_sessions - 1,
+            is_active: activePackage.remaining_sessions - 1 > 0,
+          })
+          .eq('id', activePackage.id)
+      }
 
       // Update signature with lesson_id
       if (signatureId) {

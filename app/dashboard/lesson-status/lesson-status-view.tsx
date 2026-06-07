@@ -18,12 +18,14 @@ import { Lesson, Instructor, AttendanceStatus } from '@/types/database'
 import { getLessons } from '@/lib/actions/lessons'
 import {
   cancelLessonCompletion,
+  clearLessonAttendanceCheck,
   completeLessonWithSignature,
   markGuestLessonStatus,
   updateLessonAttendanceStatus,
   updateLessonEndTime,
   type GuestLessonAction,
 } from '@/lib/actions/lesson-sessions'
+import { isAttendanceMarked } from '@/lib/lesson-record-utils'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -177,6 +179,7 @@ interface AthleteTileProps {
   bodyWeightByKey: Record<string, number>
   onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
+  onClearAttendanceCheck: (lessonId: string) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
 }
@@ -200,6 +203,7 @@ const AthleteTile = memo(function AthleteTile({
   bodyWeightByKey,
   onBodyWeightChange,
   onStatusChange,
+  onClearAttendanceCheck,
   onGuestStatusChange,
   onLessonCompleted,
 }: AthleteTileProps) {
@@ -215,10 +219,12 @@ const AthleteTile = memo(function AthleteTile({
   const label = display.meta ? `${display.name}(${display.meta})` : display.name
   const isMemberLinked = Boolean(lesson.member_id)
   const isPresent = lesson.attendance_status === 'present'
+  const isPresentMarked = isPresent && isAttendanceMarked(lesson)
   const isCancelled = lesson.attendance_status === 'cancelled'
   const completed = isLessonCompleted(lesson)
   const instructorBorderColor = resolveLessonInstructorColor(lesson, instructorLookup)
-  const canEndLesson = isPresent && !completed && !isCancelled
+  const canEndLesson = isPresentMarked && !completed && !isCancelled
+  const isGuestTrialMarked = lesson.lesson_type === '체험레슨' && !isCancelled
 
   async function handleCompleteLesson(signatureData: string, endTimeInput?: string) {
     const endTime =
@@ -290,12 +296,12 @@ const AthleteTile = memo(function AthleteTile({
 
     if (result.data) {
       onLessonCompleted(lesson.id, { end_time: result.data.end_time })
+      setEditEndTime(formatTime(result.data.end_time) ?? '')
       toast.success('종료 시간이 수정되었습니다.', {
         description: formatTime(result.data.end_time) ?? undefined,
       })
+      setEndTimeEditOpen(false)
     }
-
-    setEndTimeEditOpen(false)
   }
 
   const defaultEndTimeForDialog =
@@ -338,14 +344,27 @@ const AthleteTile = memo(function AthleteTile({
         <>
           <div className="mt-1 grid grid-cols-2 gap-0.5" role="group" aria-label={`${label} 출석 상태`}>
             {MEMBER_STATUS_OPTIONS.map((option) => {
-              const isActive = lesson.attendance_status === option.value
+              const isActive =
+                option.value === 'present'
+                  ? isPresentMarked
+                  : isCancelled
+              const canClearPresent =
+                option.value === 'present' && isPresentMarked && !completed
               return (
                 <button
                   key={option.value}
                   type="button"
                   disabled={isLoading || completed}
-                  title={option.label}
-                  onClick={() => onStatusChange(lesson.id, option.value)}
+                  title={
+                    canClearPresent ? '출석 취소' : option.label
+                  }
+                  onClick={() => {
+                    if (canClearPresent) {
+                      onClearAttendanceCheck(lesson.id)
+                      return
+                    }
+                    onStatusChange(lesson.id, option.value)
+                  }}
                   className={cn(
                     'rounded px-0.5 py-1 text-[9px] font-medium leading-tight transition-colors',
                     isActive
@@ -354,6 +373,7 @@ const AthleteTile = memo(function AthleteTile({
                         : 'bg-destructive text-destructive-foreground'
                       : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground',
                     (isLoading || completed) && 'opacity-50',
+                    canClearPresent && 'hover:opacity-90',
                   )}
                 >
                   {option.label}
@@ -418,7 +438,11 @@ const AthleteTile = memo(function AthleteTile({
                       <Pencil className="h-2.5 w-2.5" />
                     </button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-52 space-y-2 p-3" align="end">
+                  <PopoverContent
+                    className="w-auto space-y-2 p-3"
+                    align="end"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                  >
                     <Label htmlFor={`end-time-${lesson.id}`} className="text-xs">
                       종료 시간
                     </Label>
@@ -427,6 +451,7 @@ const AthleteTile = memo(function AthleteTile({
                       value={editEndTime}
                       onChange={setEditEndTime}
                       compact
+                      inline
                     />
                     <Button
                       type="button"
@@ -479,14 +504,23 @@ const AthleteTile = memo(function AthleteTile({
       ) : (
         <div className="mt-1 grid grid-cols-2 gap-0.5" role="group" aria-label={`${label} 출석/취소`}>
           {GUEST_OPTIONS.map((option) => {
-            const isActive = option.action === 'trial' ? isPresent : isCancelled
+            const isActive =
+              option.action === 'trial' ? isGuestTrialMarked : isCancelled
+            const canClearTrial =
+              option.action === 'trial' && isGuestTrialMarked
             return (
               <button
                 key={option.action}
                 type="button"
                 disabled={isLoading}
-                title={option.label}
-                onClick={() => onGuestStatusChange(lesson.id, option.action)}
+                title={canClearTrial ? '출석 취소' : option.label}
+                onClick={() => {
+                  if (canClearTrial) {
+                    onGuestStatusChange(lesson.id, 'unset')
+                    return
+                  }
+                  onGuestStatusChange(lesson.id, option.action)
+                }}
                 className={cn(
                   'rounded px-0.5 py-1 text-[9px] font-medium leading-tight transition-colors',
                   isActive
@@ -495,6 +529,7 @@ const AthleteTile = memo(function AthleteTile({
                       : 'bg-destructive text-destructive-foreground'
                     : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground',
                   isLoading && 'opacity-50',
+                  canClearTrial && 'hover:opacity-90',
                 )}
               >
                 {option.label}
@@ -572,6 +607,7 @@ interface TimeSlotsPanelProps {
   isUpdating: string | null
   canEditEndTime?: boolean
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
+  onClearAttendanceCheck: (lessonId: string) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
   bodyWeightByKey: Record<string, number>
@@ -588,6 +624,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   bodyWeightByKey,
   onBodyWeightChange,
   onStatusChange,
+  onClearAttendanceCheck,
   onGuestStatusChange,
   onLessonCompleted,
   emptyMessage = '등록된 수업이 없습니다.',
@@ -663,6 +700,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         bodyWeightByKey={bodyWeightByKey}
                         onBodyWeightChange={onBodyWeightChange}
                         onStatusChange={onStatusChange}
+                        onClearAttendanceCheck={onClearAttendanceCheck}
                         onGuestStatusChange={onGuestStatusChange}
                         onLessonCompleted={onLessonCompleted}
                       />
@@ -716,6 +754,13 @@ export function LessonStatusView({
   }, [selectedDate, initialViewMode, initialLessons, instructors])
 
   useEffect(() => {
+    setBodyWeightByKey((prev) => ({
+      ...initialBodyWeightByKey,
+      ...prev,
+    }))
+  }, [initialBodyWeightByKey])
+
+  useEffect(() => {
     setBodyWeightByKey(bodyWeightSeedRef.current)
   }, [selectedDate, initialViewMode])
 
@@ -743,7 +788,11 @@ export function LessonStatusView({
       total: lessons.length,
       athletes: lessons.filter((l) => l.member_id).length,
       unregistered: lessons.filter((l) => !l.member_id).length,
-      present: lessons.filter((l) => l.attendance_status === 'present').length,
+      present: lessons.filter((l) => {
+        if (l.attendance_status === 'cancelled') return false
+        if (!l.member_id) return l.lesson_type === '체험레슨'
+        return l.attendance_status === 'present' && isAttendanceMarked(l)
+      }).length,
       cancelled: lessons.filter((l) => l.attendance_status === 'cancelled').length,
     }),
     [lessons],
@@ -791,7 +840,10 @@ export function LessonStatusView({
       setIsLoadingDate(true)
       try {
         if (mode === 'day') {
-          const nextLessons = await getLessons({ date: anchorDate })
+          const nextLessons = await getLessons({
+            date: anchorDate,
+            includeCheckIn: true,
+          })
           setLessons(sortLessonsForStatusDisplay(nextLessons, instructors))
           return
         }
@@ -799,7 +851,11 @@ export function LessonStatusView({
           parseISO(anchorDate),
           getRangeViewForMode(mode),
         )
-        const nextLessons = await getLessons({ dateFrom, dateTo })
+        const nextLessons = await getLessons({
+          dateFrom,
+          dateTo,
+          includeCheckIn: true,
+        })
         setLessons(sortLessonsForStatusDisplay(nextLessons, instructors))
       } catch {
         toast.error('수업 목록을 불러오지 못했습니다.')
@@ -868,8 +924,33 @@ export function LessonStatusView({
     updateLessonInPlace(lessonId, {
       ...(result.data ?? {}),
       attendance_status: status,
+      ...(status === 'present'
+        ? { lesson_sessions: [{ checked_in_at: new Date().toISOString() }] }
+        : status === 'cancelled'
+          ? { lesson_sessions: [] }
+          : {}),
     })
   }, [updateLessonInPlace])
+
+  const handleClearAttendanceCheck = useCallback(
+    async (lessonId: string) => {
+      setIsUpdating(lessonId)
+      const result = await clearLessonAttendanceCheck(lessonId)
+      setIsUpdating(null)
+
+      if (result.error) {
+        toast.error('출석 취소 실패', { description: result.error })
+        return
+      }
+
+      updateLessonInPlace(lessonId, {
+        attendance_status: 'present',
+        lesson_sessions: [],
+        session_deducted: false,
+      })
+    },
+    [updateLessonInPlace],
+  )
 
   const handleGuestStatusChange = useCallback(async (lessonId: string, action: GuestLessonAction) => {
     setIsUpdating(lessonId)
@@ -893,10 +974,11 @@ export function LessonStatusView({
     instructors,
     instructorLookup,
     isUpdating,
-    canEditEndTime: isAdmin,
+    canEditEndTime: true,
     bodyWeightByKey,
     onBodyWeightChange: handleBodyWeightChange,
     onStatusChange: handleStatusChange,
+    onClearAttendanceCheck: handleClearAttendanceCheck,
     onGuestStatusChange: handleGuestStatusChange,
     onLessonCompleted: updateLessonInPlace,
   }
@@ -995,11 +1077,12 @@ export function LessonStatusView({
                         <AthleteTile
                           lesson={lesson}
                           isLoading={isUpdating === lesson.id}
-                          canEditEndTime={isAdmin}
+                          canEditEndTime
                           instructorLookup={instructorLookup}
                           bodyWeightByKey={bodyWeightByKey}
                           onBodyWeightChange={handleBodyWeightChange}
                           onStatusChange={handleStatusChange}
+                          onClearAttendanceCheck={handleClearAttendanceCheck}
                           onGuestStatusChange={handleGuestStatusChange}
                           onLessonCompleted={updateLessonInPlace}
                         />

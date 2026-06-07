@@ -10,6 +10,7 @@ import type {
   LessonEditAnchor,
 } from '@/lib/calendar-utils'
 import type { Instructor, Lesson } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 interface DayWeekViewProps {
   dates: Date[]
@@ -64,9 +65,9 @@ export function DayWeekView({
   const isWeekView = dates.length > 1
 
   return (
-    <div className="flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
       {isWeekView ? (
-        <div className="min-h-0 flex-1 overflow-hidden md:hidden">
+        <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden md:hidden">
           <CalendarMobileWeek
             dates={dates}
             selectedDate={selectedDate}
@@ -83,8 +84,8 @@ export function DayWeekView({
       <div
         className={
           isWeekView
-            ? 'hidden min-h-0 flex-1 overflow-hidden md:flex md:flex-[1.1]'
-            : 'min-h-0 flex-1 overflow-hidden md:flex-[1.1]'
+            ? 'hidden min-h-0 w-full min-w-0 flex-1 overflow-hidden md:flex'
+            : 'min-h-0 w-full min-w-0 flex-1 overflow-hidden md:flex'
         }
       >
         <TimeGrid
@@ -108,7 +109,14 @@ export function DayWeekView({
         />
       </div>
 
-      <div className="max-h-[32vh] min-h-0 shrink-0 overflow-hidden border-t border-border md:max-h-none md:flex-1">
+      <div
+        className={cn(
+          'min-h-0 shrink-0 overflow-hidden border-t border-border',
+          isWeekView
+            ? 'max-h-[32vh] md:max-h-[min(36vh,16rem)]'
+            : 'max-h-[32vh] md:max-h-none md:flex-1',
+        )}
+      >
         <MonthDayPanel
           selectedDate={selectedDate}
           lessons={lessons}

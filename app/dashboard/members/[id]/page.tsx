@@ -1,3 +1,4 @@
+import { requireMemberViewer } from '@/lib/auth/member-access'
 import { getMember } from '@/lib/actions/members'
 import { getMemberBodyRecords } from '@/lib/actions/member-body-records'
 import { getMemberAccountEmail } from '@/lib/actions/member-account'
@@ -18,6 +19,7 @@ export default async function MemberDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const { canManage } = await requireMemberViewer()
   const { id } = await params
   const [member, packagesResult, trashCount, accountEmailInfo] = await Promise.all([
     getMember(id),
@@ -111,6 +113,7 @@ export default async function MemberDetailPage({
         accountEmailSource={accountEmailInfo.source}
         bodyRecords={bodyRecords}
         bodyTableReady={bodyTableReady}
+        canManage={canManage}
       />
     </div>
   )

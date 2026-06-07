@@ -29,6 +29,10 @@ import {
   formatMemberCalendarLabel,
 } from '@/lib/member-utils'
 import { touchMemberRecent } from '@/lib/member-recent-search'
+import {
+  formatTrialLessonPayHint,
+  isTrialLessonType,
+} from '@/lib/trial-lesson-pay'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -224,6 +228,11 @@ export function LessonCreateDialog({
     })
   }, [recurrencePattern, recurrenceEndDate, date, isEditing, isAddingToSlot])
 
+  const trialPayHint =
+    isTrialLessonType(lessonType) && date
+      ? formatTrialLessonPayHint(date)
+      : null
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -343,11 +352,14 @@ export function LessonCreateDialog({
     if (!open || !isPopup) return
 
     function handlePointerDown(e: PointerEvent) {
-      const target = e.target as Node
+      const target = e.target as Element
       if (popupRef.current?.contains(target)) return
-      if ((target as Element).closest?.('[data-radix-popper-content-wrapper]')) return
-      if ((target as Element).closest?.('[data-slot="popover-content"]')) return
-      if ((target as Element).closest?.('[role="listbox"]')) return
+      if (target.closest('[data-lesson-edit-popup]')) return
+      if (target.closest('[data-radix-popper-content-wrapper]')) return
+      if (target.closest('[data-slot="popover-content"]')) return
+      if (target.closest('[data-slot="select-content"]')) return
+      if (target.closest('[role="listbox"]')) return
+      if (target.closest('[role="dialog"], [role="alertdialog"]')) return
       handleOpenChange(false)
     }
 
@@ -984,6 +996,10 @@ export function LessonCreateDialog({
         </>
       )}
 
+      {trialPayHint ? (
+        <p className="text-[11px] font-medium text-primary">{trialPayHint}</p>
+      ) : null}
+
       <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-2">
         <div className="space-y-1">
           <Label className={isPopup ? 'text-xs' : undefined}>반복</Label>
@@ -1252,8 +1268,10 @@ export function LessonCreateDialog({
       <>
       <div
         ref={popupRef}
+        data-lesson-edit-popup
         className="fixed z-50 w-72 rounded-lg border border-border bg-card shadow-xl animate-in fade-in-0 zoom-in-95"
         style={{ top: popupPosition.top, left: popupPosition.left }}
+        onPointerDownCapture={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">

@@ -4,6 +4,7 @@ import {
   filterLessonsUpToNow,
   isLessonOccurredBy,
 } from '@/lib/lesson-record-utils'
+import { getTrialLessonPayAmount, isTrialLessonType } from '@/lib/trial-lesson-pay'
 
 export { filterLessonsUpToNow, isLessonOccurredBy }
 
@@ -18,6 +19,7 @@ export type LessonPayRecord = {
   start_time: string | null
   instructor_id?: string | null
   attendance_status?: string | null
+  lesson_type?: string | null
 }
 
 export type InstructorPaySlot = {
@@ -184,21 +186,59 @@ export function buildInstructorSlotPayMap<
   return result
 }
 
+function buildSlotMemberPays<T extends LessonPayRecord>(
+  slotLessons: T[],
+  rates: InstructorRateConfig,
+): {
+  entries: Array<{ lesson: T; pay: number }>
+  totalPay: number
+  memberCount: number
+  isWeekendOrHoliday: boolean
+} | null {
+  const countable = slotLessons.filter(isSlotCountableLesson)
+  if (countable.length === 0) return null
+
+  const lessonDate = countable[0].lesson_date
+  const isWeekendOrHoliday = isWeekendOrHolidayRateDay(lessonDate)
+  const regularCount = countable.filter(
+    (lesson) => !isTrialLessonType(lesson.lesson_type),
+  ).length
+  const regularPays = splitSlotPayAmongMembers(
+    regularCount,
+    isWeekendOrHoliday,
+    rates,
+  )
+  let regularIdx = 0
+  const entries: Array<{ lesson: T; pay: number }> = []
+  let totalPay = 0
+
+  for (const lesson of countable) {
+    const pay = isTrialLessonType(lesson.lesson_type)
+      ? getTrialLessonPayAmount(lesson.lesson_date)
+      : regularPays[regularIdx++] ?? 0
+    entries.push({ lesson, pay })
+    totalPay += pay
+  }
+
+  return {
+    entries,
+    totalPay,
+    memberCount: countable.length,
+    isWeekendOrHoliday,
+  }
+}
+
 export function calcSlotPayForLessons(
   lessons: LessonPayRecord[],
   rates: InstructorRateConfig,
 ): { memberCount: number; pay: number; isWeekendOrHoliday: boolean } | null {
-  const countable = lessons.filter(isSlotCountableLesson)
-  if (countable.length === 0) return null
-
-  const lessonDate = countable[0].lesson_date
-  const memberCount = countable.length
-  const isWeekendOrHoliday = isWeekendOrHolidayRateDay(lessonDate)
+  const built = buildSlotMemberPays(lessons, rates)
+  if (!built) return null
 
   return {
-    memberCount,
-    pay: calcSlotInstructorPay(memberCount, isWeekendOrHoliday, rates),
-    isWeekendOrHoliday,
+    memberCount: built.memberCount,
+    pay: built.totalPay,
+    isWeekendOrHoliday: built.isWeekendOrHoliday,
   }
 }
 
@@ -238,24 +278,23 @@ export function summarizeInstructorPay(
 
   for (const [key, slotLessons] of slotMap) {
     const [lessonDate, startTime] = key.split('|')
-    const memberCount = slotLessons.length
-    const isWeekendOrHoliday = isWeekendOrHolidayRateDay(lessonDate)
-    const pay = calcSlotInstructorPay(memberCount, isWeekendOrHoliday, rates)
+    const built = buildSlotMemberPays(slotLessons, rates)
+    if (!built) continue
 
     slots.push({
       lessonDate,
       startTime,
-      memberCount,
-      isWeekendOrHoliday,
-      pay,
+      memberCount: built.memberCount,
+      isWeekendOrHoliday: built.isWeekendOrHoliday,
+      pay: built.totalPay,
     })
 
-    if (isWeekendOrHoliday) {
+    if (built.isWeekendOrHoliday) {
       weekendSlots++
-      weekendPay += pay
+      weekendPay += built.totalPay
     } else {
       weekdaySlots++
-      weekdayPay += pay
+      weekdayPay += built.totalPay
     }
   }
 
@@ -307,27 +346,21 @@ export function summarizeInstructorPayDetailed(
 
   for (const [key, slotLessons] of slotMap) {
     const [lessonDate, startTime] = key.split('|')
-    const memberCount = slotLessons.length
-    const isWeekendOrHoliday = isWeekendOrHolidayRateDay(lessonDate)
-    const pay = calcSlotInstructorPay(memberCount, isWeekendOrHoliday, rates)
-    const memberPays = splitSlotPayAmongMembers(
-      memberCount,
-      isWeekendOrHoliday,
-      rates,
-    )
+    const built = buildSlotMemberPays(slotLessons, rates)
+    if (!built) continue
 
     slotDetails.push({
       slotKey: key,
       lessonDate,
       startTime,
-      memberCount,
-      isWeekendOrHoliday,
-      pay,
-      members: slotLessons.map((lesson, index) => ({
+      memberCount: built.memberCount,
+      isWeekendOrHoliday: built.isWeekendOrHoliday,
+      pay: built.totalPay,
+      members: built.entries.map(({ lesson, pay }) => ({
         lessonId: lesson.id,
         name: getLessonPayDisplayName(lesson),
-        pay: memberPays[index] ?? 0,
-        calculatedPay: memberPays[index] ?? 0,
+        pay,
+        calculatedPay: pay,
       })),
     })
   }
