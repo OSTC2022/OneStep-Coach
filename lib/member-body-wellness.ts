@@ -11,6 +11,8 @@ export type BodyWellnessInput = {
   fatigue?: FatigueLevel | null
   muscle_soreness?: MuscleSoreness | null
   pain_area?: PainArea | null
+  pain_level?: number | null
+  pain_area_note?: string | null
   meal_status?: MealStatus | null
 }
 
@@ -20,6 +22,8 @@ export type MemberBodyRecordWellness = {
   fatigue: FatigueLevel | null
   muscle_soreness: MuscleSoreness | null
   pain_area: PainArea | null
+  pain_level: number | null
+  pain_area_note: string | null
   meal_status: MealStatus | null
 }
 
@@ -29,6 +33,8 @@ export const EMPTY_BODY_WELLNESS: MemberBodyRecordWellness = {
   fatigue: null,
   muscle_soreness: null,
   pain_area: null,
+  pain_level: null,
+  pain_area_note: null,
   meal_status: null,
 }
 
@@ -100,6 +106,57 @@ export function wellnessValueLabel(value: string | null | undefined): string {
   return LABEL_MAP[value] ?? value
 }
 
+export function parsePainLevel(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return null
+  const rounded = Math.round(parsed)
+  if (rounded < 1 || rounded > 10) return null
+  return rounded
+}
+
+export function formatPainAreaLabel(
+  painArea: PainArea,
+  painAreaNote?: string | null,
+): string {
+  if (painArea === 'other') {
+    const note = painAreaNote?.trim()
+    return note || wellnessChoiceLabel('pain_area', painArea)
+  }
+  return wellnessChoiceLabel('pain_area', painArea)
+}
+
+export function formatPainAreaSummary(
+  painArea: PainArea,
+  painLevel?: number | null,
+  painAreaNote?: string | null,
+): string {
+  if (painArea === 'none') return '통증 없음'
+  const areaLabel = formatPainAreaLabel(painArea, painAreaNote)
+  return painLevel != null ? `통증 ${areaLabel} ${painLevel}` : `통증 ${areaLabel}`
+}
+
+/** 통증 정도(1~10)에 따른 표시 색상 — 높을수록 빨간색 */
+export function getPainDisplayTone(
+  painArea: PainArea | null | undefined,
+  painLevel?: number | null,
+): WellnessTone {
+  if (!painArea || painArea === 'none') return 'good'
+  if (painLevel != null) {
+    if (painLevel >= 7) return 'bad'
+    if (painLevel >= 4) return 'caution'
+    return 'caution'
+  }
+  return getWellnessChoiceTone('pain_area', painArea) ?? 'caution'
+}
+
+/** 통증 그래프 점수 (3=양호 · 2=약간 · 1=주의) */
+export function painLevelToChartScore(painLevel: number): number {
+  if (painLevel >= 7) return 1
+  if (painLevel >= 4) return 2
+  return 3
+}
+
 /** 상태 의미 색상 — 좋음(초록) · 보통(주황) · 나쁨(빨강) · 기타(보라) · 수면 충분(하늘) · 해당없음(회색) */
 export type WellnessTone = 'good' | 'caution' | 'bad' | 'other' | 'info' | 'neutral'
 
@@ -139,6 +196,15 @@ export function wellnessChoiceLabel(
   }
   const choice = choiceMap[category].find((item) => item.value === value)
   return choice?.label ?? wellnessValueLabel(value)
+}
+
+/** 리포트·이력·코치 체크용 표시 라벨 (입력 버튼 문구와 분리) */
+export function wellnessReportLabel(
+  category: WellnessFieldCategory,
+  value: string | null | undefined,
+): string {
+  if (category === 'condition' && value === 'bad') return '주의 필요'
+  return wellnessChoiceLabel(category, value)
 }
 
 export function getWellnessChoiceTone(
@@ -224,7 +290,7 @@ export function buildWellnessHistoryBadges(
   }
   if (wellness.condition) {
     badges.push({
-      label: `컨디션 ${wellnessChoiceLabel('condition', wellness.condition)}`,
+      label: `컨디션 ${wellnessReportLabel('condition', wellness.condition)}`,
       tone: getWellnessChoiceTone('condition', wellness.condition)!,
     })
   }
@@ -242,11 +308,12 @@ export function buildWellnessHistoryBadges(
   }
   if (wellness.pain_area) {
     badges.push({
-      label:
-        wellness.pain_area === 'none'
-          ? '통증 없음'
-          : `통증 ${wellnessChoiceLabel('pain_area', wellness.pain_area)}`,
-      tone: getWellnessChoiceTone('pain_area', wellness.pain_area)!,
+      label: formatPainAreaSummary(
+        wellness.pain_area,
+        wellness.pain_level,
+        wellness.pain_area_note,
+      ),
+      tone: getPainDisplayTone(wellness.pain_area, wellness.pain_level),
     })
   }
   if (wellness.meal_status) {
@@ -278,16 +345,18 @@ export function formatWellnessHistoryLine(
 
   const parts: string[] = []
   if (wellness.condition) {
-    parts.push(`컨디션 ${wellnessValueLabel(wellness.condition)}`)
+    parts.push(`컨디션 ${wellnessReportLabel('condition', wellness.condition)}`)
   }
   if (wellness.fatigue) {
     parts.push(`피로도 ${wellnessValueLabel(wellness.fatigue)}`)
   }
   if (wellness.pain_area) {
     parts.push(
-      wellness.pain_area === 'none'
-        ? '통증 없음'
-        : `통증 ${wellnessValueLabel(wellness.pain_area)}`,
+      formatPainAreaSummary(
+        wellness.pain_area,
+        wellness.pain_level,
+        wellness.pain_area_note,
+      ),
     )
   } else if (wellness.muscle_soreness === 'none') {
     parts.push('통증 없음')
@@ -301,13 +370,19 @@ export function formatWellnessHistoryLine(
 export function formatWellnessSummary(wellness: Partial<MemberBodyRecordWellness>): string {
   const parts: string[] = []
   if (wellness.sleep_hours) parts.push(`수면 ${wellnessValueLabel(wellness.sleep_hours)}`)
-  if (wellness.condition) parts.push(`컨디션 ${wellnessValueLabel(wellness.condition)}`)
+  if (wellness.condition) parts.push(`컨디션 ${wellnessReportLabel('condition', wellness.condition)}`)
   if (wellness.fatigue) parts.push(`피로 ${wellnessValueLabel(wellness.fatigue)}`)
   if (wellness.muscle_soreness && wellness.muscle_soreness !== 'none') {
     parts.push(`근육통 ${wellnessValueLabel(wellness.muscle_soreness)}`)
   }
   if (wellness.pain_area && wellness.pain_area !== 'none') {
-    parts.push(`통증 ${wellnessValueLabel(wellness.pain_area)}`)
+    parts.push(
+      formatPainAreaSummary(
+        wellness.pain_area,
+        wellness.pain_level,
+        wellness.pain_area_note,
+      ),
+    )
   }
   if (wellness.meal_status) parts.push(`식사 ${wellnessValueLabel(wellness.meal_status)}`)
   return parts.join(' · ')
@@ -332,12 +407,22 @@ export function normalizeWellnessInput(
   input?: BodyWellnessInput,
 ): MemberBodyRecordWellness {
   if (!input) return { ...EMPTY_BODY_WELLNESS }
+
+  const painArea = parseWellnessField(input.pain_area, PAIN_AREA_CHOICES)
+
   return {
     sleep_hours: parseWellnessField(input.sleep_hours, SLEEP_HOUR_CHOICES),
     condition: parseWellnessField(input.condition, CONDITION_CHOICES),
     fatigue: parseWellnessField(input.fatigue, FATIGUE_CHOICES),
     muscle_soreness: parseWellnessField(input.muscle_soreness, MUSCLE_SORENESS_CHOICES),
-    pain_area: parseWellnessField(input.pain_area, PAIN_AREA_CHOICES),
+    pain_area: painArea,
+    pain_level: painArea && painArea !== 'none' ? parsePainLevel(input.pain_level) : null,
+    pain_area_note:
+      painArea === 'other'
+        ? typeof input.pain_area_note === 'string'
+          ? input.pain_area_note.trim() || null
+          : null
+        : null,
     meal_status: parseWellnessField(input.meal_status, MEAL_STATUS_CHOICES),
   }
 }

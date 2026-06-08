@@ -101,18 +101,21 @@ export function MemberAccountLink({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">회원 로그인 초대</CardTitle>
+        <CardTitle className="text-base">회원 로그인 활성화</CardTitle>
         <CardDescription>
-          회원 또는 보호자 이메일로 초대 메일을 보냅니다. 이미 등록된 이메일이어도
-          버튼을 다시 누르면 비밀번호 설정 링크를 재발송합니다. Supabase SMTP 미설정 시
-          아래에 링크가 표시되면 카톡·문자로 직접 보내주세요.
+          회원 또는 보호자 이메일로 계정을 연결합니다. 초대 메일 발송 후 비밀번호를
+          설정하면 /dashboard/my 에서 본인 리포트를 볼 수 있습니다. 전화번호로 가입한
+          경우 로그인 ID로도 로그인할 수 있습니다.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {linkedAuthUserId ? (
-          <p className="text-sm text-muted-foreground">
-            연결된 계정 ID: <code className="text-xs">{linkedAuthUserId}</code>
-          </p>
+          <div className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+            회원 로그인 활성화됨
+            <p className="mt-1 text-xs text-emerald-200/80">
+              계정 ID: <code>{linkedAuthUserId}</code>
+            </p>
+          </div>
         ) : null}
 
         <div className="space-y-2 rounded-md border border-border p-3">
@@ -184,7 +187,7 @@ export function MemberAccountLink({
                 발송 중…
               </>
             ) : (
-              '초대 메일 보내기'
+              linkedAuthUserId ? '비밀번호 설정 링크 재발송' : '회원 로그인 활성화 (초대 메일)'
             )}
           </Button>
         </div>

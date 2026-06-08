@@ -627,9 +627,6 @@ async function assertCanEditMemberBasicInfo(memberId: string): Promise<{ error?:
   const role = profileRoleToAppRole(user.role)
   if (canEditMemberBasicInfo(role)) return {}
 
-  const linkedMember = await getMemberForCurrentUser()
-  if (linkedMember?.id === memberId) return {}
-
   return { error: '권한이 없습니다.' }
 }
 

@@ -136,10 +136,12 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     const price = applyPresetPrice(sessions, formData.payment_method)
     setActiveMonthlyMonths(null)
     setPeriodMonths(null)
+    setExpiresAtManual(false)
     setFormData({
       ...formData,
       total_sessions: sessions,
       remaining_sessions: sessions,
+      expires_at: '',
       note: clearMonthlyPlanNote(formData.note),
       ...(price !== undefined ? { price } : {}),
     })
@@ -198,10 +200,12 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     const price = applyPresetPrice(sessions, formData.payment_method)
     setActiveMonthlyMonths(null)
     setPeriodMonths(null)
+    setExpiresAtManual(false)
     setFormData({
       ...formData,
       total_sessions: sessions,
       ...(isEditing ? {} : { remaining_sessions: sessions }),
+      expires_at: '',
       note: clearMonthlyPlanNote(formData.note),
       ...(price !== undefined ? { price } : {}),
     })
@@ -554,10 +558,10 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                   id="expires_at"
                   value={formData.expires_at}
                   onChange={handleExpiresAtChange}
-                  placeholder="만료일 선택"
+                  placeholder="미지정"
                 />
                 <p className="text-xs text-muted-foreground">
-                  날짜를 선택하지 않으면 만료일 없이 저장됩니다.
+                  기본은 미지정입니다. 월 정액 선택 시에만 기간에 맞춰 자동 설정됩니다.
                 </p>
               </div>
             </div>
@@ -620,7 +624,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     : '-'}
                 </span>
                 <span className="text-muted-foreground">만료일:</span>
-                <span>{formData.expires_at || '미선택'}</span>
+                <span>{formData.expires_at || '미지정'}</span>
               </div>
             </div>
 

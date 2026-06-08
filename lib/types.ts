@@ -44,6 +44,10 @@ export interface Member {
   id: string
   user_id: string | null
   auth_user_id: string | null
+  member_login_enabled?: boolean
+  member_invite_code?: string | null
+  last_login_at?: string | null
+  invite_email?: string | null
   name: string
   age: number | null
   birth_date: string | null
@@ -177,6 +181,11 @@ export interface CenterSettings {
   kakao_id: string | null
   instagram_id: string | null
   blog_url: string | null
+  center_phone?: string | null
+  naver_place_url?: string | null
+  center_address?: string | null
+  business_hours?: string | null
+  show_instructor_contact?: boolean
   updated_at: string
 }
 

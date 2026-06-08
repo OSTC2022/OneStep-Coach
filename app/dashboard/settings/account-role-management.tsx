@@ -56,6 +56,7 @@ import {
 import { InstructorRolePanel } from './instructor-role-panel'
 import { PendingApprovalsPanel } from './pending-approvals-panel'
 import { AdminCreateAccountPanel } from './admin-create-account-panel'
+import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
 import type { PendingAccountRow } from '@/lib/actions/auth-registration'
 import type { InstructorRoleRow } from '@/lib/settings-accounts-types'
 
@@ -107,6 +108,7 @@ export function AccountRoleManagement({
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pendingRole, setPendingRole] = useState<SettingsAssignableRole>('member')
+  const [memberId, setMemberId] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
@@ -197,6 +199,7 @@ export function AccountRoleManagement({
     setSelectedId(account.id)
     const assignable = appRoleToAssignable(account)
     if (assignable) setPendingRole(assignable)
+    setMemberId(account.linkedMemberId ?? '')
   }
 
   async function handleRefresh() {
@@ -214,8 +217,19 @@ export function AccountRoleManagement({
   async function handleSaveRole() {
     if (!selected || selectedAssignable === null) return
 
+    if (
+      pendingRole === 'member' &&
+      !memberId &&
+      !selected.linkedMemberId
+    ) {
+      toast.error('연결할 센터 회원을 선택해주세요.')
+      return
+    }
+
     setSaving(true)
-    const result = await updateAccountRole(selected.id, pendingRole)
+    const result = await updateAccountRole(selected.id, pendingRole, {
+      memberId: pendingRole === 'member' ? memberId || selected.linkedMemberId : null,
+    })
     setSaving(false)
 
     if (result.error) {
@@ -223,14 +237,24 @@ export function AccountRoleManagement({
       return
     }
 
-    toast.success('권한이 변경되었습니다.', {
-      description: `${selected.full_name || selected.email} → ${
-        ASSIGNABLE_ROLES.find((r) => r.value === pendingRole)?.label
-      }`,
-    })
-
     const refreshed = await listRegisteredAccounts()
     setAccounts(refreshed)
+    const updated = refreshed.find((a) => a.id === selected.id)
+    if (updated?.linkedMemberId) {
+      setMemberId(updated.linkedMemberId)
+    }
+
+    toast.success(
+      pendingRole === 'member' ? '회원 연결이 저장되었습니다.' : '권한이 변경되었습니다.',
+      {
+        description:
+          pendingRole === 'member' && updated?.linkedMemberName
+            ? `${selected.full_name || selected.email} → ${updated.linkedMemberName}`
+            : `${selected.full_name || selected.email} → ${
+                ASSIGNABLE_ROLES.find((r) => r.value === pendingRole)?.label
+              }`,
+      },
+    )
     router.refresh()
   }
 
@@ -339,6 +363,11 @@ export function AccountRoleManagement({
                             강사: {account.linkedInstructorName}
                           </span>
                         )}
+                        {account.linkedMemberName && (
+                          <span className="block text-[11px] font-normal text-muted-foreground">
+                            회원: {account.linkedMemberName}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate">
                         {account.email || account.loginEmail || '—'}
@@ -442,6 +471,9 @@ export function AccountRoleManagement({
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   현재: {selected.roleLabel} · {selected.approvalLabel}
+                  {selected.linkedMemberName
+                    ? ` · 회원: ${selected.linkedMemberName}`
+                    : ''}
                 </p>
               </div>
 
@@ -449,9 +481,10 @@ export function AccountRoleManagement({
                 <label className="text-sm font-medium">변경할 권한</label>
                 <Select
                   value={pendingRole}
-                  onValueChange={(v) =>
+                  onValueChange={(v) => {
                     setPendingRole(v as SettingsAssignableRole)
-                  }
+                    if (v !== 'member') setMemberId('')
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -470,10 +503,21 @@ export function AccountRoleManagement({
                 </p>
               </div>
 
+              {pendingRole === 'member' ? (
+                <AccountMemberLinkSelect
+                  accountUserId={selected.id}
+                  value={memberId}
+                  onValueChange={setMemberId}
+                />
+              ) : null}
+
               <Button
                 type="button"
                 className="w-full"
-                disabled={saving || pendingRole === selectedAssignable}
+                disabled={
+                  saving ||
+                  (pendingRole === selectedAssignable && pendingRole !== 'member')
+                }
                 onClick={() => void handleSaveRole()}
               >
                 {saving ? (
@@ -481,6 +525,8 @@ export function AccountRoleManagement({
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     저장 중…
                   </>
+                ) : pendingRole === 'member' ? (
+                  '회원 연결 · 권한 저장'
                 ) : (
                   '권한 저장'
                 )}

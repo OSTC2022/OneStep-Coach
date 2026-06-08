@@ -71,6 +71,6 @@ CREATE POLICY "members_coach_update" ON public.members
 -- 회원 본인 조회
 CREATE POLICY "members_self_read" ON public.members
   FOR SELECT TO authenticated
-  USING (auth_user_id = auth.uid());
+  USING (auth_user_id = auth.uid() OR user_id = auth.uid());
 
 NOTIFY pgrst, 'reload schema';

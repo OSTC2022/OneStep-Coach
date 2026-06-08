@@ -26,6 +26,7 @@ import {
   PAIN_AREA_CHOICES,
   SLEEP_HOUR_CHOICES,
 } from '@/lib/member-body-wellness'
+import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
 import { roundBodyMetric } from '@/lib/member-utils'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -47,8 +48,14 @@ const BASIC_SELECT =
 const WELLNESS_SELECT =
   `${BASIC_SELECT}, sleep_hours, condition, fatigue, muscle_soreness, pain_area, meal_status`
 
-const FULL_SELECT =
+const WELLNESS_WITH_PAIN_SELECT =
+  `${WELLNESS_SELECT}, pain_level, pain_area_note`
+
+const NUTRITION_SELECT =
   `${WELLNESS_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
+
+const FULL_SELECT =
+  `${WELLNESS_WITH_PAIN_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
 
 const BODY_RECORD_SELECT = FULL_SELECT
 
@@ -81,32 +88,45 @@ function isMissingWellnessColumns(message: string | undefined) {
   )
 }
 
+function isMissingPainDetailColumns(message: string | undefined) {
+  if (!message) return false
+  const lower = message.toLowerCase()
+  return lower.includes('pain_level') || lower.includes('pain_area_note')
+}
+
 function isMissingExtendedBodyColumns(message: string | undefined) {
   return isMissingNutritionColumns(message) || isMissingWellnessColumns(message)
 }
 
 type BodyRecordSaveTier = 'full' | 'wellness' | 'basic'
 
-function selectForTier(tier: BodyRecordSaveTier) {
+function selectForTier(tier: BodyRecordSaveTier, options?: { includePainDetail?: boolean }) {
+  const includePainDetail = options?.includePainDetail !== false
   switch (tier) {
     case 'full':
-      return FULL_SELECT
+      return includePainDetail ? FULL_SELECT : NUTRITION_SELECT
     case 'wellness':
-      return WELLNESS_SELECT
+      return includePainDetail ? WELLNESS_WITH_PAIN_SELECT : WELLNESS_SELECT
     default:
       return BASIC_SELECT
   }
 }
 
-function wellnessPayload(input?: BodyWellnessInput) {
+function wellnessPayload(input?: BodyWellnessInput, options?: { includePainDetail?: boolean }) {
   const normalized = normalizeWellnessInput(input)
-  return {
+  const base = {
     sleep_hours: normalized.sleep_hours,
     condition: normalized.condition,
     fatigue: normalized.fatigue,
     muscle_soreness: normalized.muscle_soreness,
     pain_area: normalized.pain_area,
     meal_status: normalized.meal_status,
+  }
+  if (options?.includePainDetail === false) return base
+  return {
+    ...base,
+    pain_level: normalized.pain_level,
+    pain_area_note: normalized.pain_area_note,
   }
 }
 
@@ -133,19 +153,20 @@ function payloadForTier(
   wellness?: BodyWellnessInput,
   nutrition?: BodyNutritionInput,
   proteinSettings?: Partial<MemberProteinSettings>,
+  options?: { includePainDetail?: boolean },
 ) {
   switch (tier) {
     case 'full':
       return {
         ...base,
-        ...wellnessPayload(wellness),
+        ...wellnessPayload(wellness, options),
         ...nutritionPayload(nutrition, {
           weightKg: base.weight_kg,
           proteinSettings,
         }),
       }
     case 'wellness':
-      return { ...base, ...wellnessPayload(wellness) }
+      return { ...base, ...wellnessPayload(wellness, options) }
     default:
       return base
   }
@@ -177,12 +198,27 @@ function parseNutritionRow(row: Record<string, unknown>): MemberBodyRecordNutrit
 }
 
 function parseWellnessRow(row: Record<string, unknown>): MemberBodyRecordWellness {
+  const painArea = parseWellnessField(row.pain_area, PAIN_AREA_CHOICES)
+  const painLevelRaw = row.pain_level
+  const painLevel =
+    painArea && painArea !== 'none' && painLevelRaw != null
+      ? Number(painLevelRaw)
+      : null
+
   return {
     sleep_hours: parseWellnessField(row.sleep_hours, SLEEP_HOUR_CHOICES),
     condition: parseWellnessField(row.condition, CONDITION_CHOICES),
     fatigue: parseWellnessField(row.fatigue, FATIGUE_CHOICES),
     muscle_soreness: parseWellnessField(row.muscle_soreness, MUSCLE_SORENESS_CHOICES),
-    pain_area: parseWellnessField(row.pain_area, PAIN_AREA_CHOICES),
+    pain_area: painArea,
+    pain_level:
+      painLevel != null && Number.isFinite(painLevel) && painLevel >= 1 && painLevel <= 10
+        ? Math.round(painLevel)
+        : null,
+    pain_area_note:
+      painArea === 'other' && typeof row.pain_area_note === 'string'
+        ? row.pain_area_note.trim() || null
+        : null,
     meal_status: parseWellnessField(row.meal_status, MEAL_STATUS_CHOICES),
   }
 }
@@ -239,6 +275,11 @@ async function queryMemberBodyRecords(
   let { data, error } = await run(FULL_SELECT)
   if (error && isMissingNutritionColumns(error.message)) {
     selectTier = 'wellness'
+    const retry = await run(WELLNESS_WITH_PAIN_SELECT)
+    data = retry.data
+    error = retry.error
+  }
+  if (error && isMissingPainDetailColumns(error.message)) {
     const retry = await run(WELLNESS_SELECT)
     data = retry.data
     error = retry.error
@@ -270,42 +311,60 @@ async function persistMemberBodyRecord(
   migrationHint?: string
 }> {
   const tiers: BodyRecordSaveTier[] = ['full', 'wellness', 'basic']
+  const painDetailAttempts = [true, false] as const
 
   for (const tier of tiers) {
-    const payload = payloadForTier(
-      tier,
-      params.basePayload,
-      params.wellness,
-      params.nutrition,
-      params.proteinSettings,
-    )
-    const select = selectForTier(tier)
+    for (const includePainDetail of painDetailAttempts) {
+      if (tier === 'basic' && !includePainDetail) continue
 
-    const result = params.existingId
-      ? await supabase
-          .from('member_body_records')
-          .update(payload)
-          .eq('id', params.existingId)
-          .select(select)
-          .single()
-      : await supabase
-          .from('member_body_records')
-          .insert({
-            member_id: params.memberId,
-            recorded_at: params.recordedAt,
-            ...payload,
-          })
-          .select(select)
-          .single()
+      const payload = payloadForTier(
+        tier,
+        params.basePayload,
+        params.wellness,
+        params.nutrition,
+        params.proteinSettings,
+        tier === 'basic' ? undefined : { includePainDetail },
+      )
+      const select = selectForTier(tier, tier === 'basic' ? undefined : { includePainDetail })
 
-    if (!result.error && result.data) {
-      const saved = normalizeRecord(result.data as Record<string, unknown>)
-      const hint = migrationHintForTier(tier)
-      return hint ? { record: saved, migrationHint: hint } : { record: saved }
-    }
+      const result = params.existingId
+        ? await supabase
+            .from('member_body_records')
+            .update(payload)
+            .eq('id', params.existingId)
+            .select(select)
+            .single()
+        : await supabase
+            .from('member_body_records')
+            .insert({
+              member_id: params.memberId,
+              recorded_at: params.recordedAt,
+              ...payload,
+            })
+            .select(select)
+            .single()
 
-    if (!isMissingExtendedBodyColumns(result.error?.message)) {
-      return { error: result.error?.message ?? '기록 저장에 실패했습니다.' }
+      if (!result.error && result.data) {
+        const saved = normalizeRecord(result.data as Record<string, unknown>)
+        const migrationHint =
+          !includePainDetail && tier !== 'basic'
+            ? 'supabase/add-member-pain-detail-fields.sql (pain-detail)'
+            : migrationHintForTier(tier)
+        return migrationHint ? { record: saved, migrationHint } : { record: saved }
+      }
+
+      if (
+        includePainDetail &&
+        tier !== 'basic' &&
+        isMissingPainDetailColumns(result.error?.message)
+      ) {
+        continue
+      }
+
+      if (!isMissingExtendedBodyColumns(result.error?.message)) {
+        return { error: result.error?.message ?? '기록 저장에 실패했습니다.' }
+      }
+      break
     }
   }
 
@@ -335,6 +394,8 @@ function createBootstrapRecord(
     fatigue: null,
     muscle_soreness: null,
     pain_area: null,
+    pain_level: null,
+    pain_area_note: null,
     meal_status: null,
     protein_status: null,
     protein_target_g: null,
@@ -687,9 +748,13 @@ export async function deleteMemberBodyRecord(
   recordId: string,
   memberId: string,
 ): Promise<{ error?: string }> {
-  await requireRole(['admin', 'instructor'])
-  if (recordId.startsWith('bootstrap-')) {
-    return {}
+  if (isBootstrapBodyRecord(recordId)) {
+    return { error: '신체정보 초기 설정은 삭제할 수 없습니다.' }
+  }
+
+  const access = await canAddBodyRecordFor(memberId)
+  if (!access) {
+    return { error: '권한이 없습니다.' }
   }
 
   const supabase = await memberBodyWriteClient()

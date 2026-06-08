@@ -17,6 +17,7 @@ import {
 } from '@/lib/member-body-nutrition'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
 interface ProteinIntakePanelProps {
@@ -49,6 +50,15 @@ export function ProteinIntakePanel({
     ? getNutritionChoiceTone('protein_status', status)
     : ('neutral' as const)
 
+  const progressToneClass =
+    statusTone === 'good'
+      ? '[&_[data-slot=progress-indicator]]:bg-emerald-500'
+      : statusTone === 'caution'
+        ? '[&_[data-slot=progress-indicator]]:bg-amber-500'
+        : statusTone === 'bad'
+          ? '[&_[data-slot=progress-indicator]]:bg-red-500'
+          : '[&_[data-slot=progress-indicator]]:bg-primary'
+
   function addQuickGrams(grams: number) {
     const current = validIntake ?? 0
     onIntakeChange(String(current + grams))
@@ -56,43 +66,59 @@ export function ProteinIntakePanel({
 
   return (
     <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-foreground">오늘 단백질 목표</p>
-        <p className="text-lg font-bold tabular-nums text-primary">
+      <p className="text-xs font-semibold text-foreground">
+        오늘 단백질 목표{' '}
+        <span className="tabular-nums text-primary">
           {targetG != null ? `${targetG}g` : '-'}
-        </p>
-      </div>
+        </span>
+      </p>
 
-      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-        <div className="rounded-md border border-border/60 bg-background/40 px-2.5 py-2">
-          <p className="text-foreground/60">현재 섭취</p>
-          <p className="mt-0.5 font-semibold tabular-nums text-foreground">
-            {validIntake != null ? `${validIntake}g` : '-'}
+      <div className="space-y-2">
+        <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+          {validIntake != null && targetG != null ? (
+            <>
+              {validIntake}g{' '}
+              <span className="text-lg font-semibold text-foreground/45">/ {targetG}g</span>
+            </>
+          ) : (
+            <span className="text-lg text-foreground/45">섭취량을 입력해주세요</span>
+          )}
+        </p>
+
+        {achievementPercent != null ? (
+          <p className="text-xs text-foreground/70">
+            달성률{' '}
+            <span className="font-semibold tabular-nums text-foreground">
+              {achievementPercent}%
+            </span>
+            {status ? (
+              <>
+                {' '}
+                ·{' '}
+                <span
+                  className={cn(
+                    'inline-flex rounded-md border px-1.5 py-0.5 font-medium',
+                    nutritionToneClasses(statusTone ?? 'neutral'),
+                  )}
+                >
+                  {proteinStatusLabel(status)}
+                </span>
+              </>
+            ) : null}
           </p>
-        </div>
-        <div className="rounded-md border border-border/60 bg-background/40 px-2.5 py-2">
-          <p className="text-foreground/60">남은 단백질</p>
-          <p className="mt-0.5 font-semibold tabular-nums text-foreground">
-            {remainingG != null ? `${remainingG}g` : '-'}
+        ) : null}
+
+        <Progress
+          value={achievementPercent ?? 0}
+          className={cn('h-2.5 bg-background/60', progressToneClass)}
+        />
+
+        {remainingG != null ? (
+          <p className="text-xs text-foreground/65">
+            남은 단백질{' '}
+            <span className="font-semibold tabular-nums text-foreground">{remainingG}g</span>
           </p>
-        </div>
-        <div className="rounded-md border border-border/60 bg-background/40 px-2.5 py-2">
-          <p className="text-foreground/60">달성률</p>
-          <p className="mt-0.5 font-semibold tabular-nums text-foreground">
-            {achievementPercent != null ? `${achievementPercent}%` : '-'}
-          </p>
-        </div>
-        <div className="rounded-md border border-border/60 bg-background/40 px-2.5 py-2">
-          <p className="text-foreground/60">상태</p>
-          <p
-            className={cn(
-              'mt-0.5 inline-flex rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
-              nutritionToneClasses(statusTone ?? 'neutral'),
-            )}
-          >
-            {proteinStatusLabel(status)}
-          </p>
-        </div>
+        ) : null}
       </div>
 
       <div className="space-y-1.5">
@@ -110,9 +136,9 @@ export function ProteinIntakePanel({
         />
       </div>
 
-      <div className="space-y-1.5">
-        <p className="text-xs font-medium text-foreground">빠른 입력</p>
-        <div className="flex flex-wrap gap-1.5">
+      <div className="space-y-1">
+        <p className="text-[11px] font-medium text-foreground/80">빠른 입력</p>
+        <div className="flex flex-wrap gap-1">
           {PROTEIN_QUICK_FOODS.map((food) => (
             <Button
               key={food.id}
@@ -120,10 +146,13 @@ export function ProteinIntakePanel({
               size="sm"
               variant="outline"
               disabled={disabled || targetG == null}
-              className="min-h-11 border-border/60 bg-background/40 text-foreground/85"
+              className="h-8 shrink-0 whitespace-nowrap border-border/60 bg-background/40 px-2.5 text-xs font-normal text-foreground/85"
               onClick={() => addQuickGrams(food.grams)}
             >
-              {food.label} +{food.grams}g
+              {food.label}{' '}
+              <span className="font-medium tabular-nums text-primary/90">
+                +{food.grams}g
+              </span>
             </Button>
           ))}
         </div>

@@ -49,7 +49,7 @@ CREATE POLICY "instructors_member_read" ON public.instructors
   USING (
     id IN (
       SELECT primary_instructor_id FROM public.members
-      WHERE auth_user_id = auth.uid()
+      WHERE auth_user_id = auth.uid() OR user_id = auth.uid()
     )
   );
 

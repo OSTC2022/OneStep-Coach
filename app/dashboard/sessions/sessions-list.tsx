@@ -487,7 +487,7 @@ export function SessionsList({
                     id="expires_at"
                     value={formData.expires_at}
                     onChange={(expires_at) => setFormData({ ...formData, expires_at })}
-                    placeholder="만료일 선택"
+                    placeholder="미지정"
                   />
                 </div>
               </div>

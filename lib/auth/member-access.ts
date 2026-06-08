@@ -39,8 +39,10 @@ export async function canEditMemberBasicInfoFor(memberId: string): Promise<boole
   if (!user) return false
 
   const role = profileRoleToAppRole(user.role)
-  if (canEditMemberBasicInfo(role)) return true
+  return canEditMemberBasicInfo(role)
+}
 
+export async function isLinkedMemberSelf(memberId: string): Promise<boolean> {
   const linkedMember = await getMemberForCurrentUser()
   return linkedMember?.id === memberId
 }

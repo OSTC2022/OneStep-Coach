@@ -7,6 +7,8 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
   '/dashboard': () => void import('@/app/dashboard/dashboard-recent-payments'),
   '/dashboard/settings': () =>
     void import('@/app/dashboard/settings/account-role-management'),
+  '/dashboard/settings/center-contact': () =>
+    void import('@/components/settings/center-contact-panel'),
   '/dashboard/my': () => void import('@/app/dashboard/my/member-my-page'),
   // lesson-calendar는 day-week-view/time-grid를 정적 포함 — 별도 preload 생략(HMR ChunkLoadError 방지)
   '/dashboard/reports': () => {

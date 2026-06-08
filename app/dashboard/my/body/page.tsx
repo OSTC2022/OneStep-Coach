@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getMemberPortalData } from '@/lib/actions/member-portal'
+import { getDashboardProfile } from '@/lib/auth/dashboard-user'
+import { MemberPortalUnavailable } from '@/components/dashboard/member-portal-unavailable'
 import {
   getMemberBodyRecords,
   getMemberProteinSettings,
@@ -7,8 +9,16 @@ import {
 import { MemberBodyAnalysisView } from '@/components/members/member-body-analysis-view'
 
 export default async function MyBodyPage() {
-  const data = await getMemberPortalData()
-  if (!data) redirect('/auth/login')
+  const [profile, data] = await Promise.all([
+    getDashboardProfile(),
+    getMemberPortalData(),
+  ])
+  if (!data) {
+    if (profile?.role === 'member' || profile?.role === 'guardian') {
+      return <MemberPortalUnavailable userName={profile.full_name} />
+    }
+    redirect('/auth/login')
+  }
 
   const { member } = data
   const [{ records, tableReady, wellnessColumnsReady, nutritionColumnsReady }, proteinSettings] =
@@ -22,7 +32,7 @@ export default async function MyBodyPage() {
     ])
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 pt-12 lg:pt-0">
+    <div className="mx-auto w-full max-w-[1120px] space-y-6">
       <MemberBodyAnalysisView
         member={{
           id: member.id,

@@ -24,6 +24,7 @@ import {
   UserCog,
   BarChart3,
   Settings,
+  MessageCircle,
   Dumbbell,
   CreditCard,
   UserPlus,
@@ -103,6 +104,12 @@ const menuItems = [
     roles: ['admin'],
   },
   {
+    title: '센터 연락',
+    url: '/dashboard/settings/center-contact',
+    icon: MessageCircle,
+    roles: ['admin'],
+  },
+  {
     title: '설정',
     url: '/dashboard/settings',
     icon: Settings,
@@ -163,8 +170,11 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {filteredItems.map((item) => {
-                const isActive = pathname === item.url || 
-                  (item.url !== '/dashboard' && pathname.startsWith(item.url))
+                const isActive =
+                  item.url === '/dashboard/settings'
+                    ? pathname === '/dashboard/settings'
+                    : pathname === item.url ||
+                      (item.url !== '/dashboard' && pathname.startsWith(item.url))
                 
                 return (
                   <SidebarMenuItem key={item.title}>

@@ -26,13 +26,14 @@ import {
   FATIGUE_CHOICES,
   MEAL_STATUS_CHOICES,
   MUSCLE_SORENESS_CHOICES,
-  PAIN_AREA_CHOICES,
   SLEEP_HOUR_CHOICES,
+  parsePainLevel,
   type BodyWellnessInput,
 } from '@/lib/member-body-wellness'
 import { BodyMetricInput } from '@/components/ui/body-metric-input'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { Label } from '@/components/ui/label'
+import { PainAreaInput } from '@/components/members/pain-area-input'
 import { QuickChoiceButtons } from '@/components/ui/quick-choice-buttons'
 import { cn } from '@/lib/utils'
 
@@ -45,6 +46,8 @@ export type MemberBodyRecordFormValues = {
   fatigue: BodyWellnessInput['fatigue'] | ''
   muscleSoreness: BodyWellnessInput['muscle_soreness'] | ''
   painArea: BodyWellnessInput['pain_area'] | ''
+  painLevel: string
+  painAreaNote: string
   mealStatus: BodyWellnessInput['meal_status'] | ''
   proteinIntakeG: string
   postWorkoutMealStatus: BodyNutritionInput['post_workout_meal_status'] | ''
@@ -64,6 +67,8 @@ export function createEmptyBodyRecordFormValues(
     fatigue: '',
     muscleSoreness: '',
     painArea: '',
+    painLevel: '',
+    painAreaNote: '',
     mealStatus: '',
     proteinIntakeG: '',
     postWorkoutMealStatus: '',
@@ -82,6 +87,8 @@ export function bodyRecordFormToWellnessInput(
     fatigue: values.fatigue || null,
     muscle_soreness: values.muscleSoreness || null,
     pain_area: values.painArea || null,
+    pain_level: parsePainLevel(values.painLevel),
+    pain_area_note: values.painArea === 'other' ? values.painAreaNote.trim() || null : null,
     meal_status: values.mealStatus || null,
   }
 }
@@ -284,11 +291,11 @@ export function MemberBodyRecordFields({
             </div>
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-foreground">통증 부위</p>
-              <QuickChoiceButtons
-                value={values.painArea ?? ''}
-                options={PAIN_AREA_CHOICES}
-                toneCategory="pain_area"
-                onChange={(painArea) => patch({ painArea })}
+              <PainAreaInput
+                painArea={values.painArea ?? ''}
+                painLevel={values.painLevel}
+                painAreaNote={values.painAreaNote}
+                onChange={(next) => patch(next)}
                 disabled={disabled}
               />
             </div>

@@ -1,219 +1,304 @@
 'use client'
 
-import { format } from 'date-fns'
+import type { ReactNode } from 'react'
+import Link from 'next/link'
+import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { CalendarDays, Clock, User, CreditCard, History } from 'lucide-react'
+import {
+  Activity,
+  CalendarDays,
+  ChevronRight,
+  ClipboardCheck,
+  CreditCard,
+  LineChart,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { MemberBasicInfoEditor } from '@/components/members/member-basic-info-editor'
-import { MemberContactEditor } from '@/components/members/member-contact-editor'
-import { MemberPhysicalInfoEditor } from '@/components/members/member-physical-info-editor'
-import { SnsIconLinks } from '@/components/members/sns-icon-links'
+import { Button } from '@/components/ui/button'
+import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import type { MemberPortalData } from '@/lib/actions/member-portal'
-
-const STATUS_LABEL: Record<string, string> = {
-  present: '출석',
-  absent: '결석',
-  makeup: '보강',
-  cancelled: '취소',
-  scheduled: '예정',
-}
+import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
+import { portalStatusToneClass } from '@/lib/member-portal-status'
+import type { Member } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
   data: MemberPortalData
 }
 
+function formatSportProfile(member: Member): string | null {
+  const parts = [member.sport, member.grade].filter((value) => value?.trim())
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function formatTodayRecordSummary(recorded: boolean): string {
+  return recorded ? '완료' : '입력 필요'
+}
+
+function formatRemainingSessionsHint(remaining: number | null | undefined): string {
+  if (remaining == null || remaining <= 0) return '수업권 확인 필요'
+  return '수업권 정상'
+}
+
+function formatTodayRecordHint(recorded: boolean): string {
+  return recorded ? '오늘 상태 저장됨' : '훈련 전 상태 체크'
+}
+
+function formatSessionStatusValue(remaining: number | null | undefined): string {
+  if (remaining == null || remaining <= 0) return '수업권 확인 필요'
+  return '정상 이용 중'
+}
+
+function resolveProfileAside(data: MemberPortalData) {
+  const { member, summary } = data
+  const remaining = member.remaining_sessions ?? 0
+
+  if (remaining <= 0) {
+    return {
+      label: '수업 상태',
+      value: formatSessionStatusValue(remaining),
+      valueClassName: 'text-amber-300',
+      hint: '센터에 문의해주세요',
+    }
+  }
+
+  const { athleteStatus } = summary
+  return {
+    label: '선수 상태',
+    value: athleteStatus.label,
+    valueClassName: portalStatusToneClass(athleteStatus.tone),
+    hint: athleteStatus.hint,
+  }
+}
+
 export function MemberMyPage({ data }: MemberMyPageProps) {
-  const { member, nextLesson, recentLessons, recentSessions, transactions } = data
+  const { member, summary, centerContact, coachContact } = data
+  const instructorName = member.primary_instructor?.name ?? '자율배정'
+  const sportProfile = formatSportProfile(member)
+  const todayRecordLabel = formatTodayRecordSummary(summary.todayRecorded)
+  const reportReady = summary.wellnessRecordCount >= MEMBER_REPORT_MIN_RECORDS
+  const profileAside = resolveProfileAside(data)
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">마이페이지</h1>
-        <p className="text-sm text-muted-foreground">
-          {member.name}님 · 남은 수업 {member.remaining_sessions ?? 0}회
+    <div className="mx-auto w-full max-w-[1120px] space-y-6">
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+          ONESTEP ATHLETE REPORT
+        </p>
+        <h1 className="text-2xl font-bold lg:text-3xl">내 선수 리포트</h1>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수
+          있습니다.
         </p>
       </div>
 
-      <MemberBasicInfoEditor
-        memberId={member.id}
-        birthDate={member.birth_date}
-        age={member.age}
-        grade={member.grade}
-        school={member.school ?? null}
-        canEdit
-        compact
-      />
-
-      <MemberContactEditor
-        memberId={member.id}
-        phone={member.phone}
-        parentPhone={member.parent_phone}
-        kakaoId={member.kakao_id ?? null}
-        instagramId={member.instagram_id ?? null}
-        instructorAccount={data.instructorAccount}
-        centerAccount={data.centerAccount}
-        canEdit
-        compact
-      />
-
-      <MemberPhysicalInfoEditor
-        memberId={member.id}
-        memberName={member.name}
-        heightCm={member.height_cm}
-        weightKg={member.weight_kg}
-        bodyRecords={data.bodyRecords}
-        canAddRecord
-        analysisHref="/dashboard/my/body"
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CreditCard className="h-4 w-4" />
-              남은 수업
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold tabular-nums">
-              {member.remaining_sessions ?? 0}
-              <span className="ml-1 text-lg font-normal text-muted-foreground">회</span>
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <User className="h-4 w-4" />
-              담당 강사
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-lg font-semibold">
-              {member.primary_instructor?.name ?? '자율배정'}
-            </p>
-            {member.sport && (
-              <p className="text-sm text-muted-foreground">{member.sport}</p>
-            )}
-            {data.instructorAccount ? (
-              <SnsIconLinks
-                kakaoId={data.instructorAccount.kakaoId}
-                instagramId={data.instructorAccount.instagramId}
-                blogUrl={data.instructorAccount.blogUrl}
-                size="sm"
-              />
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarDays className="h-4 w-4" />
-            다음 수업
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {nextLesson ? (
-            <div className="space-y-1">
-              <p className="font-medium">
-                {format(new Date(`${nextLesson.lesson_date}T12:00:00`), 'M월 d일 (EEE)', {
-                  locale: ko,
-                })}
-                {nextLesson.start_time && (
-                  <span className="ml-2 text-muted-foreground">
-                    {nextLesson.start_time.slice(0, 5)}
-                    {nextLesson.end_time ? ` – ${nextLesson.end_time.slice(0, 5)}` : ''}
-                  </span>
-                )}
-              </p>
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-4 sm:p-6">
+          <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">
+            <div className="space-y-1.5">
+              <p className="text-xl font-bold lg:text-2xl">{member.name} 선수</p>
+              {sportProfile ? (
+                <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
+              ) : null}
+              {member.school ? (
+                <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
+              ) : null}
               <p className="text-sm text-muted-foreground">
-                {nextLesson.instructor?.name ?? '담당 강사 미정'}
+                담당 코치:{' '}
+                <span className="font-medium text-foreground">{instructorName}</span>
               </p>
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">예정된 수업이 없습니다.</p>
-          )}
+            <div className="rounded-lg border border-border/50 bg-background/30 px-3.5 py-3 md:border-l md:border-y-0 md:border-r-0 md:bg-transparent md:pl-8">
+              <p className="text-xs font-medium text-muted-foreground">
+                {profileAside.label}
+              </p>
+              <p
+                className={cn(
+                  'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
+                  profileAside.valueClassName,
+                )}
+              >
+                {profileAside.value}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <History className="h-4 w-4" />
-            최근 수업 기록
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
+        <SummaryCard
+          title="남은 수업"
+          icon={<CreditCard className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+          value={`${member.remaining_sessions ?? 0}회`}
+          hint={formatRemainingSessionsHint(member.remaining_sessions)}
+        />
+        <SummaryCard
+          title="최근 출석일"
+          icon={<CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+          value={
+            summary.recentAttendanceDate
+              ? format(parseISO(summary.recentAttendanceDate), 'M/d')
+              : '기록 없음'
+          }
+          hint="마지막 수업"
+        />
+        <SummaryCard
+          title="최근 컨디션"
+          icon={<Activity className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+          value={summary.recentCondition.label}
+          valueClassName={portalStatusToneClass(summary.recentCondition.tone)}
+          hint={summary.recentCondition.hint}
+        />
+        <SummaryCard
+          title="오늘 기록"
+          icon={<ClipboardCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+          value={todayRecordLabel}
+          valueClassName={
+            summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
+          }
+          hint={formatTodayRecordHint(summary.todayRecorded)}
+          highlighted={!summary.todayRecorded}
+        />
+      </div>
+
+      <Card className="border-primary/15">
+        <CardHeader className="pb-2 sm:px-6">
+          <CardTitle className="text-base lg:text-lg">오늘 관리</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 p-4 sm:p-6 sm:pt-0">
+          {summary.todayRecorded ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground lg:text-base">
+                오늘 상태 기록이 완료되었습니다.
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground lg:text-base">
+                코치가 훈련 강도와 회복 상태를 확인할 수 있습니다.
+              </p>
+              {summary.todayRecordSummary ? (
+                <p className="text-sm leading-relaxed text-foreground/90">
+                  <span className="font-medium text-foreground">기록 요약: </span>
+                  {summary.todayRecordSummary}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground lg:text-base">
+                오늘 컨디션 기록이 아직 없습니다.
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground lg:text-base">
+                훈련 전 수면, 피로도, 통증, 식사 상태를 기록해주세요.
+              </p>
+              <p className="text-xs text-muted-foreground">기록 예상 시간: 약 30초</p>
+            </div>
+          )}
+
+          <Button asChild className="min-h-11 w-full sm:w-auto sm:min-w-[200px]">
+            <Link href="/dashboard/my/body#report-top" scroll={false}>
+              {summary.todayRecorded ? '오늘 기록 수정하기' : '오늘 상태 기록하기'}
+              <ChevronRight className="ml-1 h-4 w-4" />
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70">
+        <CardHeader className="pb-2 sm:px-6">
+          <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+            <LineChart className="h-4 w-4 text-primary" />
+            내 리포트
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {recentSessions.length === 0 && recentLessons.length === 0 ? (
-            <p className="text-sm text-muted-foreground">수업 기록이 없습니다.</p>
-          ) : (
-            (recentSessions.length > 0 ? recentSessions : recentLessons).slice(0, 8).map((item) => {
-              const date =
-                'session_date' in item
-                  ? item.session_date
-                  : item.lesson_date
-              const status =
-                'status' in item ? item.status : item.attendance_status
-              const time =
-                'lesson' in item && item.lesson?.start_time
-                  ? item.lesson.start_time.slice(0, 5)
-                  : 'start_time' in item && item.start_time
-                    ? item.start_time.slice(0, 5)
-                    : null
+        <CardContent className="space-y-4 p-4 sm:p-6 sm:pt-0">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            최근 기록이 3회 이상 쌓이면 컨디션 변화와 코치 체크를 확인할 수 있습니다.
+          </p>
 
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-2 border-b border-border pb-2 last:border-0 last:pb-0"
-                >
-                  <div>
-                    <p className="text-sm font-medium">
-                      {format(new Date(`${date}T12:00:00`), 'M/d (EEE)', { locale: ko })}
-                      {time && (
-                        <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">
-                          <Clock className="h-3 w-3" />
-                          {time}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <Badge variant="secondary">{STATUS_LABEL[status] ?? status}</Badge>
-                </div>
-              )
-            })
-          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-border/60 bg-muted/10 px-3 py-2.5">
+              <p className="text-xs text-muted-foreground">최근 기록</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums">
+                {summary.wellnessRecordCount}회
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/10 px-3 py-2.5">
+              <p className="text-xs text-muted-foreground">최근 컨디션</p>
+              <p
+                className={cn(
+                  'mt-0.5 text-lg font-bold',
+                  portalStatusToneClass(summary.recentCondition.tone),
+                )}
+              >
+                {summary.recentCondition.label}
+              </p>
+            </div>
+          </div>
+
+          {!reportReady ? (
+            <p className="text-sm font-medium text-amber-200/90">
+              3회 이상 기록하면 컨디션 흐름을 확인할 수 있습니다.
+            </p>
+          ) : null}
+
+          {reportReady ? (
+            <Button
+              asChild
+              variant="outline"
+              className="min-h-11 w-full border-border/70 bg-background/40 sm:w-auto sm:min-w-[180px]"
+            >
+              <Link href="/dashboard/my/body#report-top" scroll={false}>
+                리포트 확인하기
+                <ChevronRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+          ) : null}
         </CardContent>
       </Card>
 
-      {transactions.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">회차 내역</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center justify-between text-sm"
-              >
-                <span className="text-muted-foreground">
-                  {format(new Date(tx.created_at), 'M/d HH:mm', { locale: ko })}
-                  {' · '}
-                  {tx.reason}
-                </span>
-                <span className={tx.delta > 0 ? 'text-green-400' : 'text-red-400'}>
-                  {tx.delta > 0 ? '+' : ''}
-                  {tx.delta}회 → {tx.balance_after}회
-                </span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      <MemberCenterContactCard coach={coachContact} center={centerContact} />
     </div>
+  )
+}
+
+function SummaryCard({
+  title,
+  icon,
+  value,
+  valueClassName,
+  hint,
+  highlighted = false,
+}: {
+  title: string
+  icon: ReactNode
+  value: string
+  valueClassName?: string
+  hint: string
+  highlighted?: boolean
+}) {
+  return (
+    <Card
+      className={cn(
+        'h-full md:h-[158px]',
+        highlighted && 'border-primary/30 bg-primary/[0.04] ring-1 ring-primary/10',
+      )}
+    >
+      <CardContent className="grid h-full min-h-[132px] grid-rows-[auto_1fr_auto] gap-0 px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0">
+        <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          {icon}
+          <span className="truncate">{title}</span>
+        </p>
+        <p
+          className={cn(
+            'flex items-center text-2xl font-bold leading-none tabular-nums md:text-[26px]',
+            valueClassName,
+          )}
+        >
+          {value}
+        </p>
+        <p className="text-xs leading-snug text-muted-foreground md:text-[13px]">
+          {hint}
+        </p>
+      </CardContent>
+    </Card>
   )
 }

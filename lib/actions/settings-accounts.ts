@@ -19,6 +19,10 @@ import {
   fetchAllProfiles,
   upsertUserProfile,
 } from '@/lib/profiles-admin'
+import {
+  linkAuthUserToMemberRecord,
+  unlinkAuthUserFromMemberRecord,
+} from '@/lib/actions/member-account'
 import type {
   InstructorRoleRow,
   RegisteredAccount,
@@ -73,16 +77,37 @@ async function mapRegisteredAccounts(
   const rows = await fetchAllProfiles(admin)
   const ids = rows.map((p) => p.id)
   const instructorByUserId = new Map<string, string>()
+  const memberByUserId = new Map<string, { id: string; name: string }>()
 
   if (ids.length > 0) {
-    const { data: instructors } = await admin
-      .from('instructors')
-      .select('name, user_id')
-      .in('user_id', ids)
+    const [{ data: instructors }, { data: byAuth }, { data: byUser }] =
+      await Promise.all([
+        admin.from('instructors').select('name, user_id').in('user_id', ids),
+        admin
+          .from('members')
+          .select('id, name, auth_user_id, user_id')
+          .in('auth_user_id', ids),
+        admin
+          .from('members')
+          .select('id, name, auth_user_id, user_id')
+          .in('user_id', ids),
+      ])
+
+    const members = [...(byAuth ?? []), ...(byUser ?? [])]
 
     for (const row of instructors ?? []) {
       if (row.user_id) {
         instructorByUserId.set(row.user_id, row.name)
+      }
+    }
+
+    const seenMemberIds = new Set<string>()
+    for (const row of members ?? []) {
+      if (seenMemberIds.has(row.id)) continue
+      seenMemberIds.add(row.id)
+      const uid = row.auth_user_id ?? row.user_id
+      if (uid) {
+        memberByUserId.set(uid, { id: row.id, name: row.name })
       }
     }
   }
@@ -109,6 +134,8 @@ async function mapRegisteredAccounts(
       approvalLabel: getApprovalStatusLabel(approvalStatus, row.email),
       created_at: row.created_at,
       linkedInstructorName: instructorByUserId.get(row.id) ?? null,
+      linkedMemberId: memberByUserId.get(row.id)?.id ?? null,
+      linkedMemberName: memberByUserId.get(row.id)?.name ?? null,
       isProtected: protectedAccount,
     }
   })
@@ -386,6 +413,8 @@ export async function assignCoachRoleToInstructor(
 export type UpdateAccountRoleOptions = {
   /** 가입 승인 처리 중 — 승인 대기 계정에도 권한 부여 */
   skipApprovalCheck?: boolean
+  /** 회원 권한 시 연결할 센터 회원 ID */
+  memberId?: string | null
 }
 
 export async function updateAccountRole(
@@ -463,6 +492,7 @@ export async function updateAccountRole(
   }
 
   if (profileRole === 'coach') {
+    await unlinkAuthUserFromMemberRecord(userId)
     const link = await ensureInstructorLink(
       admin,
       userId,
@@ -470,8 +500,16 @@ export async function updateAccountRole(
       existing.email,
     )
     if (link.error) return link
+  } else if (profileRole === 'member') {
+    await unlinkInstructorUser(admin, userId)
+    const memberId = options?.memberId?.trim()
+    if (memberId) {
+      const linked = await linkAuthUserToMemberRecord(userId, memberId)
+      if (linked.error) return linked
+    }
   } else {
     await unlinkInstructorUser(admin, userId)
+    await unlinkAuthUserFromMemberRecord(userId)
   }
 
   revalidatePath('/dashboard/settings')

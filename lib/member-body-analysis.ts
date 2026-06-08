@@ -1,18 +1,22 @@
-import { format, parseISO, subDays } from 'date-fns'
+import { differenceInDays, format, parseISO, subDays } from 'date-fns'
 import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
 import type { BodyPeriodRange } from '@/lib/member-body-period-settings'
 import {
-  buildNutritionCoachHints,
   getDefaultSupplementConfig,
-  nutritionChoiceLabel,
   type MemberSupplementConfig,
 } from '@/lib/member-body-nutrition'
+import { calculateProteinAchievementPercent } from '@/lib/member-body-protein'
 import {
+  formatPainAreaLabel,
   hasConditionData,
+  painLevelToChartScore,
   wellnessChoiceLabel,
+  wellnessReportLabel,
   wellnessValueLabel,
   type BodyCondition,
+  type FatigueLevel,
   type MuscleSoreness,
+  type PainArea,
   type SleepHours,
 } from '@/lib/member-body-wellness'
 import { calculateMemberBmi, roundBodyMetric } from '@/lib/member-utils'
@@ -223,7 +227,7 @@ export function getLatestConditionStatus(records: MemberBodyRecord[]): Condition
     return { label: '컨디션 기록 필요', description: '오늘 상태에서 입력해주세요', tone: 'none' }
   }
 
-  const label = wellnessValueLabel(latestWithCondition.condition)
+  const label = wellnessReportLabel('condition', latestWithCondition.condition)
   const toneMap: Record<BodyCondition, ConditionStatus['tone']> = {
     good: 'good',
     normal: 'normal',
@@ -273,15 +277,19 @@ export type CoachCheckStatus =
   | 'recovery'
   | 'insufficient_records'
 
-export type CoachCheckBox = {
-  title: string
-  text: string
-  status: CoachCheckStatus
-}
-
 export type CoachCheckReport = {
-  boxes: CoachCheckBox[]
   overallStatus: CoachCheckStatus
+  /** 훈련 강도 조절에 직접 영향 — 주의 신호 */
+  warningSignals: string[]
+  /** 회복 관리 보완 — 직접적 위험 신호는 아님 */
+  recoveryPoints: string[]
+  /** 최근 컨디션·피로 등 개선 흐름 */
+  positiveFlows: string[]
+  /** 체중 등 기록 품질 확인 안내 — 훈련 판단과 분리 */
+  recordCheckNotes: string[]
+  recommendation: string
+  /** 기록 이력 기준 안내 멘트 */
+  historyNote: string
 }
 
 export const COACH_CHECK_STATUS_LABELS: Record<CoachCheckStatus, string> = {
@@ -326,22 +334,192 @@ function hasPainSignal(record: MemberBodyRecord): boolean {
   return Boolean(record.pain_area && record.pain_area !== 'none')
 }
 
-function isAdequateSleep(sleep: SleepHours | null | undefined): boolean {
-  return sleep === '7_8' || sleep === 'over_8'
+const COACH_SCORE_WEIGHT_TODAY = 0.6
+const COACH_SCORE_WEIGHT_RECENT3 = 0.3
+const COACH_SCORE_WEIGHT_CHANGE = 0.1
+const COACH_MAX_WARNING_SIGNALS = 3
+const COACH_MAX_RECOVERY_POINTS = 3
+const POST_WORKOUT_RECOVERY_LABEL = '운동 후 회복식 보완 필요'
+
+type TrainingRecordScore = {
+  sleep: number
+  condition: number
+  fatigue: number
+  soreness: number
+  pain: number
+  meal: number
+  total: number
+}
+
+type RecoveryRecordScore = {
+  protein: number
+  proteinNeedsRecord: boolean
+  postWorkout: number
+  hydration: number
+  supplement: number
+}
+
+function getValidWeightRecords(records: MemberBodyRecord[]): MemberBodyRecord[] {
+  return records.filter(
+    (record) =>
+      !record.id.startsWith('bootstrap-') &&
+      Number.isFinite(record.weight_kg) &&
+      record.weight_kg > 0,
+  )
 }
 
 function computeWeightChange(
-  records14d: MemberBodyRecord[],
+  weightRecords: MemberBodyRecord[],
 ): { pct: number | null; direction: 'up' | 'down' | 'flat' } {
-  if (records14d.length < 2) return { pct: null, direction: 'flat' }
-  const first = records14d[0].weight_kg
-  const last = records14d[records14d.length - 1].weight_kg
+  if (weightRecords.length < 2) return { pct: null, direction: 'flat' }
+  const first = weightRecords[0].weight_kg
+  const last = weightRecords[weightRecords.length - 1].weight_kg
   if (!first) return { pct: null, direction: 'flat' }
   const delta = last - first
   const pct = Math.abs((delta / first) * 100)
   return {
     pct: Number(pct.toFixed(1)),
     direction: delta > 0.05 ? 'up' : delta < -0.05 ? 'down' : 'flat',
+  }
+}
+
+const WEIGHT_RECORD_CHECK_PCT = 0.04
+const WEIGHT_SUSPICIOUS_JUMP_PCT = 0.05
+const WEIGHT_JUMP_MAX_DAYS = 3
+const WEIGHT_RECORD_CHECK_LABEL =
+  '최근 체중 기록에 큰 차이가 있어 입력값 확인이 필요합니다.'
+const WEIGHT_SUSPICIOUS_REFERENCE_NOTE =
+  '입력 오류 가능성이 있는 체중 기록은 훈련 판단에 강하게 반영하지 않습니다.'
+
+function getMaxNearbyWeightJumpPct(
+  weightRecords: MemberBodyRecord[],
+): number | null {
+  const sorted = [...weightRecords].sort((a, b) =>
+    a.recorded_at.localeCompare(b.recorded_at),
+  )
+  let maxPct: number | null = null
+  for (let i = 1; i < sorted.length; i++) {
+    const days = differenceInDays(
+      parseISO(sorted[i].recorded_at),
+      parseISO(sorted[i - 1].recorded_at),
+    )
+    if (days > WEIGHT_JUMP_MAX_DAYS) continue
+    const prev = sorted[i - 1].weight_kg
+    if (prev <= 0) continue
+    const pct = Math.abs(sorted[i].weight_kg - prev) / prev
+    if (maxPct == null || pct > maxPct) maxPct = pct
+  }
+  return maxPct
+}
+
+function scoreWeightChangePct(pct: number | null): number {
+  if (pct == null) return 0
+  if (pct < 1) return 0
+  if (pct < 2) return 1
+  if (pct < 3) return 2
+  return 3
+}
+
+function assessWeightChange(
+  validWeightRecords14d: MemberBodyRecord[],
+  realRecordCount: number,
+): WeightChangeAssessment {
+  const empty: WeightChangeAssessment = {
+    eligible: false,
+    earlyStage: realRecordCount > 0 && realRecordCount < CHART_TREND_MIN_RECORDS,
+    referenceOnly: true,
+    suspiciousJump: false,
+    needsRecordCheck: false,
+    warningLabel: null,
+    referenceLabel: null,
+    recordCheckLabel: null,
+    referenceNote: null,
+    affectsCaution: false,
+    pct: null,
+    direction: 'flat',
+    trend: 'stable',
+  }
+
+  if (validWeightRecords14d.length < WEIGHT_CHANGE_MIN_RECORDS_14D) {
+    return empty
+  }
+
+  const sorted = [...validWeightRecords14d].sort((a, b) =>
+    a.recorded_at.localeCompare(b.recorded_at),
+  )
+  const { pct, direction } = computeWeightChange(sorted)
+  const trend = weightTrendLevel(pct)
+  const earlyStage = realRecordCount < CHART_TREND_MIN_RECORDS
+  const nearbyJumpPct = getMaxNearbyWeightJumpPct(sorted)
+  const suspiciousJump =
+    nearbyJumpPct != null && nearbyJumpPct >= WEIGHT_SUSPICIOUS_JUMP_PCT
+  const needsRecordCheck =
+    nearbyJumpPct != null && nearbyJumpPct >= WEIGHT_RECORD_CHECK_PCT
+  const referenceOnly = earlyStage || suspiciousJump
+
+  if (suspiciousJump) {
+    return {
+      ...empty,
+      eligible: true,
+      earlyStage,
+      referenceOnly: true,
+      suspiciousJump: true,
+      needsRecordCheck: true,
+      recordCheckLabel: WEIGHT_RECORD_CHECK_LABEL,
+      referenceNote: WEIGHT_SUSPICIOUS_REFERENCE_NOTE,
+      pct,
+      direction,
+      trend,
+    }
+  }
+
+  if (needsRecordCheck) {
+    return {
+      ...empty,
+      eligible: true,
+      earlyStage,
+      referenceOnly: true,
+      suspiciousJump: false,
+      needsRecordCheck: true,
+      recordCheckLabel: WEIGHT_RECORD_CHECK_LABEL,
+      pct,
+      direction,
+      trend,
+    }
+  }
+
+  if (earlyStage) {
+    return {
+      ...empty,
+      eligible: true,
+      earlyStage: true,
+      referenceOnly: true,
+      suspiciousJump: false,
+      pct,
+      direction,
+      trend,
+      referenceLabel: '참고 · 초기 기록 단계',
+    }
+  }
+
+  const warningLabel =
+    pct != null && pct >= 2 ? '최근 체중 변화 폭이 큼' : null
+  const referenceLabel =
+    pct != null && pct >= 1 && pct < 2
+      ? '참고 · 최근 체중 변화 추세 관찰 중'
+      : null
+
+  return {
+    eligible: true,
+    earlyStage: false,
+    referenceOnly: false,
+    suspiciousJump: false,
+    warningLabel,
+    referenceLabel,
+    affectsCaution: pct != null && pct >= 2,
+    pct,
+    direction,
+    trend,
   }
 }
 
@@ -353,17 +531,101 @@ function weightTrendLevel(pct: number | null): 'stable' | 'watch' | 'caution' | 
   return 'severe'
 }
 
+type WeightChangeAssessment = {
+  eligible: boolean
+  earlyStage: boolean
+  referenceOnly: boolean
+  suspiciousJump: boolean
+  needsRecordCheck: boolean
+  warningLabel: string | null
+  referenceLabel: string | null
+  recordCheckLabel: string | null
+  referenceNote: string | null
+  affectsCaution: boolean
+  pct: number | null
+  direction: 'up' | 'down' | 'flat'
+  trend: 'stable' | 'watch' | 'caution' | 'severe'
+}
+
+type FatigueTrend = 'recovery' | 'worsening' | 'accumulation' | 'neutral'
+
+type FatiguePatternAnalysis = {
+  consecutiveHigh: number
+  highInRecent3: number
+  latestIsHigh: boolean
+  latestIsLow: boolean
+  trend: FatigueTrend
+  trendDelta: number
+  flowDescription: string | null
+  positiveFlowLabel: string | null
+  minStatus: CoachCheckStatus
+  warningLabel: string | null
+  showAsRepeatPattern: boolean
+  forcesCaution: boolean
+  forcesRecovery: boolean
+}
+
+type PainRepeatAnalysis = {
+  repeatedArea: PainArea | null
+  repeatCount: number
+  minStatus: CoachCheckStatus
+  warningLabel: string | null
+  forcesCaution: boolean
+  forcesRecovery: boolean
+}
+
 type CoachAnalysisContext = {
   todayRecord: MemberBodyRecord | null
   primaryRecord: MemberBodyRecord | null
   recent3: MemberBodyRecord[]
   records14d: MemberBodyRecord[]
-  weightChangePct: number | null
-  weightDirection: 'up' | 'down' | 'flat'
-  weightTrend: 'stable' | 'watch' | 'caution' | 'severe'
+  validWeightRecords14d: MemberBodyRecord[]
+  realRecordCount: number
+  weightAssessment: WeightChangeAssessment
+  fatiguePattern: FatiguePatternAnalysis
+  painPattern: PainRepeatAnalysis
   insufficientWellness: boolean
+  wellnessHistoryCount: number
   noRecords: boolean
   supplementConfig: MemberSupplementConfig
+  blendedTrainingScore: number
+  todayTrainingScore: TrainingRecordScore | null
+  recent3TrainingAvg: number
+  weightScore: number
+}
+
+export const CHART_TREND_MIN_RECORDS = 3
+const WELLNESS_HISTORY_TARGET = CHART_TREND_MIN_RECORDS
+const RECENT_WELLNESS_DAYS = 7
+const WEIGHT_CHANGE_MIN_RECORDS_14D = 2
+
+export const CHART_TREND_INITIAL_NOTICE =
+  '현재는 초기 기록 단계입니다. 최근 3회 이상 기록 후 추세 분석이 제공됩니다.'
+
+export function shouldShowChartTrendNotice(records: MemberBodyRecord[]): boolean {
+  const count = getRealRecords(records).length
+  return count > 0 && count < CHART_TREND_MIN_RECORDS
+}
+
+/** 기록 이력·최근성에 따른 코치 체크 하단 멘트 */
+export function buildRecordHistoryNote(
+  records: MemberBodyRecord[],
+  referenceDate: string = format(new Date(), 'yyyy-MM-dd'),
+): string {
+  const realRecords = getRealRecords(records)
+  if (realRecords.length === 0) return '기록이 없습니다'
+
+  const wellnessRecords = realRecords.filter((record) => hasConditionData(record))
+  const recentWellness7d = recordsWithinDays(wellnessRecords, RECENT_WELLNESS_DAYS, referenceDate)
+
+  if (recentWellness7d.length === 0) {
+    return '분석 제한: 최근 컨디션·수면·피로 기록이 필요합니다.'
+  }
+  if (realRecords.length < WELLNESS_HISTORY_TARGET) {
+    return '초기 기록 단계입니다. 최근 3회 이상 기록 후 추세 분석이 제공됩니다.'
+  }
+
+  return '최근 흐름 분석 가능'
 }
 
 function buildCoachAnalysisContext(
@@ -375,288 +637,763 @@ function buildCoachAnalysisContext(
     realRecords.find((record) => record.recorded_at === referenceDate) ?? null
   const recent3 = realRecords.slice(-3)
   const records14d = recordsWithinDays(realRecords, 14, referenceDate)
-  const { pct, direction } = computeWeightChange(records14d)
+  const validWeightRecords14d = getValidWeightRecords(records14d)
   const primaryRecord = todayRecord ?? recent3.at(-1) ?? null
 
-  const recentWellnessCount = recent3.filter((record) => hasConditionData(record)).length
-  const insufficientWellness =
-    realRecords.length > 0 &&
-    (recentWellnessCount < 2 ||
-      (!todayRecord && !recent3.some((record) => hasConditionData(record))))
+  const wellnessHistoryCount = realRecords.filter((record) =>
+    hasConditionData(record),
+  ).length
+  const insufficientWellness = realRecords.length > 0 && wellnessHistoryCount === 0
+  const weightAssessment = assessWeightChange(
+    validWeightRecords14d,
+    realRecords.length,
+  )
+  const fatiguePattern = analyzeFatiguePattern(recent3)
+  const painPattern = analyzePainRepeat(recent3, primaryRecord)
+  const todayTrainingScore = todayRecord
+    ? scoreTrainingRecord(todayRecord)
+    : primaryRecord
+      ? scoreTrainingRecord(primaryRecord)
+      : null
+  const recent3TrainingAvg = averageTrainingScore(recent3)
+  const weightScore =
+    weightAssessment.eligible &&
+    !weightAssessment.suspiciousJump &&
+    !weightAssessment.needsRecordCheck
+      ? scoreWeightChangePct(weightAssessment.pct)
+      : 0
+  const blendedTrainingScore = Math.round(
+    (todayTrainingScore?.total ?? 0) * COACH_SCORE_WEIGHT_TODAY +
+      recent3TrainingAvg * COACH_SCORE_WEIGHT_RECENT3 +
+      weightScore * COACH_SCORE_WEIGHT_CHANGE,
+  )
 
   return {
     todayRecord,
     primaryRecord,
     recent3,
     records14d,
-    weightChangePct: pct,
-    weightDirection: direction,
-    weightTrend: weightTrendLevel(pct),
+    validWeightRecords14d,
+    realRecordCount: realRecords.length,
+    weightAssessment,
+    fatiguePattern,
+    painPattern,
     insufficientWellness,
+    wellnessHistoryCount,
     noRecords: realRecords.length === 0,
     supplementConfig: getDefaultSupplementConfig(),
+    blendedTrainingScore,
+    todayTrainingScore,
+    recent3TrainingAvg,
+    weightScore,
   }
 }
 
-function countInRecent3(
-  recent3: MemberBodyRecord[],
-  predicate: (record: MemberBodyRecord) => boolean,
-): number {
-  return recent3.filter(predicate).length
+function isHighFatigue(record: MemberBodyRecord): boolean {
+  return record.fatigue === 'high'
 }
 
-function recordForSignal(
-  ctx: CoachAnalysisContext,
-): MemberBodyRecord | null {
+function recentFatigueLevels(recent3: MemberBodyRecord[]): FatigueLevel[] {
+  return recent3
+    .map((record) => record.fatigue)
+    .filter((level): level is FatigueLevel => Boolean(level))
+}
+
+function formatFatigueFlow(levels: FatigueLevel[]): string {
+  return levels.map((level) => wellnessValueLabel(level)).join(' → ')
+}
+
+function isFatigueRecoveryFlow(levels: FatigueLevel[]): boolean {
+  const latest = levels.at(-1)
+  if (latest !== 'low') return false
+  if (levels.length >= 3) {
+    const [first, second, third] = levels.slice(-3)
+    if (first === 'high' && second === 'normal' && third === 'low') return true
+  }
+  if (levels.length >= 2) {
+    const [prev, last] = levels.slice(-2)
+    if (prev === 'high' && last === 'low') return true
+    if (prev === 'normal' && last === 'low') return true
+  }
+  return levels.length >= 2 && levels.slice(0, -1).some((level) => level !== 'low')
+}
+
+function isFatigueWorseningFlow(levels: FatigueLevel[]): boolean {
+  if (levels.length >= 3) {
+    const [first, second, third] = levels.slice(-3)
+    if (first === 'low' && second === 'normal' && third === 'high') return true
+  }
+  if (levels.length >= 2) {
+    const [prev, last] = levels.slice(-2)
+    if (prev === 'normal' && last === 'high') return true
+    if (prev === 'low' && last === 'high') return true
+  }
+  return false
+}
+
+function countTrailingConsecutiveHighFatigue(records: MemberBodyRecord[]): number {
+  let count = 0
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (isHighFatigue(records[i])) count++
+    else break
+  }
+  return count
+}
+
+function analyzeFatiguePattern(recent3: MemberBodyRecord[]): FatiguePatternAnalysis {
+  const fatigueLevels = recentFatigueLevels(recent3)
+  const consecutiveHigh = countTrailingConsecutiveHighFatigue(recent3)
+  const highInRecent3 = recent3.filter(isHighFatigue).length
+  const latestFatigue = recent3.at(-1)?.fatigue
+  const latestIsHigh = latestFatigue === 'high'
+  const latestIsLow = latestFatigue === 'low'
+
+  let trend: FatigueTrend = 'neutral'
+  let trendDelta = 0
+  let flowDescription: string | null = null
+  let positiveFlowLabel: string | null = null
+
+  if (latestIsLow && isFatigueRecoveryFlow(fatigueLevels)) {
+    trend = 'recovery'
+    trendDelta = -1
+    flowDescription = formatFatigueFlow(fatigueLevels)
+    positiveFlowLabel = `피로도는 최근 ${flowDescription}으로 회복되는 흐름입니다.`
+  } else if (isFatigueWorseningFlow(fatigueLevels)) {
+    trend = 'worsening'
+    trendDelta = 1
+  } else if (
+    latestIsHigh &&
+    (consecutiveHigh >= 2 || (highInRecent3 >= 2 && latestIsHigh))
+  ) {
+    trend = 'accumulation'
+  }
+
+  let forcesRecovery = false
+  let forcesCaution = false
+  let minStatus: CoachCheckStatus = 'stable'
+  let warningLabel: string | null = null
+  let showAsRepeatPattern = false
+
+  if (latestIsHigh) {
+    if (consecutiveHigh >= 3) {
+      forcesRecovery = true
+      minStatus = 'recovery'
+      showAsRepeatPattern = true
+      warningLabel = '피로도 높음 3회 연속 기록'
+    } else if (consecutiveHigh >= 2 || highInRecent3 >= 2) {
+      forcesCaution = true
+      minStatus = 'caution'
+      showAsRepeatPattern = true
+      warningLabel =
+        consecutiveHigh >= 2
+          ? '피로도 높음 2회 연속 기록'
+          : '최근 3회 중 피로도 높음 반복'
+    } else {
+      minStatus = 'watch'
+      warningLabel = '피로도 높음'
+    }
+  } else if (latestIsLow && trend === 'recovery') {
+    minStatus = 'stable'
+  } else if (latestFatigue === 'normal' && trend === 'worsening') {
+    minStatus = 'watch'
+  }
+
+  return {
+    consecutiveHigh,
+    highInRecent3,
+    latestIsHigh,
+    latestIsLow,
+    trend,
+    trendDelta,
+    flowDescription,
+    positiveFlowLabel,
+    minStatus,
+    warningLabel,
+    showAsRepeatPattern,
+    forcesCaution,
+    forcesRecovery,
+  }
+}
+
+function isSeverePainLevel(painLevel: number | null | undefined): boolean {
+  return painLevel != null && painLevel >= 7
+}
+
+function analyzePainRepeat(
+  recent3: MemberBodyRecord[],
+  primaryRecord: MemberBodyRecord | null,
+): PainRepeatAnalysis {
+  const empty: PainRepeatAnalysis = {
+    repeatedArea: null,
+    repeatCount: 0,
+    minStatus: 'stable',
+    warningLabel: null,
+    forcesCaution: false,
+    forcesRecovery: false,
+  }
+
+  const counts = new Map<PainArea, number>()
+  for (const record of recent3) {
+    if (!hasPainSignal(record) || !record.pain_area) continue
+    counts.set(record.pain_area, (counts.get(record.pain_area) ?? 0) + 1)
+  }
+
+  let repeatedArea: PainArea | null = null
+  let repeatCount = 0
+  for (const [area, count] of counts) {
+    if (count >= 2 && count > repeatCount) {
+      repeatedArea = area
+      repeatCount = count
+    }
+  }
+
+  const r = primaryRecord
+  const hasTodayPain = Boolean(r && hasPainSignal(r))
+
+  if (repeatCount >= 2 && repeatedArea) {
+    const areaLabel = formatPainAreaLabel(repeatedArea, null)
+    const warningLabel = `${areaLabel} 통증 반복`
+    const fatigueHigh = r?.fatigue === 'high'
+    const sleepLow = r?.sleep_hours === 'under_6'
+    const severeSoreness = r?.muscle_soreness === 'severe'
+    const severePainInRepeat = recent3.some(
+      (record) =>
+        record.pain_area === repeatedArea && isSeverePainLevel(record.pain_level),
+    )
+    const severePainToday =
+      Boolean(r?.pain_area === repeatedArea) && isSeverePainLevel(r?.pain_level)
+
+    if (severePainInRepeat || severePainToday) {
+      return {
+        repeatedArea,
+        repeatCount,
+        minStatus: 'recovery',
+        warningLabel,
+        forcesCaution: false,
+        forcesRecovery: true,
+      }
+    }
+    if (severeSoreness) {
+      return {
+        repeatedArea,
+        repeatCount,
+        minStatus: 'recovery',
+        warningLabel,
+        forcesCaution: false,
+        forcesRecovery: true,
+      }
+    }
+    if (fatigueHigh || sleepLow) {
+      return {
+        repeatedArea,
+        repeatCount,
+        minStatus: 'caution',
+        warningLabel,
+        forcesCaution: true,
+        forcesRecovery: false,
+      }
+    }
+    return {
+      repeatedArea,
+      repeatCount,
+      minStatus: 'watch',
+      warningLabel,
+      forcesCaution: false,
+      forcesRecovery: false,
+    }
+  }
+
+  if (hasTodayPain && r) {
+    return {
+      ...empty,
+      minStatus: 'watch',
+      warningLabel: `${formatPainAreaLabel(r.pain_area!, r.pain_area_note)} 통증 기록`,
+    }
+  }
+
+  return empty
+}
+
+function scoreSleep(sleep: SleepHours | null | undefined): number {
+  if (!sleep) return 0
+  if (sleep === 'over_8' || sleep === '7_8') return 0
+  if (sleep === '6_7') return 1
+  return 2
+}
+
+function scoreCondition(condition: BodyCondition | null | undefined): number {
+  if (!condition) return 0
+  if (condition === 'good') return 0
+  if (condition === 'normal') return 1
+  return 3
+}
+
+function scoreFatigue(fatigue: MemberBodyRecord['fatigue']): number {
+  if (!fatigue) return 0
+  if (fatigue === 'low') return 0
+  if (fatigue === 'normal') return 1
+  return 3
+}
+
+function scoreSoreness(soreness: MuscleSoreness | null | undefined): number {
+  if (!soreness || soreness === 'none') return 0
+  if (soreness === 'mild') return 1
+  return 3
+}
+
+function scorePainArea(painArea: PainArea | null | undefined): number {
+  if (!painArea || painArea === 'none') return 0
+  if (painArea === 'knee' || painArea === 'ankle' || painArea === 'back') {
+    return 3
+  }
+  return 2
+}
+
+function scoreMeal(meal: MemberBodyRecord['meal_status']): number {
+  if (!meal) return 0
+  if (meal === 'good') return 0
+  if (meal === 'normal') return 1
+  return 2
+}
+
+function scoreTrainingRecord(record: MemberBodyRecord): TrainingRecordScore {
+  const sleep = scoreSleep(record.sleep_hours)
+  const condition = scoreCondition(record.condition)
+  const fatigue = scoreFatigue(record.fatigue)
+  const soreness = scoreSoreness(record.muscle_soreness)
+  const pain = scorePainArea(record.pain_area)
+  const meal = scoreMeal(record.meal_status)
+  return {
+    sleep,
+    condition,
+    fatigue,
+    soreness,
+    pain,
+    meal,
+    total: sleep + condition + fatigue + soreness + pain + meal,
+  }
+}
+
+function averageTrainingScore(records: MemberBodyRecord[]): number {
+  if (records.length === 0) return 0
+  const scored = records.map(scoreTrainingRecord)
+  const sum = scored.reduce((acc, row) => acc + row.total, 0)
+  return sum / scored.length
+}
+
+function scoreRecoveryRecord(
+  record: MemberBodyRecord,
+  supplementConfig: MemberSupplementConfig,
+): RecoveryRecordScore {
+  const proteinPct = calculateProteinAchievementPercent(
+    record.protein_intake_g,
+    record.protein_target_g,
+  )
+  let protein = 0
+  let proteinNeedsRecord = false
+
+  if (record.protein_intake_g == null && record.protein_status == null) {
+    protein = 1
+    proteinNeedsRecord = true
+  } else if (proteinPct != null) {
+    if (proteinPct < 50) protein = 2
+    else if (proteinPct < 80) protein = 1
+  } else if (record.protein_status === 'insufficient') {
+    protein = 2
+  } else if (record.protein_status === 'normal') {
+    protein = 1
+  }
+
+  let postWorkout = 0
+  if (record.post_workout_meal_status === 'normal') postWorkout = 1
+  else if (record.post_workout_meal_status === 'missed') postWorkout = 1
+
+  let hydration = 0
+  if (record.hydration_status === 'normal') hydration = 1
+  else if (record.hydration_status === 'insufficient') hydration = 2
+
+  let supplement = 0
+  const missedRequired = supplementConfig.items.filter(
+    (item) =>
+      item.required && record.supplement_status?.[item.id] === 'missed',
+  )
+  if (missedRequired.length > 0) supplement = 1
+
+  return { protein, proteinNeedsRecord, postWorkout, hydration, supplement }
+}
+
+function recordForSignal(ctx: CoachAnalysisContext): MemberBodyRecord | null {
   return ctx.todayRecord ?? ctx.primaryRecord
 }
 
-function hasRecoverySignals(ctx: CoachAnalysisContext): boolean {
-  const r = recordForSignal(ctx)
-  const badConditionCount = countInRecent3(ctx.recent3, (rec) => rec.condition === 'bad')
-  const highFatigueCount = countInRecent3(ctx.recent3, (rec) => rec.fatigue === 'high')
-
-  if (badConditionCount >= 2 || highFatigueCount >= 2) return true
-
-  if (r) {
-    if (r.meal_status === 'poor' && r.fatigue === 'high') return true
-    if (r.sleep_hours === 'under_6' && r.fatigue === 'high') return true
-    if (r.condition === 'bad' && r.fatigue === 'high') return true
-    if (hasPainSignal(r) && r.muscle_soreness === 'severe') return true
-    if (
-      r.meal_status === 'poor' &&
-      ctx.weightDirection === 'down' &&
-      (ctx.weightChangePct ?? 0) >= 2
-    ) {
-      return true
-    }
-    if (
-      (ctx.weightChangePct ?? 0) >= 3 &&
-      (r.condition === 'bad' || r.fatigue === 'high' || r.meal_status === 'poor')
-    ) {
-      return true
-    }
-  }
-
-  return false
+function statusFromScore(score: number): CoachCheckStatus {
+  if (score <= 2) return 'stable'
+  if (score <= 5) return 'watch'
+  if (score <= 8) return 'caution'
+  return 'recovery'
 }
 
-function hasCautionSignals(ctx: CoachAnalysisContext): boolean {
-  const r = recordForSignal(ctx)
-  if (!r) return ctx.weightTrend === 'caution' || ctx.weightTrend === 'severe'
+const STATUS_RANK: Record<CoachCheckStatus, number> = {
+  stable: 0,
+  watch: 1,
+  caution: 2,
+  recovery: 3,
+  insufficient_records: -1,
+}
 
+function maxStatus(
+  a: CoachCheckStatus,
+  b: CoachCheckStatus,
+): CoachCheckStatus {
+  if (a === 'insufficient_records') return b
+  if (b === 'insufficient_records') return a
+  return STATUS_RANK[a] >= STATUS_RANK[b] ? a : b
+}
+
+function capStatus(
+  status: CoachCheckStatus,
+  max: CoachCheckStatus,
+): CoachCheckStatus {
+  if (status === 'insufficient_records') return status
+  return STATUS_RANK[status] > STATUS_RANK[max] ? max : status
+}
+
+const ORDERED_COACH_STATUSES: CoachCheckStatus[] = [
+  'stable',
+  'watch',
+  'caution',
+  'recovery',
+]
+
+function adjustCoachStatus(
+  status: CoachCheckStatus,
+  delta: number,
+  floor: CoachCheckStatus = 'stable',
+): CoachCheckStatus {
+  const idx = ORDERED_COACH_STATUSES.indexOf(status)
+  const floorIdx = ORDERED_COACH_STATUSES.indexOf(floor)
+  const nextIdx = Math.max(
+    floorIdx,
+    Math.min(ORDERED_COACH_STATUSES.length - 1, idx + delta),
+  )
+  return ORDERED_COACH_STATUSES[nextIdx]
+}
+
+function isLatestRecordFavorable(record: MemberBodyRecord): boolean {
+  return (
+    record.fatigue === 'low' &&
+    record.condition === 'good' &&
+    (record.sleep_hours === '7_8' || record.sleep_hours === 'over_8')
+  )
+}
+
+function hasAnyPainContext(
+  ctx: CoachAnalysisContext,
+  record: MemberBodyRecord | null,
+): boolean {
+  return Boolean(
+    (record && hasPainSignal(record)) ||
+      ctx.painPattern.repeatCount >= 2 ||
+      ctx.painPattern.warningLabel,
+  )
+}
+
+function isProteinBelowHalf(record: MemberBodyRecord): boolean {
+  const pct = calculateProteinAchievementPercent(
+    record.protein_intake_g,
+    record.protein_target_g,
+  )
+  if (pct != null) return pct < 50
+  return record.protein_status === 'insufficient'
+}
+
+function meetsForcedCaution(ctx: CoachAnalysisContext, r: MemberBodyRecord | null): boolean {
+  if (ctx.fatiguePattern.forcesCaution) return true
+  if (ctx.painPattern.forcesCaution) return true
+  if (!r) return false
+  if (r.sleep_hours === 'under_6') return true
   if (r.condition === 'bad') return true
-  if (r.fatigue === 'high') return true
   if (r.muscle_soreness === 'severe') return true
   if (r.meal_status === 'poor') return true
-  if (r.protein_status === 'insufficient') return true
-  if (r.post_workout_meal_status === 'missed') return true
-  if (r.hydration_status === 'insufficient') return true
-  if (r.sleep_hours === 'under_6') return true
-  if (hasPainSignal(r)) return true
-  if (ctx.weightTrend === 'caution' || ctx.weightTrend === 'severe') return true
-
-  const missedRequired = ctx.supplementConfig.items.filter(
-    (item) =>
-      item.required && r.supplement_status?.[item.id] === 'missed',
-  )
-  if (missedRequired.length > 0) return true
-
   return false
 }
 
-function hasWatchSignals(ctx: CoachAnalysisContext): boolean {
-  const r = recordForSignal(ctx)
-  if (!r) return ctx.weightTrend === 'watch'
-
-  if (r.sleep_hours === '6_7') return true
-  if (r.fatigue === 'normal') return true
-  if (r.condition === 'normal') return true
-  if (r.muscle_soreness === 'mild') return true
-  if (r.meal_status === 'normal') return true
-  if (ctx.weightTrend === 'watch') return true
-
+function meetsForcedRecovery(ctx: CoachAnalysisContext, r: MemberBodyRecord | null): boolean {
+  if (ctx.fatiguePattern.forcesRecovery) return true
+  if (ctx.painPattern.forcesRecovery) return true
+  if (!r) return false
+  const fatigueHigh = r.fatigue === 'high'
+  if (fatigueHigh && r.sleep_hours === 'under_6') return true
+  if (fatigueHigh && r.condition === 'bad') return true
+  if (fatigueHigh && r.muscle_soreness === 'severe') return true
+  if (hasPainSignal(r) && r.muscle_soreness === 'severe') return true
+  if (r.meal_status === 'poor' && isProteinBelowHalf(r)) return true
+  if (
+    ctx.weightAssessment.direction === 'down' &&
+    (ctx.weightAssessment.pct ?? 0) >= 3 &&
+    !ctx.weightAssessment.referenceOnly &&
+    !ctx.weightAssessment.suspiciousJump &&
+    (r.meal_status === 'poor' || fatigueHigh)
+  ) {
+    return true
+  }
   return false
-}
-
-function isStableState(ctx: CoachAnalysisContext): boolean {
-  const r = recordForSignal(ctx)
-  if (!r) return ctx.weightTrend === 'stable' && !ctx.insufficientWellness
-
-  const painClear = !hasPainSignal(r) && r.muscle_soreness !== 'severe'
-  const fatigueOk = r.fatigue === 'low' || r.fatigue === 'normal' || !r.fatigue
-  const conditionOk =
-    r.condition === 'good' || r.condition === 'normal' || !r.condition
-  const sleepOk = isAdequateSleep(r.sleep_hours) || !r.sleep_hours
-  const mealOk =
-    r.meal_status === 'good' || r.meal_status === 'normal' || !r.meal_status
-  const weightOk = ctx.weightTrend === 'stable'
-
-  return painClear && fatigueOk && conditionOk && sleepOk && mealOk && weightOk
 }
 
 function determineCoachStatus(ctx: CoachAnalysisContext): CoachCheckStatus {
-  if (ctx.noRecords) return 'insufficient_records'
-  if (hasRecoverySignals(ctx)) return 'recovery'
-  if (hasCautionSignals(ctx)) return 'caution'
-  if (hasWatchSignals(ctx)) return 'watch'
-  if (isStableState(ctx) && !ctx.insufficientWellness) return 'stable'
-  if (ctx.insufficientWellness) return 'watch'
-  return 'watch'
-}
+  if (ctx.noRecords || ctx.insufficientWellness) return 'insufficient_records'
 
-function buildSignalSummary(ctx: CoachAnalysisContext): string {
   const r = recordForSignal(ctx)
-  if (!r) return ''
+  let status = statusFromScore(ctx.blendedTrainingScore)
 
-  const parts: string[] = []
-  if (r.condition) {
-    parts.push(`컨디션 ${wellnessChoiceLabel('condition', r.condition)}`)
+  status = maxStatus(status, ctx.fatiguePattern.minStatus)
+  status = maxStatus(status, ctx.painPattern.minStatus)
+
+  if (meetsForcedCaution(ctx, r)) {
+    status = maxStatus(status, 'caution')
   }
-  if (r.sleep_hours) {
-    parts.push(`수면 ${wellnessChoiceLabel('sleep_hours', r.sleep_hours)}`)
-  }
-  if (r.fatigue) {
-    parts.push(`피로 ${wellnessChoiceLabel('fatigue', r.fatigue)}`)
-  }
-  if (hasPainSignal(r)) {
-    parts.push(`통증 ${wellnessChoiceLabel('pain_area', r.pain_area)}`)
-  } else if (r.muscle_soreness && r.muscle_soreness !== 'none') {
-    parts.push(`근육통 ${wellnessChoiceLabel('muscle_soreness', r.muscle_soreness)}`)
-  }
-  if (r.meal_status) {
-    parts.push(`식사 ${wellnessChoiceLabel('meal_status', r.meal_status)}`)
-  }
-  if (r.protein_intake_g != null && r.protein_target_g != null && r.protein_status) {
-    parts.push(
-      `단백질 ${Math.round(r.protein_intake_g)}/${Math.round(r.protein_target_g)}g ${nutritionChoiceLabel('protein_status', r.protein_status)}`,
-    )
-  } else if (r.protein_status) {
-    parts.push(`단백질 ${nutritionChoiceLabel('protein_status', r.protein_status)}`)
-  }
-  if (r.hydration_status) {
-    parts.push(`수분 ${nutritionChoiceLabel('hydration_status', r.hydration_status)}`)
-  }
-  if (ctx.weightChangePct != null && ctx.records14d.length >= 2) {
-    const dir =
-      ctx.weightDirection === 'up'
-        ? '증가'
-        : ctx.weightDirection === 'down'
-          ? '감소'
-          : '유지'
-    parts.push(`최근 14일 체중 ${dir} ${ctx.weightChangePct}%`)
+  if (meetsForcedRecovery(ctx, r)) {
+    status = maxStatus(status, 'recovery')
   }
 
-  return parts.join(' · ')
-}
-
-function buildTrainingJudgment(
-  status: CoachCheckStatus,
-  ctx: CoachAnalysisContext,
-): CoachCheckBox {
-  const summary = buildSignalSummary(ctx)
-  const reason = summary ? `(${summary}) ` : ''
-
-  switch (status) {
-    case 'stable':
-      return {
-        title: '오늘 훈련 판단',
-        status: 'stable',
-        text: `${reason}최근 신체 변화와 컨디션 흐름이 안정적입니다. 예정된 훈련을 진행해도 좋으며, 수면과 식사 패턴을 꾸준히 유지해주세요.`,
-      }
-    case 'watch':
-      return {
-        title: '오늘 훈련 판단',
-        status: 'watch',
-        text: `${reason}큰 문제는 없지만 회복 상태를 함께 확인할 필요가 있습니다. 오늘 훈련 전 워밍업 반응을 확인하고, 후반부 피로 반응에 따라 강도를 조절해주세요.`,
-      }
-    case 'caution':
-      return {
-        title: '오늘 훈련 판단',
-        status: 'caution',
-        text: `${reason}오늘 상태에서 주의 신호가 확인됩니다. 고강도 훈련 전 워밍업 반응을 확인하고, 통증이나 피로가 지속되면 훈련 강도를 낮추는 것을 권장합니다.`,
-      }
-    case 'recovery':
-      return {
-        title: '오늘 훈련 판단',
-        status: 'recovery',
-        text: `${reason}최근 기록에서 회복 부족 신호가 반복되고 있습니다. 오늘은 고강도 훈련보다 회복 조깅, 보강, 스트레칭 중심으로 조절하는 것을 권장합니다.`,
-      }
-    case 'insufficient_records':
-      return {
-        title: '오늘 훈련 판단',
-        status: 'insufficient_records',
-        text: '아직 충분한 기록이 없어 오늘 훈련 강도를 정확히 판단하기 어렵습니다. 키·몸무게와 함께 컨디션·수면·피로 상태를 기록하면 더 정확한 안내를 받을 수 있습니다.',
-      }
+  if (ctx.fatiguePattern.trendDelta !== 0) {
+    const painFloor: CoachCheckStatus = hasAnyPainContext(ctx, r) ? 'watch' : 'stable'
+    status = adjustCoachStatus(status, ctx.fatiguePattern.trendDelta, painFloor)
   }
-}
 
-function buildNextActionPoint(
-  status: CoachCheckStatus,
-  ctx: CoachAnalysisContext,
-): CoachCheckBox {
-  const r = recordForSignal(ctx)
-  if (r && !ctx.insufficientWellness) {
-    const nutritionHints = buildNutritionCoachHints(
-      r,
-      { meal_status: r.meal_status, fatigue: r.fatigue },
-      ctx.supplementConfig,
-    )
-    if (nutritionHints.length > 0) {
-      const hint = nutritionHints[0]
-      const hintStatus: CoachCheckStatus =
-        hint.priority <= 4 ? 'recovery' : hint.priority <= 6 ? 'caution' : 'watch'
-      return {
-        title: '다음 관리 포인트',
-        status: hintStatus,
-        text: hint.message,
+  if (r && !ctx.painPattern.forcesRecovery && !ctx.fatiguePattern.forcesRecovery) {
+    const todayNeedsRecovery =
+      r.fatigue === 'high' &&
+      (r.sleep_hours === 'under_6' ||
+        r.condition === 'bad' ||
+        r.muscle_soreness === 'severe')
+    const improvingFlow =
+      ctx.fatiguePattern.trend === 'recovery' || isLatestRecordFavorable(r)
+
+    if (!todayNeedsRecovery && improvingFlow) {
+      if (ctx.painPattern.forcesCaution) {
+        status = capStatus(status, 'caution')
+      } else if (ctx.painPattern.repeatCount >= 2) {
+        status = capStatus(status, 'watch')
+      } else {
+        status = capStatus(status, 'watch')
       }
     }
   }
 
-  if (ctx.insufficientWellness) {
-    return {
-      title: '다음 관리 포인트',
-      status: 'insufficient_records',
-      text: '최근 컨디션 기록이 부족합니다. 다음 기록 시 수면, 피로도, 통증, 식사와 회복·영양 체크를 함께 입력하면 선수 상태를 더 정확히 확인할 수 있습니다.',
+  return status
+}
+
+function limitList(items: string[], max: number): string[] {
+  return items.slice(0, max)
+}
+
+type PrioritizedLabel = { priority: number; label: string }
+
+function buildWarningSignals(ctx: CoachAnalysisContext): string[] {
+  const r = recordForSignal(ctx)
+  const candidates: PrioritizedLabel[] = []
+  const fp = ctx.fatiguePattern
+  const pain = ctx.painPattern
+
+  if (pain.warningLabel) {
+    candidates.push({ priority: 1, label: pain.warningLabel })
+  } else if (r && hasPainSignal(r)) {
+    candidates.push({
+      priority: 1,
+      label: `${formatPainAreaLabel(r.pain_area!, r.pain_area_note)} 통증 기록`,
+    })
+  }
+
+  if (fp.warningLabel && (fp.showAsRepeatPattern || fp.latestIsHigh)) {
+    candidates.push({ priority: 2, label: fp.warningLabel })
+  }
+
+  if (r) {
+    if (r.sleep_hours === 'under_6') {
+      candidates.push({ priority: 3, label: '수면 6시간 이하' })
+    }
+    if (r.condition === 'bad') {
+      candidates.push({ priority: 4, label: '컨디션 나쁨' })
+    }
+    if (r.muscle_soreness === 'severe') {
+      candidates.push({ priority: 5, label: '근육통 심함' })
+    }
+    if (r.meal_status === 'poor') {
+      candidates.push({ priority: 6, label: '식사 부족' })
     }
   }
 
-  switch (status) {
-    case 'stable':
-      return {
-        title: '다음 관리 포인트',
-        status: 'stable',
-        text: '체중은 경기력과 컨디션을 확인하는 참고 지표입니다. 수면·식사·회복·영양 기록을 꾸준히 남기면 훈련 조절에 도움이 됩니다.',
-      }
-    case 'watch':
-      return {
-        title: '다음 관리 포인트',
-        status: 'watch',
-        text: '훈련 후 피로 반응과 수면 시간을 함께 기록해주세요. 작은 변화도 빠르게 확인할 수 있습니다.',
-      }
-    case 'caution':
-      return {
-        title: '다음 관리 포인트',
-        status: 'caution',
-        text: '통증 부위와 피로도를 매일 기록해 변화를 추적해주세요. 증상이 이어지면 훈련 강도 조절과 회복 시간 확보를 우선해주세요.',
-      }
-    case 'recovery':
-      return {
-        title: '다음 관리 포인트',
-        status: 'recovery',
-        text: '수면 시간 확보와 영양 섭취를 우선해주세요. 체중 변화가 보이더라도 성장·회복·훈련 지속성을 먼저 챙기는 것이 중요합니다.',
-      }
-    case 'insufficient_records':
-      return {
-        title: '다음 관리 포인트',
-        status: 'insufficient_records',
-        text: '오늘 상태 기록에서 수면, 컨디션, 피로도, 통증, 식사와 회복·영양 체크를 버튼으로 빠르게 입력해보세요.',
-      }
-  }
+  return limitList(
+    candidates
+      .sort((a, b) => a.priority - b.priority)
+      .map((item) => item.label),
+    COACH_MAX_WARNING_SIGNALS,
+  )
 }
 
-/** 코치·부모님 안내 리포트 — 오늘·최근 기록 중심, 최대 2개 박스 */
+function buildPositiveFlows(ctx: CoachAnalysisContext): string[] {
+  const flows: string[] = []
+  if (ctx.fatiguePattern.positiveFlowLabel) {
+    flows.push(ctx.fatiguePattern.positiveFlowLabel)
+  }
+  return flows
+}
+
+function buildRecordCheckNotes(ctx: CoachAnalysisContext): string[] {
+  const notes: string[] = []
+  const weight = ctx.weightAssessment
+
+  if (weight.recordCheckLabel) {
+    notes.push(weight.recordCheckLabel)
+  }
+  if (weight.referenceNote) {
+    notes.push(weight.referenceNote)
+  }
+  if (weight.referenceLabel && !weight.suspiciousJump) {
+    notes.push(weight.referenceLabel)
+  }
+  if (weight.warningLabel && !weight.suspiciousJump && !weight.needsRecordCheck) {
+    notes.push(`참고 · ${weight.warningLabel}`)
+  }
+
+  return limitList(notes, 3)
+}
+
+function buildRecoveryPoints(ctx: CoachAnalysisContext): string[] {
+  const r = recordForSignal(ctx)
+  if (!r) return []
+
+  const recovery = scoreRecoveryRecord(r, ctx.supplementConfig)
+  const candidates: PrioritizedLabel[] = []
+
+  if (recovery.proteinNeedsRecord) {
+    candidates.push({ priority: 1, label: '단백질 기록 필요' })
+  } else if (recovery.protein >= 1) {
+    candidates.push({ priority: 1, label: '단백질 부족' })
+  }
+
+  if (r.hydration_status === 'insufficient') {
+    candidates.push({ priority: 2, label: '수분 섭취 부족' })
+  } else if (r.hydration_status === 'normal') {
+    candidates.push({ priority: 2, label: '수분 섭취 보통' })
+  }
+
+  if (r.post_workout_meal_status === 'missed') {
+    candidates.push({ priority: 3, label: POST_WORKOUT_RECOVERY_LABEL })
+  }
+
+  if (recovery.supplement > 0) {
+    candidates.push({ priority: 4, label: '영양제 복용 누락' })
+  }
+
+  return limitList(
+    candidates
+      .sort((a, b) => a.priority - b.priority)
+      .map((item) => item.label),
+    COACH_MAX_RECOVERY_POINTS,
+  )
+}
+
+function hasFatigueAccumulation(ctx: CoachAnalysisContext): boolean {
+  const fp = ctx.fatiguePattern
+  return (
+    fp.trend === 'accumulation' &&
+    fp.latestIsHigh &&
+    (fp.consecutiveHigh >= 2 || fp.highInRecent3 >= 2)
+  )
+}
+
+function buildCoachRecommendation(
+  ctx: CoachAnalysisContext,
+  status: CoachCheckStatus,
+  warningSignals: string[],
+  recoveryPoints: string[],
+): string {
+  if (status === 'insufficient_records') {
+    return '키·몸무게와 컨디션·수면·피로 상태를 기록하면 더 정확한 코치 체크를 받을 수 있습니다.'
+  }
+
+  const sentences: string[] = []
+  const r = recordForSignal(ctx)
+  const hasPainRepeat = warningSignals.some((s) => s.includes('통증 반복'))
+  const hasPain = warningSignals.some((s) => s.includes('통증'))
+  const hasHydrationRecovery = recoveryPoints.some((s) => s.includes('수분'))
+  const hasPostWorkoutRecovery = recoveryPoints.some((s) => s.includes('회복식'))
+  const fatigueAccumulation = hasFatigueAccumulation(ctx)
+  const fatigueRecovering = ctx.fatiguePattern.trend === 'recovery'
+
+  if (fatigueAccumulation) {
+    sentences.push(
+      '최근 피로 누적 가능성이 있습니다. 오늘은 고강도 반복주나 전력 질주보다 워밍업 반응을 먼저 확인하고, 움직임이 무겁다면 훈련량을 20~30% 줄여주세요.',
+    )
+  } else if (hasPainRepeat) {
+    const area =
+      ctx.painPattern.repeatedArea != null
+        ? formatPainAreaLabel(ctx.painPattern.repeatedArea, null)
+        : '해당 부위'
+    sentences.push(
+      `오늘은 훈련 전 ${area} 상태와 워밍업 반응을 확인하세요. 통증이 없거나 가벼우면 예정된 훈련을 진행하되, 점프·스프린트·급가속 동작은 반응을 보며 조절하세요.`,
+    )
+  } else if (fatigueRecovering && status === 'watch') {
+    sentences.push(
+      '피로는 회복 흐름입니다. 오늘은 워밍업 반응을 확인하고 예정된 훈련을 진행해도 좋습니다.',
+    )
+  } else {
+    switch (status) {
+      case 'stable':
+        sentences.push(
+          '예정된 훈련을 진행해도 좋습니다. 수면과 식사 패턴을 꾸준히 유지해주세요.',
+        )
+        break
+      case 'watch':
+        sentences.push(
+          '워밍업 반응을 확인하고, 후반부 피로에 따라 강도를 조절하세요.',
+        )
+        break
+      case 'caution':
+        if (hasPain) {
+          sentences.push(
+            '오늘은 고강도 훈련 전 워밍업 반응을 확인하고, 통증이 지속되면 점프·스프린트·반복주 강도를 낮춰주세요.',
+          )
+        } else {
+          sentences.push(
+            '오늘은 고강도 훈련보다 회복 조깅, 보강, 스트레칭 중심으로 조절하세요.',
+          )
+        }
+        break
+      case 'recovery':
+        sentences.push(
+          '오늘은 고강도 훈련보다 회복 조깅, 보강, 스트레칭 중심으로 조절하세요.',
+        )
+        if (hasPain && r && hasPainSignal(r)) {
+          const area = formatPainAreaLabel(r.pain_area!, r.pain_area_note)
+          sentences.push(
+            `${area} 통증이 이어지면 점프·스프린트·반복주 강도를 낮추고 워밍업 반응을 꼭 확인해주세요.`,
+          )
+        }
+        break
+    }
+  }
+
+  if (hasPostWorkoutRecovery || hasHydrationRecovery) {
+    sentences.push('훈련 후에는 수분과 회복식을 함께 챙겨주세요.')
+  } else if (recoveryPoints.some((p) => p.includes('단백질'))) {
+    sentences.push(
+      fatigueAccumulation
+        ? '훈련 후에는 수분과 탄수화물, 단백질을 함께 챙겨 회복 상태를 확인해주세요.'
+        : '훈련 후에는 탄수화물과 단백질을 함께 챙겨 회복 상태를 확인해주세요.',
+    )
+  } else if (fatigueAccumulation) {
+    sentences.push(
+      '훈련 후에는 수분과 탄수화물, 단백질을 함께 챙겨 회복 상태를 확인해주세요.',
+    )
+  }
+
+  return sentences.slice(0, 3).join(' ')
+}
+
+/** 코치·부모님 안내 리포트 — 오늘·최근 기록 중심 */
 export function buildCoachCheckReport(
   records: MemberBodyRecord[],
   referenceDate: string = format(new Date(), 'yyyy-MM-dd'),
@@ -664,30 +1401,42 @@ export function buildCoachCheckReport(
   const ctx = buildCoachAnalysisContext(records, referenceDate)
   const overallStatus = determineCoachStatus(ctx)
 
-  if (ctx.noRecords) {
+  if (overallStatus === 'insufficient_records') {
     return {
-      overallStatus: 'insufficient_records',
-      boxes: [
-        {
-          title: '오늘 훈련 판단',
-          status: 'insufficient_records',
-          text: '체중·컨디션 기록이 없어 상태 분석이 어렵습니다. 키와 몸무게부터 기록을 시작해주세요.',
-        },
-        {
-          title: '다음 관리 포인트',
-          status: 'insufficient_records',
-          text: '다음 기록 시 수면, 피로도, 통증, 식사와 회복·영양 체크를 함께 입력하면 선수 상태를 더 정확히 확인할 수 있습니다.',
-        },
-      ],
+      overallStatus,
+      warningSignals: [],
+      recoveryPoints: [],
+      positiveFlows: [],
+      recordCheckNotes: [],
+      recommendation: buildCoachRecommendation(ctx, overallStatus, [], []),
+      historyNote: buildRecordHistoryNote(records, referenceDate),
     }
   }
 
-  const boxes: CoachCheckBox[] = [
-    buildTrainingJudgment(overallStatus, ctx),
-    buildNextActionPoint(overallStatus, ctx),
-  ]
+  const warningSignals = buildWarningSignals(ctx)
+  const recoveryPoints = buildRecoveryPoints(ctx)
+  const positiveFlows = buildPositiveFlows(ctx)
+  const recordCheckNotes = buildRecordCheckNotes(ctx)
 
-  return { overallStatus, boxes: boxes.slice(0, 2) }
+  return {
+    overallStatus,
+    warningSignals:
+      warningSignals.length > 0
+        ? warningSignals
+        : overallStatus === 'stable'
+          ? ['특이 주의 신호 없음']
+          : [],
+    recoveryPoints,
+    positiveFlows,
+    recordCheckNotes,
+    recommendation: buildCoachRecommendation(
+      ctx,
+      overallStatus,
+      warningSignals,
+      recoveryPoints,
+    ),
+    historyNote: buildRecordHistoryNote(records, referenceDate),
+  }
 }
 
 /** @deprecated buildCoachCheckReport 사용 */
@@ -757,18 +1506,32 @@ export function buildSleepChartPoints(
   })
 }
 
+function painRecordChartScore(record: MemberBodyRecord): number | null {
+  const scores: number[] = []
+
+  if (record.muscle_soreness) {
+    scores.push(SORENESS_SCORE[record.muscle_soreness])
+  }
+
+  if (record.pain_area && record.pain_area !== 'none') {
+    scores.push(
+      record.pain_level != null
+        ? painLevelToChartScore(record.pain_level)
+        : 2,
+    )
+  }
+
+  if (scores.length === 0) return null
+  return Math.min(...scores)
+}
+
 export function buildPainChartPoints(
   records: MemberBodyRecord[],
   labelForDate: (date: string) => string,
 ) {
   return records.flatMap((record) => {
     if (record.id.startsWith('bootstrap-')) return []
-    const score =
-      record.muscle_soreness != null
-        ? SORENESS_SCORE[record.muscle_soreness]
-        : record.pain_area && record.pain_area !== 'none'
-          ? 1
-          : null
+    const score = painRecordChartScore(record)
     if (score == null) return []
     return [
       {

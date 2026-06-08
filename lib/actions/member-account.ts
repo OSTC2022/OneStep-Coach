@@ -11,7 +11,9 @@ import {
   getSiteUrl,
 } from '@/lib/site-url'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
-import { getCurrentUser } from './auth'
+import { getCurrentUser, requireRole } from './auth'
+import { upsertUserProfile } from '@/lib/profiles-admin'
+import type { MemberPickerOption } from '@/lib/actions/members'
 
 const INVITE_SUCCESS =
   '초대 메일을 보냈습니다. 회원이 이메일에서 링크를 눌러 비밀번호를 설정하면 앱에 로그인할 수 있습니다.'
@@ -417,6 +419,10 @@ async function ensureMemberProfile(
   return {}
 }
 
+function generateMemberInviteCode(): string {
+  return Math.random().toString(36).slice(2, 10).toUpperCase()
+}
+
 async function linkMemberRecord(
   memberId: string,
   authUserId: string,
@@ -424,12 +430,24 @@ async function linkMemberRecord(
 ): Promise<{ error?: string }> {
   const admin = createAdminClient()
 
+  const { data: existing } = await admin
+    .from('members')
+    .select('member_invite_code')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  const loginPatch: Record<string, unknown> = {
+    auth_user_id: authUserId,
+    user_id: authUserId,
+    member_login_enabled: true,
+  }
+  if (!existing?.member_invite_code) {
+    loginPatch.member_invite_code = generateMemberInviteCode()
+  }
+
   const { error } = await admin
     .from('members')
-    .update({
-      auth_user_id: authUserId,
-      user_id: authUserId,
-    })
+    .update(loginPatch)
     .eq('id', memberId)
 
   if (error) {
@@ -468,6 +486,196 @@ async function linkInvitedUser(
   if (profileResult.error) return profileResult
 
   return linkMemberRecord(memberId, authUserId, inviteEmail)
+}
+
+export type MemberLinkSearchRow = MemberPickerOption & {
+  /** 다른 계정에 이미 연결됨 — 선택 불가 */
+  linkedToOtherAccount: boolean
+}
+
+async function clearMemberLinksForAuthUser(authUserId: string) {
+  const admin = createAdminClient()
+  await admin
+    .from('members')
+    .update({
+      auth_user_id: null,
+      user_id: null,
+      member_login_enabled: false,
+    })
+    .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
+}
+
+/** 설정 > 가입 승인·권한 부여 — 회원 프로필 검색 (다른 계정에 연결된 회원 제외) */
+export async function searchMembersForAccountLink(
+  query: string,
+  accountUserId?: string | null,
+): Promise<MemberLinkSearchRow[]> {
+  await requireRole(['admin'])
+
+  const admin = createAdminClient()
+  const q = query.trim()
+
+  let dbQuery = admin
+    .from('members')
+    .select('id, name, sport, age, birth_date, auth_user_id, user_id, phone')
+    .is('deleted_at', null)
+    .eq('is_active', true)
+    .order('name')
+    .limit(q ? 25 : 40)
+
+  if (q) {
+    dbQuery = dbQuery.or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
+  }
+
+  const { data, error } = await dbQuery
+  if (error) {
+    console.error('searchMembersForAccountLink:', error)
+    return []
+  }
+
+  return (data ?? [])
+    .map((row) => {
+      const linkedId = row.auth_user_id ?? row.user_id
+      const linkedToOtherAccount = Boolean(
+        linkedId && linkedId !== accountUserId,
+      )
+      return {
+        id: row.id,
+        name: row.name,
+        sport: row.sport,
+        age: row.age,
+        birth_date: row.birth_date,
+        linkedToOtherAccount,
+      }
+    })
+    .filter((row) => !row.linkedToOtherAccount)
+}
+
+export async function getMemberLinkedToAccount(
+  authUserId: string,
+): Promise<{ id: string; name: string } | null> {
+  await requireRole(['admin'])
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('members')
+    .select('id, name')
+    .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
+    .maybeSingle()
+
+  if (!data) return null
+  return { id: data.id, name: data.name }
+}
+
+/** 계정을 센터 회원 프로필에 연결하고 정식 승인·회원 권한 부여 */
+export async function linkAuthUserToMemberRecord(
+  authUserId: string,
+  memberId: string,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+
+  const envError = getAdminEnvError()
+  if (envError) return { error: envError }
+
+  const admin = createAdminClient()
+  const { data: authUser, error: authError } =
+    await admin.auth.admin.getUserById(authUserId)
+  if (authError || !authUser.user) {
+    return { error: '계정을 찾을 수 없습니다.' }
+  }
+
+  const email = authUser.user.email ?? ''
+  if (isProtectedAdminAccount(email)) {
+    return { error: '관리자 계정은 회원과 연결할 수 없습니다.' }
+  }
+
+  const linkedElsewhere = await isAuthUserLinkedToOtherMember(authUserId, memberId)
+  if (linkedElsewhere) {
+    return { error: '이 계정은 이미 다른 회원에 연결되어 있습니다.' }
+  }
+
+  const { data: member, error: memberError } = await admin
+    .from('members')
+    .select('id, name, auth_user_id, user_id')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  if (memberError || !member) {
+    return { error: '회원을 찾을 수 없습니다.' }
+  }
+
+  const memberLinkedId = member.auth_user_id ?? member.user_id
+  if (memberLinkedId && memberLinkedId !== authUserId) {
+    return { error: '선택한 회원은 이미 다른 계정에 연결되어 있습니다.' }
+  }
+
+  const fullName =
+    (authUser.user.user_metadata?.full_name as string | undefined)?.trim() ||
+    member.name ||
+    email.split('@')[0] ||
+    '회원'
+
+  await clearMemberLinksForAuthUser(authUserId)
+
+  const profileSave = await upsertUserProfile(admin, {
+    id: authUserId,
+    email: email || null,
+    full_name: fullName,
+    role: 'member',
+    approval_status: 'approved',
+  })
+  if (profileSave.error) return { error: profileSave.error }
+
+  const legacy = await admin.from('users').upsert(
+    {
+      id: authUserId,
+      email: email || null,
+      full_name: fullName,
+      role: 'member',
+    },
+    { onConflict: 'id' },
+  )
+  if (legacy.error) {
+    return { error: `users 동기화 실패: ${legacy.error.message}` }
+  }
+
+  const linkResult = await linkMemberRecord(
+    memberId,
+    authUserId,
+    email || undefined,
+  )
+  if (linkResult.error) return linkResult
+
+  try {
+    await admin.auth.admin.updateUserById(authUserId, {
+      user_metadata: {
+        full_name: fullName,
+        role: 'member',
+        approval_status: 'approved',
+        member_id: memberId,
+      },
+    })
+  } catch (e) {
+    console.error('linkAuthUserToMemberRecord metadata:', e)
+  }
+
+  revalidatePath('/dashboard/settings')
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${memberId}`)
+  revalidatePath('/dashboard/my')
+  revalidatePath('/auth/login')
+
+  return {}
+}
+
+export async function unlinkAuthUserFromMemberRecord(
+  authUserId: string,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+  await clearMemberLinksForAuthUser(authUserId)
+  revalidatePath('/dashboard/settings')
+  revalidatePath('/dashboard/members')
+  return {}
 }
 
 export async function linkExistingAuthUserToMember(

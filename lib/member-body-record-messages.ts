@@ -18,6 +18,13 @@ export function describeBodyRecordMigrationHint(hint: string | undefined): {
         '컨디션·수면·피로 기록은 저장되었습니다. 회복·영양도 저장하려면 Supabase SQL Editor에서 add-member-body-nutrition-fields.sql과 add-member-protein-tracking.sql을 실행해주세요.',
     }
   }
+  if (hint.includes('pain-detail')) {
+    return {
+      title: '통증 상세 항목이 저장되지 않았습니다',
+      description:
+        '통증 부위는 저장되었습니다. 통증 정도·기타 부위 입력을 저장하려면 Supabase SQL Editor에서 add-member-pain-detail-fields.sql을 실행해주세요.',
+    }
+  }
   if (hint.includes('wellness')) {
     return {
       title: '옵션 기록이 저장되지 않았습니다',

@@ -9,22 +9,53 @@ import {
 } from './lesson-sessions'
 import { getLessons } from './lessons'
 import { getCenterSettings } from './center-settings'
-import { getMemberBodyRecords, type MemberBodyRecord } from './member-body-records'
+import { getMemberBodyRecords } from './member-body-records'
+import {
+  buildMemberPortalSummary,
+  type MemberPortalSummary,
+} from '@/lib/member-portal-summary'
+import {
+  buildCenterContactView,
+  buildCoachContactView,
+  type MemberCenterContactView,
+  type MemberCoachContactView,
+} from '@/lib/center-contact'
 import { toVisibleSnsAccount, type VisibleSnsAccount } from '@/lib/sns-account'
 import type { Lesson, LessonSession, Member, SessionTransaction } from '@/lib/types'
 
-export type { VisibleSnsAccount }
+export type {
+  VisibleSnsAccount,
+  MemberPortalSummary,
+  MemberCenterContactView,
+  MemberCoachContactView,
+}
 
 export type MemberPortalData = {
   member: Member
   instructorAccount: VisibleSnsAccount | null
   centerAccount: VisibleSnsAccount | null
+  centerContact: MemberCenterContactView
+  coachContact: MemberCoachContactView
   nextLesson: Lesson | null
   recentLessons: Lesson[]
   recentSessions: LessonSession[]
   transactions: SessionTransaction[]
   bodyRecords: MemberBodyRecord[]
   bodyTableReady: boolean
+  summary: MemberPortalSummary
+}
+
+function resolveRecentAttendanceDate(
+  recentSessions: LessonSession[],
+  recentLessons: Lesson[],
+): string | null {
+  return (
+    recentSessions[0]?.session_date ??
+    recentLessons.find((lesson) => lesson.attendance_status === 'present')
+      ?.lesson_date ??
+    recentLessons[0]?.lesson_date ??
+    null
+  )
 }
 
 export async function getMemberPortalData(): Promise<MemberPortalData | null> {
@@ -47,6 +78,12 @@ export async function getMemberPortalData(): Promise<MemberPortalData | null> {
     ])
 
   const instructor = member.primary_instructor
+  const centerContact = buildCenterContactView(centerSettings)
+  const coachContact = buildCoachContactView(
+    instructor?.name ?? '자율배정',
+    instructor?.phone,
+    centerContact.showInstructorContact,
+  )
 
   return {
     member,
@@ -62,12 +99,18 @@ export async function getMemberPortalData(): Promise<MemberPortalData | null> {
       instagramId: centerSettings.instagram_id,
       blogUrl: centerSettings.blog_url,
     }),
+    centerContact,
+    coachContact,
     nextLesson,
     recentLessons,
     recentSessions,
     transactions,
     bodyRecords: bodyData.records,
     bodyTableReady: bodyData.tableReady,
+    summary: buildMemberPortalSummary(
+      bodyData.records,
+      resolveRecentAttendanceDate(recentSessions, recentLessons),
+    ),
   }
 }
 

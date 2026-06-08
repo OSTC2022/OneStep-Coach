@@ -205,6 +205,7 @@ export async function grantAccountAccess(
   accountUserId: string,
   role: SettingsAssignableRole,
   instructorId?: string | null,
+  memberId?: string | null,
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
 
@@ -228,6 +229,7 @@ export async function grantAccountAccess(
       accountUserId,
       role,
       role === 'instructor' ? instructorId : null,
+      role === 'member' ? memberId : null,
     )
   }
 
@@ -241,7 +243,9 @@ export async function grantAccountAccess(
   }
 
   const { updateAccountRole } = await import('@/lib/actions/settings-accounts')
-  const updated = await updateAccountRole(accountUserId, role)
+  const updated = await updateAccountRole(accountUserId, role, {
+    memberId: role === 'member' ? memberId : null,
+  })
   if (updated.error) return updated
 
   revalidatePath('/dashboard/settings')
@@ -252,8 +256,13 @@ export async function approveAccount(
   userId: string,
   role: SettingsAssignableRole,
   instructorId?: string | null,
+  memberId?: string | null,
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
+
+  if (role === 'member' && !memberId?.trim()) {
+    return { error: '회원 권한은 센터 회원 프로필을 선택해 연결해주세요.' }
+  }
 
   const admin = createAdminClient()
   const allProfiles = await fetchAllProfiles(admin)
@@ -353,6 +362,7 @@ export async function approveAccount(
     const { updateAccountRole } = await import('@/lib/actions/settings-accounts')
     const result = await updateAccountRole(userId, role, {
       skipApprovalCheck: true,
+      memberId: role === 'member' ? memberId : null,
     })
     if (result.error) return result
   }

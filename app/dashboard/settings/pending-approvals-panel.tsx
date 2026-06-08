@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
 
 const APPROVE_ROLES: { value: SettingsAssignableRole; label: string }[] = [
   { value: 'member', label: '회원' },
@@ -76,6 +77,7 @@ export function PendingApprovalsPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [approveRole, setApproveRole] = useState<SettingsAssignableRole>('member')
   const [instructorId, setInstructorId] = useState<string>('')
+  const [memberId, setMemberId] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -115,12 +117,17 @@ export function PendingApprovalsPanel({
       toast.error('강사 프로필을 선택해주세요.')
       return
     }
+    if (approveRole === 'member' && !memberId) {
+      toast.error('연결할 센터 회원을 선택해주세요.')
+      return
+    }
 
     setBusy(true)
     const result = await approveAccount(
       selected.id,
       approveRole,
       approveRole === 'instructor' ? instructorId : null,
+      approveRole === 'member' ? memberId : null,
     )
     setBusy(false)
 
@@ -137,6 +144,7 @@ export function PendingApprovalsPanel({
     const approvedId = selected.id
     setSelectedId(null)
     setInstructorId('')
+    setMemberId('')
     setPending((prev) => prev.filter((p) => p.id !== approvedId))
     await refresh()
     router.refresh()
@@ -208,6 +216,7 @@ export function PendingApprovalsPanel({
                       className="cursor-pointer"
                       onClick={() => {
                         setSelectedId(row.id)
+                        setMemberId('')
                         setApproveRole(
                           row.role === 'guardian'
                             ? 'guardian'
@@ -284,6 +293,7 @@ export function PendingApprovalsPanel({
                   onValueChange={(v) => {
                     setApproveRole(v as SettingsAssignableRole)
                     if (v !== 'instructor') setInstructorId('')
+                    if (v !== 'member') setMemberId('')
                   }}
                 >
                   <SelectTrigger>
@@ -298,6 +308,14 @@ export function PendingApprovalsPanel({
                   </SelectContent>
                 </Select>
               </div>
+
+              {approveRole === 'member' && selected ? (
+                <AccountMemberLinkSelect
+                  accountUserId={selected.id}
+                  value={memberId}
+                  onValueChange={setMemberId}
+                />
+              ) : null}
 
               {approveRole === 'instructor' && (
                 <div className="space-y-1.5">

@@ -21,6 +21,8 @@ export type RegisteredAccount = {
   loginEmail: string | null
   created_at: string
   linkedInstructorName: string | null
+  linkedMemberId: string | null
+  linkedMemberName: string | null
   /** 관리자·보호 계정 — 설정에서 권한 변경 불가 */
   isProtected: boolean
 }

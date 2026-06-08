@@ -86,6 +86,19 @@ export async function signIn(
   }
 
   const user = await getDashboardProfile()
+  if (user?.role === 'member' || user?.role === 'guardian') {
+    try {
+      const { createAdminClient } = await import('@/lib/supabase/admin')
+      const admin = createAdminClient()
+      await admin
+        .from('members')
+        .update({ last_login_at: new Date().toISOString() })
+        .or(`auth_user_id.eq.${authUser.id},user_id.eq.${authUser.id}`)
+    } catch {
+      // last_login_at 컬럼 미적용 시 무시
+    }
+  }
+
   const path = getDefaultDashboardPath(user?.role ?? 'member')
   redirect(path)
 }
@@ -181,6 +194,33 @@ export async function requireRole(allowedRoles: UserRole[]): Promise<User> {
   return user
 }
 
+async function fetchLinkedMemberRow(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  authUserId: string,
+): Promise<Member | null> {
+  const { data, error } = await supabase
+    .from('members')
+    .select('*, primary_instructor:instructors(*)')
+    .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
+    .maybeSingle()
+
+  if (error) {
+    console.error('getMemberForCurrentUser:', error.message)
+    const { data: basic, error: basicError } = await supabase
+      .from('members')
+      .select('*')
+      .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
+      .maybeSingle()
+    if (basicError) {
+      console.error('getMemberForCurrentUser basic:', basicError.message)
+      return null
+    }
+    return (basic as Member | null) ?? null
+  }
+
+  return (data as Member | null) ?? null
+}
+
 export async function getMemberForCurrentUser(): Promise<Member | null> {
   const supabase = await createClient()
   const {
@@ -188,13 +228,17 @@ export async function getMemberForCurrentUser(): Promise<Member | null> {
   } = await supabase.auth.getUser()
   if (!authUser) return null
 
-  const { data } = await supabase
-    .from('members')
-    .select('*, primary_instructor:instructors(*)')
-    .or(`auth_user_id.eq.${authUser.id},user_id.eq.${authUser.id}`)
-    .maybeSingle()
+  const linked = await fetchLinkedMemberRow(supabase, authUser.id)
+  if (linked) return linked
 
-  return (data as Member | null) ?? null
+  // RLS 정책 미적용 환경 — 본인 auth id와 일치하는 행만 service role로 조회
+  try {
+    const { createAdminClient } = await import('@/lib/supabase/admin')
+    const admin = createAdminClient()
+    return await fetchLinkedMemberRow(admin, authUser.id)
+  } catch {
+    return null
+  }
 }
 
 export async function linkMemberToAuthUser(

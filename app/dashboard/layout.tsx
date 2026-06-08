@@ -1,8 +1,6 @@
-import { DashboardSidebar } from '@/components/dashboard/sidebar'
-import { DashboardHeader } from '@/components/dashboard/header'
+import { DashboardShell } from '@/components/dashboard/dashboard-shell'
 import { NavPrefetch } from '@/components/dashboard/nav-prefetch'
 import { RouteTapIndicator } from '@/components/dashboard/route-tap-indicator'
-import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { requireDashboardProfile } from '@/lib/auth/dashboard-user'
 
 export default async function DashboardLayout({
@@ -16,15 +14,7 @@ export default async function DashboardLayout({
     <>
       <NavPrefetch />
       <RouteTapIndicator />
-      <SidebarProvider>
-        <DashboardSidebar user={profile} />
-        <SidebarInset>
-          <DashboardHeader user={profile} />
-          <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background p-4 md:p-6">
-            {children}
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
+      <DashboardShell user={profile}>{children}</DashboardShell>
     </>
   )
 }

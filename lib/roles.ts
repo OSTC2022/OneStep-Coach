@@ -97,11 +97,18 @@ export function canRoleSetAttendanceStatus(
   return getAttendanceStatusesForRole(role).includes(status)
 }
 
+export const MEMBER_PORTAL_PATHS = ['/dashboard/my', '/my'] as const
+
+export function isMemberPortalPath(pathname: string): boolean {
+  if (pathname === '/my' || pathname.startsWith('/my/')) return true
+  return pathname === '/dashboard/my' || pathname.startsWith('/dashboard/my/')
+}
+
 export function canAccessPath(role: AppRole, pathname: string): boolean {
   if (role === 'admin') return true
 
   if (role === 'member' || role === 'guardian') {
-    return pathname === '/dashboard/my' || pathname.startsWith('/dashboard/my/')
+    return isMemberPortalPath(pathname)
   }
 
   if (isAdminPath(pathname)) return false

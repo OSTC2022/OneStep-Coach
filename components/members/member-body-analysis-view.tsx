@@ -23,13 +23,16 @@ import {
   type MemberBodyRecord,
 } from '@/lib/actions/member-body-records'
 import { describeBodyRecordMigrationHint } from '@/lib/member-body-record-messages'
+import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
 import {
   buildBodyAnalysisStats,
   buildCoachCheckReport,
   buildConditionChartPoints,
   buildPainChartPoints,
   buildSleepChartPoints,
+  CHART_TREND_INITIAL_NOTICE,
   chartTabAvailability,
+  shouldShowChartTrendNotice,
   COACH_CHECK_STATUS_LABELS,
   coachCheckStatusClasses,
   conditionStatusToneClass,
@@ -51,12 +54,7 @@ import {
   saveBodyPeriodSettings,
   type BodyPeriodSettings,
 } from '@/lib/member-body-period-settings'
-import {
-  buildNutritionHistoryBadges,
-  hasNutritionData,
-} from '@/lib/member-body-nutrition'
-import { buildWellnessHistoryBadges, hasConditionData } from '@/lib/member-body-wellness'
-import { WellnessStatusBadge } from '@/components/members/wellness-status-badge'
+import { RecordHistoryBadgeList } from '@/components/members/record-history-badge-list'
 import { calculateMemberBmi, formatBodyMetric } from '@/lib/member-utils'
 import {
   MemberBodyRecordFields,
@@ -162,7 +160,6 @@ export function MemberBodyAnalysisView({
   )
   const [savedPeriodSettings, setSavedPeriodSettings] =
     useState<BodyPeriodSettings | null>(null)
-
   useEffect(() => {
     setRecords(initialRecords)
   }, [initialRecords])
@@ -269,6 +266,19 @@ export function MemberBodyAnalysisView({
     () => buildPainChartPoints(filteredRecords, dateLabel),
     [filteredRecords],
   )
+  const showChartTrendNotice = useMemo(
+    () => shouldShowChartTrendNotice(records),
+    [records],
+  )
+
+  function renderChartTrendNotice() {
+    if (!showChartTrendNotice) return null
+    return (
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        - {CHART_TREND_INITIAL_NOTICE}
+      </p>
+    )
+  }
 
   async function handleAddWeight() {
     const validationError = validateBasicBodyRecord(formValues)
@@ -336,6 +346,9 @@ export function MemberBodyAnalysisView({
         fatigue: result.record!.fatigue ?? '',
         muscleSoreness: result.record!.muscle_soreness ?? '',
         painArea: result.record!.pain_area ?? '',
+        painLevel:
+          result.record!.pain_level != null ? String(result.record!.pain_level) : '',
+        painAreaNote: result.record!.pain_area_note ?? '',
         mealStatus: result.record!.meal_status ?? '',
         proteinIntakeG:
           result.record!.protein_intake_g != null
@@ -350,6 +363,13 @@ export function MemberBodyAnalysisView({
 
   async function handleDeleteRecord() {
     if (!deleteTarget) return
+    if (isBootstrapBodyRecord(deleteTarget)) {
+      toast.error('삭제할 수 없음', {
+        description: '신체정보 초기 설정은 삭제할 수 없습니다.',
+      })
+      setDeleteTarget(null)
+      return
+    }
     setDeleting(true)
     const result = await deleteMemberBodyRecord(deleteTarget.id, member.id)
     setDeleting(false)
@@ -418,14 +438,14 @@ export function MemberBodyAnalysisView({
         )}
       >
         {[...filteredRecords].reverse().map((record) => {
-          const isBootstrap = record.id.startsWith('bootstrap-')
+          const isBootstrap = isBootstrapBodyRecord(record)
           const height = resolveRecordHeight(member.height_cm, record.height_cm)
           return (
             <div
               key={record.id}
-              className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/15 px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/15 px-3 py-2"
             >
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">
                   {formatRecordDate(record.recorded_at)}
                   {isBootstrap ? (
@@ -441,47 +461,14 @@ export function MemberBodyAnalysisView({
                     ? ` · BMI ${calculateMemberBmi(height, record.weight_kg)?.toFixed(1) ?? '-'}`
                     : ''}
                 </p>
-                {(() => {
-                  const wellnessBadges = buildWellnessHistoryBadges(record)
-                  const nutritionBadges = buildNutritionHistoryBadges(record)
-                  const allBadges = [...wellnessBadges, ...nutritionBadges]
-                  const hasWellness = hasConditionData(record)
-                  const hasNutrition = hasNutritionData(record)
-
-                  if (allBadges.length === 0) {
-                    return (
-                      <p className="mt-0.5 text-[11px] text-foreground/50">
-                        컨디션·회복 기록 없음
-                      </p>
-                    )
-                  }
-
-                  return (
-                    <div className="mt-1 space-y-1">
-                      <div className="flex flex-wrap gap-1">
-                        {allBadges.map((badge) => (
-                          <WellnessStatusBadge
-                            key={badge.label}
-                            label={badge.label}
-                            tone={badge.tone}
-                          />
-                        ))}
-                      </div>
-                      {hasWellness && !hasNutrition ? (
-                        <p className="text-[10px] text-foreground/45">
-                          회복/영양 기록 없음
-                        </p>
-                      ) : null}
-                    </div>
-                  )
-                })()}
+                <RecordHistoryBadgeList record={record} />
               </div>
-              {!compact && !isBootstrap ? (
+              {!isBootstrap ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                   onClick={() => setDeleteTarget(record)}
                   aria-label="체중 기록 삭제"
                 >
@@ -496,7 +483,7 @@ export function MemberBodyAnalysisView({
   }
 
   return (
-    <div className="space-y-6">
+    <div id="report-top" className="scroll-mt-28 space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <Link href={memberBackHref}>
@@ -509,7 +496,8 @@ export function MemberBodyAnalysisView({
               Athlete Condition Report
             </p>
             <h1 className="text-2xl font-bold lg:text-3xl">
-              {member.name} 선수의 컨디션 &amp; 신체변화
+              <span className="mr-2">{member.name}</span>
+              선수의 컨디션 &amp; 신체변화
             </h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-foreground/90">
               체중은 경기력과 컨디션을 확인하기 위한 참고 지표입니다.
@@ -626,63 +614,78 @@ export function MemberBodyAnalysisView({
           <CardContent className="px-4 pb-4 pt-4 sm:px-6">
             <TabsContent value="weight" className="mt-0">
               {chartPoints.length > 0 ? (
-                <MemberBodyWeightChart points={chartPoints} className="h-[320px] w-full" />
+                <>
+                  <MemberBodyWeightChart points={chartPoints} className="h-[320px] w-full" />
+                  {renderChartTrendNotice()}
+                </>
               ) : (
                 renderChartEmpty(records.length > 0)
               )}
             </TabsContent>
             <TabsContent value="bmi" className="mt-0">
               {bmiChartPoints.length > 0 ? (
-                <MemberBodyMetricChart
-                  points={bmiChartPoints}
-                  metricKey="bmi"
-                  metricLabel="BMI"
-                  formatValue={(value) => value.toFixed(1)}
-                  className="h-[320px] w-full"
-                />
+                <>
+                  <MemberBodyMetricChart
+                    points={bmiChartPoints}
+                    metricKey="bmi"
+                    metricLabel="BMI"
+                    formatValue={(value) => value.toFixed(1)}
+                    className="h-[320px] w-full"
+                  />
+                  {renderChartTrendNotice()}
+                </>
               ) : (
                 renderChartEmpty(records.length > 0)
               )}
             </TabsContent>
             <TabsContent value="condition" className="mt-0">
               {conditionChartPoints.length > 0 ? (
-                <MemberBodyMetricChart
-                  points={conditionChartPoints}
-                  metricKey="condition"
-                  metricLabel="컨디션"
-                  formatValue={(value) =>
-                    value >= 2.5 ? '좋음' : value >= 1.5 ? '보통' : '나쁨'
-                  }
-                  className="h-[320px] w-full"
-                />
+                <>
+                  <MemberBodyMetricChart
+                    points={conditionChartPoints}
+                    metricKey="condition"
+                    metricLabel="컨디션"
+                    formatValue={(value) =>
+                      value >= 2.5 ? '좋음' : value >= 1.5 ? '보통' : '주의 필요'
+                    }
+                    className="h-[320px] w-full"
+                  />
+                  {renderChartTrendNotice()}
+                </>
               ) : (
                 renderComingSoon('컨디션')
               )}
             </TabsContent>
             <TabsContent value="sleep" className="mt-0">
               {sleepChartPoints.length > 0 ? (
-                <MemberBodyMetricChart
-                  points={sleepChartPoints}
-                  metricKey="sleep"
-                  metricLabel="수면"
-                  formatValue={(value) => `${value}단계`}
-                  className="h-[320px] w-full"
-                />
+                <>
+                  <MemberBodyMetricChart
+                    points={sleepChartPoints}
+                    metricKey="sleep"
+                    metricLabel="수면"
+                    formatValue={(value) => `${value}단계`}
+                    className="h-[320px] w-full"
+                  />
+                  {renderChartTrendNotice()}
+                </>
               ) : (
                 renderComingSoon('수면')
               )}
             </TabsContent>
             <TabsContent value="pain" className="mt-0">
               {painChartPoints.length > 0 ? (
-                <MemberBodyMetricChart
-                  points={painChartPoints}
-                  metricKey="pain"
-                  metricLabel="통증·근육통"
-                  formatValue={(value) =>
-                    value >= 2.5 ? '양호' : value >= 1.5 ? '약간' : '주의'
-                  }
-                  className="h-[320px] w-full"
-                />
+                <>
+                  <MemberBodyMetricChart
+                    points={painChartPoints}
+                    metricKey="pain"
+                    metricLabel="통증·근육통"
+                    formatValue={(value) =>
+                      value >= 2.5 ? '양호' : value >= 1.5 ? '약간' : '주의'
+                    }
+                    className="h-[320px] w-full"
+                  />
+                  {renderChartTrendNotice()}
+                </>
               ) : (
                 renderComingSoon('통증')
               )}
@@ -782,43 +785,92 @@ export function MemberBodyAnalysisView({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="border-primary/15 bg-primary/5">
+        <Card
+          id="coach-check"
+          className="order-2 scroll-mt-28 border-primary/15 bg-primary/5 lg:order-1"
+        >
           <CardHeader className="py-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <ClipboardCheck className="h-4 w-4 text-primary" />
               코치 체크
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {coachReport.boxes.map((box, index) => (
-              <div
-                key={index}
-                className={cn(
-                  'rounded-lg border px-3 py-2.5',
-                  coachCheckStatusClasses(box.status),
-                )}
-              >
-                <p className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs font-semibold">
-                  <span>{box.title}</span>
-                  <span className="rounded-md border border-current/30 px-1.5 py-0.5 text-[10px] font-medium">
-                    {COACH_CHECK_STATUS_LABELS[box.status]}
-                  </span>
-                </p>
-                <p className="text-sm leading-relaxed">{box.text}</p>
+          <CardContent>
+            <div
+              className={cn(
+                'rounded-lg border px-3 py-3',
+                coachCheckStatusClasses(coachReport.overallStatus),
+              )}
+            >
+              <p className="text-xs font-semibold">오늘 훈련 판단</p>
+              <p className="mt-1 text-sm font-bold">
+                {COACH_CHECK_STATUS_LABELS[coachReport.overallStatus]}
+              </p>
+
+              {coachReport.warningSignals.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold">주의 신호</p>
+                  <ul className="mt-1.5 space-y-0.5 text-sm leading-relaxed">
+                    {coachReport.warningSignals.map((signal) => (
+                      <li key={signal}>- {signal}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {coachReport.recoveryPoints.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold">회복 보완</p>
+                  <ul className="mt-1.5 space-y-0.5 text-sm leading-relaxed">
+                    {coachReport.recoveryPoints.map((point) => (
+                      <li key={point}>- {point}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {coachReport.positiveFlows.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-emerald-300">긍정 흐름</p>
+                  <ul className="mt-1.5 space-y-0.5 text-sm leading-relaxed text-emerald-200/90">
+                    {coachReport.positiveFlows.map((flow) => (
+                      <li key={flow}>- {flow}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {coachReport.recordCheckNotes.length > 0 ? (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-muted-foreground">기록 확인</p>
+                  <ul className="mt-1.5 space-y-0.5 text-sm leading-relaxed text-muted-foreground">
+                    {coachReport.recordCheckNotes.map((note) => (
+                      <li key={note}>- {note}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="mt-3">
+                <p className="text-xs font-semibold">추천</p>
+                <p className="mt-1 text-sm leading-relaxed">{coachReport.recommendation}</p>
               </div>
-            ))}
+            </div>
+            <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+              {coachReport.historyNote}
+            </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="order-3 lg:order-2">
           <CardHeader className="py-3">
             <CardTitle className="text-base">기록 이력</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">{renderRecordList()}</CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card id="today-record" className="order-1 lg:order-3">
+          <CardHeader id="today-record-top" className="scroll-mt-[4.5rem]">
             <CardTitle className="text-base">오늘 상태 기록</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
