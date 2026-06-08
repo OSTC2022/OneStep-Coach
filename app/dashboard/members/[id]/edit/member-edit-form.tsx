@@ -36,6 +36,7 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
     birth_date: member.birth_date || '',
     age: getMemberAge(member) ?? undefined,
     grade: member.grade || '',
+    school: member.school || '',
     phone: member.phone || '',
     parent_phone: member.parent_phone || '',
     sport: member.sport || '',
@@ -57,6 +58,7 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
       birth_date: formData.birth_date,
       age: formData.age,
       grade: formData.grade || undefined,
+      school: formData.school || undefined,
       phone: formData.phone || undefined,
       parent_phone: formData.parent_phone || undefined,
       sport: formData.sport || undefined,
@@ -169,6 +171,16 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="school">학교 / 소속팀</Label>
+              <Input
+                id="school"
+                value={formData.school}
+                onChange={(e) => setFormData({ ...formData, school: e.target.value })}
+                placeholder="OO고 / OO클럽"
+              />
+            </div>
+
             <SportSelectField
               value={formData.sport}
               onChange={(sport) => setFormData({ ...formData, sport })}
@@ -211,7 +223,7 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="parent_phone">보호자 연락처</Label>
+              <Label htmlFor="parent_phone">보호자</Label>
               <Input
                 id="parent_phone"
                 value={formData.parent_phone}

@@ -3,7 +3,30 @@
 import { format } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
-import { calculateMemberBmi } from '@/lib/member-utils'
+import { canAddBodyRecordFor } from '@/lib/auth/member-access'
+import {
+  DEFAULT_MEMBER_PROTEIN_SETTINGS,
+  type MemberProteinSettings,
+  type ProteinGoalMode,
+} from '@/lib/member-body-protein'
+import {
+  normalizeNutritionInput,
+  type BodyNutritionInput,
+  type MemberBodyRecordNutrition,
+} from '@/lib/member-body-nutrition'
+import {
+  normalizeWellnessInput,
+  parseWellnessField,
+  type BodyWellnessInput,
+  type MemberBodyRecordWellness,
+  CONDITION_CHOICES,
+  FATIGUE_CHOICES,
+  MEAL_STATUS_CHOICES,
+  MUSCLE_SORENESS_CHOICES,
+  PAIN_AREA_CHOICES,
+  SLEEP_HOUR_CHOICES,
+} from '@/lib/member-body-wellness'
+import { roundBodyMetric } from '@/lib/member-utils'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -15,6 +38,162 @@ export type MemberBodyRecord = {
   height_cm: number | null
   note: string | null
   created_at: string
+} & MemberBodyRecordWellness &
+  MemberBodyRecordNutrition
+
+const BASIC_SELECT =
+  'id, member_id, recorded_at, weight_kg, height_cm, note, created_at'
+
+const WELLNESS_SELECT =
+  `${BASIC_SELECT}, sleep_hours, condition, fatigue, muscle_soreness, pain_area, meal_status`
+
+const FULL_SELECT =
+  `${WELLNESS_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
+
+const BODY_RECORD_SELECT = FULL_SELECT
+
+function isMissingNutritionColumns(message: string | undefined) {
+  if (!message) return false
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('protein_status') ||
+    lower.includes('protein_target_g') ||
+    lower.includes('protein_intake_g') ||
+    lower.includes('protein_goal_multiplier') ||
+    lower.includes('post_workout_meal_status') ||
+    lower.includes('hydration_status') ||
+    lower.includes('supplement_status') ||
+    lower.includes('nutrition_note')
+  )
+}
+
+function isMissingWellnessColumns(message: string | undefined) {
+  if (!message) return false
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('sleep_hours') ||
+    lower.includes('muscle_soreness') ||
+    lower.includes('meal_status') ||
+    lower.includes('condition') ||
+    lower.includes('fatigue') ||
+    lower.includes('pain_area') ||
+    (lower.includes('column') && lower.includes('does not exist'))
+  )
+}
+
+function isMissingExtendedBodyColumns(message: string | undefined) {
+  return isMissingNutritionColumns(message) || isMissingWellnessColumns(message)
+}
+
+type BodyRecordSaveTier = 'full' | 'wellness' | 'basic'
+
+function selectForTier(tier: BodyRecordSaveTier) {
+  switch (tier) {
+    case 'full':
+      return FULL_SELECT
+    case 'wellness':
+      return WELLNESS_SELECT
+    default:
+      return BASIC_SELECT
+  }
+}
+
+function wellnessPayload(input?: BodyWellnessInput) {
+  const normalized = normalizeWellnessInput(input)
+  return {
+    sleep_hours: normalized.sleep_hours,
+    condition: normalized.condition,
+    fatigue: normalized.fatigue,
+    muscle_soreness: normalized.muscle_soreness,
+    pain_area: normalized.pain_area,
+    meal_status: normalized.meal_status,
+  }
+}
+
+function nutritionPayload(
+  input?: BodyNutritionInput,
+  options?: { weightKg?: number; proteinSettings?: Partial<MemberProteinSettings> },
+) {
+  const nutrition = normalizeNutritionInput(input, options)
+  return {
+    protein_status: nutrition.protein_status,
+    protein_target_g: nutrition.protein_target_g,
+    protein_intake_g: nutrition.protein_intake_g,
+    protein_goal_multiplier: nutrition.protein_goal_multiplier,
+    post_workout_meal_status: nutrition.post_workout_meal_status,
+    hydration_status: nutrition.hydration_status,
+    supplement_status: nutrition.supplement_status,
+    nutrition_note: nutrition.nutrition_note,
+  }
+}
+
+function payloadForTier(
+  tier: BodyRecordSaveTier,
+  base: { weight_kg: number; height_cm: number | null },
+  wellness?: BodyWellnessInput,
+  nutrition?: BodyNutritionInput,
+  proteinSettings?: Partial<MemberProteinSettings>,
+) {
+  switch (tier) {
+    case 'full':
+      return {
+        ...base,
+        ...wellnessPayload(wellness),
+        ...nutritionPayload(nutrition, {
+          weightKg: base.weight_kg,
+          proteinSettings,
+        }),
+      }
+    case 'wellness':
+      return { ...base, ...wellnessPayload(wellness) }
+    default:
+      return base
+  }
+}
+
+function migrationHintForTier(tier: BodyRecordSaveTier): string | undefined {
+  switch (tier) {
+    case 'wellness':
+      return 'supabase/add-member-body-nutrition-fields.sql'
+    case 'basic':
+      return 'supabase/add-member-body-wellness-fields.sql'
+    default:
+      return undefined
+  }
+}
+
+function parseNutritionRow(row: Record<string, unknown>): MemberBodyRecordNutrition {
+  return normalizeNutritionInput({
+    protein_status: row.protein_status as BodyNutritionInput['protein_status'],
+    protein_target_g: row.protein_target_g as number | null | undefined,
+    protein_intake_g: row.protein_intake_g as number | null | undefined,
+    protein_goal_multiplier: row.protein_goal_multiplier as number | null | undefined,
+    post_workout_meal_status:
+      row.post_workout_meal_status as BodyNutritionInput['post_workout_meal_status'],
+    hydration_status: row.hydration_status as BodyNutritionInput['hydration_status'],
+    supplement_status: row.supplement_status as BodyNutritionInput['supplement_status'],
+    nutrition_note: row.nutrition_note as string | null | undefined,
+  })
+}
+
+function parseWellnessRow(row: Record<string, unknown>): MemberBodyRecordWellness {
+  return {
+    sleep_hours: parseWellnessField(row.sleep_hours, SLEEP_HOUR_CHOICES),
+    condition: parseWellnessField(row.condition, CONDITION_CHOICES),
+    fatigue: parseWellnessField(row.fatigue, FATIGUE_CHOICES),
+    muscle_soreness: parseWellnessField(row.muscle_soreness, MUSCLE_SORENESS_CHOICES),
+    pain_area: parseWellnessField(row.pain_area, PAIN_AREA_CHOICES),
+    meal_status: parseWellnessField(row.meal_status, MEAL_STATUS_CHOICES),
+  }
+}
+
+function parseExtendedBodyRow(
+  row: Record<string, unknown>,
+): MemberBodyRecordWellness & MemberBodyRecordNutrition {
+  return {
+    ...parseWellnessRow(row),
+    ...parseNutritionRow(row),
+  }
 }
 
 function isMissingBodyRecordsTable(message: string | undefined, code?: string) {
@@ -27,44 +206,213 @@ function isMissingBodyRecordsTable(message: string | undefined, code?: string) {
   )
 }
 
-function normalizeRecord(row: {
-  id: string
-  member_id: string
-  recorded_at: string
-  weight_kg: number | string
-  height_cm?: number | string | null
-  note?: string | null
-  created_at: string
-}): MemberBodyRecord {
+function normalizeRecord(row: Record<string, unknown>): MemberBodyRecord {
   return {
-    id: row.id,
-    member_id: row.member_id,
-    recorded_at: row.recorded_at,
-    weight_kg: Number(row.weight_kg),
-    height_cm: row.height_cm != null ? Number(row.height_cm) : null,
-    note: row.note ?? null,
-    created_at: row.created_at,
+    id: String(row.id),
+    member_id: String(row.member_id),
+    recorded_at: String(row.recorded_at),
+    weight_kg: roundBodyMetric(row.weight_kg as number | string) ?? Number(row.weight_kg),
+    height_cm:
+      row.height_cm != null
+        ? roundBodyMetric(row.height_cm as number | string)
+        : null,
+    note: (row.note as string | null | undefined) ?? null,
+    created_at: String(row.created_at),
+    ...parseExtendedBodyRow(row),
   }
 }
 
-function bootstrapFromMember(member: {
-  id: string
-  weight_kg: number | null
-  height_cm?: number | null
-  registered_at: string
-}): MemberBodyRecord[] {
-  if (!member.weight_kg || member.weight_kg <= 0) return []
-  return [
-    {
-      id: `bootstrap-${member.id}`,
-      member_id: member.id,
-      recorded_at: member.registered_at.split('T')[0],
-      weight_kg: Number(member.weight_kg),
-      height_cm: member.height_cm != null ? Number(member.height_cm) : null,
-      note: null,
-      created_at: member.registered_at,
-    },
-  ]
+async function queryMemberBodyRecords(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  memberId: string,
+) {
+  const run = (select: string) =>
+    supabase
+      .from('member_body_records')
+      .select(select)
+      .eq('member_id', memberId)
+      .order('recorded_at', { ascending: true })
+      .order('created_at', { ascending: true })
+      .limit(120)
+
+  let selectTier: BodyRecordSaveTier = 'full'
+  let { data, error } = await run(FULL_SELECT)
+  if (error && isMissingNutritionColumns(error.message)) {
+    selectTier = 'wellness'
+    const retry = await run(WELLNESS_SELECT)
+    data = retry.data
+    error = retry.error
+  }
+  if (error && isMissingWellnessColumns(error.message)) {
+    selectTier = 'basic'
+    const retry = await run(BASIC_SELECT)
+    data = retry.data
+    error = retry.error
+  }
+
+  return { data, error, selectTier }
+}
+
+async function persistMemberBodyRecord(
+  supabase: Awaited<ReturnType<typeof memberBodyWriteClient>>,
+  params: {
+    memberId: string
+    recordedAt: string
+    existingId?: string
+    basePayload: { weight_kg: number; height_cm: number | null }
+    wellness?: BodyWellnessInput
+    nutrition?: BodyNutritionInput
+    proteinSettings?: Partial<MemberProteinSettings>
+  },
+): Promise<{
+  record?: MemberBodyRecord
+  error?: string
+  migrationHint?: string
+}> {
+  const tiers: BodyRecordSaveTier[] = ['full', 'wellness', 'basic']
+
+  for (const tier of tiers) {
+    const payload = payloadForTier(
+      tier,
+      params.basePayload,
+      params.wellness,
+      params.nutrition,
+      params.proteinSettings,
+    )
+    const select = selectForTier(tier)
+
+    const result = params.existingId
+      ? await supabase
+          .from('member_body_records')
+          .update(payload)
+          .eq('id', params.existingId)
+          .select(select)
+          .single()
+      : await supabase
+          .from('member_body_records')
+          .insert({
+            member_id: params.memberId,
+            recorded_at: params.recordedAt,
+            ...payload,
+          })
+          .select(select)
+          .single()
+
+    if (!result.error && result.data) {
+      const saved = normalizeRecord(result.data as Record<string, unknown>)
+      const hint = migrationHintForTier(tier)
+      return hint ? { record: saved, migrationHint: hint } : { record: saved }
+    }
+
+    if (!isMissingExtendedBodyColumns(result.error?.message)) {
+      return { error: result.error?.message ?? '기록 저장에 실패했습니다.' }
+    }
+  }
+
+  return { error: '기록 저장에 실패했습니다.' }
+}
+
+function createBootstrapRecord(
+  memberId: string,
+  fallback: {
+    weight_kg: number | null
+    height_cm?: number | null
+    registered_at: string
+  },
+): MemberBodyRecord | null {
+  if (!fallback.weight_kg || fallback.weight_kg <= 0) return null
+  const weight = roundBodyMetric(fallback.weight_kg) ?? Number(fallback.weight_kg)
+  return {
+    id: `bootstrap-${memberId}`,
+    member_id: memberId,
+    recorded_at: fallback.registered_at.split('T')[0],
+    weight_kg: weight,
+    height_cm: null,
+    note: '신체정보 초기 설정',
+    created_at: fallback.registered_at,
+    sleep_hours: null,
+    condition: null,
+    fatigue: null,
+    muscle_soreness: null,
+    pain_area: null,
+    meal_status: null,
+    protein_status: null,
+    protein_target_g: null,
+    protein_intake_g: null,
+    protein_goal_multiplier: null,
+    post_workout_meal_status: null,
+    hydration_status: null,
+    supplement_status: null,
+    nutrition_note: null,
+  }
+}
+
+const PROTEIN_GOAL_MODES: ProteinGoalMode[] = [
+  'basic',
+  'training',
+  'high_intensity',
+  'recovery',
+]
+
+function parseProteinGoalMode(value: unknown): ProteinGoalMode {
+  return typeof value === 'string' &&
+    PROTEIN_GOAL_MODES.includes(value as ProteinGoalMode)
+    ? (value as ProteinGoalMode)
+    : DEFAULT_MEMBER_PROTEIN_SETTINGS.protein_goal_mode
+}
+
+/** 선수별 단백질 목표 설정 (members 테이블, 없으면 기본값) */
+export async function getMemberProteinSettings(
+  memberId: string,
+): Promise<MemberProteinSettings> {
+  const supabase = await createStaffDataClient()
+  const { data, error } = await supabase
+    .from('members')
+    .select('protein_goal_multiplier, protein_goal_mode')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  if (error || !data) {
+    return { ...DEFAULT_MEMBER_PROTEIN_SETTINGS }
+  }
+
+  const multiplier = Number(data.protein_goal_multiplier)
+  return {
+    protein_goal_multiplier:
+      Number.isFinite(multiplier) && multiplier > 0
+        ? multiplier
+        : DEFAULT_MEMBER_PROTEIN_SETTINGS.protein_goal_multiplier,
+    protein_goal_mode: parseProteinGoalMode(data.protein_goal_mode),
+  }
+}
+
+/** DB 기록과 합쳐 신체정보 초기 설정(가상) 기록을 항상 유지 */
+function mergeWithBootstrapRecord(
+  records: MemberBodyRecord[],
+  memberId: string,
+  fallback?: {
+    weight_kg: number | null
+    height_cm?: number | null
+    registered_at: string
+  },
+): MemberBodyRecord[] {
+  const bootstrap = fallback ? createBootstrapRecord(memberId, fallback) : null
+  const withoutBootstrap = records.filter((record) => !record.id.startsWith('bootstrap-'))
+  if (!bootstrap) return withoutBootstrap
+
+  return [...withoutBootstrap, bootstrap].sort((a, b) => {
+    const dateCmp = a.recorded_at.localeCompare(b.recorded_at)
+    if (dateCmp !== 0) return dateCmp
+    if (a.id.startsWith('bootstrap-')) return -1
+    if (b.id.startsWith('bootstrap-')) return 1
+    return a.created_at.localeCompare(b.created_at)
+  })
+}
+
+async function assertCanViewBodyRecords(memberId: string): Promise<{ error?: string }> {
+  const allowed = await canAddBodyRecordFor(memberId)
+  if (!allowed) return { error: '권한이 없습니다.' }
+  return {}
 }
 
 export async function getMemberBodyRecords(
@@ -74,42 +422,54 @@ export async function getMemberBodyRecords(
     height_cm?: number | null
     registered_at: string
   },
-): Promise<{ records: MemberBodyRecord[]; tableReady: boolean }> {
-  await requireRole(['admin', 'instructor'])
+): Promise<{
+  records: MemberBodyRecord[]
+  tableReady: boolean
+  wellnessColumnsReady: boolean
+  nutritionColumnsReady: boolean
+}> {
+  const access = await assertCanViewBodyRecords(memberId)
+  if (access.error) {
+    return {
+      records: [],
+      tableReady: true,
+      wellnessColumnsReady: false,
+      nutritionColumnsReady: false,
+    }
+  }
 
   const supabase = await createStaffDataClient()
-  const { data, error } = await supabase
-    .from('member_body_records')
-    .select('id, member_id, recorded_at, weight_kg, height_cm, note, created_at')
-    .eq('member_id', memberId)
-    .order('recorded_at', { ascending: true })
-    .order('created_at', { ascending: true })
-    .limit(120)
+  const { data, error, selectTier } = await queryMemberBodyRecords(supabase, memberId)
 
   if (error && isMissingBodyRecordsTable(error.message, error.code)) {
     return {
-      records: fallback ? bootstrapFromMember({ id: memberId, ...fallback }) : [],
+      records: mergeWithBootstrapRecord([], memberId, fallback),
       tableReady: false,
+      wellnessColumnsReady: false,
+      nutritionColumnsReady: false,
     }
   }
 
   if (error) {
     console.error('getMemberBodyRecords:', error)
     return {
-      records: fallback ? bootstrapFromMember({ id: memberId, ...fallback }) : [],
+      records: mergeWithBootstrapRecord([], memberId, fallback),
       tableReady: true,
+      wellnessColumnsReady: false,
+      nutritionColumnsReady: false,
     }
   }
 
-  const records = (data ?? []).map(normalizeRecord)
-  if (records.length === 0 && fallback?.weight_kg) {
-    return {
-      records: bootstrapFromMember({ id: memberId, ...fallback }),
-      tableReady: true,
-    }
+  return {
+    records: mergeWithBootstrapRecord(
+      (data ?? []).map(normalizeRecord),
+      memberId,
+      fallback,
+    ),
+    tableReady: true,
+    wellnessColumnsReady: selectTier === 'full' || selectTier === 'wellness',
+    nutritionColumnsReady: selectTier === 'full',
   }
-
-  return { records, tableReady: true }
 }
 
 async function memberBodyWriteClient() {
@@ -126,20 +486,27 @@ export async function addMemberBodyRecord(
   options?: {
     recordedAt?: string
     heightCm?: number | null
+    wellness?: BodyWellnessInput
+    nutrition?: BodyNutritionInput
+    proteinSettings?: Partial<MemberProteinSettings>
     /** 수업현황 체중 입력 등 — 클라이언트 상태가 있어 전체 갱신 생략 */
     skipDashboardRevalidate?: boolean
   },
 ): Promise<{ record?: MemberBodyRecord; error?: string; migrationHint?: string }> {
-  await requireRole(['admin', 'instructor'])
+  const access = await canAddBodyRecordFor(memberId)
+  if (!access) {
+    return { error: '권한이 없습니다.' }
+  }
 
-  const weight = Number(weightKg)
-  if (!Number.isFinite(weight) || weight <= 0 || weight >= 500) {
+  const weight = roundBodyMetric(weightKg)
+  if (weight == null || weight >= 500) {
     return { error: '체중을 올바르게 입력해주세요.' }
   }
 
   const recordedAt = options?.recordedAt ?? format(new Date(), 'yyyy-MM-dd')
   const supabase = await memberBodyWriteClient()
-
+  const recordHeightCm =
+    options?.heightCm != null ? roundBodyMetric(options.heightCm) : null
   const { data: existingToday } = await supabase
     .from('member_body_records')
     .select('id')
@@ -147,73 +514,48 @@ export async function addMemberBodyRecord(
     .eq('recorded_at', recordedAt)
     .maybeSingle()
 
-  let saved: MemberBodyRecord | undefined
-
-  if (existingToday?.id) {
-    const { data, error } = await supabase
-      .from('member_body_records')
-      .update({
-        weight_kg: weight,
-        height_cm: options?.heightCm ?? null,
-      })
-      .eq('id', existingToday.id)
-      .select('id, member_id, recorded_at, weight_kg, height_cm, note, created_at')
-      .single()
-
-    if (error) {
-      if (isMissingBodyRecordsTable(error.message, error.code)) {
-        return {
-          error: '신체 기록 테이블이 없습니다.',
-          migrationHint: 'supabase/add-member-body-records.sql',
-        }
-      }
-      return { error: error.message }
-    }
-    saved = normalizeRecord(data)
-  } else {
-    const { data, error } = await supabase
-      .from('member_body_records')
-      .insert({
-        member_id: memberId,
-        recorded_at: recordedAt,
-        weight_kg: weight,
-        height_cm: options?.heightCm ?? null,
-      })
-      .select('id, member_id, recorded_at, weight_kg, height_cm, note, created_at')
-      .single()
-
-    if (error) {
-      if (isMissingBodyRecordsTable(error.message, error.code)) {
-        return {
-          error: '신체 기록 테이블이 없습니다.',
-          migrationHint: 'supabase/add-member-body-records.sql',
-        }
-      }
-      return { error: error.message }
-    }
-    saved = normalizeRecord(data)
+  const basePayload = {
+    weight_kg: weight,
+    height_cm: recordHeightCm,
   }
 
-  const heightForBmi = options?.heightCm ?? saved.height_cm
-  const bmi = calculateMemberBmi(heightForBmi, weight)
+  const proteinSettings =
+    options?.proteinSettings ?? (await getMemberProteinSettings(memberId))
 
-  await supabase
-    .from('members')
-    .update({
-      weight_kg: weight,
-      ...(heightForBmi ? { height_cm: heightForBmi } : {}),
-      ...(bmi != null ? { bmi } : {}),
-    })
-    .eq('id', memberId)
+  const persistResult = await persistMemberBodyRecord(supabase, {
+    memberId,
+    recordedAt,
+    existingId: existingToday?.id,
+    basePayload,
+    wellness: options?.wellness,
+    nutrition: options?.nutrition,
+    proteinSettings,
+  })
+
+  if (persistResult.error) {
+    if (isMissingBodyRecordsTable(persistResult.error)) {
+      return {
+        error: '신체 기록 테이블이 없습니다.',
+        migrationHint: 'supabase/add-member-body-records.sql',
+      }
+    }
+    return { error: persistResult.error }
+  }
+
+  const saved = persistResult.record
 
   if (!options?.skipDashboardRevalidate) {
     revalidatePath(`/dashboard/members/${memberId}`)
     revalidatePath(`/dashboard/members/${memberId}/body`)
     revalidatePath('/dashboard/members')
+    revalidatePath('/dashboard/my')
     revalidatePath('/dashboard/lesson-status')
   }
 
-  return { record: saved }
+  return {
+    record: saved,
+    migrationHint: persistResult.migrationHint,
+  }
 }
 
 /** 수업현황 선수 타일 — 해당 수업일 기준 체중 기록 */
@@ -347,7 +689,7 @@ export async function deleteMemberBodyRecord(
 ): Promise<{ error?: string }> {
   await requireRole(['admin', 'instructor'])
   if (recordId.startsWith('bootstrap-')) {
-    return { error: '삭제할 수 없는 기본 기록입니다.' }
+    return {}
   }
 
   const supabase = await memberBodyWriteClient()
@@ -366,7 +708,9 @@ export async function deleteMemberBodyRecord(
 
   revalidatePath(`/dashboard/members/${memberId}`)
   revalidatePath(`/dashboard/members/${memberId}/body`)
+  revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/lesson-status')
 
   return {}
 }
+

@@ -38,6 +38,29 @@ export function normalizePrimaryInstructorId(value?: string | null): string | nu
   return trimmed
 }
 
+/** 키·몸무게 값을 소수 1자리로 반올림 (저장·계산용) */
+export function roundBodyMetric(
+  value: number | string | null | undefined,
+): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.round(n * 10) / 10
+}
+
+/** 키·몸무게 표시·입력용 (소수 1자리, 예: 65.1) */
+export function formatBodyMetric(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  return (Math.round(value * 10) / 10).toFixed(1)
+}
+
+/** 입력 필드 blur 시 소수 1자리로 정리 */
+export function normalizeBodyMetricInput(value: string): string {
+  if (!value.trim()) return ''
+  const rounded = roundBodyMetric(value)
+  return rounded != null ? formatBodyMetric(rounded) : value
+}
+
 /** 키(cm)·몸무게(kg)로 BMI 계산 (소수 1자리) */
 export function calculateMemberBmi(
   heightCm?: number | null,
@@ -214,7 +237,7 @@ export function formatMemberContactDisplay(
     return `${phone} · 보호자 ${parentPhone}`
   }
   if (phone) return phone
-  if (parentPhone) return parentPhone
+  if (parentPhone) return `보호자 ${parentPhone}`
   return '-'
 }
 

@@ -1,5 +1,12 @@
-import { requireMemberViewer } from '@/lib/auth/member-access'
+import {
+  canAddBodyRecordFor,
+  canEditMemberBasicInfoFor,
+  requireMemberViewer,
+} from '@/lib/auth/member-access'
+import { canSavePhysicalBaseline, canViewPhysicalEditButton } from '@/lib/roles'
 import { getMember } from '@/lib/actions/members'
+import { getCenterSettings } from '@/lib/actions/center-settings'
+import { toVisibleSnsAccount } from '@/lib/sns-account'
 import { getMemberBodyRecords } from '@/lib/actions/member-body-records'
 import { getMemberAccountEmail } from '@/lib/actions/member-account'
 import { getDeletedSessionPackagesCount, getSessionPackages } from '@/lib/actions/sessions'
@@ -19,13 +26,17 @@ export default async function MemberDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  const { canManage } = await requireMemberViewer()
+  const { canManage, role } = await requireMemberViewer()
   const { id } = await params
-  const [member, packagesResult, trashCount, accountEmailInfo] = await Promise.all([
+  const [member, packagesResult, trashCount, accountEmailInfo, canEditBasicInfo, centerSettings, canAddBodyRecord] =
+    await Promise.all([
     getMember(id),
     getSessionPackages({ memberId: id }),
     getDeletedSessionPackagesCount(id),
     getMemberAccountEmail(id),
+    canEditMemberBasicInfoFor(id),
+    getCenterSettings(),
+    canAddBodyRecordFor(id),
   ])
   const sessionPackages = packagesResult.data
 
@@ -101,6 +112,20 @@ export default async function MemberDetailPage({
       registered_at: member.registered_at,
     })
 
+  const instructor = member.primary_instructor
+  const instructorAccount = instructor
+    ? toVisibleSnsAccount(instructor.name, {
+        kakaoId: instructor.kakao_id,
+        instagramId: instructor.instagram_id,
+        blogUrl: instructor.blog_url,
+      })
+    : null
+  const centerAccount = toVisibleSnsAccount(centerSettings.name, {
+    kakaoId: centerSettings.kakao_id,
+    instagramId: centerSettings.instagram_id,
+    blogUrl: centerSettings.blog_url,
+  })
+
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
       <MemberDetail
@@ -114,6 +139,12 @@ export default async function MemberDetailPage({
         bodyRecords={bodyRecords}
         bodyTableReady={bodyTableReady}
         canManage={canManage}
+        canEditBasicInfo={canEditBasicInfo}
+        canShowPhysicalEditButton={canViewPhysicalEditButton(role)}
+        canSavePhysicalInitial={canSavePhysicalBaseline(role)}
+        canAddBodyRecord={canAddBodyRecord}
+        instructorAccount={instructorAccount}
+        centerAccount={centerAccount}
       />
     </div>
   )

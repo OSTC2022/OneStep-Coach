@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
@@ -8,11 +8,13 @@ import { ko } from 'date-fns/locale'
 import {
   Activity,
   ArrowLeft,
+  CalendarRange,
+  ClipboardCheck,
   Loader2,
+  RotateCcw,
+  Save,
   Scale,
   Trash2,
-  TrendingDown,
-  TrendingUp,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -20,12 +22,53 @@ import {
   deleteMemberBodyRecord,
   type MemberBodyRecord,
 } from '@/lib/actions/member-body-records'
-import { buildBodyAnalysisStats } from '@/lib/member-body-analysis'
-import { calculateMemberBmi, resolveMemberBmi } from '@/lib/member-utils'
+import { describeBodyRecordMigrationHint } from '@/lib/member-body-record-messages'
+import {
+  buildBodyAnalysisStats,
+  buildCoachCheckReport,
+  buildConditionChartPoints,
+  buildPainChartPoints,
+  buildSleepChartPoints,
+  chartTabAvailability,
+  COACH_CHECK_STATUS_LABELS,
+  coachCheckStatusClasses,
+  conditionStatusToneClass,
+  filterRecordsByPeriod,
+  getGrowthStatus,
+  getLatestConditionStatus,
+  getRecentWeightChangeDescription,
+  resolveRecordHeight,
+  wellnessSummaryToneClass,
+} from '@/lib/member-body-analysis'
+import {
+  BODY_PERIOD_PRESETS,
+  DEFAULT_BODY_PERIOD_SETTINGS,
+  bodyPeriodSettingsEqual,
+  clearBodyPeriodSettings,
+  formatBodyPeriodLabel,
+  loadBodyPeriodSettings,
+  resolveBodyPeriodRange,
+  saveBodyPeriodSettings,
+  type BodyPeriodSettings,
+} from '@/lib/member-body-period-settings'
+import {
+  buildNutritionHistoryBadges,
+  hasNutritionData,
+} from '@/lib/member-body-nutrition'
+import { buildWellnessHistoryBadges, hasConditionData } from '@/lib/member-body-wellness'
+import { WellnessStatusBadge } from '@/components/members/wellness-status-badge'
+import { calculateMemberBmi, formatBodyMetric } from '@/lib/member-utils'
+import {
+  MemberBodyRecordFields,
+  bodyRecordFormToNutritionInput,
+  bodyRecordFormToWellnessInput,
+  createEmptyBodyRecordFormValues,
+  validateBasicBodyRecord,
+  type MemberBodyRecordFormValues,
+} from '@/components/members/member-body-record-fields'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import {
   AlertDialog,
@@ -38,20 +81,36 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 
+const CHART_LOADING = (
+  <div className="flex h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-muted/15 text-sm text-muted-foreground">
+    그래프 불러오는 중…
+  </div>
+)
+
 const MemberBodyWeightChart = dynamic(
   () =>
     import('@/components/members/member-body-weight-chart').then((mod) => ({
       default: mod.MemberBodyWeightChart,
     })),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-muted/15 text-sm text-muted-foreground">
-        그래프 불러오는 중…
-      </div>
-    ),
-  },
+  { ssr: false, loading: () => CHART_LOADING },
 )
+
+const MemberBodyMetricChart = dynamic(
+  () =>
+    import('@/components/members/member-body-metric-chart').then((mod) => ({
+      default: mod.MemberBodyMetricChart,
+    })),
+  { ssr: false, loading: () => CHART_LOADING },
+)
+
+const BODY_CHART_TABS = [
+  { id: 'weight', label: '체중' },
+  { id: 'bmi', label: 'BMI' },
+  { id: 'condition', label: '컨디션' },
+  { id: 'sleep', label: '수면' },
+  { id: 'pain', label: '통증' },
+  { id: 'records', label: '기록' },
+] as const
 
 interface MemberBodyAnalysisViewProps {
   member: {
@@ -62,8 +121,15 @@ interface MemberBodyAnalysisViewProps {
     weight_kg: number | null
     bmi: number | null
   }
+  proteinSettings?: {
+    protein_goal_multiplier: number
+    protein_goal_mode: string
+  }
   initialRecords: MemberBodyRecord[]
   tableReady: boolean
+  wellnessColumnsReady?: boolean
+  nutritionColumnsReady?: boolean
+  backHref?: string
 }
 
 function formatRecordDate(date: string) {
@@ -74,51 +140,154 @@ export function MemberBodyAnalysisView({
   member,
   initialRecords,
   tableReady,
+  wellnessColumnsReady = true,
+  nutritionColumnsReady = true,
+  proteinSettings,
+  backHref,
 }: MemberBodyAnalysisViewProps) {
+  const memberBackHref = backHref ?? `/dashboard/members/${member.id}`
   const [records, setRecords] = useState(initialRecords)
-  const [dateInput, setDateInput] = useState(() => format(new Date(), 'yyyy-MM-dd'))
-  const [weightInput, setWeightInput] = useState('')
+  const [formValues, setFormValues] = useState<MemberBodyRecordFormValues>(() => {
+    const latest = initialRecords.at(-1)
+    return createEmptyBodyRecordFormValues({
+      date: format(new Date(), 'yyyy-MM-dd'),
+      height: formatBodyMetric(latest?.height_cm ?? member.height_cm),
+    })
+  })
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<MemberBodyRecord | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [periodSettings, setPeriodSettings] = useState<BodyPeriodSettings>(
+    DEFAULT_BODY_PERIOD_SETTINGS,
+  )
+  const [savedPeriodSettings, setSavedPeriodSettings] =
+    useState<BodyPeriodSettings | null>(null)
+
+  useEffect(() => {
+    setRecords(initialRecords)
+  }, [initialRecords])
+
+  useEffect(() => {
+    const saved = loadBodyPeriodSettings(member.id)
+    if (saved) {
+      setPeriodSettings(saved)
+      setSavedPeriodSettings(saved)
+    }
+  }, [member.id])
+
+  const periodRange = useMemo(
+    () => resolveBodyPeriodRange(periodSettings),
+    [periodSettings],
+  )
+
+  const filteredRecords = useMemo(
+    () => filterRecordsByPeriod(records, periodRange),
+    [records, periodRange],
+  )
 
   const stats = useMemo(
-    () => buildBodyAnalysisStats(records, member.height_cm),
-    [records, member.height_cm],
+    () =>
+      buildBodyAnalysisStats(
+        filteredRecords,
+        member.height_cm,
+        periodSettings.mode === 'all' ? member.weight_kg : null,
+      ),
+    [filteredRecords, member.height_cm, member.weight_kg, periodSettings.mode],
   )
 
   const chartPoints = useMemo(
     () =>
-      records.map((record) => ({
+      filteredRecords.map((record) => ({
         date: record.recorded_at,
         label: format(parseISO(record.recorded_at), 'M/d', { locale: ko }),
         weight: record.weight_kg,
       })),
-    [records],
+    [filteredRecords],
   )
 
-  const displayBmi = resolveMemberBmi({
-    bmi: stats.latestBmi ?? member.bmi,
-    height_cm: member.height_cm,
-    weight_kg: stats.latest ?? member.weight_kg,
-  })
+  const bmiChartPoints = useMemo(
+    () =>
+      filteredRecords.flatMap((record) => {
+        const height = resolveRecordHeight(member.height_cm, record.height_cm)
+        const bmi = calculateMemberBmi(height, record.weight_kg)
+        if (bmi == null) return []
+        return [
+          {
+            date: record.recorded_at,
+            label: format(parseISO(record.recorded_at), 'M/d', { locale: ko }),
+            value: bmi,
+          },
+        ]
+      }),
+    [filteredRecords, member.height_cm],
+  )
+
+  const periodDirty = !bodyPeriodSettingsEqual(
+    periodSettings,
+    savedPeriodSettings ?? DEFAULT_BODY_PERIOD_SETTINGS,
+  )
+  const hasSavedPeriod = savedPeriodSettings != null
+  const periodLabel = formatBodyPeriodLabel(periodSettings)
+
+  function handleSavePeriodSettings() {
+    saveBodyPeriodSettings(member.id, periodSettings)
+    setSavedPeriodSettings(periodSettings)
+    toast.success('조회 기간 설정을 저장했습니다.')
+  }
+
+  function handleResetPeriodSettings() {
+    setPeriodSettings(DEFAULT_BODY_PERIOD_SETTINGS)
+    setSavedPeriodSettings(null)
+    clearBodyPeriodSettings(member.id)
+    toast.success('조회 기간 설정을 초기화했습니다.')
+  }
+
+  const displayBmi = stats.latestBmi ?? member.bmi
+  const growthStatus = useMemo(() => getGrowthStatus(displayBmi), [displayBmi])
+  const conditionStatus = useMemo(
+    () => getLatestConditionStatus(filteredRecords),
+    [filteredRecords],
+  )
+  const coachReport = useMemo(() => buildCoachCheckReport(records), [records])
+  const chartTabs = useMemo(
+    () => chartTabAvailability(filteredRecords),
+    [filteredRecords],
+  )
+
+  const dateLabel = (date: string) =>
+    format(parseISO(date), 'M/d', { locale: ko })
+
+  const conditionChartPoints = useMemo(
+    () => buildConditionChartPoints(filteredRecords, dateLabel),
+    [filteredRecords],
+  )
+  const sleepChartPoints = useMemo(
+    () => buildSleepChartPoints(filteredRecords, dateLabel),
+    [filteredRecords],
+  )
+  const painChartPoints = useMemo(
+    () => buildPainChartPoints(filteredRecords, dateLabel),
+    [filteredRecords],
+  )
 
   async function handleAddWeight() {
-    if (!dateInput) {
-      toast.error('날짜를 선택해주세요.')
-      return
-    }
-
-    const weight = Number(weightInput)
-    if (!Number.isFinite(weight) || weight <= 0) {
-      toast.error('체중을 입력해주세요.')
+    const validationError = validateBasicBodyRecord(formValues)
+    if (validationError) {
+      toast.error(validationError)
       return
     }
 
     setSaving(true)
-    const result = await addMemberBodyRecord(member.id, weight, {
-      recordedAt: dateInput,
-      heightCm: member.height_cm,
+    const weightKg = Number(formValues.weight)
+    const result = await addMemberBodyRecord(member.id, weightKg, {
+      recordedAt: formValues.date,
+      heightCm: Number(formValues.height),
+      wellness: bodyRecordFormToWellnessInput(formValues),
+      nutrition: bodyRecordFormToNutritionInput(formValues, {
+        weightKg,
+        proteinSettings,
+      }),
+      proteinSettings,
     })
     setSaving(false)
 
@@ -131,19 +300,51 @@ export function MemberBodyAnalysisView({
       return
     }
 
+    const migrationNotice = describeBodyRecordMigrationHint(result.migrationHint)
+    if (migrationNotice) {
+      toast.warning(migrationNotice.title, {
+        description: migrationNotice.description,
+      })
+    } else {
+      toast.success('오늘 상태 기록이 저장되었습니다.')
+    }
+
     if (result.record) {
       setRecords((prev) => {
         const withoutSameDay = prev.filter(
-          (row) => row.recorded_at !== result.record!.recorded_at,
+          (row) =>
+            row.id.startsWith('bootstrap-') ||
+            row.recorded_at !== result.record!.recorded_at,
         )
-        return [...withoutSameDay, result.record!].sort((a, b) =>
-          a.recorded_at.localeCompare(b.recorded_at),
-        )
+        return [...withoutSameDay, result.record!].sort((a, b) => {
+          const dateCmp = a.recorded_at.localeCompare(b.recorded_at)
+          if (dateCmp !== 0) return dateCmp
+          if (a.id.startsWith('bootstrap-')) return -1
+          if (b.id.startsWith('bootstrap-')) return 1
+          return a.created_at.localeCompare(b.created_at)
+        })
       })
-      setWeightInput('')
-      toast.success('체중이 기록되었습니다.', {
-        description: formatRecordDate(result.record.recorded_at),
-      })
+      setFormValues((prev) => ({
+        ...prev,
+        height:
+          result.record!.height_cm != null
+            ? formatBodyMetric(result.record!.height_cm)
+            : prev.height,
+        weight: formatBodyMetric(result.record!.weight_kg),
+        sleepHours: result.record!.sleep_hours ?? '',
+        condition: result.record!.condition ?? '',
+        fatigue: result.record!.fatigue ?? '',
+        muscleSoreness: result.record!.muscle_soreness ?? '',
+        painArea: result.record!.pain_area ?? '',
+        mealStatus: result.record!.meal_status ?? '',
+        proteinIntakeG:
+          result.record!.protein_intake_g != null
+            ? String(Math.round(result.record!.protein_intake_g))
+            : '',
+        postWorkoutMealStatus: result.record!.post_workout_meal_status ?? '',
+        hydrationStatus: result.record!.hydration_status ?? '',
+        supplementStatus: result.record!.supplement_status ?? {},
+      }))
     }
   }
 
@@ -163,23 +364,157 @@ export function MemberBodyAnalysisView({
     toast.success('체중 기록을 삭제했습니다.')
   }
 
+  function renderChartEmpty(hasAnyRecords: boolean) {
+    return (
+      <div className="flex h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground">
+        <Scale className="mb-3 h-10 w-10 text-primary/40" />
+        <p>
+          {hasAnyRecords
+            ? '선택한 기간에 표시할 데이터가 없습니다.'
+            : '아직 기록이 없습니다.'}
+        </p>
+        <p className="mt-1 text-xs">
+          {hasAnyRecords
+            ? '조회 기간을 바꾸거나 아래에서 기록을 추가해주세요.'
+            : '수업현황에서 체중을 입력하거나 아래에서 직접 기록하세요.'}
+        </p>
+      </div>
+    )
+  }
+
+  function renderComingSoon(label: string) {
+    return (
+      <div className="flex h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-border text-center text-muted-foreground">
+        <Activity className="mb-3 h-10 w-10 text-primary/40" />
+        <p className="font-medium text-foreground">{label} 기록 준비 중</p>
+        <p className="mt-1 max-w-xs text-xs">
+          곧 {label} 입력·그래프 연동이 추가됩니다.
+        </p>
+      </div>
+    )
+  }
+
+  function renderRecordList(compact = false) {
+    if (filteredRecords.length === 0) {
+      return (
+        <div
+          className={cn(
+            'flex items-center justify-center text-sm text-muted-foreground',
+            compact ? 'h-[320px]' : 'py-8',
+          )}
+        >
+          {records.length === 0
+            ? '기록이 없습니다.'
+            : '선택한 기간에 기록이 없습니다.'}
+        </div>
+      )
+    }
+
+    return (
+      <div
+        className={cn(
+          'space-y-2',
+          compact && 'max-h-[320px] overflow-y-auto pr-1',
+        )}
+      >
+        {[...filteredRecords].reverse().map((record) => {
+          const isBootstrap = record.id.startsWith('bootstrap-')
+          const height = resolveRecordHeight(member.height_cm, record.height_cm)
+          return (
+            <div
+              key={record.id}
+              className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/15 px-3 py-2"
+            >
+              <div>
+                <p className="text-sm font-medium">
+                  {formatRecordDate(record.recorded_at)}
+                  {isBootstrap ? (
+                    <span className="ml-2 text-xs font-normal text-primary">
+                      초기 설정
+                    </span>
+                  ) : null}
+                </p>
+                <p className="text-xs tabular-nums text-foreground/90">
+                  {height ? `${formatBodyMetric(height)}cm · ` : ''}
+                  {formatBodyMetric(record.weight_kg)}kg
+                  {height
+                    ? ` · BMI ${calculateMemberBmi(height, record.weight_kg)?.toFixed(1) ?? '-'}`
+                    : ''}
+                </p>
+                {(() => {
+                  const wellnessBadges = buildWellnessHistoryBadges(record)
+                  const nutritionBadges = buildNutritionHistoryBadges(record)
+                  const allBadges = [...wellnessBadges, ...nutritionBadges]
+                  const hasWellness = hasConditionData(record)
+                  const hasNutrition = hasNutritionData(record)
+
+                  if (allBadges.length === 0) {
+                    return (
+                      <p className="mt-0.5 text-[11px] text-foreground/50">
+                        컨디션·회복 기록 없음
+                      </p>
+                    )
+                  }
+
+                  return (
+                    <div className="mt-1 space-y-1">
+                      <div className="flex flex-wrap gap-1">
+                        {allBadges.map((badge) => (
+                          <WellnessStatusBadge
+                            key={badge.label}
+                            label={badge.label}
+                            tone={badge.tone}
+                          />
+                        ))}
+                      </div>
+                      {hasWellness && !hasNutrition ? (
+                        <p className="text-[10px] text-foreground/45">
+                          회복/영양 기록 없음
+                        </p>
+                      ) : null}
+                    </div>
+                  )
+                })()}
+              </div>
+              {!compact && !isBootstrap ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  onClick={() => setDeleteTarget(record)}
+                  aria-label="체중 기록 삭제"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <Link href={`/dashboard/members/${member.id}`}>
+          <Link href={memberBackHref}>
             <Button variant="ghost" size="icon" className="mt-1">
               <ArrowLeft className="h-5 w-5" />
             </Button>
           </Link>
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-              Body Performance
+              Athlete Condition Report
             </p>
-            <h1 className="text-2xl font-bold lg:text-3xl">{member.name} 신체 변화</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              수업현황 체중 입력이 자동 반영됩니다
-              {member.sport ? ` · ${member.sport}` : ''}
+            <h1 className="text-2xl font-bold lg:text-3xl">
+              {member.name} 선수의 컨디션 &amp; 신체변화
+            </h1>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-foreground/90">
+              체중은 경기력과 컨디션을 확인하기 위한 참고 지표입니다.
+              <br />
+              무리한 감량보다 성장, 회복, 훈련 지속성이 더 중요합니다.
             </p>
           </div>
         </div>
@@ -187,24 +522,33 @@ export function MemberBodyAnalysisView({
           <p className="text-xs text-amber-400">
             DB: supabase/add-member-body-records.sql 실행 필요
           </p>
+        ) : !nutritionColumnsReady ? (
+          <p className="max-w-xs text-xs leading-relaxed text-amber-300/90">
+            Supabase SQL Editor에서 add-member-body-nutrition-fields.sql,
+            add-member-protein-tracking.sql 실행 필요
+          </p>
+        ) : !wellnessColumnsReady ? (
+          <p className="max-w-xs text-xs leading-relaxed text-amber-300/90">
+            컨디션 저장: supabase/add-member-body-wellness-fields.sql 실행 필요
+          </p>
         ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="pt-5">
-            <p className="text-xs text-muted-foreground">현재 체중</p>
+          <CardContent className="space-y-1.5 pt-5">
+            <p className="text-xs font-medium text-foreground">현재 체중</p>
             <p className="text-2xl font-bold tabular-nums">
-              {stats.latest != null ? `${stats.latest}kg` : '-'}
+              {stats.latest != null ? `${formatBodyMetric(stats.latest)}kg` : '-'}
             </p>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="pt-5">
-            <p className="text-xs text-muted-foreground">변화량</p>
+          <CardContent className="space-y-1.5 pt-5">
+            <p className="text-xs font-medium text-foreground">최근 체중 변화</p>
             <p
               className={cn(
-                'inline-flex items-center gap-1 text-2xl font-bold tabular-nums',
+                'text-2xl font-bold tabular-nums',
                 stats.delta == null
                   ? ''
                   : stats.delta > 0
@@ -214,151 +558,281 @@ export function MemberBodyAnalysisView({
                       : '',
               )}
             >
-              {stats.delta == null ? (
-                '-'
-              ) : (
-                <>
-                  {stats.delta > 0 ? (
-                    <TrendingUp className="h-5 w-5" />
-                  ) : stats.delta < 0 ? (
-                    <TrendingDown className="h-5 w-5" />
-                  ) : null}
-                  {stats.delta > 0 ? '+' : ''}
-                  {stats.delta}kg
-                </>
+              {stats.delta == null
+                ? '-'
+                : `${stats.delta > 0 ? '+' : ''}${formatBodyMetric(stats.delta)}kg`}
+            </p>
+            <p className="text-[11px] text-foreground/70">
+              {getRecentWeightChangeDescription(stats.delta)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="border-primary/10">
+          <CardContent className="space-y-1.5 pt-5">
+            <p className="text-xs font-medium text-foreground">BMI / 성장 상태</p>
+            <p
+              className={cn(
+                'text-2xl font-bold',
+                wellnessSummaryToneClass(growthStatus.tone),
               )}
+            >
+              {growthStatus.label}
             </p>
+            <p className="text-[11px] text-foreground/70">{growthStatus.description}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pt-5">
-            <p className="text-xs text-muted-foreground">평균 · 최저 · 최고</p>
-            <p className="text-lg font-semibold tabular-nums">
-              {stats.average ?? '-'} / {stats.min ?? '-'} / {stats.max ?? '-'} kg
+        <Card className="border-primary/10">
+          <CardContent className="space-y-1.5 pt-5">
+            <p className="text-xs font-medium text-foreground">컨디션</p>
+            <p
+              className={cn(
+                'text-2xl font-bold',
+                conditionStatusToneClass(conditionStatus.tone),
+              )}
+            >
+              {conditionStatus.label}
             </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-5">
-            <p className="text-xs text-muted-foreground">BMI</p>
-            <p className="text-2xl font-bold tabular-nums text-primary">
-              {displayBmi != null ? displayBmi.toFixed(1) : '-'}
-            </p>
+            <p className="text-[11px] text-foreground/70">{conditionStatus.description}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="overflow-hidden border-primary/20">
-        <CardHeader className="border-b border-border/60 bg-gradient-to-r from-primary/10 to-transparent">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Activity className="h-5 w-5 text-primary" />
-            체중 변화 그래프
+      <div className="space-y-2">
+      <Card className="gap-0 border-primary/20 py-0">
+        <CardHeader className="flex min-h-11 !grid-rows-none items-center justify-center border-b border-primary/20 bg-primary/5 px-4 !py-0 !pb-0 sm:px-6">
+          <CardTitle className="flex items-center justify-center gap-2 text-base font-semibold text-foreground">
+            <Activity className="h-4 w-4 shrink-0 text-primary" />
+            컨디션 &amp; 체중 변화 그래프
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-6">
-          {chartPoints.length > 0 ? (
-            <MemberBodyWeightChart points={chartPoints} className="h-[320px]" />
-          ) : (
-            <div className="flex h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground">
-              <Scale className="mb-3 h-10 w-10 text-primary/40" />
-              <p>아직 체중 기록이 없습니다.</p>
-              <p className="mt-1 text-xs">수업현황에서 체중을 입력하거나 아래에서 직접 기록하세요.</p>
-            </div>
-          )}
-        </CardContent>
+        <Tabs defaultValue="weight" className="gap-0">
+          <div className="border-b border-primary/20 bg-primary/5 px-4 sm:px-6">
+            <TabsList className="h-11 w-full justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
+              {BODY_CHART_TABS.map((tab) => {
+                const enabled = chartTabs[tab.id]
+                return (
+                  <TabsTrigger
+                    key={tab.id}
+                    value={tab.id}
+                    disabled={!enabled}
+                    className="min-h-11 shrink-0 rounded-md px-3 text-xs font-medium text-foreground/80 disabled:opacity-40 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none"
+                  >
+                    {tab.label}
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
+          </div>
+          <CardContent className="px-4 pb-4 pt-4 sm:px-6">
+            <TabsContent value="weight" className="mt-0">
+              {chartPoints.length > 0 ? (
+                <MemberBodyWeightChart points={chartPoints} className="h-[320px] w-full" />
+              ) : (
+                renderChartEmpty(records.length > 0)
+              )}
+            </TabsContent>
+            <TabsContent value="bmi" className="mt-0">
+              {bmiChartPoints.length > 0 ? (
+                <MemberBodyMetricChart
+                  points={bmiChartPoints}
+                  metricKey="bmi"
+                  metricLabel="BMI"
+                  formatValue={(value) => value.toFixed(1)}
+                  className="h-[320px] w-full"
+                />
+              ) : (
+                renderChartEmpty(records.length > 0)
+              )}
+            </TabsContent>
+            <TabsContent value="condition" className="mt-0">
+              {conditionChartPoints.length > 0 ? (
+                <MemberBodyMetricChart
+                  points={conditionChartPoints}
+                  metricKey="condition"
+                  metricLabel="컨디션"
+                  formatValue={(value) =>
+                    value >= 2.5 ? '좋음' : value >= 1.5 ? '보통' : '나쁨'
+                  }
+                  className="h-[320px] w-full"
+                />
+              ) : (
+                renderComingSoon('컨디션')
+              )}
+            </TabsContent>
+            <TabsContent value="sleep" className="mt-0">
+              {sleepChartPoints.length > 0 ? (
+                <MemberBodyMetricChart
+                  points={sleepChartPoints}
+                  metricKey="sleep"
+                  metricLabel="수면"
+                  formatValue={(value) => `${value}단계`}
+                  className="h-[320px] w-full"
+                />
+              ) : (
+                renderComingSoon('수면')
+              )}
+            </TabsContent>
+            <TabsContent value="pain" className="mt-0">
+              {painChartPoints.length > 0 ? (
+                <MemberBodyMetricChart
+                  points={painChartPoints}
+                  metricKey="pain"
+                  metricLabel="통증·근육통"
+                  formatValue={(value) =>
+                    value >= 2.5 ? '양호' : value >= 1.5 ? '약간' : '주의'
+                  }
+                  className="h-[320px] w-full"
+                />
+              ) : (
+                renderComingSoon('통증')
+              )}
+            </TabsContent>
+            <TabsContent value="records" className="mt-0">
+              {renderRecordList(true)}
+            </TabsContent>
+          </CardContent>
+        </Tabs>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">기록 이력</CardTitle>
+      <div className="rounded-lg border border-border/70 bg-muted/10 px-2.5 py-1.5 sm:px-3">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-muted-foreground">
+            <CalendarRange className="h-3.5 w-3.5 text-primary" />
+            조회 기간
+          </span>
+          <div className="flex flex-wrap items-center gap-1">
+            {BODY_PERIOD_PRESETS.map((preset) => (
+              <Button
+                key={preset.mode}
+                type="button"
+                size="sm"
+                variant={periodSettings.mode === preset.mode ? 'default' : 'outline'}
+                className="h-7 px-2 text-[11px]"
+                onClick={() =>
+                  setPeriodSettings((prev) => ({
+                    ...prev,
+                    mode: preset.mode,
+                  }))
+                }
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+          <span className="text-[11px] text-muted-foreground">
+            현재: <span className="text-foreground">{periodLabel}</span>
+            {hasSavedPeriod && !periodDirty ? (
+              <span className="ml-1 text-primary">· 저장됨</span>
+            ) : periodDirty ? (
+              <span className="ml-1 text-amber-400">· 미저장</span>
+            ) : null}
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-[11px]"
+              disabled={!periodDirty}
+              onClick={handleSavePeriodSettings}
+            >
+              <Save className="mr-1 h-3 w-3" />
+              저장
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px]"
+              disabled={
+                periodSettings.mode === 'all' && !hasSavedPeriod && !periodDirty
+              }
+              onClick={handleResetPeriodSettings}
+            >
+              <RotateCcw className="mr-1 h-3 w-3" />
+              초기화
+            </Button>
+          </div>
+        </div>
+        {periodSettings.mode === 'custom' ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 border-t border-border/50 pt-1.5">
+            <KoreanDatePicker
+              id="body-period-from"
+              value={periodSettings.fromDate ?? ''}
+              onChange={(value) =>
+                setPeriodSettings((prev) => ({ ...prev, fromDate: value || undefined }))
+              }
+              placeholder="시작일"
+              compact
+              className="h-8 w-[148px] text-xs"
+            />
+            <span className="text-[11px] text-muted-foreground">~</span>
+            <KoreanDatePicker
+              id="body-period-to"
+              value={periodSettings.toDate ?? ''}
+              onChange={(value) =>
+                setPeriodSettings((prev) => ({ ...prev, toDate: value || undefined }))
+              }
+              placeholder="종료일"
+              compact
+              className="h-8 w-[148px] text-xs"
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="border-primary/15 bg-primary/5">
+          <CardHeader className="py-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ClipboardCheck className="h-4 w-4 text-primary" />
+              코치 체크
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {records.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                기록이 없습니다.
-              </p>
-            ) : (
-              [...records].reverse().map((record) => {
-                const canDelete = !record.id.startsWith('bootstrap-')
-                return (
-                  <div
-                    key={record.id}
-                    className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/15 px-3 py-2"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">
-                        {formatRecordDate(record.recorded_at)}
-                      </p>
-                      <p className="text-xs text-muted-foreground tabular-nums">
-                        {record.weight_kg}kg
-                        {member.height_cm
-                          ? ` · BMI ${calculateMemberBmi(member.height_cm, record.weight_kg)?.toFixed(1) ?? '-'}`
-                          : ''}
-                      </p>
-                    </div>
-                    {canDelete ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteTarget(record)}
-                        aria-label="체중 기록 삭제"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                )
-              })
-            )}
+          <CardContent className="space-y-3">
+            {coachReport.boxes.map((box, index) => (
+              <div
+                key={index}
+                className={cn(
+                  'rounded-lg border px-3 py-2.5',
+                  coachCheckStatusClasses(box.status),
+                )}
+              >
+                <p className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                  <span>{box.title}</span>
+                  <span className="rounded-md border border-current/30 px-1.5 py-0.5 text-[10px] font-medium">
+                    {COACH_CHECK_STATUS_LABELS[box.status]}
+                  </span>
+                </p>
+                <p className="text-sm leading-relaxed">{box.text}</p>
+              </div>
+            ))}
           </CardContent>
         </Card>
 
         <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-base">기록 이력</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">{renderRecordList()}</CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
-            <CardTitle className="text-base">체중 직접 기록</CardTitle>
+            <CardTitle className="text-base">오늘 상태 기록</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="body-record-date" className="text-xs text-muted-foreground">
-                날짜
-              </Label>
-              <KoreanDatePicker
-                id="body-record-date"
-                value={dateInput}
-                onChange={setDateInput}
-                placeholder="날짜 선택"
-                compact
-                className="w-full"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="body-record-weight" className="text-xs text-muted-foreground">
-                체중
-              </Label>
-              <Input
-                id="body-record-weight"
-                type="number"
-                inputMode="decimal"
-                step="0.1"
-                min="1"
-                max="500"
-                placeholder="체중 (kg)"
-                value={weightInput}
-                onChange={(e) => setWeightInput(e.target.value)}
-                disabled={saving}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    void handleAddWeight()
-                  }
-                }}
-              />
-            </div>
+            <MemberBodyRecordFields
+              idPrefix="body-record"
+              values={formValues}
+              onChange={setFormValues}
+              proteinSettings={proteinSettings}
+              disabled={saving}
+              onEnterSubmit={() => void handleAddWeight()}
+            />
             <Button
               type="button"
-              className="w-full"
+              className="min-h-11 w-full"
               disabled={saving}
               onClick={() => void handleAddWeight()}
             >
@@ -371,12 +845,13 @@ export function MemberBodyAnalysisView({
                 '기록하기'
               )}
             </Button>
-            <p className="text-xs text-muted-foreground">
-              같은 날짜에 다시 기록하면 체중이 갱신됩니다. 수업현황 선수 카드 입력도
-              해당 수업 날짜로 자동 반영됩니다.
+            <p className="text-xs text-foreground/70">
+              키·몸무게만 입력해도 저장됩니다. 컨디션·회복·영양은 버튼으로 빠르게 기록하세요.
             </p>
           </CardContent>
         </Card>
+      </div>
+
       </div>
 
       <AlertDialog
@@ -390,7 +865,7 @@ export function MemberBodyAnalysisView({
             <AlertDialogTitle>체중 기록을 삭제할까요?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `${formatRecordDate(deleteTarget.recorded_at)} · ${deleteTarget.weight_kg}kg 기록을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`
+                ? `${formatRecordDate(deleteTarget.recorded_at)} · ${formatBodyMetric(deleteTarget.weight_kg)}kg 기록을 삭제합니다. 이 작업은 되돌릴 수 없습니다.`
                 : '선택한 체중 기록을 삭제합니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>

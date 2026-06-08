@@ -183,6 +183,62 @@ export async function getInstructorForCurrentUser(): Promise<Instructor | null> 
   return null
 }
 
+function normalizeInstructorSnsFields(
+  formData: Partial<InstructorFormData>,
+): Partial<InstructorFormData> {
+  const next = { ...formData }
+  if (formData.kakao_id !== undefined) {
+    next.kakao_id = formData.kakao_id?.trim() || undefined
+  }
+  if (formData.instagram_id !== undefined) {
+    next.instagram_id = formData.instagram_id?.trim() || undefined
+  }
+  if (formData.blog_url !== undefined) {
+    next.blog_url = formData.blog_url?.trim() || undefined
+  }
+  return next
+}
+
+export async function updateMyInstructorSns(formData: {
+  kakao_id?: string
+  instagram_id?: string
+  blog_url?: string
+}): Promise<InstructorMutationResult> {
+  const instructor = await getInstructorForCurrentUser()
+  if (!instructor) {
+    return { error: '연결된 강사 프로필을 찾을 수 없습니다.' }
+  }
+
+  const supabase = getInstructorWriteClient() ?? (await createClient())
+  const updateData: Record<string, unknown> = {}
+  if (formData.kakao_id !== undefined) {
+    updateData.kakao_id = formData.kakao_id?.trim() || null
+  }
+  if (formData.instagram_id !== undefined) {
+    updateData.instagram_id = formData.instagram_id?.trim() || null
+  }
+  if (formData.blog_url !== undefined) {
+    updateData.blog_url = formData.blog_url?.trim() || null
+  }
+
+  const { data, error } = await supabase
+    .from('instructors')
+    .update(updateData)
+    .eq('id', instructor.id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Error updating instructor SNS:', error)
+    return { error: mapInstructorError(error.message) }
+  }
+
+  revalidatePath('/dashboard')
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/members')
+  return { data: data as Instructor }
+}
+
 export async function createInstructor(formData: InstructorFormData): Promise<InstructorMutationResult> {
   await requireRole(['admin'])
   const supabase = getInstructorWriteClient() ?? (await createClient())
@@ -190,6 +246,9 @@ export async function createInstructor(formData: InstructorFormData): Promise<In
   const payload = {
     name: formData.name,
     phone: formData.phone || null,
+    kakao_id: formData.kakao_id?.trim() || null,
+    instagram_id: formData.instagram_id?.trim() || null,
+    blog_url: formData.blog_url?.trim() || null,
     speciality: formData.speciality || [],
     hourly_rate_weekday: formData.hourly_rate_weekday || 30000,
     hourly_rate_weekend: formData.hourly_rate_weekend || 40000,
@@ -239,16 +298,26 @@ export async function updateInstructor(
 ): Promise<InstructorMutationResult> {
   await requireRole(['admin'])
   const supabase = getInstructorWriteClient() ?? (await createClient())
+  const payload: Record<string, unknown> = { ...normalizeInstructorSnsFields(formData) }
+  if (formData.kakao_id !== undefined) {
+    payload.kakao_id = formData.kakao_id?.trim() || null
+  }
+  if (formData.instagram_id !== undefined) {
+    payload.instagram_id = formData.instagram_id?.trim() || null
+  }
+  if (formData.blog_url !== undefined) {
+    payload.blog_url = formData.blog_url?.trim() || null
+  }
 
   const { data, error } = await supabase
     .from('instructors')
-    .update(formData)
+    .update(payload)
     .eq('id', id)
     .select()
     .single()
 
-  if (error && isMissingCalendarColorColumn(error) && 'calendar_color' in formData) {
-    const { calendar_color: _removed, ...fallbackPayload } = formData
+  if (error && isMissingCalendarColorColumn(error) && 'calendar_color' in payload) {
+    const { calendar_color: _removed, ...fallbackPayload } = payload
     const retry = await supabase
       .from('instructors')
       .update(fallbackPayload)

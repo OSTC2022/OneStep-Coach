@@ -16,6 +16,9 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { profileRoleToAppRole } from '@/lib/roles'
+import { getCenterSettings } from '@/lib/actions/center-settings'
+import { getInstructorForCurrentUser } from '@/lib/actions/instructors'
+import { StaffSnsCard } from '@/components/instructors/staff-sns-card'
 import { DashboardRecentPayments } from './dashboard-recent-payments'
 
 export default async function DashboardPage() {
@@ -29,9 +32,11 @@ export default async function DashboardPage() {
   const appRole = profileRoleToAppRole(profile.role)
   const isAdmin = appRole === 'admin'
 
-  const [stats, recentActivity] = await Promise.all([
+  const [stats, recentActivity, centerSettings, linkedInstructor] = await Promise.all([
     isAdmin ? getDashboardStats() : getInstructorDashboardStats(),
     isAdmin ? getRecentActivity(6) : Promise.resolve([]),
+    getCenterSettings(),
+    isAdmin ? Promise.resolve(null) : getInstructorForCurrentUser(),
   ])
 
   const quickLinks =
@@ -124,6 +129,14 @@ export default async function DashboardPage() {
         ))}
         {isAdmin ? <DashboardRecentPayments payments={recentActivity} /> : null}
       </div>
+
+      {!isAdmin ? (
+        <StaffSnsCard
+          role="instructor"
+          instructor={linkedInstructor}
+          centerSettings={centerSettings}
+        />
+      ) : null}
     </div>
   )
 }

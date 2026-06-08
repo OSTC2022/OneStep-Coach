@@ -109,6 +109,9 @@ export function InstructorManagement({
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
+    kakao_id: '',
+    instagram_id: '',
+    blog_url: '',
     speciality: '',
     hourly_rate_weekday: 30000,
     hourly_rate_weekend: 40000,
@@ -200,6 +203,9 @@ export function InstructorManagement({
     setFormData({
       name: '',
       phone: '',
+      kakao_id: '',
+      instagram_id: '',
+      blog_url: '',
       speciality: '',
       hourly_rate_weekday: 30000,
       hourly_rate_weekend: 40000,
@@ -211,6 +217,9 @@ export function InstructorManagement({
   const buildFormPayload = () => ({
     name: formData.name.trim(),
     phone: formData.phone || undefined,
+    kakao_id: formData.kakao_id || undefined,
+    instagram_id: formData.instagram_id || undefined,
+    blog_url: formData.blog_url || undefined,
     speciality: formData.speciality
       ? formData.speciality.split(',').map((s) => s.trim()).filter(Boolean)
       : [],
@@ -328,6 +337,9 @@ export function InstructorManagement({
     setFormData({
       name: instructor.name,
       phone: instructor.phone || '',
+      kakao_id: instructor.kakao_id || '',
+      instagram_id: instructor.instagram_id || '',
+      blog_url: instructor.blog_url || '',
       speciality: instructor.speciality?.join(', ') || '',
       hourly_rate_weekday: instructor.hourly_rate_weekday,
       hourly_rate_weekend: instructor.hourly_rate_weekend,
@@ -478,6 +490,32 @@ export function InstructorManagement({
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   placeholder="010-1234-5678"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>카카오톡</Label>
+                  <Input
+                    value={formData.kakao_id}
+                    onChange={(e) => setFormData({ ...formData, kakao_id: e.target.value })}
+                    placeholder="카카오톡 개인 ID"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>인스타그램</Label>
+                  <Input
+                    value={formData.instagram_id}
+                    onChange={(e) => setFormData({ ...formData, instagram_id: e.target.value })}
+                    placeholder="@아이디"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>블로그</Label>
+                <Input
+                  value={formData.blog_url}
+                  onChange={(e) => setFormData({ ...formData, blog_url: e.target.value })}
+                  placeholder="https://blog.naver.com/아이디"
                 />
               </div>
               <div className="space-y-2">
@@ -654,6 +692,32 @@ export function InstructorManagement({
               <Input
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>카카오톡</Label>
+                <Input
+                  value={formData.kakao_id}
+                  onChange={(e) => setFormData({ ...formData, kakao_id: e.target.value })}
+                  placeholder="카카오톡 개인 ID"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>인스타그램</Label>
+                <Input
+                  value={formData.instagram_id}
+                  onChange={(e) => setFormData({ ...formData, instagram_id: e.target.value })}
+                  placeholder="@아이디"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>블로그</Label>
+              <Input
+                value={formData.blog_url}
+                onChange={(e) => setFormData({ ...formData, blog_url: e.target.value })}
+                placeholder="https://blog.naver.com/아이디"
               />
             </div>
             <div className="space-y-2">

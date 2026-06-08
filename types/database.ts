@@ -15,6 +15,8 @@ export interface Instructor {
   user_id: string | null
   name: string
   phone: string | null
+  kakao_id: string | null
+  instagram_id: string | null
   speciality: string[]
   hourly_rate_weekday: number
   hourly_rate_weekend: number
@@ -31,8 +33,11 @@ export interface Member {
   age: number | null
   birth_date: string | null
   grade: string | null
+  school: string | null
   phone: string | null
   parent_phone: string | null
+  kakao_id: string | null
+  instagram_id: string | null
   sport: string | null
   height_cm: number | null
   weight_kg: number | null
@@ -110,8 +115,11 @@ export interface MemberFormData {
   birth_date?: string
   age?: number
   grade?: string
+  school?: string
   phone?: string
   parent_phone?: string
+  kakao_id?: string
+  instagram_id?: string
   sport?: string
   height_cm?: number
   weight_kg?: number

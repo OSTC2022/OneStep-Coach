@@ -5,18 +5,27 @@ export const PROFILE_SELECT =
 
 export const USER_LEGACY_SELECT = 'id, email, full_name, role, created_at'
 
-export const MEMBER_LIST_SELECT_LEGACY =
+export const MEMBER_LIST_SELECT_CORE =
   'id, name, phone, sport, age, birth_date, grade, is_active, primary_instructor_id, registered_at, created_at, height_cm, weight_kg, goal, injury_history, memo, parent_phone'
+
+/** school 컬럼 마이그레이션 전 DB 호환 */
+export const MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL = MEMBER_LIST_SELECT_CORE
+
+export const MEMBER_LIST_SELECT_LEGACY =
+  `${MEMBER_LIST_SELECT_CORE}, school, kakao_id, instagram_id`
 
 export const MEMBER_LIST_SELECT =
   `${MEMBER_LIST_SELECT_LEGACY}, deleted_at`
+
+export const MEMBER_LIST_SELECT_NO_SCHOOL =
+  `${MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL}, deleted_at`
 
 export const MEMBER_PICKER_SELECT = 'id, name, sport, age, birth_date, phone'
 
 export const MEMBER_DETAIL_SELECT = MEMBER_LIST_SELECT
 
 export const INSTRUCTOR_LIST_SELECT =
-  'id, name, phone, is_active, calendar_color, user_id, speciality, hourly_rate_weekday, hourly_rate_weekend, extra_member_rate, created_at'
+  'id, name, phone, kakao_id, instagram_id, blog_url, is_active, calendar_color, user_id, speciality, hourly_rate_weekday, hourly_rate_weekend, extra_member_rate, created_at'
 
 export const INSTRUCTOR_PICKER_SELECT = 'id, name, calendar_color, is_active'
 

@@ -343,7 +343,7 @@ export function MemberList({
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone">연락처</Label>
+                  <Label htmlFor="phone">본인 연락처</Label>
                   <Input
                     id="phone"
                     value={formData.phone}
@@ -352,7 +352,7 @@ export function MemberList({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="parent_phone">보호자 연락처</Label>
+                  <Label htmlFor="parent_phone">보호자</Label>
                   <Input
                     id="parent_phone"
                     value={formData.parent_phone}

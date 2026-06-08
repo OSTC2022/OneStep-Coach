@@ -5,6 +5,10 @@ import { ko } from 'date-fns/locale'
 import { CalendarDays, Clock, User, CreditCard, History } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { MemberBasicInfoEditor } from '@/components/members/member-basic-info-editor'
+import { MemberContactEditor } from '@/components/members/member-contact-editor'
+import { MemberPhysicalInfoEditor } from '@/components/members/member-physical-info-editor'
+import { SnsIconLinks } from '@/components/members/sns-icon-links'
 import type { MemberPortalData } from '@/lib/actions/member-portal'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -31,6 +35,38 @@ export function MemberMyPage({ data }: MemberMyPageProps) {
         </p>
       </div>
 
+      <MemberBasicInfoEditor
+        memberId={member.id}
+        birthDate={member.birth_date}
+        age={member.age}
+        grade={member.grade}
+        school={member.school ?? null}
+        canEdit
+        compact
+      />
+
+      <MemberContactEditor
+        memberId={member.id}
+        phone={member.phone}
+        parentPhone={member.parent_phone}
+        kakaoId={member.kakao_id ?? null}
+        instagramId={member.instagram_id ?? null}
+        instructorAccount={data.instructorAccount}
+        centerAccount={data.centerAccount}
+        canEdit
+        compact
+      />
+
+      <MemberPhysicalInfoEditor
+        memberId={member.id}
+        memberName={member.name}
+        heightCm={member.height_cm}
+        weightKg={member.weight_kg}
+        bodyRecords={data.bodyRecords}
+        canAddRecord
+        analysisHref="/dashboard/my/body"
+      />
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
@@ -54,13 +90,21 @@ export function MemberMyPage({ data }: MemberMyPageProps) {
               담당 강사
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <p className="text-lg font-semibold">
               {member.primary_instructor?.name ?? '자율배정'}
             </p>
             {member.sport && (
               <p className="text-sm text-muted-foreground">{member.sport}</p>
             )}
+            {data.instructorAccount ? (
+              <SnsIconLinks
+                kakaoId={data.instructorAccount.kakaoId}
+                instagramId={data.instructorAccount.instagramId}
+                blogUrl={data.instructorAccount.blogUrl}
+                size="sm"
+              />
+            ) : null}
           </CardContent>
         </Card>
       </div>

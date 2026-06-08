@@ -4,9 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { deleteSessionPackage } from '@/lib/actions/sessions'
-import { resolveMemberBmi } from '@/lib/member-utils'
+import { MemberPhysicalInfoEditor } from '@/components/members/member-physical-info-editor'
 import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
-import { MemberBodyChangeMenuLink } from '@/components/members/member-body-change-menu-link'
 import { Member, SessionPackage } from '@/types/database'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -33,8 +32,6 @@ import {
 import {
   ArrowLeft,
   Edit,
-  User,
-  Phone,
   Calendar,
   Target,
   AlertTriangle,
@@ -42,12 +39,10 @@ import {
   CreditCard,
   Trash2,
 } from 'lucide-react'
-import {
-  formatMemberAge,
-  formatMemberContactDisplay,
-  formatBirthDateDisplay,
-  formatPrimaryInstructorName,
-} from '@/lib/member-utils'
+import { formatPrimaryInstructorName } from '@/lib/member-utils'
+import { MemberBasicInfoEditor } from '@/components/members/member-basic-info-editor'
+import { MemberContactEditor } from '@/components/members/member-contact-editor'
+import type { VisibleSnsAccount } from '@/lib/sns-account'
 import { MemberAccountLink } from '@/components/members/member-account-link'
 import { SessionPackageTrashSheet } from './session-package-trash-sheet'
 import {
@@ -82,6 +77,12 @@ interface MemberDetailProps {
   bodyRecords?: MemberBodyRecord[]
   bodyTableReady?: boolean
   canManage?: boolean
+  canEditBasicInfo?: boolean
+  canShowPhysicalEditButton?: boolean
+  canSavePhysicalInitial?: boolean
+  canAddBodyRecord?: boolean
+  instructorAccount?: VisibleSnsAccount | null
+  centerAccount?: VisibleSnsAccount | null
 }
 
 function formatPackageDate(value: string | null | undefined) {
@@ -100,6 +101,12 @@ export function MemberDetail({
   bodyRecords = [],
   bodyTableReady = true,
   canManage = true,
+  canEditBasicInfo = false,
+  canShowPhysicalEditButton = false,
+  canSavePhysicalInitial = false,
+  canAddBodyRecord = false,
+  instructorAccount = null,
+  centerAccount = null,
 }: MemberDetailProps) {
   const router = useRouter()
   const [memberState, setMemberState] = useState(member)
@@ -119,8 +126,6 @@ export function MemberDetail({
   useEffect(() => {
     setMemberState(member)
   }, [member])
-
-  const displayBmi = useMemo(() => resolveMemberBmi(memberState), [memberState])
 
   const lessonTotalPages = Math.max(
     1,
@@ -210,10 +215,6 @@ export function MemberDetail({
               <Badge variant={memberState.is_active ? 'default' : 'secondary'}>
                 {memberState.is_active ? '활성' : '비활성'}
               </Badge>
-              <MemberBodyChangeMenuLink
-                memberId={memberState.id}
-                latestWeight={bodyRecords.at(-1)?.weight_kg ?? memberState.weight_kg}
-              />
             </div>
             <p className="text-muted-foreground">
               등록일:{' '}
@@ -232,108 +233,43 @@ export function MemberDetail({
       </div>
 
       {/* Info Cards Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
         {/* Basic Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <User className="h-5 w-5 text-primary" />
-              기본 정보
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">생년월일</span>
-              <span>{formatBirthDateDisplay(member.birth_date)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">나이</span>
-              <span>{formatMemberAge(member)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">학년 / 포지션</span>
-              <span>{member.grade || '-'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">종목</span>
-              <span>{member.sport || '-'}</span>
-            </div>
-          </CardContent>
-        </Card>
+        <MemberBasicInfoEditor
+          memberId={memberState.id}
+          birthDate={memberState.birth_date}
+          age={memberState.age}
+          grade={memberState.grade}
+          school={memberState.school ?? null}
+          canEdit={canEditBasicInfo}
+          onSaved={(data) => setMemberState((prev) => ({ ...prev, ...data }))}
+        />
 
         {/* Contact Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Phone className="h-5 w-5 text-primary" />
-              연락처
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground shrink-0">연락처</span>
-              <span className="text-right">{formatMemberContactDisplay(member)}</span>
-            </div>
-            {member.phone?.trim() && member.parent_phone?.trim() ? (
-              <>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">본인</span>
-                  <span>{member.phone}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">보호자</span>
-                  <span>{member.parent_phone}</span>
-                </div>
-              </>
-            ) : null}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">담당 강사</span>
-              <span>{formatPrimaryInstructorName(member.primary_instructor)}</span>
-            </div>
-          </CardContent>
-        </Card>
+        <MemberContactEditor
+          memberId={memberState.id}
+          phone={memberState.phone}
+          parentPhone={memberState.parent_phone}
+          kakaoId={memberState.kakao_id ?? null}
+          instagramId={memberState.instagram_id ?? null}
+          instructorName={formatPrimaryInstructorName(memberState.primary_instructor)}
+          instructorAccount={instructorAccount}
+          centerAccount={centerAccount}
+          canEdit={canEditBasicInfo}
+          onSaved={(data) => setMemberState((prev) => ({ ...prev, ...data }))}
+        />
 
-        {/* Physical Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Target className="h-5 w-5 text-primary" />
-              신체 정보
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">키</span>
-              <span>
-                {memberState.height_cm ? `${memberState.height_cm}cm` : '-'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">몸무게</span>
-              <span>
-                {memberState.weight_kg ? `${memberState.weight_kg}kg` : '-'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">BMI</span>
-              <span
-                className={
-                  displayBmi
-                    ? displayBmi < 18.5
-                      ? 'text-blue-400'
-                      : displayBmi < 23
-                        ? 'text-green-400'
-                        : displayBmi < 25
-                          ? 'text-yellow-400'
-                          : 'text-red-400'
-                    : ''
-                }
-              >
-                {displayBmi != null ? displayBmi.toFixed(1) : '-'}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        <MemberPhysicalInfoEditor
+          memberId={memberState.id}
+          memberName={memberState.name}
+          heightCm={memberState.height_cm}
+          weightKg={memberState.weight_kg}
+          canEditInitial={canShowPhysicalEditButton}
+          canSaveInitial={canSavePhysicalInitial}
+          bodyRecords={bodyRecords}
+          canAddRecord={canAddBodyRecord}
+          onSaved={(data) => setMemberState((prev) => ({ ...prev, ...data }))}
+        />
 
         {/* Session Info */}
         <Card className={totalRemainingSessions <= 3 && totalRemainingSessions > 0 ? 'border-warning' : ''}>

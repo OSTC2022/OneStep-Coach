@@ -60,6 +60,21 @@ export function canViewMembers(role: AppRole): boolean {
   return role === 'admin' || role === 'instructor'
 }
 
+/** 생년월일·학년/포지션·학교/소속팀 등 기본 정보 수정 */
+export function canEditMemberBasicInfo(role: AppRole): boolean {
+  return role === 'admin' || role === 'instructor'
+}
+
+/** 신체정보 수정 버튼 표시 (관리자·강사) */
+export function canViewPhysicalEditButton(role: AppRole): boolean {
+  return role === 'admin' || role === 'instructor'
+}
+
+/** 신체정보 키·몸무게 초기 설정 저장 (관리자만) */
+export function canSavePhysicalBaseline(role: AppRole): boolean {
+  return role === 'admin'
+}
+
 /** 회원 등록·수정·수업권 관리 등 쓰기 전용 경로 */
 export function isMemberWritePath(pathname: string): boolean {
   if (pathname === '/dashboard/members/new') return true

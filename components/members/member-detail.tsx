@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import { deleteMember, toggleMemberStatus } from '@/lib/actions/members'
 import {
+  formatBodyMetric,
   formatMemberAge,
   formatMemberContactDisplay,
   formatBirthDateDisplay,
@@ -195,11 +196,15 @@ export function MemberDetail({ member, packages, lessons }: MemberDetailProps) {
             <CardContent>
               <div className="grid gap-4 sm:grid-cols-4">
                 <div className="p-4 rounded-lg bg-secondary/50 text-center">
-                  <p className="text-2xl font-bold">{member.height_cm || '-'}</p>
+                  <p className="text-2xl font-bold">
+                    {member.height_cm ? formatBodyMetric(member.height_cm) : '-'}
+                  </p>
                   <p className="text-sm text-muted-foreground">키 (cm)</p>
                 </div>
                 <div className="p-4 rounded-lg bg-secondary/50 text-center">
-                  <p className="text-2xl font-bold">{member.weight_kg || '-'}</p>
+                  <p className="text-2xl font-bold">
+                    {member.weight_kg ? formatBodyMetric(member.weight_kg) : '-'}
+                  </p>
                   <p className="text-sm text-muted-foreground">몸무게 (kg)</p>
                 </div>
                 <div
