@@ -7,7 +7,7 @@ import { ArrowLeft, CalendarDays, CreditCard } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import type { MemberPortalData } from '@/lib/actions/member-portal'
+import type { MemberPortalData } from '@/lib/member-portal-types'
 
 const STATUS_LABEL: Record<string, string> = {
   present: '출석',

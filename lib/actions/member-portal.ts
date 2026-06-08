@@ -11,39 +11,13 @@ import { getLessons } from './lessons'
 import { getCenterSettings } from './center-settings'
 import { getMemberBodyRecords } from './member-body-records'
 import {
-  buildMemberPortalSummary,
-  type MemberPortalSummary,
-} from '@/lib/member-portal-summary'
-import {
   buildCenterContactView,
   buildCoachContactView,
-  type MemberCenterContactView,
-  type MemberCoachContactView,
 } from '@/lib/center-contact'
-import { toVisibleSnsAccount, type VisibleSnsAccount } from '@/lib/sns-account'
-import type { Lesson, LessonSession, Member, SessionTransaction } from '@/lib/types'
-
-export type {
-  VisibleSnsAccount,
-  MemberPortalSummary,
-  MemberCenterContactView,
-  MemberCoachContactView,
-}
-
-export type MemberPortalData = {
-  member: Member
-  instructorAccount: VisibleSnsAccount | null
-  centerAccount: VisibleSnsAccount | null
-  centerContact: MemberCenterContactView
-  coachContact: MemberCoachContactView
-  nextLesson: Lesson | null
-  recentLessons: Lesson[]
-  recentSessions: LessonSession[]
-  transactions: SessionTransaction[]
-  bodyRecords: MemberBodyRecord[]
-  bodyTableReady: boolean
-  summary: MemberPortalSummary
-}
+import { buildMemberPortalSummary } from '@/lib/member-portal-summary'
+import type { MemberPortalData } from '@/lib/member-portal-types'
+import { toVisibleSnsAccount } from '@/lib/sns-account'
+import type { Lesson, LessonSession } from '@/lib/types'
 
 function resolveRecentAttendanceDate(
   recentSessions: LessonSession[],
