@@ -17,6 +17,9 @@ export const CENTER_CONTACT_TOPICS = [
   '상담',
 ] as const
 
+export const KAKAO_CHANNEL_QR_SRC = '/images/kakao-channel-qr.png'
+export const KAKAO_CHANNEL_DEFAULT_ID = 'onesteptc'
+
 const UNASSIGNED_COACH_LABEL = '자율배정'
 
 export function isUnassignedCoach(coachName: string): boolean {

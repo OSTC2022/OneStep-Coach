@@ -6,6 +6,15 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Dumbbell, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
 import type { User } from '@/lib/types'
 import { toast } from 'sonner'
@@ -26,6 +35,8 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [hash, setHash] = useState('')
+  const [signOutOpen, setSignOutOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     function syncHash() {
@@ -39,11 +50,17 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
   const title = portalTitle(pathname, hash)
 
   async function handleSignOut() {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    toast.success('로그아웃 되었습니다.')
-    router.push('/auth/login')
-    router.refresh()
+    setSigningOut(true)
+    try {
+      const supabase = createClient()
+      await supabase.auth.signOut()
+      toast.success('로그아웃 되었습니다.')
+      setSignOutOpen(false)
+      router.push('/auth/login')
+      router.refresh()
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   return (
@@ -71,12 +88,34 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
           variant="ghost"
           size="icon"
           className="h-9 w-9 text-muted-foreground hover:text-foreground"
-          onClick={() => void handleSignOut()}
+          onClick={() => setSignOutOpen(true)}
           aria-label="로그아웃"
         >
           <LogOut className="h-4 w-4" />
         </Button>
       </div>
+
+      <AlertDialog open={signOutOpen} onOpenChange={setSignOutOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>로그아웃 하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              로그아웃하면 다시 로그인해야 합니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={signingOut}>취소</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={signingOut}
+              onClick={() => void handleSignOut()}
+            >
+              {signingOut ? '로그아웃 중…' : '로그아웃'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   )
 }

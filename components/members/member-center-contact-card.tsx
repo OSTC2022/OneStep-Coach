@@ -11,19 +11,19 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { KakaoChannelInquiryDialog } from '@/components/members/kakao-channel-inquiry-dialog'
 import {
   buildTelHref,
   CENTER_CONTACT_TOPICS,
+  KAKAO_CHANNEL_DEFAULT_ID,
   COACH_INQUIRY_HINT,
   COACH_UNASSIGNED_HINT,
   formatCoachDisplayName,
   hasExternalUrl,
-  hasKakaoChannelLink,
   hasTelLink,
   isUnassignedCoach,
   openBlog,
   openInstagram,
-  openKakaoChannel,
   type MemberCenterContactView,
   type MemberCoachContactView,
 } from '@/lib/center-contact'
@@ -145,10 +145,11 @@ export function MemberCenterContactCard({
   coach,
   center,
 }: MemberCenterContactCardProps) {
-  const [kakaoPending, setKakaoPending] = useState(false)
+  const [kakaoDialogOpen, setKakaoDialogOpen] = useState(false)
   const unassigned = isUnassignedCoach(coach.name)
 
-  const kakaoReady = hasKakaoChannelLink(center.kakaoChannel)
+  const kakaoChannel = center.kakaoChannel?.trim() || KAKAO_CHANNEL_DEFAULT_ID
+  const kakaoReady = Boolean(kakaoChannel)
   const phoneReady = hasTelLink(center.centerPhone)
   const instagramReady = hasExternalUrl(center.instagram)
   const blogReady = hasExternalUrl(center.blogUrl)
@@ -171,13 +172,6 @@ export function MemberCenterContactCard({
 
   const hasCenterInfo =
     center.centerPhone || center.centerAddress || center.businessHours
-
-  function handleKakaoClick() {
-    if (!center.kakaoChannel || !kakaoReady) return
-    setKakaoPending(true)
-    openKakaoChannel(center.kakaoChannel)
-    window.setTimeout(() => setKakaoPending(false), 600)
-  }
 
   return (
     <Card className="border-border/70">
@@ -242,7 +236,7 @@ export function MemberCenterContactCard({
               icon={<MessageCircle className="h-4 w-4" />}
               ready={kakaoReady}
               primary
-              onClick={handleKakaoClick}
+              onClick={() => setKakaoDialogOpen(true)}
             />
             <ContactActionButton
               label="전화하기"
@@ -281,18 +275,18 @@ export function MemberCenterContactCard({
           </div>
         </div>
 
-        {kakaoPending ? (
-          <p className="text-center text-xs text-muted-foreground">
-            카카오톡 채널로 이동 중…
-          </p>
-        ) : null}
-
         {unavailableNotice ? (
           <p className="text-center text-xs leading-relaxed text-muted-foreground">
             {unavailableNotice}
           </p>
         ) : null}
       </CardContent>
+
+      <KakaoChannelInquiryDialog
+        channelId={kakaoChannel}
+        open={kakaoDialogOpen}
+        onOpenChange={setKakaoDialogOpen}
+      />
     </Card>
   )
 }

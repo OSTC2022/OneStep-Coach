@@ -14,7 +14,7 @@ const CENTER_SETTINGS_SELECT =
 const DEFAULT_CENTER_SETTINGS: CenterSettings = {
   id: CENTER_SETTINGS_ID,
   name: '센터',
-  kakao_id: null,
+  kakao_id: 'onesteptc',
   instagram_id: null,
   blog_url: null,
   center_phone: null,
