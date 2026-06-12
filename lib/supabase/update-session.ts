@@ -10,13 +10,14 @@ import {
   canAccessPath,
   getDefaultDashboardPath,
   profileRoleToAppRole,
+  type AppRole,
 } from '@/lib/roles'
 import type { ProfileApprovalStatus } from '@/lib/types'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
-const DEV_AUTH_CACHE_TTL_MS = 5000
+const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 3000
 
-let devAuthCache: {
+let sessionAuthCache: {
   cookieKey: string
   user: User | null
   expiresAt: number
@@ -41,32 +42,52 @@ async function getSessionUser(
   supabase: SupabaseClient,
   request: NextRequest,
 ): Promise<User | null> {
-  if (!isDevEnvironment()) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    return user
-  }
-
   const cookieKey = devCookieKey(request)
   const now = Date.now()
   if (
-    devAuthCache &&
-    devAuthCache.cookieKey === cookieKey &&
-    devAuthCache.expiresAt > now
+    sessionAuthCache &&
+    sessionAuthCache.cookieKey === cookieKey &&
+    sessionAuthCache.expiresAt > now
   ) {
-    return devAuthCache.user
+    return sessionAuthCache.user
   }
 
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  devAuthCache = {
+  sessionAuthCache = {
     cookieKey,
     user,
-    expiresAt: now + DEV_AUTH_CACHE_TTL_MS,
+    expiresAt: now + AUTH_CACHE_TTL_MS,
   }
   return user
+}
+
+function resolveRoleFromMetadata(
+  email: string | null | undefined,
+  user: User,
+): AppRole | null {
+  if (isProtectedAdminAccount(email)) return 'admin'
+  const metadataRole = user.user_metadata?.role as string | undefined
+  if (!metadataRole) return null
+  return profileRoleToAppRole(metadataRole)
+}
+
+/** JWT 메타데이터에 승인·역할이 있으면 DB 조회 없이 대시보드 통과 (로컬 dev와 동일) */
+function shouldUseMetadataDashboardFastPath(
+  request: NextRequest,
+  user: User,
+  fastApproval: ProfileApprovalStatus | null,
+): boolean {
+  if (!fastApproval || !isProfileAccessAllowed(fastApproval, user.email)) {
+    return false
+  }
+  if (!request.nextUrl.pathname.startsWith('/dashboard')) return false
+
+  const role = resolveRoleFromMetadata(user.email, user)
+  if (!role) return false
+
+  return canAccessPath(role, request.nextUrl.pathname)
 }
 
 function shouldUseDevDashboardFastPath(
@@ -136,6 +157,36 @@ function resolveSessionRole(
   if (isProtectedAdminAccount(email)) return 'admin' as const
   if (profileRole) return profileRoleToAppRole(profileRole)
   return profileRoleToAppRole(legacyRole ?? 'member')
+}
+
+async function resolveUserSessionRole(
+  supabase: ReturnType<typeof createServerClient>,
+  user: User,
+): Promise<AppRole> {
+  const metadataRole = resolveRoleFromMetadata(user.email, user)
+  if (metadataRole) return metadataRole
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, email')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  let legacyRole: string | null = null
+  if (!profile?.role) {
+    const { data: legacy } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle()
+    legacyRole = legacy?.role ?? null
+  }
+
+  return resolveSessionRole(
+    user.email ?? profile?.email,
+    profile?.role ?? null,
+    legacyRole,
+  )
 }
 
 function missingSupabaseEnvResponse() {
@@ -218,6 +269,7 @@ export async function updateSession(request: NextRequest) {
       const fastApproval = resolveApprovalFast(user.email, metadataStatus)
 
       if (
+        shouldUseMetadataDashboardFastPath(request, user, fastApproval) ||
         shouldUseDevDashboardFastPath(request, user, fastApproval) ||
         (fastApproval &&
           isRscPrefetch(request) &&
@@ -249,27 +301,7 @@ export async function updateSession(request: NextRequest) {
         isAuthStatusPath(request.nextUrl.pathname) &&
         isProfileAccessAllowed(approvalStatus, user.email)
       ) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role, email')
-          .eq('id', user.id)
-          .maybeSingle()
-
-        let legacyRole: string | null = null
-        if (!profile?.role) {
-          const { data: legacy } = await supabase
-            .from('users')
-            .select('role')
-            .eq('id', user.id)
-            .maybeSingle()
-          legacyRole = legacy?.role ?? null
-        }
-
-        const role = resolveSessionRole(
-          user.email ?? profile?.email,
-          profile?.role ?? null,
-          legacyRole,
-        )
+        const role = await resolveUserSessionRole(supabase, user)
         const url = request.nextUrl.clone()
         url.pathname = getDefaultDashboardPath(role)
         return NextResponse.redirect(url)
@@ -277,27 +309,7 @@ export async function updateSession(request: NextRequest) {
     }
 
     if (user && request.nextUrl.pathname.startsWith('/dashboard')) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role, email')
-        .eq('id', user.id)
-        .maybeSingle()
-
-      let legacyRole: string | null = null
-      if (!profile?.role) {
-        const { data: legacy } = await supabase
-          .from('users')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle()
-        legacyRole = legacy?.role ?? null
-      }
-
-      const role = resolveSessionRole(
-        user.email ?? profile?.email,
-        profile?.role ?? null,
-        legacyRole,
-      )
+      const role = await resolveUserSessionRole(supabase, user)
 
       if (!canAccessPath(role, request.nextUrl.pathname)) {
         const url = request.nextUrl.clone()
@@ -310,27 +322,7 @@ export async function updateSession(request: NextRequest) {
       request.nextUrl.pathname.startsWith('/auth/login') &&
       user
     ) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role, email')
-        .eq('id', user.id)
-        .maybeSingle()
-
-      let legacyRole: string | null = null
-      if (!profile?.role) {
-        const { data: legacy } = await supabase
-          .from('users')
-          .select('role')
-          .eq('id', user.id)
-          .maybeSingle()
-        legacyRole = legacy?.role ?? null
-      }
-
-      const role = resolveSessionRole(
-        user.email ?? profile?.email,
-        profile?.role ?? null,
-        legacyRole,
-      )
+      const role = await resolveUserSessionRole(supabase, user)
       const url = request.nextUrl.clone()
       url.pathname = getDefaultDashboardPath(role)
       return NextResponse.redirect(url)

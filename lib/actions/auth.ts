@@ -85,6 +85,28 @@ export async function signIn(
     return { error: '가입 승인 후 로그인할 수 있습니다.' }
   }
 
+  const profileRole = isProtectedAdminAccount(accountEmail)
+    ? 'admin'
+    : profileRow?.role ??
+      (authUser.user_metadata?.role as string | undefined) ??
+      'member'
+  const metaRole = authUser.user_metadata?.role as string | undefined
+  const metaApproval = authUser.user_metadata?.approval_status as
+    | ProfileApprovalStatus
+    | undefined
+
+  if (metaRole !== profileRole || metaApproval !== approvalStatus) {
+    await supabase.auth.updateUser({
+      data: {
+        role: profileRole,
+        approval_status: approvalStatus,
+        ...(profileRow?.full_name
+          ? { full_name: profileRow.full_name }
+          : {}),
+      },
+    })
+  }
+
   const user = await getDashboardProfile()
   if (user?.role === 'member' || user?.role === 'guardian') {
     try {

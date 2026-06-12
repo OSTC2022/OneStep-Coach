@@ -10,6 +10,8 @@ const DESKTOP_PREFETCH_ROUTES = [
   '/dashboard/lesson-status',
   '/dashboard/calendar',
   '/dashboard/attendance',
+  '/dashboard/settings/center-contact',
+  '/dashboard/settings/google-calendar',
 ] as const
 
 const MOBILE_LIGHT_ROUTES = [

@@ -44,7 +44,12 @@ export const getDashboardProfile = cache(async (): Promise<User | null> => {
   const email = user.email ?? dbProfile?.email ?? null
 
   if (dbProfile) {
-    await ensureProtectedAdminRole(user.id, email ?? dbProfile.email)
+    if (
+      isProtectedAdminAccount(email ?? dbProfile.email) &&
+      dbProfile.role !== 'admin'
+    ) {
+      await ensureProtectedAdminRole(user.id, email ?? dbProfile.email)
+    }
     return {
       id: dbProfile.id,
       email: formatLoginEmailForDisplay(dbProfile.email) ?? dbProfile.email,
@@ -66,7 +71,9 @@ export const getDashboardProfile = cache(async (): Promise<User | null> => {
     .maybeSingle()
 
   if (legacy) {
-    await ensureProtectedAdminRole(user.id, legacy.email)
+    if (isProtectedAdminAccount(legacy.email) && legacy.role !== 'admin') {
+      await ensureProtectedAdminRole(user.id, legacy.email)
+    }
     return {
       id: legacy.id,
       email: legacy.email,
