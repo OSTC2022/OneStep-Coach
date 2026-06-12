@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -30,92 +30,54 @@ import {
   UserPlus,
   CalendarDays,
   ListChecks,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw,
+  Check,
+  Pencil,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { User } from '@/lib/types'
 import { getRoleLabel } from '@/lib/roles'
 import { preloadRouteChunk } from '@/lib/chunk-preload'
 import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
+import {
+  getDefaultSidebarMenuOrder,
+  normalizeSidebarMenuOrder,
+  orderSidebarMenuItems,
+  readSidebarMenuOrder,
+  type SidebarMenuItemDef,
+  writeSidebarMenuOrder,
+} from '@/lib/dashboard-menu-order'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
-const menuItems = [
-  {
-    title: '마이페이지',
-    url: '/dashboard/my',
-    icon: LayoutDashboard,
-    roles: ['member', 'guardian'],
-  },
-  {
-    title: '대시보드',
-    url: '/dashboard',
-    icon: LayoutDashboard,
-    roles: ['admin', 'instructor'],
-  },
-  {
-    title: '수업현황',
-    url: '/dashboard/lesson-status',
-    icon: ListChecks,
-    roles: ['admin', 'instructor'],
-  },
-  {
-    title: '회원 관리',
-    url: '/dashboard/members',
-    icon: Users,
-    roles: ['admin', 'instructor'],
-  },
-  {
-    title: '회원 추가',
-    url: '/dashboard/members/new',
-    icon: UserPlus,
-    roles: ['admin'],
-  },
-  {
-    title: '세션/결제',
-    url: '/dashboard/sessions',
-    icon: CreditCard,
-    roles: ['admin'],
-  },
-  {
-    title: '수업 등록',
-    url: '/dashboard/lessons',
-    icon: ClipboardList,
-    roles: ['admin', 'instructor'],
-  },
-  {
-    title: '캘린더',
-    url: '/dashboard/calendar',
-    icon: CalendarDays,
-    roles: ['admin', 'instructor'],
-  },
-  {
-    title: '출석 체크',
-    url: '/dashboard/attendance',
-    icon: CalendarCheck,
-    roles: ['admin', 'instructor'],
-  },
-  {
-    title: '강사 관리',
-    url: '/dashboard/instructors',
-    icon: UserCog,
-    roles: ['admin'],
-  },
-  {
-    title: '리포트',
-    url: '/dashboard/reports',
-    icon: BarChart3,
-    roles: ['admin'],
-  },
-  {
-    title: '센터 연락',
-    url: '/dashboard/settings/center-contact',
-    icon: MessageCircle,
-    roles: ['admin'],
-  },
-  {
-    title: '설정',
-    url: '/dashboard/settings',
-    icon: Settings,
-    roles: ['admin'],
-  },
-]
+const MENU_ICONS: Record<string, LucideIcon> = {
+  '/dashboard/my': LayoutDashboard,
+  '/dashboard': LayoutDashboard,
+  '/dashboard/lesson-status': ListChecks,
+  '/dashboard/members': Users,
+  '/dashboard/members/new': UserPlus,
+  '/dashboard/sessions': CreditCard,
+  '/dashboard/lessons': ClipboardList,
+  '/dashboard/calendar': CalendarDays,
+  '/dashboard/attendance': CalendarCheck,
+  '/dashboard/instructors': UserCog,
+  '/dashboard/reports': BarChart3,
+  '/dashboard/settings/center-contact': MessageCircle,
+  '/dashboard/settings': Settings,
+}
+
+function isMenuItemActive(pathname: string, url: string) {
+  if (url === '/dashboard/settings') {
+    return pathname === '/dashboard/settings'
+  }
+  return (
+    pathname === url ||
+    (url !== '/dashboard' && pathname.startsWith(url))
+  )
+}
 
 interface DashboardSidebarProps {
   user: User | null
@@ -127,11 +89,53 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar()
   const userRole = user?.role || 'member'
 
-  const filteredItems = menuItems.filter((item) =>
-    item.roles.includes(userRole),
+  const [editMode, setEditMode] = useState(false)
+  const [order, setOrder] = useState<string[]>(() =>
+    getDefaultSidebarMenuOrder(userRole),
   )
+  const [draggingId, setDraggingId] = useState<string | null>(null)
 
   const prefetchedRoutesRef = useRef(new Set<string>())
+
+  useEffect(() => {
+    setOrder(readSidebarMenuOrder(userRole))
+  }, [userRole])
+
+  const menuItems = orderSidebarMenuItems(userRole, order)
+  const canEditMenu = menuItems.length > 1
+
+  function persist(next: string[]) {
+    const normalized = normalizeSidebarMenuOrder(userRole, next)
+    setOrder(normalized)
+    writeSidebarMenuOrder(userRole, normalized)
+  }
+
+  function moveItem(id: string, direction: -1 | 1) {
+    const index = order.indexOf(id)
+    if (index < 0) return
+    const target = index + direction
+    if (target < 0 || target >= order.length) return
+
+    const next = [...order]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    persist(next)
+  }
+
+  function reorder(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return
+    const from = order.indexOf(draggedId)
+    const to = order.indexOf(targetId)
+    if (from < 0 || to < 0) return
+
+    const next = [...order]
+    next.splice(from, 1)
+    next.splice(to, 0, draggedId)
+    persist(next)
+  }
+
+  function resetOrder() {
+    persist(getDefaultSidebarMenuOrder(userRole))
+  }
 
   function prefetchMenuRoute(href: string) {
     if (!shouldBackgroundPrefetch()) return
@@ -142,20 +146,97 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   }
 
   useEffect(() => {
-    if (!shouldBackgroundPrefetch() || !isMobile) return
-    for (const item of filteredItems.slice(0, 4)) {
+    if (!shouldBackgroundPrefetch() || !isMobile || editMode) return
+    for (const item of menuItems.slice(0, 4)) {
       if (item.url === pathname) continue
       prefetchMenuRoute(item.url)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMobile, pathname])
+  }, [isMobile, pathname, editMode, menuItems])
+
+  function renderMenuItem(item: SidebarMenuItemDef, index: number) {
+    const Icon = MENU_ICONS[item.id] ?? LayoutDashboard
+    const isActive = isMenuItemActive(pathname, item.url)
+
+    if (!editMode) {
+      return (
+        <SidebarMenuItem key={item.id}>
+          <SidebarMenuButton
+            asChild
+            isActive={isActive}
+            className={isActive ? 'bg-sidebar-accent text-sidebar-primary' : ''}
+          >
+            <Link
+              href={item.url}
+              prefetch={false}
+              onPointerDown={() => prefetchMenuRoute(item.url)}
+              onTouchStart={() => prefetchMenuRoute(item.url)}
+              onClick={() => {
+                if (isMobile) setOpenMobile(false)
+              }}
+            >
+              <Icon className={`h-4 w-4 ${isActive ? 'text-sidebar-primary' : ''}`} />
+              <span>{item.title}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      )
+    }
+
+    return (
+      <SidebarMenuItem key={item.id}>
+        <div
+          draggable
+          onDragStart={() => setDraggingId(item.id)}
+          onDragEnd={() => setDraggingId(null)}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={() => {
+            if (draggingId) reorder(draggingId, item.id)
+            setDraggingId(null)
+          }}
+          className={cn(
+            'flex items-center gap-1 rounded-md border border-dashed border-sidebar-border px-2 py-1.5',
+            draggingId === item.id && 'opacity-50',
+          )}
+        >
+          <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" />
+          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
+          <div className="flex shrink-0 items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={index === 0}
+              aria-label={`${item.title} 위로`}
+              onClick={() => moveItem(item.id, -1)}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={index === menuItems.length - 1}
+              aria-label={`${item.title} 아래로`}
+              onClick={() => moveItem(item.id, 1)}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      </SidebarMenuItem>
+    )
+  }
 
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <Link href="/dashboard" prefetch={false} className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-sidebar-primary/10 rounded-xl flex items-center justify-center">
-            <Dumbbell className="w-5 h-5 text-sidebar-primary" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sidebar-primary/10">
+            <Dumbbell className="h-5 w-5 text-sidebar-primary" />
           </div>
           <div>
             <h1 className="font-bold text-sidebar-foreground">OneStep Coach</h1>
@@ -163,59 +244,74 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           </div>
         </Link>
       </SidebarHeader>
-      
+
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-muted-foreground">메뉴</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredItems.map((item) => {
-                const isActive =
-                  item.url === '/dashboard/settings'
-                    ? pathname === '/dashboard/settings'
-                    : pathname === item.url ||
-                      (item.url !== '/dashboard' && pathname.startsWith(item.url))
-                
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive}
-                      className={isActive ? 'bg-sidebar-accent text-sidebar-primary' : ''}
+          <div className="flex items-center justify-between gap-2 px-2">
+            <SidebarGroupLabel className="px-0 text-muted-foreground">
+              {editMode ? '메뉴 배치' : '메뉴'}
+            </SidebarGroupLabel>
+            {canEditMenu ? (
+              <div className="flex items-center gap-1">
+                {editMode ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      aria-label="기본값으로 초기화"
+                      onClick={resetOrder}
                     >
-                      <Link
-                        href={item.url}
-                        prefetch={false}
-                        onPointerDown={() => prefetchMenuRoute(item.url)}
-                        onTouchStart={() => prefetchMenuRoute(item.url)}
-                        onClick={() => {
-                          if (isMobile) setOpenMobile(false)
-                        }}
-                      >
-                        <item.icon className={`w-4 h-4 ${isActive ? 'text-sidebar-primary' : ''}`} />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      aria-label="편집 완료"
+                      onClick={() => setEditMode(false)}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    aria-label="메뉴 배치 편집"
+                    onClick={() => setEditMode(true)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ) : null}
+          </div>
+          {editMode ? (
+            <p className="px-2 pb-2 text-xs text-muted-foreground">
+              드래그하거나 화살표로 순서를 바꿀 수 있습니다.
+            </p>
+          ) : null}
+          <SidebarGroupContent>
+            <SidebarMenu>{menuItems.map(renderMenuItem)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-sidebar-primary/20 flex items-center justify-center text-sidebar-primary font-medium text-sm">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary/20 text-sm font-medium text-sidebar-primary">
             {user?.full_name?.charAt(0) || user?.email?.charAt(0) || '?'}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sidebar-foreground truncate">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-sidebar-foreground">
               {user?.full_name || '사용자'}
             </p>
-            <p className="text-xs text-muted-foreground">
-              {getRoleLabel(userRole)}
-            </p>
+            <p className="text-xs text-muted-foreground">{getRoleLabel(userRole)}</p>
           </div>
         </div>
       </SidebarFooter>

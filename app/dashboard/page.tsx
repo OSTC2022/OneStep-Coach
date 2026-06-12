@@ -5,20 +5,13 @@ import {
   getInstructorDashboardStats,
   getRecentActivity,
 } from '@/lib/actions/dashboard'
-import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Users,
-  CalendarCheck,
-  ClipboardList,
-  CalendarDays,
-  ListChecks,
-  AlertTriangle,
-} from 'lucide-react'
+import { Users, AlertTriangle } from 'lucide-react'
 import { profileRoleToAppRole } from '@/lib/roles'
 import { getCenterSettings } from '@/lib/actions/center-settings'
 import { getInstructorForCurrentUser } from '@/lib/actions/instructors'
 import { StaffSnsCard } from '@/components/instructors/staff-sns-card'
+import { DashboardQuickLinks } from '@/components/dashboard/dashboard-quick-links'
 import { DashboardRecentPayments } from './dashboard-recent-payments'
 
 export default async function DashboardPage() {
@@ -39,22 +32,7 @@ export default async function DashboardPage() {
     isAdmin ? Promise.resolve(null) : getInstructorForCurrentUser(),
   ])
 
-  const quickLinks =
-    isAdmin
-      ? [
-          { href: '/dashboard/lesson-status', label: '수업현황', icon: ListChecks },
-          { href: '/dashboard/members', label: '회원 관리', icon: Users },
-          { href: '/dashboard/attendance', label: '출석 체크', icon: CalendarCheck },
-          { href: '/dashboard/lessons', label: '수업 등록', icon: ClipboardList },
-          { href: '/dashboard/calendar', label: '캘린더', icon: CalendarDays },
-        ]
-      : [
-          { href: '/dashboard/lesson-status', label: '수업현황', icon: ListChecks },
-          { href: '/dashboard/members', label: '회원 관리', icon: Users },
-          { href: '/dashboard/attendance', label: '출석 체크', icon: CalendarCheck },
-          { href: '/dashboard/lessons', label: '수업 등록', icon: ClipboardList },
-          { href: '/dashboard/calendar', label: '캘린더', icon: CalendarDays },
-        ]
+  const quickLinkRole = isAdmin ? 'admin' : 'instructor'
 
   return (
     <div className="space-y-6">
@@ -111,24 +89,12 @@ export default async function DashboardPage() {
         ) : null}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {quickLinks.map((item) => (
-          <Link key={item.href} href={item.href}>
-            <Card className="h-full transition-colors hover:bg-muted/40 active:bg-muted/60 max-md:transition-none">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">바로가기</p>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-        {isAdmin ? <DashboardRecentPayments payments={recentActivity} /> : null}
-      </div>
+      <DashboardQuickLinks
+        role={quickLinkRole}
+        trailing={
+          isAdmin ? <DashboardRecentPayments payments={recentActivity} /> : null
+        }
+      />
 
       {!isAdmin ? (
         <StaffSnsCard
