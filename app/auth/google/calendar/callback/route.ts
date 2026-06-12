@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/actions/auth'
 import { connectGoogleCalendarFromOAuthCode } from '@/lib/google-calendar/connect'
+import { verifyGoogleOAuthState } from '@/lib/google-calendar/oauth-state'
 import { GOOGLE_CALENDAR_OAUTH_STATE_COOKIE } from '@/lib/google-calendar/oauth'
 
 export async function GET(request: NextRequest) {
@@ -10,10 +11,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   const state = searchParams.get('state')
   const oauthError = searchParams.get('error')
-  const savedState = request.cookies.get(GOOGLE_CALENDAR_OAUTH_STATE_COOKIE)?.value
-
-  const response = NextResponse.redirect(settingsUrl)
-  response.cookies.delete(GOOGLE_CALENDAR_OAUTH_STATE_COOKIE)
+  const cookieState = request.cookies.get(GOOGLE_CALENDAR_OAUTH_STATE_COOKIE)?.value
 
   if (oauthError) {
     return NextResponse.redirect(
@@ -26,7 +24,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${settingsUrl}?error=admin-only`)
   }
 
-  if (!code || !state || !savedState || state !== savedState) {
+  if (!code || !state) {
+    return NextResponse.redirect(`${settingsUrl}?error=invalid-state`)
+  }
+
+  const stateValid =
+    (await verifyGoogleOAuthState(state)) ||
+    Boolean(cookieState && cookieState === state)
+
+  if (!stateValid) {
     return NextResponse.redirect(`${settingsUrl}?error=invalid-state`)
   }
 
@@ -37,5 +43,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  return NextResponse.redirect(`${settingsUrl}?connected=1`)
+  const success = NextResponse.redirect(`${settingsUrl}?connected=1`)
+  success.cookies.delete(GOOGLE_CALENDAR_OAUTH_STATE_COOKIE)
+  return success
 }
