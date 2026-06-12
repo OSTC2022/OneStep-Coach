@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import Link from 'next/link'
 import { createPortal } from 'react-dom'
 import { Loader2, Trash2, UserPlus, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -101,6 +102,64 @@ interface LessonCreateDialogProps {
 const LESSON_TYPES = [...LESSON_TYPE_OPTIONS]
 const EMPTY_SLOT_LESSONS: Lesson[] = []
 
+const POPUP_FIELD_LABEL =
+  'text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground'
+const POPUP_INPUT_VALUE =
+  'h-7 border-0 bg-transparent px-0 text-xs font-semibold text-foreground shadow-none focus-visible:ring-0'
+const POPUP_SECTION = 'space-y-1 rounded-md border border-border/55 bg-muted/10 px-2 py-1.5'
+
+function PopupFormSection({
+  label,
+  children,
+  hint,
+}: {
+  label: string
+  children: ReactNode
+  hint?: ReactNode
+}) {
+  return (
+    <div className={POPUP_SECTION}>
+      <p className={POPUP_FIELD_LABEL}>{label}</p>
+      {children}
+      {hint ? (
+        <div className="hidden text-[9px] leading-snug text-muted-foreground/90 sm:block">
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function LessonFormSection({
+  label,
+  htmlFor,
+  isPopup,
+  hint,
+  children,
+}: {
+  label: string
+  htmlFor?: string
+  isPopup: boolean
+  hint?: ReactNode
+  children: ReactNode
+}) {
+  if (isPopup) {
+    return (
+      <PopupFormSection label={label} hint={hint}>
+        {children}
+      </PopupFormSection>
+    )
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint}
+    </div>
+  )
+}
+
 function toTimeInputValue(value?: string | null) {
   if (!value) return ''
   return value.slice(0, 5)
@@ -166,9 +225,10 @@ export function LessonCreateDialog({
     member_id: string | null
     title: string | null
   } | null>(null)
-  const [popupPosition, setPopupPosition] = useState<{ top: number; left: number }>({
+  const [popupPosition, setPopupPosition] = useState<{ top: number; left: number; width: number }>({
     top: 80,
     left: 304,
+    width: 272,
   })
   const [mounted, setMounted] = useState(false)
   const initialInstructorId = defaultInstructorId || AUTO_INSTRUCTOR_ID
@@ -241,6 +301,41 @@ export function LessonCreateDialog({
         ? formatRunningLessonPayHint()
         : null
 
+  const linkedMemberId = memberId || getLessonMemberId(lesson)
+  const linkedMemberLabel = useMemo(() => {
+    if (lesson) return getLessonCalendarLabel(lesson)
+    if (memberId) {
+      const member = memberOptions.find((item) => item.id === memberId)
+      if (member) return formatMemberCalendarLabel(member)
+    }
+    const trimmed = entryText.trim()
+    return trimmed || null
+  }, [lesson, memberId, memberOptions, entryText])
+
+  const popupTitle = (
+    <>
+      <span className="font-medium text-muted-foreground">
+        {isAddingToSlot ? '수업 추가' : '수업 수정'}
+      </span>
+      {!isAddingToSlot && linkedMemberLabel ? (
+        <>
+          <span className="text-muted-foreground/70"> · </span>
+          {linkedMemberId ? (
+            <Link
+              href={`/dashboard/members/${linkedMemberId}`}
+              className="font-semibold text-primary hover:underline"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {linkedMemberLabel}
+            </Link>
+          ) : (
+            <span className="font-semibold text-primary">{linkedMemberLabel}</span>
+          )}
+        </>
+      ) : null}
+    </>
+  )
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -250,7 +345,11 @@ export function LessonCreateDialog({
 
     const base = anchor
       ? getLessonPopupPosition(anchor)
-      : { top: 80, left: Math.max(16, window.innerWidth - 304) }
+      : {
+          top: 80,
+          left: Math.max(12, (window.innerWidth - 272) / 2),
+          width: Math.min(272, window.innerWidth - 24),
+        }
 
     const el = popupRef.current
     if (!el) {
@@ -263,7 +362,7 @@ export function LessonCreateDialog({
     if (top + height > window.innerHeight - 12) {
       top = Math.max(12, window.innerHeight - height - 12)
     }
-    setPopupPosition({ top, left: base.left })
+    setPopupPosition({ top, left: base.left, width: base.width })
   }, [
     open,
     isPopup,
@@ -891,49 +990,58 @@ export function LessonCreateDialog({
 
   const formFields = (
     <>
-      <div className="space-y-1.5">
-        <Label htmlFor="lesson-date" className={isPopup ? 'text-xs' : undefined}>
-          날짜
-        </Label>
+      <LessonFormSection label="날짜" htmlFor="lesson-date" isPopup={isPopup}>
         <KoreanDatePicker
           id="lesson-date"
           value={date}
           onChange={setDate}
           placeholder="날짜 선택"
           compact={isPopup}
-          className={isPopup ? 'text-xs' : undefined}
+          className={isPopup ? POPUP_INPUT_VALUE : undefined}
         />
-      </div>
+      </LessonFormSection>
 
-      <div className="space-y-1.5">
-        <div className="grid grid-cols-2 gap-2">
-          <Label htmlFor="start-time" className={isPopup ? 'text-xs' : undefined}>
-            시작
-          </Label>
-          <Label htmlFor="end-time" className={isPopup ? 'text-xs' : undefined}>
-            종료
-          </Label>
-        </div>
-        <SimpleTimeRangeInput
-          startId="start-time"
-          endId="end-time"
-          startValue={startTime}
-          endValue={endTime}
-          onStartChange={setStartTime}
-          onEndChange={setEndTime}
-          calendarStartTime={draft?.startTime ?? null}
-          endPlaceholder={draft?.endTime || '19:30'}
-          compact={isPopup}
-        />
-        {!isPopup && (
-          <p className="text-xs text-muted-foreground">
-            예: 18:00~19:30 (시작 칸에 한 번에 입력 가능)
-          </p>
+      <LessonFormSection label="시작 / 종료" isPopup={isPopup}>
+        {isPopup ? (
+          <div className="grid grid-cols-2 gap-2">
+            <SimpleTimeRangeInput
+              startId="start-time"
+              endId="end-time"
+              startValue={startTime}
+              endValue={endTime}
+              onStartChange={setStartTime}
+              onEndChange={setEndTime}
+              calendarStartTime={draft?.startTime ?? null}
+              endPlaceholder={draft?.endTime || '19:30'}
+              compact={isPopup}
+              className="col-span-2 [&_input]:h-7 [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-0 [&_input]:text-xs [&_input]:font-semibold [&_input]:shadow-none [&_input]:focus-visible:ring-0"
+            />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Label htmlFor="start-time">시작</Label>
+              <Label htmlFor="end-time">종료</Label>
+            </div>
+            <SimpleTimeRangeInput
+              startId="start-time"
+              endId="end-time"
+              startValue={startTime}
+              endValue={endTime}
+              onStartChange={setStartTime}
+              onEndChange={setEndTime}
+              calendarStartTime={draft?.startTime ?? null}
+              endPlaceholder={draft?.endTime || '19:30'}
+              compact={isPopup}
+            />
+            <p className="text-xs text-muted-foreground">
+              예: 18:00~19:30 (시작 칸에 한 번에 입력 가능)
+            </p>
+          </>
         )}
-      </div>
+      </LessonFormSection>
 
-      <div className="space-y-1.5">
-        <Label className={isPopup ? 'text-xs' : undefined}>회원 연결 (선택)</Label>
+      <LessonFormSection label="회원 연결" isPopup={isPopup}>
         <MemberSearchSelect
           key={
             isAddingToSlot
@@ -954,39 +1062,53 @@ export function LessonCreateDialog({
           inlineSearch
           enableRecentSearches
           onSearchMembers={searchMembersForPicker}
+          className={
+            isPopup
+              ? '[&_input]:h-7 [&_input]:border-0 [&_input]:bg-transparent [&_input]:pl-7 [&_input]:text-xs [&_input]:font-semibold [&_input]:shadow-none [&_input]:focus-visible:ring-0'
+              : undefined
+          }
         />
-      </div>
+      </LessonFormSection>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="calendar-display" className={isPopup ? 'text-xs' : undefined}>
-          캘린더 표시
-        </Label>
+      <LessonFormSection
+        label="캘린더 표시"
+        htmlFor="calendar-display"
+        isPopup={isPopup}
+        hint={
+          isPopup ? null : (
+            <p className="text-[11px] text-muted-foreground">
+              비우면 회원 정보로 자동 표시 · 예: {calendarPlaceholder}
+            </p>
+          )
+        }
+      >
         <Input
           id="calendar-display"
           value={calendarDisplayText}
           onChange={(e) => setCalendarDisplayText(e.target.value)}
           placeholder={calendarPlaceholder}
-          className={isPopup ? 'h-8 text-xs' : undefined}
+          className={isPopup ? POPUP_INPUT_VALUE : undefined}
         />
-        <p className="text-[11px] text-muted-foreground">
-          비우면 회원 정보로 자동 표시 · 예: {calendarPlaceholder}
-        </p>
-      </div>
+      </LessonFormSection>
 
       {isPopup ? (
-        <div className="grid grid-cols-2 gap-2">
-          <InstructorSelectField
-            id="lesson-instructor"
-            label="강사"
-            value={instructorId}
-            onChange={setInstructorId}
-            instructors={instructors}
-            compact
-          />
-          <div className="space-y-1">
-            <Label className="text-xs">수업 유형</Label>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className={POPUP_SECTION}>
+            <InstructorSelectField
+              id="lesson-instructor"
+              label="강사"
+              value={instructorId}
+              onChange={setInstructorId}
+              instructors={instructors}
+              compact
+              labelClassName={POPUP_FIELD_LABEL}
+              triggerClassName="h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none"
+            />
+          </div>
+          <div className={POPUP_SECTION}>
+            <p className={POPUP_FIELD_LABEL}>수업 유형</p>
             <Select value={lessonType} onValueChange={setLessonType}>
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1030,16 +1152,27 @@ export function LessonCreateDialog({
         <p className="text-[11px] font-medium text-primary">{fixedLessonPayHint}</p>
       ) : null}
 
-      <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-2">
-        <div className="space-y-1">
-          <Label className={isPopup ? 'text-xs' : undefined}>반복</Label>
+      <div
+        className={cn(
+          'space-y-1',
+          isPopup ? POPUP_SECTION : 'rounded-md border border-border/70 bg-muted/20 p-2',
+        )}
+      >
+        <div className="space-y-0.5">
+          <Label className={isPopup ? POPUP_FIELD_LABEL : undefined}>반복</Label>
           <Select
             value={recurrencePattern}
             onValueChange={(value) =>
               setRecurrencePattern(value as LessonRecurrencePattern)
             }
           >
-            <SelectTrigger className={isPopup ? 'h-8 text-xs' : undefined}>
+            <SelectTrigger
+              className={
+                isPopup
+                  ? 'h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none'
+                  : undefined
+              }
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1056,7 +1189,7 @@ export function LessonCreateDialog({
           <div className="space-y-1">
             <Label
               htmlFor="recurrence-end-date"
-              className={isPopup ? 'text-xs' : undefined}
+              className={isPopup ? POPUP_FIELD_LABEL : undefined}
             >
               반복 종료
             </Label>
@@ -1066,7 +1199,7 @@ export function LessonCreateDialog({
               onChange={setRecurrenceEndDate}
               placeholder="종료 날짜"
               compact={isPopup}
-              className={isPopup ? 'text-xs' : undefined}
+              className={isPopup ? POPUP_INPUT_VALUE : undefined}
             />
             {recurrencePreview ? (
               <p className="text-[11px] font-medium text-primary">
@@ -1086,13 +1219,13 @@ export function LessonCreateDialog({
   )
 
   const popupFooter = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       {isEditing && !isAddingToSlot && (
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-8 sm:w-8"
           disabled={isLoading}
           title="삭제 (Del)"
           onClick={() => void handleDeleteRequest()}
@@ -1104,12 +1237,12 @@ export function LessonCreateDialog({
         type="button"
         variant="outline"
         size="sm"
-        className="flex-1"
+        className="h-7 flex-1 text-xs sm:h-8"
         onClick={() => handleOpenChange(false)}
       >
         취소
       </Button>
-      <Button type="submit" size="sm" className="flex-1" disabled={isLoading}>
+      <Button type="submit" size="sm" className="h-7 flex-1 text-xs sm:h-8" disabled={isLoading}>
         {isLoading ? (
           <>
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -1299,32 +1432,29 @@ export function LessonCreateDialog({
       <div
         ref={popupRef}
         data-lesson-edit-popup
-        className="fixed z-50 w-72 rounded-lg border border-border bg-card shadow-xl animate-in fade-in-0 zoom-in-95"
-        style={{ top: popupPosition.top, left: popupPosition.left }}
+        className="fixed z-50 max-w-[calc(100vw-1.5rem)] rounded-lg border border-border bg-card shadow-xl animate-in fade-in-0 zoom-in-95"
+        style={{
+          top: popupPosition.top,
+          left: popupPosition.left,
+          width: popupPosition.width,
+        }}
         onPointerDownCapture={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center justify-between gap-1.5 border-b border-border bg-muted/15 px-2.5 py-2">
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold">
-              {isAddingToSlot ? '수업 추가' : '수업 수정'}
-              {!isAddingToSlot && lesson ? (
-                <span className="ml-1 font-normal text-muted-foreground">
-                  · {getLessonCalendarLabel(lesson)}
-                </span>
-              ) : null}
-            </h3>
+            <h3 className="truncate text-xs leading-snug sm:text-sm">{popupTitle}</h3>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-0.5">
             {!isAddingToSlot && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-7 px-2 text-xs"
+                className="h-6 px-1.5 text-[10px] sm:h-7 sm:px-2 sm:text-xs"
                 onClick={handleAddAnotherMember}
               >
-                <UserPlus className="mr-1 h-3.5 w-3.5" />
+                <UserPlus className="mr-0.5 h-3 w-3 sm:mr-1 sm:h-3.5 sm:w-3.5" />
                 추가
               </Button>
             )}
@@ -1332,16 +1462,18 @@ export function LessonCreateDialog({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-6 w-6 sm:h-7 sm:w-7"
               onClick={() => handleOpenChange(false)}
             >
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
-        <form onSubmit={handleSubmit} className="text-sm">
-          <div className="space-y-2 px-3 py-2">{formFields}</div>
-          <div className="border-t border-border px-3 py-2">{popupFooter}</div>
+        <form onSubmit={handleSubmit} className="text-xs sm:text-sm">
+          <div className="max-h-[min(70vh,32rem)] space-y-1.5 overflow-y-auto overscroll-contain px-2.5 py-1.5">
+            {formFields}
+          </div>
+          <div className="border-t border-border px-2.5 py-1.5">{popupFooter}</div>
         </form>
       </div>
       {scopeDialogs}
@@ -1355,7 +1487,13 @@ export function LessonCreateDialog({
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{isEditing ? '수업 수정' : '수업 추가'}</DialogTitle>
+            <DialogTitle className="flex flex-wrap items-baseline gap-x-1 text-base leading-snug">
+              {isEditing ? (
+                popupTitle
+              ) : (
+                <span className="font-semibold text-foreground">수업 추가</span>
+              )}
+            </DialogTitle>
             <DialogDescription>
               {isEditing
                 ? '수업 일정과 정보를 수정합니다.'

@@ -6,6 +6,7 @@ import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import {
   clearGoogleCalendarSyncRow,
   ensureGoogleCalendarWatch,
+  getConnectedCalendarNames,
   getGoogleCalendarSyncRow,
   listPendingGoogleSyncLessons,
   stopGoogleCalendarWatchForRow,
@@ -25,6 +26,7 @@ export async function getGoogleCalendarSyncStatus(): Promise<GoogleCalendarSyncS
       connected: false,
       connectedEmail: null,
       calendarName: null,
+      calendarNames: [],
       syncEnabled: false,
       lastSyncedAt: null,
       lastSyncError: null,
@@ -35,18 +37,24 @@ export async function getGoogleCalendarSyncStatus(): Promise<GoogleCalendarSyncS
   }
 
   const row = await getGoogleCalendarSyncRow()
+  const calendarNames = getConnectedCalendarNames(row)
   const watchExpiresAt = row?.watch_expiration ?? null
+  const watchExpiresAt2 = row?.watch_expiration_2 ?? null
   const watchActive = Boolean(
-    row?.watch_channel_id &&
+    (row?.watch_channel_id &&
       watchExpiresAt &&
-      Date.parse(watchExpiresAt) > Date.now(),
+      Date.parse(watchExpiresAt) > Date.now()) ||
+      (row?.watch_channel_id_2 &&
+        watchExpiresAt2 &&
+        Date.parse(watchExpiresAt2) > Date.now()),
   )
 
   return {
     configured: true,
     connected: Boolean(row?.refresh_token && row.calendar_id),
     connectedEmail: row?.connected_email ?? null,
-    calendarName: row?.calendar_name ?? null,
+    calendarName: calendarNames.length > 0 ? calendarNames.join(', ') : null,
+    calendarNames,
     syncEnabled: row?.sync_enabled ?? false,
     lastSyncedAt: row?.last_synced_at ?? null,
     lastSyncError: row?.last_sync_error ?? null,

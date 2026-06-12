@@ -1,8 +1,10 @@
 'use client'
 
+import { useRef, useState } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { MonthDayPanel } from './month-day-panel'
 import { TimeGrid } from './time-grid'
-import { CalendarMobileWeek } from './calendar-mobile-week'
+import { CalendarPanelResizeHandle } from './calendar-panel-resize-handle'
 import type { MemoQuickAddPayload } from './month-memo-input'
 import type {
   CalendarMemberSearchItem,
@@ -10,6 +12,8 @@ import type {
   LessonEditAnchor,
 } from '@/lib/calendar-utils'
 import type { Instructor, Lesson } from '@/lib/types'
+import { useCalendarPanelSplit } from '@/lib/calendar-panel-split'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface DayWeekViewProps {
@@ -41,6 +45,10 @@ interface DayWeekViewProps {
   hasRangeCache?: boolean
 }
 
+const MIN_BOTTOM_PX = 168
+const MIN_TOP_PX = 160
+const DEFAULT_BOTTOM_PX = 280
+
 export function DayWeekView({
   dates,
   selectedDate,
@@ -63,30 +71,55 @@ export function DayWeekView({
   hasRangeCache = true,
 }: DayWeekViewProps) {
   const isWeekView = dates.length > 1
+  const [gridExpanded, setGridExpanded] = useState(true)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const splitKey = isWeekView ? 'week' : 'day'
+
+  const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
+    containerRef,
+    {
+      storageKey: splitKey,
+      defaultBottomPx: DEFAULT_BOTTOM_PX,
+      minBottomPx: MIN_BOTTOM_PX,
+      minTopPx: MIN_TOP_PX,
+    },
+  )
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
-      {isWeekView ? (
-        <div className="min-h-0 w-full min-w-0 flex-1 overflow-hidden md:hidden">
-          <CalendarMobileWeek
-            dates={dates}
-            selectedDate={selectedDate}
-            lessons={lessons}
-            onSelectDate={onSelectDate}
-            onLessonActivate={onLessonActivate}
-            highlightedLessonIds={highlightedLessonIds}
-            rangeLoading={rangeLoading}
-            hasCache={hasRangeCache}
-          />
-        </div>
-      ) : null}
+    <div
+      ref={containerRef}
+      className={cn(
+        'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
+        isDragging && 'select-none',
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 py-1.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1.5 text-xs text-muted-foreground"
+          onClick={() => setGridExpanded((prev) => !prev)}
+        >
+          {gridExpanded ? (
+            <>
+              <ChevronUp className="h-3.5 w-3.5" />
+              시간표 접기
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3.5 w-3.5" />
+              시간표 펼치기
+            </>
+          )}
+        </Button>
+      </div>
 
       <div
-        className={
-          isWeekView
-            ? 'hidden min-h-0 w-full min-w-0 flex-1 overflow-hidden md:flex'
-            : 'min-h-0 w-full min-w-0 flex-1 overflow-hidden md:flex'
-        }
+        className={cn(
+          'min-h-0 overflow-hidden',
+          gridExpanded ? 'flex-1' : 'shrink-0',
+        )}
       >
         <TimeGrid
           dates={dates}
@@ -101,6 +134,7 @@ export function DayWeekView({
           isLessonSelected={isLessonSelected}
           onClearLessonSelection={onClearLessonSelection}
           compactHeader={compactHeader}
+          collapsed={!gridExpanded}
           highlightedLessonIds={highlightedLessonIds}
           selectedLessonIds={selectedLessonIds}
           rangeLoading={rangeLoading}
@@ -109,13 +143,11 @@ export function DayWeekView({
         />
       </div>
 
+      <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
+
       <div
-        className={cn(
-          'min-h-0 shrink-0 overflow-hidden border-t border-border',
-          isWeekView
-            ? 'max-h-[32vh] md:max-h-[min(36vh,16rem)]'
-            : 'max-h-[32vh] md:max-h-none md:flex-1',
-        )}
+        className="w-full shrink-0 self-start overflow-y-auto"
+        style={{ maxHeight: `${bottomPx}px` }}
       >
         <MonthDayPanel
           selectedDate={selectedDate}

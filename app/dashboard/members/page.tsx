@@ -9,8 +9,8 @@ import { MemberList } from './member-list'
 export default async function MembersPage() {
   const { canManage } = await requireMemberViewer()
   const { data: members, count: totalCount } = await getMembers({
-    orderBy: 'created_at',
-    orderAsc: false,
+  orderBy: 'recent_lesson',
+  orderAsc: false,
     limit: LIST_PAGE_SIZE,
     offset: 0,
   })

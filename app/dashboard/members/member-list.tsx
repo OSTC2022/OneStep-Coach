@@ -1,10 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createMember, deleteMember, getMembers, toggleMemberStatus } from '@/lib/actions/members'
 import { getInstructors } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+import {
+  DEFAULT_MEMBER_LIST_SORT,
+  memberListOrderByFromField,
+  type MemberListSortField,
+} from '@/lib/member-list-sort'
 import {
   formatMemberAge,
   formatMemberContactDisplay,
@@ -55,7 +60,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Edit, Plus, Search, Trash2 } from 'lucide-react'
+import { Edit, Plus, Search, Trash2, ArrowDown, ArrowUp, CalendarDays, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { MemberTrashSheet } from './member-trash-sheet'
 import { LIST_ROW_LINK_PREFETCH } from '@/lib/navigation-prefetch'
 
@@ -67,6 +72,66 @@ interface MemberListProps {
   canManage?: boolean
 }
 
+function MemberSortIcon({
+  active,
+  asc,
+  recentLesson = false,
+}: {
+  active: boolean
+  asc: boolean
+  recentLesson?: boolean
+}) {
+  if (!active) return null
+  if (recentLesson) {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-primary">
+        <CalendarDays className="h-3 w-3" aria-hidden />
+        {asc ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+      </span>
+    )
+  }
+  return asc ? (
+    <ArrowUp className="h-3 w-3 text-primary" aria-hidden />
+  ) : (
+    <ArrowDown className="h-3 w-3 text-primary" aria-hidden />
+  )
+}
+
+function SortableMemberHead({
+  label,
+  field,
+  sortField,
+  sortAsc,
+  recentLesson = false,
+  className,
+  onSort,
+}: {
+  label: string
+  field: MemberListSortField
+  sortField: MemberListSortField
+  sortAsc: boolean
+  recentLesson?: boolean
+  className?: string
+  onSort: (field: MemberListSortField) => void
+}) {
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 font-medium transition-colors hover:text-primary"
+        onClick={() => onSort(field)}
+      >
+        {label}
+        <MemberSortIcon
+          active={sortField === field}
+          asc={sortAsc}
+          recentLesson={recentLesson}
+        />
+      </button>
+    </TableHead>
+  )
+}
+
 export function MemberList({
   initialMembers,
   totalCount,
@@ -75,14 +140,21 @@ export function MemberList({
   canManage = true,
 }: MemberListProps) {
   const [members, setMembers] = useState(initialMembers)
-  const [loadedCount, setLoadedCount] = useState(initialMembers.length)
+  const [listTotalCount, setListTotalCount] = useState(totalCount)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [sortField, setSortField] = useState<MemberListSortField>(
+    DEFAULT_MEMBER_LIST_SORT.field,
+  )
+  const [sortAsc, setSortAsc] = useState(DEFAULT_MEMBER_LIST_SORT.asc)
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [pageLoading, setPageLoading] = useState(false)
+  const skipFetchRef = useRef(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [instructors, setInstructors] = useState<{ id: string; name: string }[]>([])
   const [instructorsLoading, setInstructorsLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Member | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [trashCount, setTrashCount] = useState(initialTrashCount)
@@ -90,8 +162,59 @@ export function MemberList({
 
   useEffect(() => {
     setMembers(initialMembers)
-    setLoadedCount(initialMembers.length)
-  }, [initialMembers])
+    setListTotalCount(totalCount)
+  }, [initialMembers, totalCount])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim())
+      setCurrentPage(1)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [searchTerm])
+
+  const loadMembers = useCallback(async () => {
+    setPageLoading(true)
+    try {
+      const { data, count } = await getMembers({
+        orderBy: memberListOrderByFromField(sortField),
+        orderAsc: sortAsc,
+        limit: pageSize,
+        offset: (currentPage - 1) * pageSize,
+        search: debouncedSearch || undefined,
+        isActive:
+          statusFilter === 'all'
+            ? undefined
+            : statusFilter === 'active',
+      })
+      setMembers(data)
+      setListTotalCount(count)
+    } finally {
+      setPageLoading(false)
+    }
+  }, [sortField, sortAsc, currentPage, pageSize, debouncedSearch, statusFilter])
+
+  useEffect(() => {
+    if (skipFetchRef.current) {
+      skipFetchRef.current = false
+      return
+    }
+    void loadMembers()
+  }, [loadMembers])
+
+  function handleSortClick(field: MemberListSortField) {
+    if (sortField === field) {
+      setSortAsc((prev) => !prev)
+    } else {
+      setSortField(field)
+      setSortAsc(field === 'recent_lesson' ? false : true)
+    }
+    setCurrentPage(1)
+  }
+
+  const totalPages = Math.max(1, Math.ceil(listTotalCount / pageSize))
+  const pageStart = listTotalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1
+  const pageEnd = Math.min(currentPage * pageSize, listTotalCount)
 
   useEffect(() => {
     if (!isAddDialogOpen || instructors.length > 0 || instructorsLoading) return
@@ -109,30 +232,6 @@ export function MemberList({
     }
   }, [isAddDialogOpen, instructors.length, instructorsLoading])
 
-  const hasMore = loadedCount < totalCount
-
-  async function handleLoadMore() {
-    if (!hasMore || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const { data } = await getMembers({
-        orderBy: 'created_at',
-        orderAsc: false,
-        limit: pageSize,
-        offset: loadedCount,
-      })
-      if (data.length > 0) {
-        setMembers((prev) => {
-          const ids = new Set(prev.map((m) => m.id))
-          return [...prev, ...data.filter((m) => !ids.has(m.id))]
-        })
-        setLoadedCount((n) => n + data.length)
-      }
-    } finally {
-      setLoadingMore(false)
-    }
-  }
-
   const [formData, setFormData] = useState<MemberFormData>({
     name: '',
     birth_date: '',
@@ -149,19 +248,6 @@ export function MemberList({
     primary_instructor_id: AUTO_INSTRUCTOR_ID,
   })
 
-  const filteredMembers = members.filter((member) => {
-    const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.phone?.includes(searchTerm) ||
-      member.parent_phone?.includes(searchTerm) ||
-      member.sport?.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesStatus = statusFilter === 'all' || 
-      (statusFilter === 'active' && member.is_active) ||
-      (statusFilter === 'inactive' && !member.is_active)
-    
-    return matchesSearch && matchesStatus
-  })
-
   const handleAddMember = async () => {
     if (!formData.name.trim()) return
 
@@ -176,7 +262,10 @@ export function MemberList({
     }
 
     if (result.data) {
-      setMembers([{ ...result.data, primary_instructor: null }, ...members])
+      setIsAddDialogOpen(false)
+      setCurrentPage(1)
+      skipFetchRef.current = false
+      void loadMembers()
       setFormData({
         name: '',
         birth_date: '',
@@ -192,7 +281,6 @@ export function MemberList({
         memo: '',
         primary_instructor_id: AUTO_INSTRUCTOR_ID,
       })
-      setIsAddDialogOpen(false)
       toast.success('새 회원이 등록되었습니다.')
     }
 
@@ -234,6 +322,7 @@ export function MemberList({
       deleted_at: new Date().toISOString(),
     }
     setMembers(members.filter((m) => m.id !== deleteTarget.id))
+    setListTotalCount((count) => Math.max(0, count - 1))
     setRecentTrashItems((prev) => [
       trashedMember,
       ...prev.filter((m) => m.id !== trashedMember.id),
@@ -258,7 +347,13 @@ export function MemberList({
               className="pl-9 w-full sm:w-64"
             />
           </div>
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | 'active' | 'inactive')}>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v as 'all' | 'active' | 'inactive')
+              setCurrentPage(1)
+            }}
+          >
             <SelectTrigger className="w-full sm:w-32">
               <SelectValue />
             </SelectTrigger>
@@ -471,9 +566,21 @@ export function MemberList({
       </div>
 
       {/* Stats */}
-      <div className="flex gap-4 text-sm text-muted-foreground">
-        <span>전체 {members.length}명</span>
-        <span>검색 결과 {filteredMembers.length}명</span>
+      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+        <span>전체 {listTotalCount}명</span>
+        {debouncedSearch || statusFilter !== 'all' ? (
+          <span>현재 페이지 {pageStart}-{pageEnd}명</span>
+        ) : (
+          <span>
+            {pageStart}-{pageEnd}명 표시
+          </span>
+        )}
+        {pageLoading ? (
+          <span className="inline-flex items-center gap-1">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            불러오는 중
+          </span>
+        ) : null}
       </div>
 
       {/* Table */}
@@ -481,26 +588,62 @@ export function MemberList({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>이름</TableHead>
-              <TableHead className="hidden sm:table-cell">나이</TableHead>
-              <TableHead className="hidden md:table-cell">연락처</TableHead>
-              <TableHead className="hidden lg:table-cell">종목</TableHead>
-              <TableHead className="hidden lg:table-cell">담당 강사</TableHead>
-              <TableHead>상태</TableHead>
-              {canManage ? <TableHead className="text-right">관리</TableHead> : null}
+              <SortableMemberHead
+                label="이름"
+                field="recent_lesson"
+                sortField={sortField}
+                sortAsc={sortAsc}
+                recentLesson
+                onSort={handleSortClick}
+              />
+              <SortableMemberHead
+                label="나이"
+                field="age"
+                sortField={sortField}
+                sortAsc={sortAsc}
+                className="hidden sm:table-cell"
+                onSort={handleSortClick}
+              />
+              <SortableMemberHead
+                label="종목"
+                field="sport"
+                sortField={sortField}
+                sortAsc={sortAsc}
+                className="hidden lg:table-cell"
+                onSort={handleSortClick}
+              />
+              <SortableMemberHead
+                label="담당 강사"
+                field="instructor"
+                sortField={sortField}
+                sortAsc={sortAsc}
+                className="hidden lg:table-cell lg:pr-2"
+                onSort={handleSortClick}
+              />
+              <TableHead className="hidden md:table-cell lg:pl-10 xl:pl-16">
+                연락처
+              </TableHead>
+              <TableHead className="w-[1%] whitespace-nowrap text-right pr-4 md:pr-6">
+                상태
+              </TableHead>
+              {canManage ? (
+                <TableHead className="w-[1%] whitespace-nowrap text-right pr-2 md:pr-4">
+                  관리
+                </TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredMembers.length === 0 ? (
+            {members.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 7 : 6} className="text-center py-12">
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
                     <p>
-                      {searchTerm || statusFilter !== 'all'
+                      {debouncedSearch || statusFilter !== 'all'
                         ? '검색 결과가 없습니다.'
                         : '등록된 회원이 없습니다.'}
                     </p>
-                    {canManage && !searchTerm && statusFilter === 'all' && (
+                    {canManage && !debouncedSearch && statusFilter === 'all' && (
                       <Button asChild>
                         <Link href="/dashboard/members/new">
                           <Plus className="h-4 w-4 mr-2" />
@@ -512,7 +655,7 @@ export function MemberList({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredMembers.map((member) => (
+              members.map((member) => (
                 <TableRow key={member.id}>
                   <TableCell className="font-medium">
                     <Link
@@ -526,29 +669,31 @@ export function MemberList({
                   <TableCell className="hidden sm:table-cell">
                     {formatMemberAge(member)}
                   </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {formatMemberContactDisplay(member)}
-                  </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     {member.sport || '-'}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell">
+                  <TableCell className="hidden lg:table-cell lg:pr-2">
                     {formatPrimaryInstructorName(member.primary_instructor)}
                   </TableCell>
-                  <TableCell>
-                    {canManage ? (
-                      <Switch
-                        checked={member.is_active}
-                        onCheckedChange={() => void handleToggleMemberStatus(member)}
-                      />
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {member.is_active ? '활성' : '비활성'}
-                      </span>
-                    )}
+                  <TableCell className="hidden md:table-cell lg:pl-10 xl:pl-16">
+                    {formatMemberContactDisplay(member)}
+                  </TableCell>
+                  <TableCell className="w-[1%] whitespace-nowrap text-right pr-4 md:pr-6">
+                    <div className="flex justify-end">
+                      {canManage ? (
+                        <Switch
+                          checked={member.is_active}
+                          onCheckedChange={() => void handleToggleMemberStatus(member)}
+                        />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {member.is_active ? '활성' : '비활성'}
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   {canManage ? (
-                    <TableCell className="text-right">
+                    <TableCell className="w-[1%] whitespace-nowrap text-right pr-2 md:pr-4">
                       <div className="flex justify-end gap-1">
                         <Button variant="ghost" size="icon" asChild>
                           <Link
@@ -605,18 +750,35 @@ export function MemberList({
         </AlertDialogContent>
       </AlertDialog>
 
-      {hasMore && !searchTerm && statusFilter === 'all' && (
-        <div className="flex justify-center pt-2">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loadingMore}
-            onClick={() => void handleLoadMore()}
-          >
-            {loadingMore ? '불러오는 중…' : `더보기 (${loadedCount}/${totalCount})`}
-          </Button>
+      {totalPages > 1 ? (
+        <div className="flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {pageStart}-{pageEnd} / 전체 {listTotalCount}명 · {currentPage}/{totalPages}페이지
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={currentPage <= 1 || pageLoading}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              이전
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={currentPage >= totalPages || pageLoading}
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            >
+              다음
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

@@ -190,8 +190,22 @@ export function SignaturePadDialog({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl gap-4">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && isSubmitting) return
+        onOpenChange(next)
+      }}
+    >
+      <DialogContent
+        className="max-w-3xl gap-4"
+        onPointerDownOutside={(e) => {
+          if (isSubmitting) e.preventDefault()
+        }}
+        onEscapeKeyDown={(e) => {
+          if (isSubmitting) e.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>

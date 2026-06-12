@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { ChevronDown, ChevronUp } from 'lucide-react'
@@ -22,7 +22,9 @@ import {
 import { getInstructorCalendarColor } from '@/lib/instructor-colors'
 import type { Lesson } from '@/lib/types'
 import { MonthDayPanel } from './month-day-panel'
+import { CalendarPanelResizeHandle } from './calendar-panel-resize-handle'
 import { Button } from '@/components/ui/button'
+import { useCalendarPanelSplit } from '@/lib/calendar-panel-split'
 
 import type { MemoQuickAddPayload } from './month-memo-input'
 
@@ -47,6 +49,9 @@ interface MonthViewProps {
 const WEEKDAY_LABELS = WEEKDAY_LABELS_MON_START
 const MAX_LINES = 4
 const LINE_HEIGHT = 3
+const MIN_BOTTOM_PX = 168
+const MIN_TOP_PX = 120
+const DEFAULT_BOTTOM_PX = 300
 
 export function MonthView({
   currentDate,
@@ -62,6 +67,16 @@ export function MonthView({
   onClearLessonSelection,
 }: MonthViewProps) {
   const [gridExpanded, setGridExpanded] = useState(true)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
+    containerRef,
+    {
+      storageKey: 'month',
+      defaultBottomPx: DEFAULT_BOTTOM_PX,
+      minBottomPx: MIN_BOTTOM_PX,
+      minTopPx: MIN_TOP_PX,
+    },
+  )
   const gridDates = getMonthGridDates(currentDate)
   const weeks = useMemo(
     () =>
@@ -95,7 +110,13 @@ export function MonthView({
   const today = new Date()
 
   return (
-    <div className="flex h-full min-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <div
+      ref={containerRef}
+      className={cn(
+        'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
+        isDragging && 'select-none',
+      )}
+    >
       <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 py-1.5">
         <Button
           type="button"
@@ -120,8 +141,8 @@ export function MonthView({
 
       <div
         className={cn(
-          'flex shrink-0 flex-col overflow-hidden transition-[flex-grow] duration-300',
-          gridExpanded ? 'min-h-[42%] flex-[1.1]' : 'h-auto',
+          'flex min-h-0 flex-col overflow-hidden transition-[flex-grow] duration-300',
+          gridExpanded ? 'min-h-0 flex-1' : 'shrink-0',
         )}
       >
         <div className="grid shrink-0 grid-cols-7 border-b border-border bg-muted/30">
@@ -217,16 +238,23 @@ export function MonthView({
         </div>
       </div>
 
-      <MonthDayPanel
-        selectedDate={selectedDate}
-        lessons={lessons}
-        members={members}
-        onLessonActivate={onLessonActivate}
-        onLessonEdit={onLessonEdit}
-        onLessonLineUpdate={onLessonLineUpdate}
-        onMemoSubmit={onMemoSubmit}
-        isLessonSelected={isLessonSelected}
-      />
+      <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
+
+      <div
+        className="w-full shrink-0 self-start overflow-y-auto"
+        style={{ maxHeight: `${bottomPx}px` }}
+      >
+        <MonthDayPanel
+          selectedDate={selectedDate}
+          lessons={lessons}
+          members={members}
+          onLessonActivate={onLessonActivate}
+          onLessonEdit={onLessonEdit}
+          onLessonLineUpdate={onLessonLineUpdate}
+          onMemoSubmit={onMemoSubmit}
+          isLessonSelected={isLessonSelected}
+        />
+      </div>
     </div>
   )
 }

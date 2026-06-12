@@ -26,6 +26,8 @@ interface InstructorSelectFieldProps {
   instructors: InstructorSelectOption[]
   showLabel?: boolean
   className?: string
+  labelClassName?: string
+  triggerClassName?: string
   compact?: boolean
 }
 
@@ -37,6 +39,8 @@ export function InstructorSelectField({
   instructors,
   showLabel = true,
   className,
+  labelClassName,
+  triggerClassName,
   compact = false,
 }: InstructorSelectFieldProps) {
   const selectedInstructor = instructors.find((instructor) => instructor.id === value)
@@ -44,7 +48,7 @@ export function InstructorSelectField({
   return (
     <div className={cn(compact ? 'space-y-1' : 'space-y-2', className)}>
       {showLabel && (
-        <Label htmlFor={id} className={compact ? 'text-xs' : undefined}>
+        <Label htmlFor={id} className={cn(compact && 'text-xs', labelClassName)}>
           {label}
         </Label>
       )}
@@ -54,7 +58,11 @@ export function InstructorSelectField({
       >
         <SelectTrigger
           id={id}
-          className={cn('bg-input border-border', compact && 'h-8 text-xs')}
+          className={cn(
+            'bg-input border-border',
+            compact && 'h-8 text-xs',
+            triggerClassName,
+          )}
         >
           {value && value !== AUTO_INSTRUCTOR_ID && selectedInstructor ? (
             <InstructorColorLabel

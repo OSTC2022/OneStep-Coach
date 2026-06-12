@@ -37,8 +37,8 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
 
   useEffect(() => {
     if (searchParams.get('connected') === '1') {
-      toast.success('Google 캘린더 "수업" 연동 완료', {
-        description: '새 일정은 Push 알림으로 거의 실시간 반영됩니다.',
+      toast.success('Google 캘린더 연동 완료', {
+        description: '「수업」「수업2」 캘린더를 찾으면 자동 반영됩니다.',
       })
       router.replace('/dashboard/settings/google-calendar')
     }
@@ -113,8 +113,10 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>
-            센터 공용 Google 계정의 <strong className="text-foreground">「수업」</strong>{' '}
-            캘린더와 연동하려면 환경 변수 설정이 필요합니다.
+            센터 공용 Google 계정의{' '}
+            <strong className="text-foreground">「수업」</strong>,{' '}
+            <strong className="text-foreground">「수업2」</strong> 캘린더와 연동하려면
+            환경 변수 설정이 필요합니다.
           </p>
           <ul className="list-disc space-y-1 pl-5">
             <li>GOOGLE_CLIENT_ID</li>
@@ -142,9 +144,10 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Google Calendar의 <strong className="text-foreground">「수업」</strong>{' '}
-            캘린더에 등록한 일정이 원스텝 코치 캘린더에 자동으로 반영됩니다. 회원 이름을
-            찾지 못하면 임시 등록 후 알림을 보냅니다.
+            Google Calendar의 <strong className="text-foreground">「수업」</strong>,{' '}
+            <strong className="text-foreground">「수업2」</strong> 캘린더에 등록한 일정이
+            원스텝 코치 캘린더에 자동으로 반영됩니다. 회원 이름을 찾지 못하면 임시 등록 후
+            알림을 보냅니다.
           </p>
 
           <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
@@ -170,7 +173,11 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                 </div>
                 <div>
                   <dt className="text-muted-foreground">가져오는 캘린더</dt>
-                  <dd className="font-medium">{status.calendarName ?? '수업'}</dd>
+                  <dd className="font-medium">
+                    {status.calendarNames.length > 0
+                      ? status.calendarNames.map((name) => `「${name}」`).join(', ')
+                      : '수업'}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Push 알림</dt>
@@ -254,9 +261,14 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           <CardTitle className="text-base">사용 방법</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>1. Google Calendar에 캘린더 이름을 정확히 <strong className="text-foreground">수업</strong>으로 만듭니다.</p>
+          <p>
+            1. Google Calendar에 캘린더 이름을 정확히{' '}
+            <strong className="text-foreground">수업</strong>,{' '}
+            <strong className="text-foreground">수업2</strong>로 만듭니다. (수업은 필수,
+            수업2는 선택)
+          </p>
           <p>2. 일정 제목은 <strong className="text-foreground">회원명(나이종목)</strong> 형식을 권장합니다. 예: 윤찬민(14축구)</p>
-          <p>3. iPhone 캘린더를 쓰는 경우, iCloud/Google과 「수업」 캘린더를 동기화해 두면 같은 일정이 반영됩니다.</p>
+          <p>3. iPhone 캘린더를 쓰는 경우, iCloud/Google과 「수업」「수업2」 캘린더를 동기화해 두면 같은 일정이 반영됩니다.</p>
         </CardContent>
       </Card>
     </div>

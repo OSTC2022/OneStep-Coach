@@ -17,6 +17,12 @@ import {
 } from '@/lib/member-utils'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import {
+  fetchLastLessonDateByMember,
+  sortFieldUsesMemorySort,
+  sortMembersForList,
+  type MemberListOrderBy,
+} from '@/lib/member-list-sort'
+import {
   MEMBER_DETAIL_SELECT,
   MEMBER_LIST_SELECT,
   MEMBER_LIST_SELECT_LEGACY,
@@ -157,7 +163,10 @@ function buildMembersQuery(
   query = query.order(options.orderBy, { ascending: options.orderAsc })
 
   if (options.search) {
-    query = query.or(`name.ilike.%${options.search}%,phone.ilike.%${options.search}%`)
+    const q = options.search.trim()
+    query = query.or(
+      `name.ilike.%${q}%,phone.ilike.%${q}%,parent_phone.ilike.%${q}%,sport.ilike.%${q}%`,
+    )
   }
   if (options.isActive !== undefined) {
     query = query.eq('is_active', options.isActive)
@@ -183,25 +192,31 @@ async function fetchMembersRows(
     trash?: boolean
     limit?: number
     offset?: number
-    orderBy?: 'name' | 'created_at' | 'deleted_at'
+    orderBy?: MemberListOrderBy
     orderAsc?: boolean
     withCount?: boolean
   },
 ) {
-  const orderBy = options?.orderBy ?? 'name'
-  const orderAsc = options?.orderAsc ?? true
+  const orderBy = options?.orderBy ?? 'recent_lesson'
+  const orderAsc = options?.orderAsc ?? false
   const limit = options?.limit
   const offset = options?.offset
+  const useMemorySort = sortFieldUsesMemorySort(orderBy)
+
+  const dbOrderBy: string =
+    orderBy === 'recent_lesson' || orderBy === 'instructor' || orderBy === 'age'
+      ? 'name'
+      : orderBy
 
   const baseOpts = {
     search: options?.search,
     isActive: options?.isActive,
     instructorId: options?.instructorId,
     trash: options?.trash,
-    limit,
-    offset,
-    orderBy,
-    orderAsc,
+    limit: useMemorySort ? undefined : limit,
+    offset: useMemorySort ? undefined : offset,
+    orderBy: dbOrderBy,
+    orderAsc: useMemorySort ? true : orderAsc,
     withCount: options?.withCount,
   }
 
@@ -301,11 +316,14 @@ export async function getMembers(options?: {
   trash?: boolean
   limit?: number
   offset?: number
-  orderBy?: 'name' | 'created_at' | 'deleted_at'
+  orderBy?: MemberListOrderBy
   orderAsc?: boolean
 }): Promise<{ data: Member[]; count: number; trashEnabled: boolean }> {
   const supabase = await createStaffDataClient()
   const trashEnabled = options?.trash ? await isMemberTrashEnabled() : true
+  const orderBy = options?.orderBy ?? 'recent_lesson'
+  const orderAsc =
+    options?.orderAsc ?? (orderBy === 'recent_lesson' ? false : true)
 
   if (options?.trash && !trashEnabled) {
     return { data: [], count: 0, trashEnabled: false }
@@ -313,6 +331,8 @@ export async function getMembers(options?: {
 
   const { data: members, error, count } = await fetchMembersRows(supabase, {
     ...options,
+    orderBy,
+    orderAsc,
     withCount: true,
   })
 
@@ -334,8 +354,27 @@ export async function getMembers(options?: {
   ]
   const lookup = await fetchInstructorLookup(supabase, instructorIds)
 
+  let data = attachPrimaryInstructors(members, lookup) as Member[]
+
+  const needsMemorySort = sortFieldUsesMemorySort(orderBy)
+  if (needsMemorySort) {
+    const lastLessonByMember =
+      orderBy === 'recent_lesson'
+        ? await fetchLastLessonDateByMember(
+            supabase,
+            data.map((member) => member.id),
+          )
+        : new Map<string, string>()
+    data = await sortMembersForList(data, orderBy, orderAsc, lastLessonByMember)
+    const offset = options?.offset ?? 0
+    const limit = options?.limit
+    if (limit != null) {
+      data = data.slice(offset, offset + limit)
+    }
+  }
+
   return {
-    data: attachPrimaryInstructors(members, lookup) as Member[],
+    data,
     count: count ?? members.length,
     trashEnabled,
   }

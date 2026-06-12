@@ -67,6 +67,10 @@ interface TimeGridProps {
   selectedLessonIds?: ReadonlySet<string>
   rangeLoading?: boolean
   hasRangeCache?: boolean
+  /** 컨테이너 높이에 맞춰 시간축·블록을 함께 축소·확대 */
+  fitHourHeight?: boolean
+  /** 접힌 상태 — 요일·날짜 헤더만 표시 */
+  collapsed?: boolean
 }
 
 const HOURS = Array.from(
@@ -74,7 +78,7 @@ const HOURS = Array.from(
   (_, i) => CALENDAR_START_HOUR + i,
 )
 
-const TIME_GUTTER_WIDTH_PX = 56
+const TIME_GUTTER_WIDTH_PX = 48
 const WEEK_DAY_COLUMN_WIDTH_PX = 72
 
 function getDayColumnClass(multiDay: boolean) {
@@ -332,9 +336,12 @@ export function TimeGrid({
   selectedLessonIds,
   rangeLoading = false,
   hasRangeCache = true,
+  fitHourHeight = false,
+  collapsed = false,
 }: TimeGridProps) {
   const activateLesson = onLessonActivate ?? onLessonEdit
   const scrollRef = useRef<HTMLDivElement>(null)
+  const dayHeaderRef = useRef<HTMLDivElement>(null)
   const highlightedSet = useMemo(
     () => new Set(highlightedLessonIds ?? []),
     [highlightedLessonIds],
@@ -386,6 +393,28 @@ export function TimeGrid({
   const hourHeightRef = useRef(hourHeight)
   hourHeightRef.current = hourHeight
   const gridHeight = getGridHeight(hourHeight)
+
+  useEffect(() => {
+    if (!fitHourHeight) return
+    const scrollEl = scrollRef.current
+    if (!scrollEl) return
+
+    function fitToContainer() {
+      const headerHeight = dayHeaderRef.current?.offsetHeight ?? 48
+      const available = scrollEl.clientHeight - headerHeight
+      const hourCount = CALENDAR_END_HOUR - CALENDAR_START_HOUR
+      if (available <= 0 || hourCount <= 0) return
+      const fitted = available / hourCount
+      setHourHeight(
+        Math.max(DEFAULT_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, fitted)),
+      )
+    }
+
+    const observer = new ResizeObserver(fitToContainer)
+    observer.observe(scrollEl)
+    fitToContainer()
+    return () => observer.disconnect()
+  }, [fitHourHeight, dates.length, compactHeader])
   const isMultiDay = dates.length > 1
   const gridMinWidth = isMultiDay
     ? TIME_GUTTER_WIDTH_PX + dates.length * WEEK_DAY_COLUMN_WIDTH_PX
@@ -458,6 +487,7 @@ export function TimeGrid({
     if (!el) return
 
     function handleWheel(e: WheelEvent) {
+      if (fitHourHeight) return
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
       setHourHeight((prev) => {
@@ -468,7 +498,7 @@ export function TimeGrid({
 
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
-  }, [])
+  }, [fitHourHeight])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -487,6 +517,7 @@ export function TimeGrid({
     }
 
     function handleTouchMove(e: TouchEvent) {
+      if (fitHourHeight) return
       if (e.touches.length !== 2 || pinchStartDistance == null) return
       e.preventDefault()
       const distance = touchDistance(e.touches)
@@ -524,7 +555,7 @@ export function TimeGrid({
       el.removeEventListener('touchend', handleTouchEnd)
       el.removeEventListener('touchcancel', handleTouchEnd)
     }
-  }, [])
+  }, [fitHourHeight])
 
   function getMinutesFromY(y: number) {
     return yToMinutes(y, hourHeight)
@@ -1063,39 +1094,52 @@ export function TimeGrid({
   return (
     <div className={cn('relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/20 px-2 py-1 md:hidden">
-        <p className="text-[10px] text-muted-foreground">핀치 또는 버튼으로 확대·축소</p>
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-7 w-7"
-            onClick={zoomOut}
-            disabled={hourHeight <= MIN_HOUR_HEIGHT}
-            aria-label="줌 아웃"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </Button>
-          <span className="min-w-[2.75rem] text-center text-[10px] font-medium tabular-nums text-muted-foreground">
-            {zoomPercent}%
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-7 w-7"
-            onClick={zoomIn}
-            disabled={hourHeight >= MAX_HOUR_HEIGHT}
-            aria-label="줌 인"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        {!collapsed ? (
+          <>
+            <p className="text-[10px] text-muted-foreground">핀치 또는 버튼으로 확대·축소</p>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                onClick={zoomOut}
+                disabled={hourHeight <= MIN_HOUR_HEIGHT}
+                aria-label="줌 아웃"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </Button>
+              <span className="min-w-[2.75rem] text-center text-[10px] font-medium tabular-nums text-muted-foreground">
+                {zoomPercent}%
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                onClick={zoomIn}
+                disabled={hourHeight >= MAX_HOUR_HEIGHT}
+                aria-label="줌 인"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="w-full py-0.5 text-center text-[10px] text-muted-foreground">
+            시간표 펼치기로 전체 보기
+          </p>
+        )}
       </div>
 
       <div
         ref={scrollRef}
-        className="relative min-h-0 w-full min-w-0 flex-1 overflow-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]"
+        className={cn(
+          'relative w-full min-w-0',
+          collapsed
+            ? 'shrink-0 overflow-hidden'
+            : 'min-h-0 flex-1 overflow-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]',
+        )}
       >
         <div
           className={cn(
@@ -1108,8 +1152,11 @@ export function TimeGrid({
               : undefined
           }
         >
-          <div className="sticky top-0 z-20 flex w-full shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm">
-            <div className="sticky left-0 z-30 w-14 shrink-0 border-r border-border bg-card max-md:bg-card md:bg-card/95" />
+          <div
+            ref={dayHeaderRef}
+            className="sticky top-0 z-20 flex w-full shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm"
+          >
+            <div className="sticky left-0 z-30 w-12 shrink-0 border-r border-border bg-card max-md:bg-card md:bg-card/95" />
             {dates.map((date) => {
               const isToday = isSameDay(date, now)
               const isSelected = selectedDate ? isSameDay(date, selectedDate) : false
@@ -1124,44 +1171,73 @@ export function TimeGrid({
                   onClick={() => onSelectDate?.(date)}
                   className={cn(
                     dayColumnClass,
-                    'border-r border-border py-2 text-center last:border-r-0 transition-colors',
+                    'border-r border-border text-center last:border-r-0 transition-colors',
+                    isMultiDay ? 'px-0.5 py-1' : 'py-2',
                     canSelect && 'cursor-pointer hover:bg-muted/40',
                     isToday && !isSelected && 'bg-primary/5',
                     isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/40',
                   )}
                 >
-                  {!compactHeader && isMultiDay && (
-                    <p className={cn('text-[11px] font-medium', dateColor || 'text-muted-foreground')}>
-                      {format(date, 'EEE', { locale: ko })}
-                    </p>
-                  )}
-                  <p
-                    className={cn(
-                      'text-sm font-semibold tabular-nums',
-                      !isToday && !isSelected && dateColor,
-                      isToday &&
-                        !isSelected &&
-                        'inline-flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-primary/40',
-                      isSelected &&
-                        'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
-                      isToday &&
+                  {isMultiDay ? (
+                    <span
+                      className={cn(
+                        'inline-flex items-center justify-center gap-0.5 leading-none',
                         isSelected &&
-                        'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground',
-                    )}
-                  >
-                    {format(date, 'd')}
-                  </p>
-                  {holiday && !isSelected && (
-                    <p className="mt-0.5 text-[9px] font-medium text-red-500">공휴일</p>
+                          'rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground',
+                        isToday &&
+                          !isSelected &&
+                          'rounded-full px-1 py-0.5 ring-1 ring-primary/40',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'text-xs font-semibold tabular-nums',
+                          !isToday && !isSelected && dateColor,
+                        )}
+                      >
+                        {format(date, 'd')}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-[10px] font-medium',
+                          !isSelected && (dateColor || 'text-muted-foreground'),
+                        )}
+                      >
+                        {format(date, 'EEE', { locale: ko })}
+                      </span>
+                    </span>
+                  ) : (
+                    <>
+                      <p
+                        className={cn(
+                          'text-sm font-semibold tabular-nums',
+                          !isToday && !isSelected && dateColor,
+                          isToday &&
+                            !isSelected &&
+                            'inline-flex items-center justify-center rounded-full px-2 py-0.5 ring-1 ring-primary/40',
+                          isSelected &&
+                            'inline-flex items-center justify-center rounded-full bg-primary px-2 py-0.5 text-primary-foreground',
+                          isToday &&
+                            isSelected &&
+                            'inline-flex items-center justify-center rounded-full bg-primary px-2 py-0.5 text-primary-foreground',
+                        )}
+                      >
+                        {format(date, 'd')}({format(date, 'EEE', { locale: ko })})
+                      </p>
+                      {holiday && !isSelected && (
+                        <p className="mt-0.5 text-[9px] font-medium text-red-500">공휴일</p>
+                      )}
+                    </>
                   )}
                 </button>
               )
             })}
           </div>
 
+          {!collapsed ? (
           <div className="flex w-full min-w-full">
           <div
-            className="sticky left-0 z-10 w-14 shrink-0 border-r border-border bg-card relative"
+            className="sticky left-0 z-10 w-12 shrink-0 border-r border-border bg-card relative"
             style={{ height: gridHeight }}
           >
             {HOURS.map((hour) => (
@@ -1377,6 +1453,7 @@ export function TimeGrid({
             )
           })}
           </div>
+          ) : null}
         </div>
       </div>
       {rangeLoading && !hasRangeCache ? (

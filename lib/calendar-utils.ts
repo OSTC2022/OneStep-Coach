@@ -467,29 +467,34 @@ export type LessonEditAnchor = {
   bottom: number
 }
 
-const POPUP_WIDTH = 288
-export const POPUP_ESTIMATED_HEIGHT = 330
-const POPUP_GAP = 10
+const POPUP_WIDTH = 272
+export const POPUP_ESTIMATED_HEIGHT = 290
+const POPUP_GAP = 8
+const MOBILE_POPUP_MAX_VW = 24
 
 export function getLessonPopupPosition(anchor: LessonEditAnchor) {
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const isMobile = vw < 640
+  const popupWidth = isMobile ? Math.min(POPUP_WIDTH, vw - MOBILE_POPUP_MAX_VW) : POPUP_WIDTH
 
-  let left = anchor.right + POPUP_GAP
+  let left = anchor.left - popupWidth - POPUP_GAP
   let top = anchor.top
 
-  if (left + POPUP_WIDTH > vw - 12) {
-    left = anchor.left - POPUP_WIDTH - POPUP_GAP
+  if (isMobile) {
+    left = Math.max(12, (vw - popupWidth) / 2)
+  } else if (left < 12) {
+    left = anchor.right + POPUP_GAP
   }
-  if (left < 12) {
-    left = Math.min(Math.max(12, anchor.left), vw - POPUP_WIDTH - 12)
+  if (left + popupWidth > vw - 12) {
+    left = Math.max(12, vw - popupWidth - 12)
   }
 
   if (top + POPUP_ESTIMATED_HEIGHT > vh - 12) {
     top = Math.max(12, vh - POPUP_ESTIMATED_HEIGHT - 12)
   }
 
-  return { top, left }
+  return { top, left, width: popupWidth }
 }
 
 export function isSameLessonSlot(a: Lesson, b: Lesson): boolean {

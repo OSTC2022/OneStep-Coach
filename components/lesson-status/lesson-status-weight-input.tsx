@@ -1,12 +1,15 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Undo2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   clearLessonStatusWeight,
   recordLessonStatusWeight,
 } from '@/lib/actions/member-body-records'
+import { formatBodyMetric } from '@/lib/member-utils'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
@@ -27,12 +30,14 @@ export function LessonStatusWeightInput({
   className,
   onWeightChange,
 }: LessonStatusWeightInputProps) {
-  const [value, setValue] = useState(
-    initialWeight != null ? String(initialWeight) : '',
-  )
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
-  const lastSavedRef = useRef(initialWeight ?? null)
+  const [savedWeight, setSavedWeight] = useState<number | null>(
+    initialWeight ?? null,
+  )
   const boundRef = useRef({ memberId, lessonDate })
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const memberOrDateChanged =
@@ -41,28 +46,45 @@ export function LessonStatusWeightInput({
     boundRef.current = { memberId, lessonDate }
 
     if (memberOrDateChanged) {
-      const next = initialWeight != null ? String(initialWeight) : ''
-      setValue(next)
-      lastSavedRef.current = initialWeight ?? null
+      setSavedWeight(initialWeight ?? null)
+      setOpen(false)
+      setDraft('')
       return
     }
 
     if (initialWeight != null) {
-      const next = String(initialWeight)
-      setValue(next)
-      lastSavedRef.current = initialWeight
+      setSavedWeight(initialWeight)
     }
   }, [initialWeight, memberId, lessonDate])
 
-  async function commit(nextRaw: string) {
-    const trimmed = nextRaw.trim()
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  function openEditor() {
+    setDraft(savedWeight != null ? formatBodyMetric(savedWeight) : '')
+    setOpen(true)
+  }
+
+  function closeEditor() {
+    setOpen(false)
+    setDraft('')
+  }
+
+  async function handleConfirm() {
+    const trimmed = draft.trim()
     const parsed = trimmed ? Number(trimmed) : NaN
     const shouldClear =
       !trimmed || (Number.isFinite(parsed) && parsed === 0)
 
     if (shouldClear) {
-      if (lastSavedRef.current == null) {
-        setValue('')
+      if (savedWeight == null) {
+        closeEditor()
         return
       }
 
@@ -76,28 +98,25 @@ export function LessonStatusWeightInput({
             ? `${result.error} · ${result.migrationHint}`
             : result.error,
         })
-        setValue(
-          lastSavedRef.current != null ? String(lastSavedRef.current) : '',
-        )
         return
       }
 
-      lastSavedRef.current = null
-      setValue('')
+      setSavedWeight(null)
       onWeightChange?.(null)
+      closeEditor()
       return
     }
 
     const weight = parsed
     if (!Number.isFinite(weight) || weight <= 0 || weight >= 500) {
       toast.error('체중을 올바르게 입력해주세요.')
-      setValue(
-        lastSavedRef.current != null ? String(lastSavedRef.current) : '',
-      )
       return
     }
 
-    if (lastSavedRef.current === weight) return
+    if (savedWeight === weight) {
+      closeEditor()
+      return
+    }
 
     setSaving(true)
     const result = await recordLessonStatusWeight(memberId, lessonDate, weight)
@@ -109,65 +128,125 @@ export function LessonStatusWeightInput({
           ? `${result.error} · ${result.migrationHint}`
           : result.error,
       })
-      setValue(
-        lastSavedRef.current != null ? String(lastSavedRef.current) : '',
-      )
       return
     }
 
-    lastSavedRef.current = weight
-    setValue(String(weight))
+    setSavedWeight(weight)
     onWeightChange?.(weight)
+    closeEditor()
   }
 
-  const savedDisplay =
-    lastSavedRef.current != null ? String(lastSavedRef.current) : ''
-  const isDirty = value !== savedDisplay
-
-  function handleUndo() {
-    setValue(savedDisplay)
-  }
+  const hasSaved = savedWeight != null
 
   return (
-    <div className={cn('mt-1 flex w-full items-center gap-1', className)}>
-      <div className="relative min-w-0 flex-1">
-        <Input
-          type="number"
-          inputMode="decimal"
-          step="0.1"
-          min="0"
-          max="500"
-          placeholder="체중 kg"
-          value={value}
-          disabled={disabled || saving}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={() => void commit(value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.currentTarget.blur()
-            }
-          }}
-          className="h-7 border-border/70 bg-muted/30 px-2 text-[10px] tabular-nums shadow-none"
-        />
+    <>
+      <button
+        type="button"
+        disabled={disabled || saving}
+        onClick={() => {
+          if (disabled || saving) return
+          openEditor()
+        }}
+        className={cn(
+          'mt-1 flex w-full min-w-0 items-center rounded border border-border/70 bg-muted/30 px-2 py-1 text-left text-[10px] transition-colors hover:bg-muted/50',
+          hasSaved
+            ? 'font-medium text-primary'
+            : 'text-muted-foreground',
+          (disabled || saving) && 'opacity-50',
+          className,
+        )}
+      >
         {saving ? (
-          <Loader2 className="pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 animate-spin text-muted-foreground" />
-        ) : null}
-      </div>
-      {isDirty ? (
-        <button
-          type="button"
-          disabled={disabled || saving}
-          title="이전으로 되돌리기"
-          aria-label="체중 입력 되돌리기"
-          onClick={handleUndo}
-          className={cn(
-            'shrink-0 rounded border border-primary/30 bg-primary/10 p-1 text-primary transition-colors hover:bg-primary/20',
-            (disabled || saving) && 'opacity-50',
-          )}
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : hasSaved ? (
+          '체중 작성 완료'
+        ) : (
+          '체중 kg'
+        )}
+      </button>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (disabled) return
+          if (!next && saving) return
+          if (next) {
+            openEditor()
+          } else {
+            closeEditor()
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="w-[min(100vw-2rem,13rem)] gap-0 p-3 sm:max-w-[13rem]"
+          onPointerDownOutside={(e) => {
+            if (saving) e.preventDefault()
+          }}
+          onEscapeKeyDown={(e) => {
+            if (saving) e.preventDefault()
+          }}
         >
-          <Undo2 className="h-2.5 w-2.5" />
-        </button>
-      ) : null}
-    </div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <DialogTitle className="text-xs font-medium">체중 (kg)</DialogTitle>
+              <Input
+                ref={inputRef}
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                min="0"
+                max="500"
+                placeholder="예: 65.5"
+                value={draft}
+                disabled={saving}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void handleConfirm()
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    closeEditor()
+                  }
+                }}
+                className="h-9 tabular-nums"
+              />
+              {hasSaved ? (
+                <p className="text-[10px] text-muted-foreground">
+                  삭제하려면 0 입력 후 확인
+                </p>
+              ) : null}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 flex-1"
+                disabled={saving}
+                onClick={() => closeEditor()}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 flex-1"
+                disabled={saving}
+                onClick={() => void handleConfirm()}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  '확인'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

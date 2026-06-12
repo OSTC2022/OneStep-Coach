@@ -9,10 +9,11 @@ import {
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import {
   ensureGoogleCalendarWatch,
-  findLessonCalendarId,
+  findLessonCalendars,
   syncGoogleCalendarLessons,
   upsertGoogleCalendarSyncRow,
 } from '@/lib/google-calendar/sync'
+import { GOOGLE_LESSON_CALENDAR_NAME } from '@/lib/google-calendar/config'
 
 export async function connectGoogleCalendarFromOAuthCode(
   code: string,
@@ -32,9 +33,15 @@ export async function connectGoogleCalendarFromOAuthCode(
 
     const email = await fetchGoogleUserEmail(token.access_token)
     const calendars = await listGoogleCalendars(token.access_token)
-    const lessonCalendar = findLessonCalendarId(calendars)
+    const lessonCalendars = findLessonCalendars(calendars)
+    const primaryCalendar = lessonCalendars.find(
+      (calendar) => calendar.summary === GOOGLE_LESSON_CALENDAR_NAME,
+    )
+    const secondaryCalendar = lessonCalendars.find(
+      (calendar) => calendar.summary !== GOOGLE_LESSON_CALENDAR_NAME,
+    )
 
-    if (!lessonCalendar) {
+    if (!primaryCalendar) {
       return {
         error:
           'Google 캘린더에서 "수업" 이름의 캘린더를 찾지 못했습니다. Google Calendar에 "수업" 캘린더를 만든 뒤 다시 연결해 주세요.',
@@ -44,13 +51,19 @@ export async function connectGoogleCalendarFromOAuthCode(
     await upsertGoogleCalendarSyncRow({
       connected_email: email,
       refresh_token: token.refresh_token,
-      calendar_id: lessonCalendar.id,
-      calendar_name: lessonCalendar.summary,
+      calendar_id: primaryCalendar.id,
+      calendar_name: primaryCalendar.summary,
+      calendar_id_2: secondaryCalendar?.id ?? null,
+      calendar_name_2: secondaryCalendar?.summary ?? null,
       sync_enabled: true,
       sync_token: null,
+      sync_token_2: null,
       watch_channel_id: null,
       watch_resource_id: null,
       watch_expiration: null,
+      watch_channel_id_2: null,
+      watch_resource_id_2: null,
+      watch_expiration_2: null,
       last_sync_error: null,
     })
 
