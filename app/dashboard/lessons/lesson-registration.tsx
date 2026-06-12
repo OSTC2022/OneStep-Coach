@@ -11,6 +11,7 @@ import {
 } from '@/lib/session-package-utils'
 import { Lesson, SessionPackage } from '@/types/database'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { Label } from '@/components/ui/label'

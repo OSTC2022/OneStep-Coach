@@ -27,6 +27,7 @@ export default async function MyBodyPage() {
         weight_kg: member.weight_kg,
         height_cm: member.height_cm,
         registered_at: member.registered_at,
+        body_baseline_recorded_at: member.body_baseline_recorded_at,
       }),
       getMemberProteinSettings(member.id),
     ])

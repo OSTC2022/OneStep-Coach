@@ -798,6 +798,88 @@ export async function updateMemberPhysicalInfo(
 
   revalidatePath('/dashboard/members')
   revalidatePath(`/dashboard/members/${memberId}`)
+  revalidatePath(`/dashboard/members/${memberId}/body`)
+  revalidatePath('/dashboard/my')
+  return { data: withMemberRowDefaults(data as Record<string, unknown>) as Member }
+}
+
+const BODY_BASELINE_MIGRATION_HINT =
+  '초기 설정 날짜 저장을 위해 Supabase SQL Editor에서 supabase/add-member-body-baseline-date.sql 을 실행해 주세요.'
+
+function isMissingBodyBaselineDateColumn(message: string | undefined) {
+  if (!message) return false
+  return message.toLowerCase().includes('body_baseline_recorded_at')
+}
+
+/** 신체정보 초기 설정 날짜·키·몸무게 (관리자만) */
+export async function updateMemberBodyBaseline(
+  memberId: string,
+  formData: {
+    recorded_at: string
+    height_cm?: number | string
+    weight_kg?: number | string
+  },
+): Promise<{ data?: Member; error?: string; migrationHint?: string }> {
+  await requireRole(['admin'])
+
+  if (!formData.recorded_at) {
+    return { error: '초기 설정 날짜를 선택해주세요.' }
+  }
+
+  const heightCm = parseOptionalBodyMetric(formData.height_cm)
+  const weightKg = parseOptionalBodyMetric(formData.weight_kg)
+  if (heightCm == null || heightCm <= 0) {
+    return { error: '현재 키를 입력해주세요.' }
+  }
+  if (weightKg == null || weightKg <= 0) {
+    return { error: '몸무게를 입력해주세요.' }
+  }
+
+  const supabase = await memberWriteClient()
+  const updateData: Record<string, unknown> = {
+    body_baseline_recorded_at: formData.recorded_at,
+    height_cm: heightCm,
+    weight_kg: weightKg,
+    bmi: calculateMemberBmi(heightCm, weightKg),
+  }
+
+  let { data, error } = await supabase
+    .from('members')
+    .update(updateData)
+    .eq('id', memberId)
+    .select()
+    .single()
+
+  if (error && isMissingBodyBaselineDateColumn(error.message)) {
+    const { body_baseline_recorded_at: _removed, ...fallbackUpdate } = updateData
+    const retry = await supabase
+      .from('members')
+      .update(fallbackUpdate)
+      .eq('id', memberId)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+    if (!error) {
+      revalidatePath('/dashboard/members')
+      revalidatePath(`/dashboard/members/${memberId}`)
+      revalidatePath(`/dashboard/members/${memberId}/body`)
+      revalidatePath('/dashboard/my')
+      return {
+        data: withMemberRowDefaults(data as Record<string, unknown>) as Member,
+        migrationHint: BODY_BASELINE_MIGRATION_HINT,
+      }
+    }
+  }
+
+  if (error) {
+    console.error('Error updating member body baseline:', error)
+    return { error: mapMemberError(error.message) }
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${memberId}`)
+  revalidatePath(`/dashboard/members/${memberId}/body`)
   revalidatePath('/dashboard/my')
   return { data: withMemberRowDefaults(data as Record<string, unknown>) as Member }
 }

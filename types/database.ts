@@ -47,6 +47,8 @@ export interface Member {
   memo: string | null
   primary_instructor_id: string | null
   registered_at: string
+  body_baseline_recorded_at: string | null
+  body_share_token?: string | null
   is_active: boolean
   created_at: string
   deleted_at: string | null

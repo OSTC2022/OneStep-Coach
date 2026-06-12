@@ -412,16 +412,20 @@ function createBootstrapRecord(
     weight_kg: number | null
     height_cm?: number | null
     registered_at: string
+    body_baseline_recorded_at?: string | null
   },
 ): MemberBodyRecord | null {
   if (!fallback.weight_kg || fallback.weight_kg <= 0) return null
   const weight = roundBodyMetric(fallback.weight_kg) ?? Number(fallback.weight_kg)
+  const baselineDate = (
+    fallback.body_baseline_recorded_at ?? fallback.registered_at
+  ).split('T')[0]
   return {
     id: `bootstrap-${memberId}`,
     member_id: memberId,
-    recorded_at: fallback.registered_at.split('T')[0],
+    recorded_at: baselineDate,
     weight_kg: weight,
-    height_cm: null,
+    height_cm: fallback.height_cm != null ? roundBodyMetric(fallback.height_cm) : null,
     note: '신체정보 초기 설정',
     created_at: fallback.registered_at,
     sleep_hours: null,
@@ -491,6 +495,7 @@ function mergeWithBootstrapRecord(
     weight_kg: number | null
     height_cm?: number | null
     registered_at: string
+    body_baseline_recorded_at?: string | null
   },
 ): MemberBodyRecord[] {
   const bootstrap = fallback ? createBootstrapRecord(memberId, fallback) : null
@@ -518,6 +523,7 @@ export async function getMemberBodyRecords(
     weight_kg: number | null
     height_cm?: number | null
     registered_at: string
+    body_baseline_recorded_at?: string | null
   },
 ): Promise<{
   records: MemberBodyRecord[]

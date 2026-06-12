@@ -67,6 +67,8 @@ export interface Member {
   primary_instructor_id: string | null
   remaining_sessions: number
   registered_at: string
+  body_baseline_recorded_at?: string | null
+  body_share_token?: string | null
   is_active: boolean
   created_at: string
   deleted_at: string | null

@@ -110,6 +110,7 @@ export default async function MemberDetailPage({
       weight_kg: member.weight_kg,
       height_cm: member.height_cm,
       registered_at: member.registered_at,
+      body_baseline_recorded_at: member.body_baseline_recorded_at,
     })
 
   const instructor = member.primary_instructor

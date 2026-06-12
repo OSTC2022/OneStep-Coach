@@ -12,3 +12,11 @@ export function isBootstrapBodyRecord(
     recordOrId.note === '신체정보 초기 설정'
   )
 }
+
+export function resolveBodyBaselineDate(member: {
+  body_baseline_recorded_at?: string | null
+  registered_at: string
+}): string {
+  const raw = member.body_baseline_recorded_at ?? member.registered_at
+  return raw.split('T')[0]
+}

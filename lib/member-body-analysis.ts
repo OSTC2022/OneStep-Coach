@@ -1,6 +1,7 @@
-import { differenceInDays, format, parseISO, subDays } from 'date-fns'
+import { differenceInDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
+import { ko } from 'date-fns/locale'
 import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
-import type { BodyPeriodRange } from '@/lib/member-body-period-settings'
+import type { BodyPeriodMode, BodyPeriodRange } from '@/lib/member-body-period-settings'
 import {
   getDefaultSupplementConfig,
   type MemberSupplementConfig,
@@ -42,6 +43,67 @@ export function filterRecordsByPeriod(
     const date = record.recorded_at
     return date >= range.from && date <= range.to
   })
+}
+
+export type BodyChartGranularity = 'raw' | 'daily' | 'weekly'
+
+export function resolveBodyChartGranularity(mode: BodyPeriodMode): BodyChartGranularity {
+  if (mode === 'daily') return 'daily'
+  if (mode === 'weekly') return 'weekly'
+  return 'raw'
+}
+
+/** 그래프용 기록 — 1일·1주 단위일 때 하루/주당 1점 */
+export function prepareRecordsForChart(
+  records: MemberBodyRecord[],
+  granularity: BodyChartGranularity,
+): MemberBodyRecord[] {
+  const sorted = [...records].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at))
+  if (granularity === 'raw') return sorted
+
+  if (granularity === 'daily') {
+    const byDay = new Map<string, MemberBodyRecord>()
+    for (const record of sorted) {
+      byDay.set(record.recorded_at, record)
+    }
+    return [...byDay.values()].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at))
+  }
+
+  const byWeek = new Map<string, MemberBodyRecord>()
+  for (const record of sorted) {
+    const weekStart = format(
+      startOfWeek(parseISO(record.recorded_at), { weekStartsOn: 1, locale: ko }),
+      'yyyy-MM-dd',
+    )
+    const existing = byWeek.get(weekStart)
+    if (!existing || record.recorded_at > existing.recorded_at) {
+      byWeek.set(weekStart, record)
+    }
+  }
+  return [...byWeek.values()].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at))
+}
+
+export function chartSpanYears(records: MemberBodyRecord[]): boolean {
+  if (records.length < 2) return false
+  const firstYear = records[0].recorded_at.slice(0, 4)
+  const lastYear = records.at(-1)!.recorded_at.slice(0, 4)
+  return firstYear !== lastYear
+}
+
+export function buildChartAxisDateLabel(
+  date: string,
+  options?: { includeYear?: boolean; weekly?: boolean },
+): string {
+  const parsed = parseISO(date)
+  const pattern = options?.includeYear ? 'yy.M.d' : 'M/d'
+  if (options?.weekly) {
+    return format(
+      startOfWeek(parsed, { weekStartsOn: 1, locale: ko }),
+      pattern,
+      { locale: ko },
+    )
+  }
+  return format(parsed, pattern, { locale: ko })
 }
 
 /** 기록별 BMI — 기록에 입력한 현재 키 우선, 없으면 신체정보 초기 키 */

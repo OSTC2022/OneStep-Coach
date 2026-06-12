@@ -1,6 +1,8 @@
 'use client'
 
 import { useId, useMemo } from 'react'
+import { format, parseISO } from 'date-fns'
+import { ko } from 'date-fns/locale'
 import {
   Area,
   CartesianGrid,
@@ -129,7 +131,8 @@ export function MemberBodyMetricChart({
               hideIndicator
               labelFormatter={(_, payload) => {
                 const row = payload?.[0]?.payload as MetricChartPoint | undefined
-                return row ? `${row.label}` : metricLabel
+                if (!row) return metricLabel
+                return format(parseISO(row.date), 'yyyy.M.d (EEE)', { locale: ko })
               }}
               formatter={(value) => (
                 <span className="text-sm font-bold tabular-nums text-primary">

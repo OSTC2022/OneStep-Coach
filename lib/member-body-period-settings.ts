@@ -1,6 +1,17 @@
-import { format, subMonths, subYears } from 'date-fns'
+import { format, subDays, subMonths, subYears } from 'date-fns'
 
-export type BodyPeriodMode = 'all' | '1m' | '3m' | '6m' | '1y' | 'custom'
+export type BodyPeriodMode =
+  | 'all'
+  | 'daily'
+  | 'weekly'
+  | '1m'
+  | '3m'
+  | '6m'
+  | '1y'
+  | 'custom'
+
+/** 1일·1주 단위 그래프 기본 조회 범위 (4주) */
+export const BODY_CHART_GRANULARITY_WEEKS = 4
 
 export type BodyPeriodSettings = {
   mode: BodyPeriodMode
@@ -21,12 +32,27 @@ export const DEFAULT_BODY_PERIOD_SETTINGS: BodyPeriodSettings = {
 
 export const BODY_PERIOD_PRESETS: { mode: BodyPeriodMode; label: string }[] = [
   { mode: 'all', label: '전체' },
+  { mode: 'daily', label: '1일' },
+  { mode: 'weekly', label: '1주' },
   { mode: '1m', label: '1개월' },
   { mode: '3m', label: '3개월' },
   { mode: '6m', label: '6개월' },
   { mode: '1y', label: '1년' },
   { mode: 'custom', label: '직접 지정' },
 ]
+
+export function defaultBodyGranularityRange(today = new Date()): BodyPeriodRange {
+  const to = format(today, 'yyyy-MM-dd')
+  const from = format(
+    subDays(today, BODY_CHART_GRANULARITY_WEEKS * 7 - 1),
+    'yyyy-MM-dd',
+  )
+  return { from, to }
+}
+
+export function isBodyGranularityMode(mode: BodyPeriodMode): boolean {
+  return mode === 'daily' || mode === 'weekly'
+}
 
 function storageKey(memberId: string) {
   return `${STORAGE_PREFIX}${memberId}`
@@ -35,6 +61,8 @@ function storageKey(memberId: string) {
 function isValidMode(mode: unknown): mode is BodyPeriodMode {
   return (
     mode === 'all' ||
+    mode === 'daily' ||
+    mode === 'weekly' ||
     mode === '1m' ||
     mode === '3m' ||
     mode === '6m' ||
@@ -53,9 +81,9 @@ export function normalizeBodyPeriodSettings(
   if (!value || !isValidMode(value.mode)) {
     return { ...DEFAULT_BODY_PERIOD_SETTINGS }
   }
-  if (value.mode === 'custom') {
+  if (value.mode === 'custom' || isBodyGranularityMode(value.mode)) {
     return {
-      mode: 'custom',
+      mode: value.mode,
       fromDate: isIsoDate(value.fromDate) ? value.fromDate : undefined,
       toDate: isIsoDate(value.toDate) ? value.toDate : undefined,
     }
@@ -106,6 +134,14 @@ export function resolveBodyPeriodRange(
       return { from: format(subMonths(today, 6), 'yyyy-MM-dd'), to }
     case '1y':
       return { from: format(subYears(today, 1), 'yyyy-MM-dd'), to }
+    case 'daily':
+    case 'weekly': {
+      const fallback = defaultBodyGranularityRange(today)
+      return {
+        from: settings.fromDate ?? fallback.from,
+        to: settings.toDate ?? fallback.to,
+      }
+    }
     case 'custom': {
       if (!settings.fromDate && !settings.toDate) return null
       return {
@@ -120,6 +156,14 @@ export function resolveBodyPeriodRange(
 
 export function formatBodyPeriodLabel(settings: BodyPeriodSettings): string {
   const preset = BODY_PERIOD_PRESETS.find((item) => item.mode === settings.mode)
+  if (isBodyGranularityMode(settings.mode)) {
+    const unit = preset?.label ?? settings.mode
+    const range = resolveBodyPeriodRange(settings)
+    if (range) {
+      return `${unit} · ${range.from} ~ ${range.to}`
+    }
+    return `${unit} · 최근 ${BODY_CHART_GRANULARITY_WEEKS}주`
+  }
   if (settings.mode !== 'custom') {
     return preset?.label ?? '전체'
   }

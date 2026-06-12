@@ -4,6 +4,8 @@ import {
   getMemberBodyRecords,
   getMemberProteinSettings,
 } from '@/lib/actions/member-body-records'
+import { getDashboardProfile } from '@/lib/auth/dashboard-user'
+import { canSavePhysicalBaseline } from '@/lib/roles'
 import { MemberBodyAnalysisView } from '@/components/members/member-body-analysis-view'
 
 export default async function MemberBodyPage({
@@ -12,7 +14,7 @@ export default async function MemberBodyPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const member = await getMember(id)
+  const [member, profile] = await Promise.all([getMember(id), getDashboardProfile()])
   if (!member) notFound()
 
   const [{ records, tableReady, wellnessColumnsReady, nutritionColumnsReady }, proteinSettings] =
@@ -21,6 +23,7 @@ export default async function MemberBodyPage({
         weight_kg: member.weight_kg,
         height_cm: member.height_cm,
         registered_at: member.registered_at,
+        body_baseline_recorded_at: member.body_baseline_recorded_at,
       }),
       getMemberProteinSettings(member.id),
     ])
@@ -41,6 +44,7 @@ export default async function MemberBodyPage({
         wellnessColumnsReady={wellnessColumnsReady}
         nutritionColumnsReady={nutritionColumnsReady}
         proteinSettings={proteinSettings}
+        canEditBodyBaseline={canSavePhysicalBaseline(profile?.role ?? 'member')}
       />
     </div>
   )
