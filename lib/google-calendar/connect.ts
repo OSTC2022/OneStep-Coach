@@ -55,7 +55,7 @@ export async function connectGoogleCalendarFromOAuthCode(
     })
 
     await ensureGoogleCalendarWatch()
-    await syncGoogleCalendarLessons({ reason: 'initial-connect' })
+    // 초기 연결 UI는 빠르게 — 동기화는 사용자가 「지금 동기화」로 실행
 
     revalidatePath('/dashboard/settings/google-calendar')
     revalidatePath('/dashboard/calendar')

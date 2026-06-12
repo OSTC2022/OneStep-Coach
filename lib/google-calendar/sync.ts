@@ -2,9 +2,6 @@ import 'server-only'
 
 import { randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
-import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
-import { queryActiveSessionPackageId } from '@/lib/actions/sessions'
 import {
   GOOGLE_CALENDAR_SYNC_ID,
   GOOGLE_LESSON_CALENDAR_NAME,
@@ -17,12 +14,13 @@ import {
   watchGoogleCalendarEvents,
   withGoogleAccessToken,
 } from '@/lib/google-calendar/client'
+import { getGoogleSyncTimeBounds } from '@/lib/google-calendar/event-mapper'
 import {
-  getGoogleSyncTimeBounds,
-  isGoogleEventCancelled,
-  normalizeGoogleEventTitle,
-  parseGoogleEventDateTime,
-} from '@/lib/google-calendar/event-mapper'
+  applyGoogleEventsBatch,
+  loadExistingByGoogleEventId,
+  loadMemberNameMap,
+  MAX_EVENTS_PER_SYNC,
+} from '@/lib/google-calendar/sync-apply'
 import type {
   GoogleCalendarEvent,
   GoogleCalendarSyncResult,
@@ -31,6 +29,8 @@ import type {
 
 const SYNC_SELECT =
   'id, connected_email, refresh_token, calendar_id, calendar_name, sync_token, watch_channel_id, watch_resource_id, watch_expiration, sync_enabled, last_synced_at, last_sync_error, pending_member_count, updated_at'
+
+const MAX_FETCH_PAGES = 1
 
 function isMissingGoogleSyncTable(error: { message?: string; code?: string } | null) {
   if (!error) return false
@@ -105,23 +105,6 @@ export async function clearGoogleCalendarSyncRow(): Promise<void> {
   await supabase.from('google_calendar_sync').delete().eq('id', GOOGLE_CALENDAR_SYNC_ID)
 }
 
-async function lookupMemberIdByName(
-  supabase: ReturnType<typeof createAdminClient>,
-  name: string,
-): Promise<string | null> {
-  const trimmed = name.trim()
-  if (!trimmed) return null
-
-  const { data, error } = await supabase
-    .from('members')
-    .select('id')
-    .eq('name', trimmed)
-    .limit(2)
-
-  if (error || !data || data.length !== 1) return null
-  return data[0].id
-}
-
 async function countPendingMemberLessons(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<number> {
@@ -138,111 +121,7 @@ async function countPendingMemberLessons(
   return count ?? 0
 }
 
-async function findLessonByGoogleEventId(
-  supabase: ReturnType<typeof createAdminClient>,
-  googleEventId: string,
-) {
-  const { data, error } = await supabase
-    .from('lessons')
-    .select('id, member_id, google_sync_status, session_deducted')
-    .eq('google_event_id', googleEventId)
-    .maybeSingle()
-
-  if (error) {
-    if (isMissingGoogleLessonColumn(error)) return null
-    throw new Error(error.message)
-  }
-
-  return data
-}
-
-async function applyGoogleEventToLesson(
-  supabase: ReturnType<typeof createAdminClient>,
-  event: GoogleCalendarEvent,
-): Promise<'created' | 'updated' | 'cancelled' | 'pendingMember' | 'skipped'> {
-  if (!event.id) return 'skipped'
-
-  const existing = await findLessonByGoogleEventId(supabase, event.id)
-
-  if (isGoogleEventCancelled(event)) {
-    if (!existing) return 'skipped'
-    if (existing.session_deducted) return 'skipped'
-
-    const { error } = await supabase
-      .from('lessons')
-      .update({ attendance_status: 'cancelled' })
-      .eq('id', existing.id)
-
-    if (error) {
-      if (isMissingGoogleLessonColumn(error)) return 'skipped'
-      throw new Error(error.message)
-    }
-
-    return 'cancelled'
-  }
-
-  const schedule = parseGoogleEventDateTime(event)
-  if (!schedule) return 'skipped'
-
-  const title = normalizeGoogleEventTitle(event.summary)
-  const memberName = extractMemberNameFromCalendarLabel(title)
-  const memberId = await lookupMemberIdByName(supabase, memberName)
-  let sessionPackageId: string | null = null
-  if (memberId) {
-    try {
-      const staffClient = await createStaffDataClient()
-      sessionPackageId = await queryActiveSessionPackageId(staffClient, memberId)
-    } catch {
-      sessionPackageId = null
-    }
-  }
-  const googleSyncStatus = memberId ? null : 'pending_member'
-
-  const payload: Record<string, unknown> = {
-    lesson_date: schedule.lessonDate,
-    start_time: schedule.startTime,
-    end_time: schedule.endTime,
-    title: memberId ? null : title,
-    member_id: memberId,
-    session_package_id: sessionPackageId,
-    google_event_id: event.id,
-    google_sync_status: googleSyncStatus,
-    attendance_status: 'present',
-    special_note: memberId
-      ? null
-      : '[구글 캘린더] 회원 자동 연결 실패 — 캘린더에서 회원을 지정해 주세요.',
-  }
-
-  if (existing) {
-    if (existing.session_deducted) {
-      return 'skipped'
-    }
-
-    const { error } = await supabase.from('lessons').update(payload).eq('id', existing.id)
-    if (error) {
-      if (isMissingGoogleLessonColumn(error)) return 'skipped'
-      throw new Error(error.message)
-    }
-
-    return memberId ? 'updated' : 'pendingMember'
-  }
-
-  const insertPayload = {
-    ...payload,
-    lesson_type: '개인레슨',
-    session_deducted: false,
-  }
-
-  const { error } = await supabase.from('lessons').insert(insertPayload)
-  if (error) {
-    if (isMissingGoogleLessonColumn(error)) return 'skipped'
-    throw new Error(error.message)
-  }
-
-  return memberId ? 'created' : 'pendingMember'
-}
-
-async function fetchAllChangedEvents(
+async function fetchChangedEventsFast(
   accessToken: string,
   calendarId: string,
   syncToken: string | null,
@@ -251,6 +130,7 @@ async function fetchAllChangedEvents(
   let pageToken: string | null = null
   let nextSyncToken: string | null = syncToken
   let useFullSync = !syncToken
+  let pages = 0
 
   do {
     try {
@@ -267,17 +147,19 @@ async function fetchAllChangedEvents(
       if (response.nextSyncToken) {
         nextSyncToken = response.nextSyncToken
       }
+      pages += 1
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (!useFullSync && message.includes('410')) {
         useFullSync = true
         pageToken = null
         nextSyncToken = null
+        pages = 0
         continue
       }
       throw error
     }
-  } while (pageToken)
+  } while (pageToken && pages < MAX_FETCH_PAGES)
 
   return { events, nextSyncToken }
 }
@@ -291,39 +173,54 @@ export async function syncGoogleCalendarLessons(options?: {
   }
 
   const supabase = createAdminClient()
-  const result: GoogleCalendarSyncResult = {
-    created: 0,
-    updated: 0,
-    cancelled: 0,
-    pendingMember: 0,
-    skipped: 0,
-  }
 
   try {
-    await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
-      const { events, nextSyncToken } = await fetchAllChangedEvents(
-        accessToken,
-        row.calendar_id!,
-        row.sync_token,
-      )
+    const syncResult = await withGoogleAccessToken(
+      row.refresh_token,
+      async (accessToken) => {
+        const { events, nextSyncToken } = await fetchChangedEventsFast(
+          accessToken,
+          row.calendar_id!,
+          row.sync_token,
+        )
 
-      for (const event of events) {
-        const outcome = await applyGoogleEventToLesson(supabase, event)
-        if (outcome === 'created') result.created += 1
-        else if (outcome === 'updated') result.updated += 1
-        else if (outcome === 'cancelled') result.cancelled += 1
-        else if (outcome === 'pendingMember') result.pendingMember += 1
-        else result.skipped += 1
-      }
+        const googleEventIds = events
+          .map((event) => event.id)
+          .filter((id): id is string => Boolean(id))
 
-      const pendingCount = await countPendingMemberLessons(supabase)
-      await upsertGoogleCalendarSyncRow({
-        sync_token: nextSyncToken,
-        last_synced_at: new Date().toISOString(),
-        last_sync_error: null,
-        pending_member_count: pendingCount,
-      })
-    })
+        const [memberMap, existingMap] = await Promise.all([
+          loadMemberNameMap(supabase),
+          loadExistingByGoogleEventId(supabase, googleEventIds),
+        ])
+
+        const result = await applyGoogleEventsBatch(
+          supabase,
+          events,
+          memberMap,
+          existingMap,
+        )
+
+        const pendingCount = await countPendingMemberLessons(supabase)
+        await upsertGoogleCalendarSyncRow({
+          sync_token: nextSyncToken,
+          last_synced_at: new Date().toISOString(),
+          last_sync_error: null,
+          pending_member_count: pendingCount,
+        })
+
+        if (options?.reason) {
+          console.info('[google-calendar] sync complete', options.reason, {
+            ...result,
+            fetched: events.length,
+            capped: events.length > MAX_EVENTS_PER_SYNC,
+          })
+        }
+
+        return result
+      },
+    )
+
+    return syncResult
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await upsertGoogleCalendarSyncRow({
@@ -331,12 +228,6 @@ export async function syncGoogleCalendarLessons(options?: {
     })
     throw error
   }
-
-  if (options?.reason) {
-    console.info('[google-calendar] sync complete', options.reason, result)
-  }
-
-  return result
 }
 
 export async function ensureGoogleCalendarWatch(): Promise<void> {

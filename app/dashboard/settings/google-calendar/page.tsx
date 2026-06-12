@@ -5,6 +5,8 @@ import { requireDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getGoogleCalendarSyncStatus } from '@/lib/actions/google-calendar-sync'
 import { GoogleCalendarPanel } from '@/components/settings/google-calendar-panel'
 
+export const maxDuration = 60
+
 export default async function GoogleCalendarSettingsPage() {
   const profile = await requireDashboardProfile()
   if (profile.role !== 'admin') {

@@ -79,7 +79,6 @@ export async function runGoogleCalendarSyncNow(): Promise<{
   await requireRole(['admin'])
 
   try {
-    await ensureGoogleCalendarWatch()
     const data = await syncGoogleCalendarLessons({ reason: 'manual' })
     revalidatePath('/dashboard/settings/google-calendar')
     revalidatePath('/dashboard/calendar')

@@ -54,20 +54,27 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
 
   async function handleManualSync() {
     setIsSyncing(true)
-    const result = await runGoogleCalendarSyncNow()
-    setIsSyncing(false)
+    try {
+      const result = await runGoogleCalendarSyncNow()
 
-    if (result.error) {
-      toast.error('동기화 실패', { description: result.error })
-      return
+      if (result.error) {
+        toast.error('동기화 실패', { description: result.error })
+        return
+      }
+
+      const nextStatus = await getGoogleCalendarSyncStatus()
+      setStatus(nextStatus)
+
+      toast.success('동기화 완료', {
+        description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
+      })
+    } catch {
+      toast.error('동기화 실패', {
+        description: '요청 시간이 초과되었거나 연결이 끊어졌습니다. 잠시 후 다시 시도해 주세요.',
+      })
+    } finally {
+      setIsSyncing(false)
     }
-
-    const nextStatus = await getGoogleCalendarSyncStatus()
-    setStatus(nextStatus)
-
-    toast.success('동기화 완료', {
-      description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
-    })
   }
 
   async function handleDisconnect() {

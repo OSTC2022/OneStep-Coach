@@ -61,9 +61,9 @@ export function isGoogleEventCancelled(event: GoogleCalendarEvent): boolean {
 export function getGoogleSyncTimeBounds() {
   const now = new Date()
   const timeMin = new Date(now)
-  timeMin.setDate(timeMin.getDate() - 30)
+  timeMin.setDate(timeMin.getDate() - 3)
   const timeMax = new Date(now)
-  timeMax.setDate(timeMax.getDate() + 365)
+  timeMax.setDate(timeMax.getDate() + 60)
 
   return {
     timeMin: timeMin.toISOString(),

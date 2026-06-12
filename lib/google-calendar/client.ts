@@ -37,6 +37,7 @@ export async function exchangeGoogleOAuthCode(code: string): Promise<GoogleToken
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    signal: AbortSignal.timeout(15_000),
   })
 
   if (!response.ok) {
@@ -61,6 +62,7 @@ export async function refreshGoogleAccessToken(
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    signal: AbortSignal.timeout(15_000),
   })
 
   if (!response.ok) {
@@ -93,6 +95,7 @@ async function googleFetch<T>(
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
     },
+    signal: AbortSignal.timeout(30_000),
   })
 
   if (!response.ok) {
@@ -130,7 +133,7 @@ export async function listGoogleCalendarEvents(
   const params = new URLSearchParams({
     singleEvents: 'true',
     showDeleted: 'true',
-    maxResults: '250',
+    maxResults: '100',
   })
 
   if (options.syncToken) {
