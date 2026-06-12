@@ -867,7 +867,7 @@ export async function updateLessonEndTime(
   data?: { id: string; end_time: string }
   error?: string
 }> {
-  await requireRole(['admin', 'instructor'])
+  await requireRole(['admin'])
 
   const normalizedEndTime = normalizeEndTime(endTime)
   if (!normalizedEndTime) {

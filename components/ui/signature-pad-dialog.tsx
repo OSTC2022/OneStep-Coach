@@ -2,10 +2,11 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { History, RotateCcw } from 'lucide-react'
+import { History, RotateCcw, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TimeInput24 } from '@/components/ui/time-input-24'
+import { cn } from '@/lib/utils'
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,8 @@ interface SignaturePadDialogProps {
   ) => void
   /** 관리자 — 종료 시간 직접 입력 */
   canEditEndTime?: boolean
+  /** 수업 종료 시 종료 시간 표시 (비관리자는 읽기 전용) */
+  showEndTime?: boolean
   defaultEndTime?: string
   onConfirm: (signatureData: string, endTime?: string) => void
 }
@@ -60,6 +63,7 @@ export function SignaturePadDialog({
   pastLessonMemberId,
   onPastLessonUpdated,
   canEditEndTime = false,
+  showEndTime = false,
   defaultEndTime = '',
   onConfirm,
 }: SignaturePadDialogProps) {
@@ -180,8 +184,8 @@ export function SignaturePadDialog({
 
   const handleConfirm = () => {
     if (!signatureData) return
-    if (canEditEndTime && !endTime.trim()) return
-    onConfirm(signatureData, canEditEndTime ? endTime : undefined)
+    if (showEndTime && !endTime.trim()) return
+    onConfirm(signatureData, showEndTime ? endTime : undefined)
   }
 
   return (
@@ -201,14 +205,26 @@ export function SignaturePadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {canEditEndTime ? (
+        {showEndTime ? (
           <div className="space-y-1.5">
             <Label htmlFor="lesson-end-time">종료 시간</Label>
-            <TimeInput24
-              id="lesson-end-time"
-              value={endTime}
-              onChange={setEndTime}
-            />
+            {canEditEndTime ? (
+              <TimeInput24
+                id="lesson-end-time"
+                value={endTime}
+                onChange={setEndTime}
+              />
+            ) : (
+              <div
+                id="lesson-end-time"
+                className={cn(
+                  'flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm tabular-nums',
+                )}
+              >
+                <Clock className="h-4 w-4 shrink-0 opacity-60" />
+                {endTime || '—'}
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -259,7 +275,7 @@ export function SignaturePadDialog({
             <Button
               type="button"
               onClick={handleConfirm}
-              disabled={isSubmitting || !signatureData || (canEditEndTime && !endTime.trim())}
+              disabled={isSubmitting || !signatureData || (showEndTime && !endTime.trim())}
             >
               {isSubmitting ? '저장 중...' : confirmLabel}
             </Button>

@@ -208,6 +208,7 @@ const AthleteTile = memo(function AthleteTile({
   onLessonCompleted,
 }: AthleteTileProps) {
   const [signatureOpen, setSignatureOpen] = useState(false)
+  const [signatureDefaultEndTime, setSignatureDefaultEndTime] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
   const [endTimeEditOpen, setEndTimeEditOpen] = useState(false)
   const [editEndTime, setEditEndTime] = useState('')
@@ -227,8 +228,11 @@ const AthleteTile = memo(function AthleteTile({
   const isGuestTrialMarked = lesson.lesson_type === '체험레슨' && !isCancelled
 
   async function handleCompleteLesson(signatureData: string, endTimeInput?: string) {
-    const endTime =
-      endTimeInput?.trim() || formatLocalEndTime(new Date())
+    const endTime = endTimeInput?.trim()
+    if (!endTime) {
+      toast.error('종료 시간을 확인할 수 없습니다.')
+      return
+    }
 
     setIsCompleting(true)
     const result = await completeLessonWithSignature(lesson.id, signatureData, endTime)
@@ -304,9 +308,10 @@ const AthleteTile = memo(function AthleteTile({
     }
   }
 
-  const defaultEndTimeForDialog =
-    formatTime(lesson.end_time) ||
-    formatLocalEndTime(new Date())
+  function openSignatureDialog() {
+    setSignatureDefaultEndTime(formatLocalEndTime(new Date()))
+    setSignatureOpen(true)
+  }
 
   return (
     <>
@@ -484,7 +489,7 @@ const AthleteTile = memo(function AthleteTile({
                     ? '출석 처리 후 종료·서명할 수 있습니다'
                     : `${label} 보호자 서명 받기`
               }
-              onClick={() => setSignatureOpen(true)}
+              onClick={openSignatureDialog}
               className={cn(
                 'mt-1 w-full rounded border border-primary/40 bg-primary/10 px-1 py-1 text-[9px] font-semibold leading-tight text-primary transition-colors hover:bg-primary/20',
                 (isLoading || isCompleting || !canEndLesson) && 'opacity-50',
@@ -552,7 +557,8 @@ const AthleteTile = memo(function AthleteTile({
         confirmLabel="종료 확인"
         isSubmitting={isCompleting}
         canEditEndTime={canEditEndTime}
-        defaultEndTime={defaultEndTimeForDialog}
+        defaultEndTime={signatureDefaultEndTime}
+        showEndTime
         showPastLessonFinder
         pastLessonMemberId={lesson.member_id ?? lesson.member?.id}
         onPastLessonUpdated={onLessonCompleted}
@@ -974,7 +980,7 @@ export function LessonStatusView({
     instructors,
     instructorLookup,
     isUpdating,
-    canEditEndTime: true,
+    canEditEndTime: isAdmin,
     bodyWeightByKey,
     onBodyWeightChange: handleBodyWeightChange,
     onStatusChange: handleStatusChange,
@@ -1077,7 +1083,7 @@ export function LessonStatusView({
                         <AthleteTile
                           lesson={lesson}
                           isLoading={isUpdating === lesson.id}
-                          canEditEndTime
+                          canEditEndTime={isAdmin}
                           instructorLookup={instructorLookup}
                           bodyWeightByKey={bodyWeightByKey}
                           onBodyWeightChange={handleBodyWeightChange}

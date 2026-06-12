@@ -52,6 +52,7 @@ function TimeColumn({
     pointerId: -1,
     startY: 0,
     startScrollTop: 0,
+    pendingSelect: null as string | null,
   })
 
   useEffect(() => {
@@ -81,16 +82,16 @@ function TimeColumn({
     const el = listRef.current
     if (!el) return
 
-    function isItemButton(target: EventTarget | null) {
-      return Boolean(
-        target instanceof Element &&
-          target.closest('button[data-value]'),
-      )
+    function getItemValue(target: EventTarget | null) {
+      if (!(target instanceof Element)) return null
+      const button = target.closest('button[data-value]')
+      return button instanceof HTMLButtonElement
+        ? button.dataset.value ?? null
+        : null
     }
 
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return
-      if (isItemButton(e.target)) return
 
       dragRef.current = {
         active: false,
@@ -98,6 +99,7 @@ function TimeColumn({
         pointerId: e.pointerId,
         startY: e.clientY,
         startScrollTop: el.scrollTop,
+        pendingSelect: getItemValue(e.target),
       }
       el.setPointerCapture(e.pointerId)
     }
@@ -123,8 +125,18 @@ function TimeColumn({
       if (el.hasPointerCapture(e.pointerId)) {
         el.releasePointerCapture(e.pointerId)
       }
+
+      const pendingSelect = drag.pendingSelect
+      const didDrag = drag.didDrag
+
       dragRef.current.active = false
       dragRef.current.pointerId = -1
+      dragRef.current.pendingSelect = null
+
+      if (!didDrag && pendingSelect) {
+        onSelect(pendingSelect)
+      }
+
       window.setTimeout(() => {
         dragRef.current.didDrag = false
       }, 0)
@@ -141,7 +153,7 @@ function TimeColumn({
       el.removeEventListener('pointerup', endPointer)
       el.removeEventListener('pointercancel', endPointer)
     }
-  }, [])
+  }, [onSelect])
 
   return (
     <div className="flex w-14 flex-col">
@@ -150,7 +162,7 @@ function TimeColumn({
       </div>
       <div
         ref={listRef}
-        className="max-h-44 cursor-grab overflow-y-auto overscroll-contain py-1 active:cursor-grabbing"
+        className="max-h-44 cursor-grab overflow-y-auto overscroll-contain py-1 active:cursor-grabbing [touch-action:pan-y] [-webkit-overflow-scrolling:touch]"
       >
         {items.map((item) => {
           const isSelected = selected === item
@@ -160,13 +172,8 @@ function TimeColumn({
               type="button"
               data-value={item}
               aria-selected={isSelected}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                onSelect(item)
-              }}
               className={cn(
-                'flex w-full cursor-pointer items-center justify-center py-1.5 text-sm tabular-nums transition-colors touch-manipulation',
+                'flex w-full cursor-pointer items-center justify-center py-1.5 text-sm tabular-nums transition-colors touch-manipulation select-none',
                 isSelected
                   ? 'bg-primary text-primary-foreground'
                   : 'text-foreground hover:bg-accent',

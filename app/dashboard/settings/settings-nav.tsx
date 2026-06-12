@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, Users } from 'lucide-react'
+import { Building2, CalendarSync, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const SETTINGS_TABS = [
@@ -12,13 +12,20 @@ const SETTINGS_TABS = [
     icon: Users,
     isActive: (path: string) =>
       path === '/dashboard/settings' &&
-      !path.startsWith('/dashboard/settings/center-contact'),
+      !path.startsWith('/dashboard/settings/center-contact') &&
+      !path.startsWith('/dashboard/settings/google-calendar'),
   },
   {
     href: '/dashboard/settings/center-contact',
     label: '센터 연락',
     icon: Building2,
     isActive: (path: string) => path.startsWith('/dashboard/settings/center-contact'),
+  },
+  {
+    href: '/dashboard/settings/google-calendar',
+    label: 'Google 캘린더',
+    icon: CalendarSync,
+    isActive: (path: string) => path.startsWith('/dashboard/settings/google-calendar'),
   },
 ] as const
 

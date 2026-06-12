@@ -118,6 +118,8 @@ export interface Lesson {
   session_deducted: boolean
   lesson_no: number | null
   signature_id: string | null
+  google_event_id?: string | null
+  google_sync_status?: string | null
   recurrence_group_id?: string | null
   recurrence_pattern?: string | null
   created_at: string
