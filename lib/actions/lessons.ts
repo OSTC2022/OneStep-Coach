@@ -20,10 +20,13 @@ import {
   type LessonRecurrencePattern,
 } from '@/lib/lesson-recurrence'
 import {
+  findExistingLessonsByDates,
+  type LessonSlotIdentity,
+} from '@/lib/lesson-slot-utils'
+import {
   encodeRecurrenceInSpecialNote,
   enrichLessonRecurrenceFields,
   filterLessonsBySeriesDeleteKey,
-  filterLessonsBySlotKey,
   inferRecurrenceFromSlotLessons,
   resolveLessonRecurrence,
   stripRecurrenceFromSpecialNote,
@@ -33,6 +36,7 @@ import {
   filterLessonsUpToNow,
   getTodayDateKey,
 } from '@/lib/lesson-record-utils'
+import { toStoredLessonType } from '@/lib/lesson-types'
 import { syncTrialLessonPayOverride } from '@/lib/trial-lesson-pay-sync'
 import {
   LESSON_CALENDAR_SELECT,
@@ -54,6 +58,7 @@ type RecurringLessonMutationResult = {
   error?: string
   warning?: string
   createdCount?: number
+  linkedCount?: number
 }
 
 const LESSON_TITLE_MIGRATION_HINT =
@@ -401,7 +406,7 @@ function buildInsertPayload(
     lesson_date: formData.lesson_date,
     start_time: formData.start_time || null,
     end_time: formData.end_time || null,
-    lesson_type: formData.lesson_type || '개인레슨',
+    lesson_type: toStoredLessonType(formData.lesson_type),
     content: formData.content || null,
     special_note: formData.special_note || null,
     attendance_status: formData.attendance_status || 'present',
@@ -426,6 +431,64 @@ function buildInsertPayload(
   }
 
   return payload
+}
+
+function buildRecurrenceLinkUpdate(
+  formData: LessonFormData,
+  recurrenceGroupId: string,
+  recurrencePattern: LessonRecurrencePattern | string | null,
+) {
+  return {
+    instructor_id: formData.instructor_id || null,
+    start_time: formData.start_time || null,
+    end_time: formData.end_time || null,
+    lesson_type: toStoredLessonType(formData.lesson_type),
+    recurrence_group_id: recurrenceGroupId,
+    recurrence_pattern: recurrencePattern,
+  }
+}
+
+async function updateLessonRecurrenceLink(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+  lessonId: string,
+  formData: LessonFormData,
+  recurrenceGroupId: string,
+  recurrencePattern: LessonRecurrencePattern | string | null,
+): Promise<{ lesson: Lesson | null; warning?: string }> {
+  let payload: Record<string, unknown> = buildRecurrenceLinkUpdate(
+    formData,
+    recurrenceGroupId,
+    recurrencePattern,
+  )
+
+  let { data, error } = await supabase
+    .from('lessons')
+    .update(payload)
+    .eq('id', lessonId)
+    .select(LESSON_MUTATION_SELECT_LEGACY)
+    .single()
+
+  let warning: string | undefined
+
+  if (error && isMissingRecurrenceColumn(error)) {
+    payload = withLegacyRecurrenceNote(
+      stripRecurrenceFields(payload),
+      recurrenceGroupId,
+      recurrencePattern,
+    )
+    const retry = await supabase
+      .from('lessons')
+      .update(payload)
+      .eq('id', lessonId)
+      .select(LESSON_MUTATION_SELECT_LEGACY)
+      .single()
+    data = retry.data
+    error = retry.error
+    warning = LESSON_RECURRENCE_MIGRATION_HINT
+  }
+
+  if (error || !data) return { lesson: null, warning }
+  return { lesson: normalizeLessonRecord(data as Lesson), warning }
 }
 
 function logSupabaseError(context: string, error: { message?: string; code?: string; details?: string }) {
@@ -729,122 +792,168 @@ export async function createRecurringLessons(
   }
 
   let baseLessonNo = 0
-  if (memberId) {
-    const { data: lastLesson } = await supabase
-      .from('lessons')
-      .select('lesson_no')
-      .eq('member_id', memberId)
-      .order('lesson_no', { ascending: false })
-      .limit(1)
-      .single()
-
-    baseLessonNo = lastLesson?.lesson_no || 0
-  }
 
   const recurrenceGroupId = options.recurrenceGroupId ?? crypto.randomUUID()
   const recurrencePattern =
     options.recurrencePattern ?? options.pattern ?? null
 
-  const payloads = dates.map((lessonDate, index) =>
-    buildInsertPayload(
-      {
-        ...formData,
-        lesson_date: lessonDate,
-        session_package_id: sessionPackageId ?? formData.session_package_id,
-      },
-      memberId,
-      title,
-      memberId ? baseLessonNo + index + 1 : null,
-      user?.id || null,
-      { recurrenceGroupId, recurrencePattern },
-    ),
-  )
-
-  let warning: string | undefined
-  let { data, error } = await supabase
-    .from('lessons')
-    .insert(payloads)
-    .select(LESSON_MUTATION_SELECT_LEGACY)
-
-  if (error && isMissingRecurrenceColumn(error)) {
-    const strippedPayloads = payloads
-      .map(stripRecurrenceFields)
-      .map((payload) =>
-        withLegacyRecurrenceNote(
-          payload,
-          recurrenceGroupId,
-          recurrencePattern,
-        ),
-      )
-    const retry = await supabase
-      .from('lessons')
-      .insert(strippedPayloads)
-      .select(LESSON_MUTATION_SELECT_LEGACY)
-    data = retry.data
-    error = retry.error
-    warning = LESSON_RECURRENCE_MIGRATION_HINT
+  const slotIdentity: LessonSlotIdentity = {
+    memberId,
+    title,
+    instructorId: formData.instructor_id || null,
+    startTime: formData.start_time || null,
   }
 
-  if (error && isMissingTitleColumn(error) && !memberId && title) {
-    const fallbackPayloads = dates.map((lessonDate, index) =>
+  const existingByDate = await findExistingLessonsByDates(
+    supabase,
+    slotIdentity,
+    dates,
+  )
+
+  const savedLessons: Lesson[] = []
+  const insertDates: string[] = []
+  let warning: string | undefined
+  let linkedCount = 0
+
+  for (const lessonDate of dates) {
+    const existingId = existingByDate.get(lessonDate)
+    if (existingId) {
+      const { lesson: linked, warning: linkWarning } =
+        await updateLessonRecurrenceLink(
+          supabase,
+          existingId,
+          { ...formData, lesson_date: lessonDate },
+          recurrenceGroupId,
+          recurrencePattern,
+        )
+      if (linked) {
+        savedLessons.push(linked)
+        linkedCount += 1
+      }
+      warning = warning ?? linkWarning
+    } else {
+      insertDates.push(lessonDate)
+    }
+  }
+
+  if (insertDates.length > 0) {
+    if (memberId) {
+      const { data: lastLesson } = await supabase
+        .from('lessons')
+        .select('lesson_no')
+        .eq('member_id', memberId)
+        .order('lesson_no', { ascending: false })
+        .limit(1)
+        .single()
+
+      baseLessonNo = lastLesson?.lesson_no || 0
+    }
+
+    const payloads = insertDates.map((lessonDate, index) =>
       buildInsertPayload(
-        { ...formData, lesson_date: lessonDate },
+        {
+          ...formData,
+          lesson_date: lessonDate,
+          session_package_id: sessionPackageId ?? formData.session_package_id,
+        },
         memberId,
         title,
         memberId ? baseLessonNo + index + 1 : null,
         user?.id || null,
-        {
-          useTitleFallback: true,
-          recurrenceGroupId,
-          recurrencePattern,
-        },
+        { recurrenceGroupId, recurrencePattern },
       ),
     )
 
-    let retry = await supabase
+    let { data, error } = await supabase
       .from('lessons')
-      .insert(fallbackPayloads)
+      .insert(payloads)
       .select(LESSON_MUTATION_SELECT_LEGACY)
 
-    if (retry.error && isMissingRecurrenceColumn(retry.error)) {
-      retry = await supabase
-        .from('lessons')
-        .insert(
-          fallbackPayloads
-            .map(stripRecurrenceFields)
-            .map((payload) =>
-              withLegacyRecurrenceNote(
-                payload,
-                recurrenceGroupId,
-                recurrencePattern,
-              ),
-            ),
+    if (error && isMissingRecurrenceColumn(error)) {
+      const strippedPayloads = payloads
+        .map(stripRecurrenceFields)
+        .map((payload) =>
+          withLegacyRecurrenceNote(
+            payload,
+            recurrenceGroupId,
+            recurrencePattern,
+          ),
         )
+      const retry = await supabase
+        .from('lessons')
+        .insert(strippedPayloads)
         .select(LESSON_MUTATION_SELECT_LEGACY)
-      warning = LESSON_RECURRENCE_MIGRATION_HINT
+      data = retry.data
+      error = retry.error
+      warning = warning ?? LESSON_RECURRENCE_MIGRATION_HINT
     }
 
-    data = retry.data
-    error = retry.error
-    warning = warning ?? LESSON_TITLE_MIGRATION_HINT
-  }
+    if (error && isMissingTitleColumn(error) && !memberId && title) {
+      const fallbackPayloads = insertDates.map((lessonDate, index) =>
+        buildInsertPayload(
+          { ...formData, lesson_date: lessonDate },
+          memberId,
+          title,
+          memberId ? baseLessonNo + index + 1 : null,
+          user?.id || null,
+          {
+            useTitleFallback: true,
+            recurrenceGroupId,
+            recurrencePattern,
+          },
+        ),
+      )
 
-  if (error) {
-    console.error('Error creating recurring lessons:', error)
-    if (isMemberIdRequiredError(error) && !memberId) {
-      return { error: LESSON_TITLE_MIGRATION_HINT }
+      let retry = await supabase
+        .from('lessons')
+        .insert(fallbackPayloads)
+        .select(LESSON_MUTATION_SELECT_LEGACY)
+
+      if (retry.error && isMissingRecurrenceColumn(retry.error)) {
+        retry = await supabase
+          .from('lessons')
+          .insert(
+            fallbackPayloads
+              .map(stripRecurrenceFields)
+              .map((payload) =>
+                withLegacyRecurrenceNote(
+                  payload,
+                  recurrenceGroupId,
+                  recurrencePattern,
+                ),
+              ),
+          )
+          .select(LESSON_MUTATION_SELECT_LEGACY)
+        warning = warning ?? LESSON_RECURRENCE_MIGRATION_HINT
+      }
+
+      data = retry.data
+      error = retry.error
+      warning = warning ?? LESSON_TITLE_MIGRATION_HINT
     }
-    const message =
-      error.code === 'PGRST205'
-        ? 'lessons 테이블이 없습니다. supabase/fix-lessons.sql 을 실행해주세요.'
-        : isMissingTitleColumn(error)
-          ? LESSON_TITLE_MIGRATION_HINT
-          : mapLessonError(error.message)
-    return { error: message }
+
+    if (error) {
+      console.error('Error creating recurring lessons:', error)
+      if (isMemberIdRequiredError(error) && !memberId) {
+        return { error: LESSON_TITLE_MIGRATION_HINT }
+      }
+      const message =
+        error.code === 'PGRST205'
+          ? 'lessons 테이블이 없습니다. supabase/fix-lessons.sql 을 실행해주세요.'
+          : isMissingTitleColumn(error)
+            ? LESSON_TITLE_MIGRATION_HINT
+            : mapLessonError(error.message)
+      return { error: message }
+    }
+
+    savedLessons.push(
+      ...((data ?? []) as Lesson[]).map(normalizeLessonRecord),
+    )
   }
 
-  const lessons = ((data ?? []) as Lesson[]).map(normalizeLessonRecord)
-  for (const lesson of lessons) {
+  savedLessons.sort((a, b) => a.lesson_date.localeCompare(b.lesson_date))
+
+  for (const lesson of savedLessons) {
     await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
   }
 
@@ -856,9 +965,10 @@ export async function createRecurringLessons(
   revalidatePath('/dashboard/reports')
 
   return {
-    data: lessons,
+    data: savedLessons,
     warning,
-    createdCount: lessons.length,
+    createdCount: insertDates.length,
+    linkedCount,
   }
 }
 
@@ -1044,23 +1154,24 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
         endDate = inferred?.endDate ?? null
       }
     } else {
-      let siblingsQuery = await supabase
+      const { data: groupSiblings, error: groupError } = await supabase
         .from('lessons')
-        .select('lesson_date, special_note')
-        .ilike('special_note', `%${resolved.groupId}%`)
+        .select('lesson_date')
+        .eq('recurrence_group_id', resolved.groupId)
         .order('lesson_date', { ascending: false })
         .limit(1)
 
-      if (siblingsQuery.error?.message?.includes('special_note')) {
-        siblingsQuery = await supabase
+      if (!groupError && groupSiblings?.length) {
+        endDate = groupSiblings[0].lesson_date
+      } else {
+        const legacy = await supabase
           .from('lessons')
-          .select('lesson_date')
-          .eq('recurrence_group_id', resolved.groupId)
+          .select('lesson_date, special_note')
+          .ilike('special_note', `%${resolved.groupId}%`)
           .order('lesson_date', { ascending: false })
           .limit(1)
+        endDate = legacy.data?.[0]?.lesson_date ?? null
       }
-
-      endDate = siblingsQuery.data?.[0]?.lesson_date ?? null
     }
 
     return {

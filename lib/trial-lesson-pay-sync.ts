@@ -8,6 +8,11 @@ import {
   isTrialLessonPayAmount,
   isTrialLessonType,
 } from '@/lib/trial-lesson-pay'
+import {
+  getRunningLessonPayAmount,
+  isRunningLessonPayAmount,
+} from '@/lib/running-lesson-pay'
+import { isRunningLessonType } from '@/lib/lesson-types'
 
 type TrialLessonPaySyncRow = {
   id: string
@@ -26,7 +31,21 @@ function isMissingPayOverrideTable(message: string) {
   )
 }
 
-/** 체험레슨 유형에 맞게 회원(수업)별 강사료 override 동기화 */
+function getFixedLessonPayAmount(lesson: TrialLessonPaySyncRow): number | null {
+  if (isTrialLessonType(lesson.lesson_type)) {
+    return getTrialLessonPayAmount(lesson.lesson_date)
+  }
+  if (isRunningLessonType(lesson.lesson_type)) {
+    return getRunningLessonPayAmount()
+  }
+  return null
+}
+
+function isFixedLessonPayAmount(amount: number): boolean {
+  return isTrialLessonPayAmount(amount) || isRunningLessonPayAmount(amount)
+}
+
+/** 체험·러닝레슨 등 고정 강사료 override 동기화 */
 export async function syncTrialLessonPayOverride(
   supabase: SupabaseClient,
   lesson: TrialLessonPaySyncRow,
@@ -41,15 +60,14 @@ export async function syncTrialLessonPayOverride(
   )
   const memberKey = getInstructorMemberPayOverrideKey(slotKey, lesson.id)
 
-  if (
-    isTrialLessonType(lesson.lesson_type) &&
-    lesson.attendance_status !== 'cancelled'
-  ) {
+  const fixedPay = getFixedLessonPayAmount(lesson)
+
+  if (fixedPay !== null && lesson.attendance_status !== 'cancelled') {
     const { error } = await supabase.from('instructor_pay_slot_overrides').upsert(
       {
         instructor_id: lesson.instructor_id,
         slot_key: memberKey,
-        pay_amount: getTrialLessonPayAmount(lesson.lesson_date),
+        pay_amount: fixedPay,
         member_count: null,
         updated_by: userId ?? null,
         updated_at: new Date().toISOString(),
@@ -77,7 +95,7 @@ export async function syncTrialLessonPayOverride(
     return
   }
 
-  if (!existing || !isTrialLessonPayAmount(Number(existing.pay_amount))) return
+  if (!existing || !isFixedLessonPayAmount(Number(existing.pay_amount))) return
 
   const { error } = await supabase
     .from('instructor_pay_slot_overrides')

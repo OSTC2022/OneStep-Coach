@@ -66,7 +66,7 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
       setStatus(nextStatus)
 
       toast.success('동기화 완료', {
-        description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
+        description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 기존 연결 ${result.data?.linked ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
       })
     } catch {
       toast.error('동기화 실패', {

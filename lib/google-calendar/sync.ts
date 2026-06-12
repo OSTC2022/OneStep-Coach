@@ -169,7 +169,7 @@ export async function syncGoogleCalendarLessons(options?: {
 }): Promise<GoogleCalendarSyncResult> {
   const row = await getGoogleCalendarSyncRow()
   if (!row?.refresh_token || !row.calendar_id || !row.sync_enabled) {
-    return { created: 0, updated: 0, cancelled: 0, pendingMember: 0, skipped: 0 }
+    return { created: 0, updated: 0, linked: 0, cancelled: 0, pendingMember: 0, skipped: 0 }
   }
 
   const supabase = createAdminClient()

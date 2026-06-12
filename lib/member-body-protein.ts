@@ -1,13 +1,18 @@
 import {
   DEFAULT_MEMBER_PROTEIN_SETTINGS,
   PROTEIN_GOAL_MODE_MULTIPLIERS,
+  PROTEIN_INTAKE_SLOTS,
   type MemberProteinSettings,
+  type ProteinIntakeBySlot,
+  type ProteinIntakeSlotId,
   type ProteinStatus,
 } from '@/lib/member-body-protein-types'
 
 export type {
   MemberProteinSettings,
   ProteinGoalMode,
+  ProteinIntakeBySlot,
+  ProteinIntakeSlotId,
   ProteinQuickFood,
   ProteinStatus,
 } from '@/lib/member-body-protein-types'
@@ -15,6 +20,7 @@ export type {
 export {
   DEFAULT_MEMBER_PROTEIN_SETTINGS,
   PROTEIN_GOAL_MODE_MULTIPLIERS,
+  PROTEIN_INTAKE_SLOTS,
   PROTEIN_QUICK_FOODS,
 } from '@/lib/member-body-protein-types'
 
@@ -89,4 +95,103 @@ export function parseProteinGramsInput(value: string): number | null {
 export function formatProteinGrams(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '-'
   return String(Math.round(value))
+}
+
+const PROTEIN_SLOT_IDS = new Set<ProteinIntakeSlotId>(
+  PROTEIN_INTAKE_SLOTS.map((slot) => slot.id),
+)
+
+function parseProteinSlotGrams(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return null
+  return Math.round(parsed)
+}
+
+export function emptyProteinIntakeBySlot(): ProteinIntakeBySlot {
+  return {}
+}
+
+export function normalizeProteinIntakeBySlot(
+  slots: ProteinIntakeBySlot | null | undefined,
+): ProteinIntakeBySlot {
+  if (!slots) return {}
+  const next: ProteinIntakeBySlot = {}
+  for (const [key, value] of Object.entries(slots)) {
+    if (!PROTEIN_SLOT_IDS.has(key as ProteinIntakeSlotId)) continue
+    const grams = parseProteinSlotGrams(value)
+    if (grams == null || grams <= 0) continue
+    next[key as ProteinIntakeSlotId] = grams
+  }
+  return next
+}
+
+export function parseProteinIntakeBySlot(raw: unknown): ProteinIntakeBySlot {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {}
+  }
+  return normalizeProteinIntakeBySlot(raw as ProteinIntakeBySlot)
+}
+
+export function sumProteinIntakeBySlot(
+  slots: ProteinIntakeBySlot | null | undefined,
+): number {
+  return Object.values(normalizeProteinIntakeBySlot(slots)).reduce(
+    (sum, grams) => sum + grams,
+    0,
+  )
+}
+
+export function proteinIntakeBySlotFromRecord(record: {
+  protein_intake_by_slot?: unknown
+}): ProteinIntakeBySlot {
+  return parseProteinIntakeBySlot(record.protein_intake_by_slot)
+}
+
+export function getProteinSlotInputValue(
+  slots: ProteinIntakeBySlot,
+  slotId: ProteinIntakeSlotId,
+): string {
+  const grams = normalizeProteinIntakeBySlot(slots)[slotId]
+  return grams != null && grams > 0 ? String(grams) : ''
+}
+
+export function setProteinSlotInputValue(
+  slots: ProteinIntakeBySlot,
+  slotId: ProteinIntakeSlotId,
+  rawValue: string,
+): ProteinIntakeBySlot {
+  const next = { ...normalizeProteinIntakeBySlot(slots) }
+  const trimmed = rawValue.trim()
+  if (!trimmed) {
+    delete next[slotId]
+    return next
+  }
+  const grams = parseProteinSlotGrams(trimmed)
+  if (grams == null) return next
+  next[slotId] = grams
+  return next
+}
+
+export function addProteinSlotGrams(
+  slots: ProteinIntakeBySlot,
+  slotId: ProteinIntakeSlotId,
+  grams: number,
+): ProteinIntakeBySlot {
+  if (!Number.isFinite(grams) || grams <= 0) return normalizeProteinIntakeBySlot(slots)
+  const next = { ...normalizeProteinIntakeBySlot(slots) }
+  next[slotId] = (next[slotId] ?? 0) + Math.round(grams)
+  return next
+}
+
+export function formatProteinIntakeBreakdown(
+  slots: ProteinIntakeBySlot | null | undefined,
+): string {
+  const normalized = normalizeProteinIntakeBySlot(slots)
+  const parts = PROTEIN_INTAKE_SLOTS.flatMap((slot) => {
+    const grams = normalized[slot.id]
+    if (grams == null || grams <= 0) return []
+    return [`${slot.label} ${grams}g`]
+  })
+  return parts.length > 0 ? parts.join(' · ') : ''
 }

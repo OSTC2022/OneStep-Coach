@@ -35,8 +35,9 @@ import {
 } from '@/lib/calendar-utils'
 import { AUTO_INSTRUCTOR_ID } from '@/lib/member-utils'
 import {
-  AUTO_INSTRUCTOR_CALENDAR_COLOR,
+  AUTO_INSTRUCTOR_BORDER_COLOR,
   getInstructorCalendarColor,
+  resolveLessonDisplayColor,
 } from '@/lib/instructor-colors'
 import { cn } from '@/lib/utils'
 import type { Instructor } from '@/lib/types'
@@ -110,10 +111,7 @@ function resolveLessonInstructorColor(
   lesson: LessonWithRelations,
   instructorLookup: Map<string, AttendanceInstructor>,
 ) {
-  if (!lesson.instructor_id) return AUTO_INSTRUCTOR_CALENDAR_COLOR
-  const instructor =
-    lesson.instructor ?? instructorLookup.get(lesson.instructor_id) ?? null
-  return getInstructorCalendarColor(instructor)
+  return resolveLessonDisplayColor(lesson, [...instructorLookup.values()])
 }
 
 const AttendanceTile = memo(function AttendanceTile({
@@ -345,7 +343,7 @@ export function AttendanceCheck({ initialLessons, instructors }: AttendanceCheck
   )
 
   function resolveInstructorColor(instructorId: string) {
-    if (instructorId === AUTO_INSTRUCTOR_ID) return AUTO_INSTRUCTOR_CALENDAR_COLOR
+    if (instructorId === AUTO_INSTRUCTOR_ID) return AUTO_INSTRUCTOR_BORDER_COLOR
     return getInstructorCalendarColor(instructorLookup.get(instructorId) ?? null)
   }
 

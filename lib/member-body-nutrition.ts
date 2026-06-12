@@ -2,11 +2,14 @@ import {
   calculateProteinAchievementPercent,
   calculateProteinTarget,
   deriveProteinStatus,
+  normalizeProteinIntakeBySlot,
   proteinStatusLabel,
   resolveProteinMultiplier,
+  sumProteinIntakeBySlot,
   type MemberProteinSettings,
 } from '@/lib/member-body-protein'
-import type { WellnessHistoryBadge, WellnessTone } from '@/lib/member-body-wellness'
+import type { ProteinIntakeBySlot } from '@/lib/member-body-protein-types'
+import type { ProteinIntakeBySlot } from '@/lib/member-body-protein-types'
 import { wellnessToneClasses } from '@/lib/member-body-wellness'
 
 export type ProteinStatus = 'sufficient' | 'normal' | 'insufficient'
@@ -26,6 +29,7 @@ export type MemberBodyRecordNutrition = {
   protein_status: ProteinStatus | null
   protein_target_g: number | null
   protein_intake_g: number | null
+  protein_intake_by_slot: ProteinIntakeBySlot | null
   protein_goal_multiplier: number | null
   post_workout_meal_status: PostWorkoutMealStatus | null
   hydration_status: HydrationStatus | null
@@ -37,6 +41,7 @@ export type BodyNutritionInput = {
   protein_status?: ProteinStatus | null
   protein_target_g?: number | null
   protein_intake_g?: number | null
+  protein_intake_by_slot?: ProteinIntakeBySlot | null
   protein_goal_multiplier?: number | null
   post_workout_meal_status?: PostWorkoutMealStatus | null
   hydration_status?: HydrationStatus | null
@@ -48,6 +53,7 @@ export const EMPTY_BODY_NUTRITION: MemberBodyRecordNutrition = {
   protein_status: null,
   protein_target_g: null,
   protein_intake_g: null,
+  protein_intake_by_slot: null,
   protein_goal_multiplier: null,
   post_workout_meal_status: null,
   hydration_status: null,
@@ -72,6 +78,7 @@ function parseProteinMultiplier(value: unknown): number | null {
 export function buildProteinNutritionFields(
   input: {
     protein_intake_g?: number | null
+    protein_intake_by_slot?: ProteinIntakeBySlot | null
     protein_target_g?: number | null
     protein_goal_multiplier?: number | null
     protein_status?: ProteinStatus | null
@@ -80,12 +87,19 @@ export function buildProteinNutritionFields(
   settings?: Partial<MemberProteinSettings>,
 ): Pick<
   MemberBodyRecordNutrition,
-  'protein_target_g' | 'protein_intake_g' | 'protein_goal_multiplier' | 'protein_status'
+  | 'protein_target_g'
+  | 'protein_intake_g'
+  | 'protein_intake_by_slot'
+  | 'protein_goal_multiplier'
+  | 'protein_status'
 > {
   const multiplier =
     parseProteinMultiplier(input.protein_goal_multiplier) ??
     resolveProteinMultiplier(settings)
-  const intake = parseProteinGrams(input.protein_intake_g)
+  const bySlot = normalizeProteinIntakeBySlot(input.protein_intake_by_slot)
+  const slotTotal = sumProteinIntakeBySlot(bySlot)
+  const intake =
+    slotTotal > 0 ? slotTotal : parseProteinGrams(input.protein_intake_g)
   const target =
     parseProteinGrams(input.protein_target_g) ??
     calculateProteinTarget(weightKg, multiplier)
@@ -99,6 +113,7 @@ export function buildProteinNutritionFields(
     return {
       protein_target_g: null,
       protein_intake_g: null,
+      protein_intake_by_slot: null,
       protein_goal_multiplier: null,
       protein_status: null,
     }
@@ -107,6 +122,7 @@ export function buildProteinNutritionFields(
   return {
     protein_target_g: target,
     protein_intake_g: intake,
+    protein_intake_by_slot: Object.keys(bySlot).length > 0 ? bySlot : null,
     protein_goal_multiplier: multiplier,
     protein_status: status,
   }
@@ -270,6 +286,7 @@ export function normalizeNutritionInput(
   const protein = buildProteinNutritionFields(
     {
       protein_intake_g: input.protein_intake_g,
+      protein_intake_by_slot: input.protein_intake_by_slot,
       protein_target_g: input.protein_target_g,
       protein_goal_multiplier: input.protein_goal_multiplier,
       protein_status: isNutritionChoice(input.protein_status, PROTEIN_STATUS_CHOICES)

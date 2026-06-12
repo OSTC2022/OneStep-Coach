@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { calculateMemberBmi, formatBodyMetric } from '@/lib/member-utils'
+import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
+import { proteinIntakeBySlotFromRecord } from '@/lib/member-body-protein'
 import { ProteinIntakePanel } from '@/components/members/protein-intake-panel'
 import { buildProteinNutritionFields } from '@/lib/member-body-nutrition'
 import {
@@ -18,8 +20,8 @@ import {
   type SupplementStatusMap,
 } from '@/lib/member-body-nutrition'
 import {
-  parseProteinGramsInput,
   type MemberProteinSettings,
+  type ProteinIntakeBySlot,
 } from '@/lib/member-body-protein'
 import {
   CONDITION_CHOICES,
@@ -49,7 +51,7 @@ export type MemberBodyRecordFormValues = {
   painLevel: string
   painAreaNote: string
   mealStatus: BodyWellnessInput['meal_status'] | ''
-  proteinIntakeG: string
+  proteinIntakeBySlot: ProteinIntakeBySlot
   postWorkoutMealStatus: BodyNutritionInput['post_workout_meal_status'] | ''
   hydrationStatus: BodyNutritionInput['hydration_status'] | ''
   supplementStatus: SupplementStatusMap
@@ -70,12 +72,34 @@ export function createEmptyBodyRecordFormValues(
     painLevel: '',
     painAreaNote: '',
     mealStatus: '',
-    proteinIntakeG: '',
+    proteinIntakeBySlot: {},
     postWorkoutMealStatus: '',
     hydrationStatus: '',
     supplementStatus: {},
     ...overrides,
   }
+}
+
+export function memberBodyRecordToFormValues(
+  record: MemberBodyRecord,
+): MemberBodyRecordFormValues {
+  return createEmptyBodyRecordFormValues({
+    date: record.recorded_at,
+    height: record.height_cm != null ? formatBodyMetric(record.height_cm) : '',
+    weight: formatBodyMetric(record.weight_kg),
+    sleepHours: record.sleep_hours ?? '',
+    condition: record.condition ?? '',
+    fatigue: record.fatigue ?? '',
+    muscleSoreness: record.muscle_soreness ?? '',
+    painArea: record.pain_area ?? '',
+    painLevel: record.pain_level != null ? String(record.pain_level) : '',
+    painAreaNote: record.pain_area_note ?? '',
+    mealStatus: record.meal_status ?? '',
+    proteinIntakeBySlot: proteinIntakeBySlotFromRecord(record),
+    postWorkoutMealStatus: record.post_workout_meal_status ?? '',
+    hydrationStatus: record.hydration_status ?? '',
+    supplementStatus: record.supplement_status ?? {},
+  })
 }
 
 export function bodyRecordFormToWellnessInput(
@@ -106,7 +130,7 @@ export function bodyRecordFormToNutritionInput(
 
   const weightKg = options?.weightKg ?? (values.weight ? Number(values.weight) : null)
   const protein = buildProteinNutritionFields(
-    { protein_intake_g: parseProteinGramsInput(values.proteinIntakeG) },
+    { protein_intake_by_slot: values.proteinIntakeBySlot },
     weightKg,
     options?.proteinSettings,
   )
@@ -328,10 +352,12 @@ export function MemberBodyRecordFields({
           <div className="space-y-3 border-t border-border/60 px-3 py-3">
             <ProteinIntakePanel
               weightKg={weightKg}
-              proteinIntakeG={values.proteinIntakeG}
+              proteinIntakeBySlot={values.proteinIntakeBySlot}
               proteinSettings={proteinSettings}
               disabled={disabled}
-              onIntakeChange={(proteinIntakeG) => patch({ proteinIntakeG })}
+              onIntakeBySlotChange={(proteinIntakeBySlot) =>
+                patch({ proteinIntakeBySlot })
+              }
             />
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-foreground">운동 후 회복식</p>

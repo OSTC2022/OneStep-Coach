@@ -5,6 +5,8 @@ import {
   isLessonOccurredBy,
 } from '@/lib/lesson-record-utils'
 import { getTrialLessonPayAmount, isTrialLessonType } from '@/lib/trial-lesson-pay'
+import { getRunningLessonPayAmount } from '@/lib/running-lesson-pay'
+import { isRunningLessonType } from '@/lib/lesson-types'
 
 export { filterLessonsUpToNow, isLessonOccurredBy }
 
@@ -201,7 +203,9 @@ function buildSlotMemberPays<T extends LessonPayRecord>(
   const lessonDate = countable[0].lesson_date
   const isWeekendOrHoliday = isWeekendOrHolidayRateDay(lessonDate)
   const regularCount = countable.filter(
-    (lesson) => !isTrialLessonType(lesson.lesson_type),
+    (lesson) =>
+      !isTrialLessonType(lesson.lesson_type) &&
+      !isRunningLessonType(lesson.lesson_type),
   ).length
   const regularPays = splitSlotPayAmongMembers(
     regularCount,
@@ -215,7 +219,9 @@ function buildSlotMemberPays<T extends LessonPayRecord>(
   for (const lesson of countable) {
     const pay = isTrialLessonType(lesson.lesson_type)
       ? getTrialLessonPayAmount(lesson.lesson_date)
-      : regularPays[regularIdx++] ?? 0
+      : isRunningLessonType(lesson.lesson_type)
+        ? getRunningLessonPayAmount()
+        : regularPays[regularIdx++] ?? 0
     entries.push({ lesson, pay })
     totalPay += pay
   }

@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { normalizeLessonType } from '@/lib/lesson-types'
 import {
   Select,
   SelectContent,
@@ -103,7 +103,7 @@ const LESSON_TYPES = [
   { value: '개인레슨', label: '개인레슨' },
   { value: '그룹레슨', label: '그룹레슨' },
   { value: '체험레슨', label: '체험레슨' },
-  { value: '보강', label: '보강' },
+  { value: '러닝레슨', label: '러닝레슨' },
 ]
 
 export function LessonRegistration({
@@ -475,7 +475,7 @@ export function LessonRegistration({
                           {formatLessonTime(lesson.start_time)}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary">{lesson.lesson_type}</Badge>
+                          <Badge variant="secondary">{normalizeLessonType(lesson.lesson_type)}</Badge>
                         </TableCell>
                       </TableRow>
                     ))}

@@ -3,6 +3,12 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
 import {
+  buildLessonSlotDateKey,
+  googleRecurrenceGroupId,
+  loadExistingLessonsBySlotKeys,
+  type LessonSlotLookupCandidate,
+} from '@/lib/lesson-slot-utils'
+import {
   isGoogleEventCancelled,
   normalizeGoogleEventTitle,
   parseGoogleEventDateTime,
@@ -15,6 +21,7 @@ const UPDATE_CHUNK_SIZE = 12
 type ExistingLesson = {
   id: string
   session_deducted: boolean
+  google_event_id?: string | null
 }
 
 export async function loadMemberNameMap(
@@ -73,12 +80,12 @@ function eventSortKey(event: GoogleCalendarEvent): string {
 function buildLessonPayload(
   event: GoogleCalendarEvent,
   memberId: string | null,
+  title: string,
 ): Record<string, unknown> | null {
   const schedule = parseGoogleEventDateTime(event)
   if (!schedule || !event.id) return null
 
-  const title = normalizeGoogleEventTitle(event.summary)
-  return {
+  const payload: Record<string, unknown> = {
     lesson_date: schedule.lessonDate,
     start_time: schedule.startTime,
     end_time: schedule.endTime,
@@ -92,6 +99,23 @@ function buildLessonPayload(
       ? null
       : '[구글 캘린더] 회원 자동 연결 실패 — 캘린더에서 회원을 지정해 주세요.',
   }
+
+  if (event.recurringEventId) {
+    payload.recurrence_group_id = googleRecurrenceGroupId(event.recurringEventId)
+  }
+
+  return payload
+}
+
+function emptySyncResult(): GoogleCalendarSyncResult {
+  return {
+    created: 0,
+    updated: 0,
+    linked: 0,
+    cancelled: 0,
+    pendingMember: 0,
+    skipped: 0,
+  }
 }
 
 export async function applyGoogleEventsBatch(
@@ -100,19 +124,20 @@ export async function applyGoogleEventsBatch(
   memberMap: Map<string, string>,
   existingMap: Map<string, ExistingLesson>,
 ): Promise<GoogleCalendarSyncResult> {
-  const result: GoogleCalendarSyncResult = {
-    created: 0,
-    updated: 0,
-    cancelled: 0,
-    pendingMember: 0,
-    skipped: 0,
-  }
+  const result = emptySyncResult()
 
   const sorted = [...events].sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)))
   const limited = sorted.slice(0, MAX_EVENTS_PER_SYNC)
 
-  const toInsert: Record<string, unknown>[] = []
-  const toUpdate: { id: string; payload: Record<string, unknown>; pending: boolean }[] = []
+  type PendingEvent = {
+    event: GoogleCalendarEvent
+    memberId: string | null
+    title: string
+    payload: Record<string, unknown>
+    slotKey: string
+  }
+
+  const pendingEvents: PendingEvent[] = []
   const toCancelIds: string[] = []
 
   for (const event of limited) {
@@ -121,11 +146,11 @@ export async function applyGoogleEventsBatch(
       continue
     }
 
-    const existing = existingMap.get(event.id)
+    const existingByGoogleId = existingMap.get(event.id)
 
     if (isGoogleEventCancelled(event)) {
-      if (existing && !existing.session_deducted) {
-        toCancelIds.push(existing.id)
+      if (existingByGoogleId && !existingByGoogleId.session_deducted) {
+        toCancelIds.push(existingByGoogleId.id)
       } else {
         result.skipped += 1
       }
@@ -135,23 +160,100 @@ export async function applyGoogleEventsBatch(
     const title = normalizeGoogleEventTitle(event.summary)
     const memberName = extractMemberNameFromCalendarLabel(title)
     const memberId = memberMap.get(memberName.trim()) ?? null
-    const payload = buildLessonPayload(event, memberId)
+    const payload = buildLessonPayload(event, memberId, title)
     if (!payload) {
       result.skipped += 1
       continue
     }
 
-    if (existing) {
-      if (existing.session_deducted) {
+    if (existingByGoogleId) {
+      pendingEvents.push({
+        event,
+        memberId,
+        title,
+        payload,
+        slotKey: `google:${event.id}`,
+      })
+      continue
+    }
+
+    const slotKey = buildLessonSlotDateKey(String(payload.lesson_date), {
+      memberId,
+      title: memberId ? null : title,
+      instructorId: null,
+      startTime: (payload.start_time as string | null) ?? null,
+    })
+
+    pendingEvents.push({
+      event,
+      memberId,
+      title,
+      payload,
+      slotKey: slotKey || `google:${event.id}`,
+    })
+  }
+
+  const slotCandidates: LessonSlotLookupCandidate[] = pendingEvents
+    .filter((item) => !existingMap.has(item.event.id!))
+    .map((item) => ({
+      lessonDate: String(item.payload.lesson_date),
+      memberId: item.memberId,
+      title: item.title,
+      startTime: (item.payload.start_time as string | null) ?? null,
+    }))
+
+  const slotExistingMap = await loadExistingLessonsBySlotKeys(supabase, slotCandidates)
+
+  const toInsert: Record<string, unknown>[] = []
+  const toUpdate: {
+    id: string
+    payload: Record<string, unknown>
+    pending: boolean
+    linked: boolean
+  }[] = []
+
+  for (const item of pendingEvents) {
+    const existingByGoogleId = existingMap.get(item.event.id!)
+
+    if (existingByGoogleId) {
+      if (existingByGoogleId.session_deducted) {
         result.skipped += 1
         continue
       }
-      toUpdate.push({ id: existing.id, payload, pending: !memberId })
+      toUpdate.push({
+        id: existingByGoogleId.id,
+        payload: item.payload,
+        pending: !item.memberId,
+        linked: false,
+      })
+      continue
+    }
+
+    const slotMatch = slotExistingMap.get(item.slotKey)
+    if (slotMatch) {
+      if (slotMatch.session_deducted) {
+        result.skipped += 1
+        continue
+      }
+      if (
+        slotMatch.google_event_id &&
+        slotMatch.google_event_id !== item.event.id
+      ) {
+        result.skipped += 1
+        continue
+      }
+
+      toUpdate.push({
+        id: slotMatch.id,
+        payload: item.payload,
+        pending: !item.memberId,
+        linked: true,
+      })
       continue
     }
 
     toInsert.push({
-      ...payload,
+      ...item.payload,
       lesson_type: '개인레슨',
       session_deducted: false,
     })
@@ -167,7 +269,15 @@ export async function applyGoogleEventsBatch(
   }
 
   if (toInsert.length > 0) {
-    const { error } = await supabase.from('lessons').insert(toInsert)
+    let { error } = await supabase.from('lessons').insert(toInsert)
+    if (error?.message.includes('recurrence_group_id')) {
+      const fallbackRows = toInsert.map((row) => {
+        const { recurrence_group_id: _removed, ...rest } = row
+        return rest
+      })
+      const retry = await supabase.from('lessons').insert(fallbackRows)
+      error = retry.error
+    }
     if (error) throw new Error(error.message)
     result.created = toInsert.length
     result.pendingMember += toInsert.filter(
@@ -180,11 +290,21 @@ export async function applyGoogleEventsBatch(
     const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE)
     await Promise.all(
       chunk.map(async (item) => {
-        const { error } = await supabase.from('lessons').update(item.payload).eq('id', item.id)
+        let payload = item.payload
+        let { error } = await supabase.from('lessons').update(payload).eq('id', item.id)
+        if (error?.message.includes('recurrence_group_id')) {
+          const { recurrence_group_id: _removed, ...fallbackPayload } = payload
+          const retry = await supabase
+            .from('lessons')
+            .update(fallbackPayload)
+            .eq('id', item.id)
+          error = retry.error
+        }
         if (error) throw new Error(error.message)
       }),
     )
-    result.updated += chunk.filter((item) => !item.pending).length
+    result.linked += chunk.filter((item) => item.linked).length
+    result.updated += chunk.filter((item) => !item.linked && !item.pending).length
     result.pendingMember += chunk.filter((item) => item.pending).length
   }
 

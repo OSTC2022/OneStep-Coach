@@ -65,11 +65,11 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
     }),
     supabase
       .from('lessons')
-      .select('id, attendance_status, lesson_date')
+      .select('id, attendance_status, lesson_date, instructor_id')
       .gte('lesson_date', thisMonthStr),
     supabase
       .from('lessons')
-      .select('id, attendance_status, lesson_date')
+      .select('id, attendance_status, lesson_date, instructor_id')
       .gte('lesson_date', lastMonthStr)
       .lte('lesson_date', lastMonthEndStr),
     supabase
@@ -147,10 +147,10 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
       thisMonthRevenue,
       lastMonthRevenue,
       thisMonthLessons: thisMonthLessons.filter(
-        (l) => l.attendance_status === 'present',
+        (l) => l.attendance_status === 'present' && l.instructor_id,
       ).length,
       lastMonthLessons: lastMonthLessons.filter(
-        (l) => l.attendance_status === 'present',
+        (l) => l.attendance_status === 'present' && l.instructor_id,
       ).length,
       totalMembers: totalMembersRes.count ?? 0,
       activeMembers: activeMembersRes.count ?? 0,

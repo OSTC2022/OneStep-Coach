@@ -11,6 +11,7 @@ import {
   CalendarRange,
   ClipboardCheck,
   Loader2,
+  Pencil,
   RotateCcw,
   Save,
   Scale,
@@ -55,12 +56,14 @@ import {
   type BodyPeriodSettings,
 } from '@/lib/member-body-period-settings'
 import { RecordHistoryBadgeList } from '@/components/members/record-history-badge-list'
+import { proteinIntakeBySlotFromRecord } from '@/lib/member-body-protein'
 import { calculateMemberBmi, formatBodyMetric } from '@/lib/member-utils'
 import {
   MemberBodyRecordFields,
   bodyRecordFormToNutritionInput,
   bodyRecordFormToWellnessInput,
   createEmptyBodyRecordFormValues,
+  memberBodyRecordToFormValues,
   validateBasicBodyRecord,
   type MemberBodyRecordFormValues,
 } from '@/components/members/member-body-record-fields'
@@ -165,6 +168,19 @@ export function MemberBodyAnalysisView({
   }, [initialRecords])
 
   useEffect(() => {
+    const existing = records.find(
+      (record) =>
+        record.recorded_at === formValues.date && !isBootstrapBodyRecord(record),
+    )
+    setFormValues((prev) => ({
+      ...prev,
+      proteinIntakeBySlot: existing
+        ? proteinIntakeBySlotFromRecord(existing)
+        : {},
+    }))
+  }, [formValues.date, records])
+
+  useEffect(() => {
     const saved = loadBodyPeriodSettings(member.id)
     if (saved) {
       setPeriodSettings(saved)
@@ -225,6 +241,25 @@ export function MemberBodyAnalysisView({
   )
   const hasSavedPeriod = savedPeriodSettings != null
   const periodLabel = formatBodyPeriodLabel(periodSettings)
+
+  const editingExistingRecord = useMemo(
+    () =>
+      records.find(
+        (record) =>
+          record.recorded_at === formValues.date && !isBootstrapBodyRecord(record),
+      ) ?? null,
+    [records, formValues.date],
+  )
+
+  function handleEditRecord(record: MemberBodyRecord) {
+    setFormValues(memberBodyRecordToFormValues(record))
+    toast.info(`${formatRecordDate(record.recorded_at)} 기록을 불러왔습니다.`)
+    requestAnimationFrame(() => {
+      document
+        .getElementById('today-record-top')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
 
   function handleSavePeriodSettings() {
     saveBodyPeriodSettings(member.id, periodSettings)
@@ -316,7 +351,9 @@ export function MemberBodyAnalysisView({
         description: migrationNotice.description,
       })
     } else {
-      toast.success('오늘 상태 기록이 저장되었습니다.')
+      toast.success(
+        editingExistingRecord ? '기록을 수정했습니다.' : '오늘 상태 기록이 저장되었습니다.',
+      )
     }
 
     if (result.record) {
@@ -350,10 +387,7 @@ export function MemberBodyAnalysisView({
           result.record!.pain_level != null ? String(result.record!.pain_level) : '',
         painAreaNote: result.record!.pain_area_note ?? '',
         mealStatus: result.record!.meal_status ?? '',
-        proteinIntakeG:
-          result.record!.protein_intake_g != null
-            ? String(Math.round(result.record!.protein_intake_g))
-            : '',
+        proteinIntakeBySlot: proteinIntakeBySlotFromRecord(result.record!),
         postWorkoutMealStatus: result.record!.post_workout_meal_status ?? '',
         hydrationStatus: result.record!.hydration_status ?? '',
         supplementStatus: result.record!.supplement_status ?? {},
@@ -463,18 +497,30 @@ export function MemberBodyAnalysisView({
                 </p>
                 <RecordHistoryBadgeList record={record} />
               </div>
-              {!isBootstrap ? (
+              <div className="flex shrink-0 items-center gap-0.5">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => setDeleteTarget(record)}
-                  aria-label="체중 기록 삭제"
+                  className="h-8 w-8 text-muted-foreground hover:text-primary"
+                  onClick={() => handleEditRecord(record)}
+                  aria-label={`${formatRecordDate(record.recorded_at)} 기록 수정`}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Pencil className="h-4 w-4" />
                 </Button>
-              ) : null}
+                {!isBootstrap ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => setDeleteTarget(record)}
+                    aria-label="체중 기록 삭제"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
             </div>
           )
         })}
@@ -871,7 +917,11 @@ export function MemberBodyAnalysisView({
 
         <Card id="today-record" className="order-1 lg:order-3">
           <CardHeader id="today-record-top" className="scroll-mt-[4.5rem]">
-            <CardTitle className="text-base">오늘 상태 기록</CardTitle>
+            <CardTitle className="text-base">
+              {editingExistingRecord
+                ? `${formatRecordDate(formValues.date)} 기록 수정`
+                : '오늘 상태 기록'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <MemberBodyRecordFields
@@ -893,6 +943,8 @@ export function MemberBodyAnalysisView({
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   저장 중
                 </>
+              ) : editingExistingRecord ? (
+                '수정 저장'
               ) : (
                 '기록하기'
               )}

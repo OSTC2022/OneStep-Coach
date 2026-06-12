@@ -215,6 +215,20 @@ export function calculateAgeFromBirthDate(birthDate: string): number | null {
   return age >= 0 ? age : null
 }
 
+/** 출생 연도 기준 세는 나이 (학년·나이 표기용, 예: 초6 → 13세) */
+export function calculateKoreanAgeFromBirthDate(birthDate: string): number | null {
+  if (!birthDate) return null
+
+  const birth = new Date(`${birthDate}T00:00:00`)
+  if (Number.isNaN(birth.getTime())) return null
+
+  const birthYear = birth.getFullYear()
+  if (birthYear < 1900) return null
+
+  const koreanAge = new Date().getFullYear() - birthYear + 1
+  return koreanAge >= 1 ? koreanAge : null
+}
+
 /** 회원 나이 표시 (저장된 age 우선, 없으면 생년월일 계산) */
 export function getMemberAge(member: Pick<Member, 'age' | 'birth_date'>): number | null {
   if (member.age != null && member.age >= 0) {
@@ -247,6 +261,14 @@ export function suggestAgeFromBirthDate(birthDate?: string | null): number | nul
 }
 
 export function formatMemberAge(member: Pick<Member, 'age' | 'birth_date'>): string {
+  if (member.birth_date) {
+    const koreanAge = calculateKoreanAgeFromBirthDate(member.birth_date)
+    const manAge = calculateAgeFromBirthDate(member.birth_date)
+    if (koreanAge != null && manAge != null) {
+      return `${koreanAge}세 (만${manAge}세)`
+    }
+  }
+
   const age = getMemberAge(member)
   return age != null ? `${age}세` : '-'
 }
@@ -330,8 +352,12 @@ export function getMemberCharacteristicColor(
 
 export function formatMemberAgeFromBirthDate(birthDate?: string): string {
   if (!birthDate) return '-'
-  const age = calculateAgeFromBirthDate(birthDate)
-  return age != null ? `${age}세` : '-'
+  const koreanAge = calculateKoreanAgeFromBirthDate(birthDate)
+  const manAge = calculateAgeFromBirthDate(birthDate)
+  if (koreanAge != null && manAge != null) {
+    return `${koreanAge}세 (만${manAge}세)`
+  }
+  return '-'
 }
 
 export function resolveMemberAgeAndBirthDate(

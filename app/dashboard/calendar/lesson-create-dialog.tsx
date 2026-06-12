@@ -30,9 +30,15 @@ import {
 } from '@/lib/member-utils'
 import { touchMemberRecent } from '@/lib/member-recent-search'
 import {
+  LESSON_TYPE_OPTIONS,
+  normalizeLessonType,
+  isRunningLessonType,
+} from '@/lib/lesson-types'
+import {
   formatTrialLessonPayHint,
   isTrialLessonType,
 } from '@/lib/trial-lesson-pay'
+import { formatRunningLessonPayHint } from '@/lib/running-lesson-pay'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -92,7 +98,7 @@ interface LessonCreateDialogProps {
   sameSlotLessons?: Lesson[]
 }
 
-const LESSON_TYPES = ['개인레슨', '그룹레슨', '체험레슨', '보강']
+const LESSON_TYPES = [...LESSON_TYPE_OPTIONS]
 const EMPTY_SLOT_LESSONS: Lesson[] = []
 
 function toTimeInputValue(value?: string | null) {
@@ -228,10 +234,12 @@ export function LessonCreateDialog({
     })
   }, [recurrencePattern, recurrenceEndDate, date, isEditing, isAddingToSlot])
 
-  const trialPayHint =
+  const fixedLessonPayHint =
     isTrialLessonType(lessonType) && date
       ? formatTrialLessonPayHint(date)
-      : null
+      : isRunningLessonType(lessonType)
+        ? formatRunningLessonPayHint()
+        : null
 
   useEffect(() => {
     setMounted(true)
@@ -298,7 +306,7 @@ export function LessonCreateDialog({
         setEntryText(resolveLessonTitle(lesson) || '')
       }
       setInstructorId(lesson.instructor_id || initialInstructorId)
-      setLessonType(lesson.lesson_type || '개인레슨')
+      setLessonType(normalizeLessonType(lesson.lesson_type))
       setDate(lesson.lesson_date)
       setStartTime(toTimeInputValue(lesson.start_time))
       setEndTime(toTimeInputValue(lesson.end_time))
@@ -463,9 +471,15 @@ export function LessonCreateDialog({
       showSaveWarning(result.warning)
 
       setIsLoading(false)
-      toast.success(
-        `${result.createdCount ?? result.data?.length ?? 0}개 ${successLabel}`,
-      )
+      const created = result.createdCount ?? 0
+      const linked = result.linkedCount ?? 0
+      if (linked > 0 && created > 0) {
+        toast.success(`${created}개 등록, ${linked}개 기존 일정 연결`)
+      } else if (linked > 0) {
+        toast.success(`${linked}개 기존 일정을 반복 시리즈에 연결했습니다.`)
+      } else {
+        toast.success(`${created || result.data?.length || 0}개 ${successLabel}`)
+      }
       handleOpenChange(false)
       return
     }
@@ -675,6 +689,22 @@ export function LessonCreateDialog({
         recurringResult.data?.forEach((item) => onSaved(item))
         showSaveWarning(recurringResult.warning)
         createdCount = recurringResult.createdCount ?? additionalDates.length
+        const linkedCount = recurringResult.linkedCount ?? 0
+        setIsLoading(false)
+
+        if (createdCount > 0 || linkedCount > 0) {
+          const parts: string[] = []
+          if (createdCount > 0) parts.push(`${createdCount}개 추가`)
+          if (linkedCount > 0) parts.push(`${linkedCount}개 기존 일정 연결`)
+          toast.success(`수업이 수정되었고 ${parts.join(', ')}되었습니다.`)
+        } else if ((result.data?.length ?? 0) > 1) {
+          toast.success(`${result.data?.length ?? 0}개 수업이 수정되었습니다.`)
+        } else {
+          toast.success('수업이 수정되었습니다.')
+        }
+
+        handleOpenChange(false)
+        return
       }
     }
 
@@ -996,8 +1026,8 @@ export function LessonCreateDialog({
         </>
       )}
 
-      {trialPayHint ? (
-        <p className="text-[11px] font-medium text-primary">{trialPayHint}</p>
+      {fixedLessonPayHint ? (
+        <p className="text-[11px] font-medium text-primary">{fixedLessonPayHint}</p>
       ) : null}
 
       <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-2">

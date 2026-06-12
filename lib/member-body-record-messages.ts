@@ -4,6 +4,13 @@ export function describeBodyRecordMigrationHint(hint: string | undefined): {
   description: string
 } | null {
   if (!hint) return null
+  if (hint.includes('protein-slots')) {
+    return {
+      title: '시간대별 단백질 기록이 저장되지 않았습니다',
+      description:
+        '오늘 합계 단백질은 저장되었습니다. 아침·점심·저녁 등 시간대별 기록을 남기려면 Supabase SQL Editor에서 add-member-protein-intake-by-slot.sql을 실행해주세요.',
+    }
+  }
   if (hint.includes('protein-tracking')) {
     return {
       title: '단백질 자동 계산 항목이 저장되지 않았습니다',

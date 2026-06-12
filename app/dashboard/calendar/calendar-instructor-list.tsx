@@ -7,13 +7,16 @@ import { List, Loader2, Trash2, X } from 'lucide-react'
 import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
 import { Button } from '@/components/ui/button'
 import {
-  filterLessonsForMonth,
+  filterLessonsForView,
   getLessonCalendarDisplayLine,
+  getViewTitle,
   sortLessonsBySchedule,
+  type CalendarView,
 } from '@/lib/calendar-utils'
 import {
   getInstructorCalendarColor,
-  AUTO_INSTRUCTOR_CALENDAR_COLOR,
+  AUTO_INSTRUCTOR_BORDER_COLOR,
+  resolveLessonDisplayColor,
   hexToRgba,
 } from '@/lib/instructor-colors'
 import { AUTO_INSTRUCTOR_ID } from '@/lib/member-utils'
@@ -34,8 +37,7 @@ function getLessonInstructorFilterId(lesson: Lesson): string {
 }
 
 function getLessonInstructorColor(lesson: Lesson): string {
-  if (!lesson.instructor_id) return AUTO_INSTRUCTOR_CALENDAR_COLOR
-  return getInstructorCalendarColor(lesson.instructor)
+  return resolveLessonDisplayColor(lesson, lesson.instructor ? [lesson.instructor] : [])
 }
 
 function buildInstructorFilterOptions(instructors: Instructor[]): InstructorFilterOption[] {
@@ -43,7 +45,7 @@ function buildInstructorFilterOptions(instructors: Instructor[]): InstructorFilt
     {
       id: AUTO_INSTRUCTOR_ID,
       name: AUTO_INSTRUCTOR_LABEL,
-      color: AUTO_INSTRUCTOR_CALENDAR_COLOR,
+      color: AUTO_INSTRUCTOR_BORDER_COLOR,
     },
     ...instructors.map((instructor) => ({
       id: instructor.id,
@@ -57,6 +59,7 @@ interface CalendarInstructorListProps {
   instructors: Instructor[]
   lessons: Lesson[]
   currentDate: Date
+  view: CalendarView
   highlightedLessonIds?: string[]
   onLoadMonthPool?: () => void
   onSelectLesson?: (lesson: Lesson) => void
@@ -68,6 +71,7 @@ export function CalendarInstructorList({
   instructors,
   lessons,
   currentDate,
+  view,
   highlightedLessonIds,
   onLoadMonthPool,
   onSelectLesson,
@@ -109,14 +113,25 @@ export function CalendarInstructorList({
     })
   }, [instructors])
 
-  const monthLessons = useMemo(() => {
-    const inMonth = filterLessonsForMonth(lessons, currentDate)
-    return sortLessonsBySchedule(inMonth).filter((lesson) =>
+  const listLessons = useMemo(() => {
+    const inRange = filterLessonsForView(lessons, currentDate, view)
+    return sortLessonsBySchedule(inRange).filter((lesson) =>
       activeInstructorIds.has(getLessonInstructorFilterId(lesson)),
     )
-  }, [lessons, currentDate, activeInstructorIds])
+  }, [lessons, currentDate, view, activeInstructorIds])
 
-  const monthLabel = format(currentDate, 'M월', { locale: ko })
+  const listTitle = useMemo(() => {
+    if (view === 'month') {
+      return `${format(currentDate, 'M월', { locale: ko })} 수업 목록`
+    }
+    return `${getViewTitle(currentDate, view)} 수업 목록`
+  }, [currentDate, view])
+
+  const emptyListMessage = useMemo(() => {
+    if (view === 'day') return '이 날짜에 선택한 강사의 수업이 없습니다.'
+    if (view === 'week') return '이번 주에 선택한 강사의 수업이 없습니다.'
+    return `${format(currentDate, 'M월', { locale: ko })}에 선택한 강사의 수업이 없습니다.`
+  }, [currentDate, view])
   const highlightedSet = useMemo(
     () => new Set(highlightedLessonIds ?? []),
     [highlightedLessonIds],
@@ -132,7 +147,7 @@ export function CalendarInstructorList({
       el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }, 80)
     return () => window.clearTimeout(timer)
-  }, [open, highlightedLessonIds, monthLessons])
+  }, [open, highlightedLessonIds, listLessons])
 
   const onLoadMonthPoolRef = useRef(onLoadMonthPool)
   onLoadMonthPoolRef.current = onLoadMonthPool
@@ -215,7 +230,7 @@ export function CalendarInstructorList({
         size="sm"
         className="gap-1.5"
         onClick={() => setOpen((value) => !value)}
-        title="이달 수업 목록"
+        title={`${listTitle} 보기`}
       >
         <List className="h-4 w-4" />
         <span className="hidden sm:inline">목록</span>
@@ -225,7 +240,7 @@ export function CalendarInstructorList({
         <div className="absolute left-0 top-full z-50 mt-1 w-[min(calc(100vw-2rem),42rem)] overflow-hidden rounded-md border border-border bg-popover shadow-lg">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <div>
-              <p className="text-sm font-medium">{monthLabel} 수업 목록</p>
+              <p className="text-sm font-medium">{listTitle}</p>
               <p className="text-xs text-muted-foreground">
                 강사 색 on/off · Alt+클릭 선택 · 클릭 이동 · 우클릭/길게 누르기 수정
               </p>
@@ -311,13 +326,13 @@ export function CalendarInstructorList({
                 <p className="px-4 py-8 text-center text-sm text-muted-foreground">
                   표시할 강사를 선택해주세요.
                 </p>
-              ) : monthLessons.length === 0 ? (
+              ) : listLessons.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  {monthLabel}에 선택한 강사의 수업이 없습니다.
+                  {emptyListMessage}
                 </p>
               ) : (
                 <ul className="divide-y divide-border py-1">
-                  {monthLessons.map((lesson) => {
+                  {listLessons.map((lesson) => {
                     const color = getLessonInstructorColor(lesson)
                     const isHighlighted = highlightedSet.has(lesson.id)
                     const isMultiSelected = isLessonSelected(lesson.id)
@@ -399,18 +414,18 @@ export function CalendarInstructorList({
             </div>
           </div>
 
-          {monthLessons.length > 0 && (
+          {listLessons.length > 0 && (
             <div
               className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground"
               style={{
                 backgroundColor: hexToRgba(
                   filterOptions.find((option) => activeInstructorIds.has(option.id))
-                    ?.color ?? AUTO_INSTRUCTOR_CALENDAR_COLOR,
+                    ?.color ?? AUTO_INSTRUCTOR_BORDER_COLOR,
                   0.06,
                 ),
               }}
             >
-              {monthLessons.length}건 · {activeInstructorIds.size}개 표시 중
+              {listLessons.length}건 · {activeInstructorIds.size}개 표시 중
               {selectionCount > 0 ? ` · ${selectionCount}개 선택` : ''}
             </div>
           )}

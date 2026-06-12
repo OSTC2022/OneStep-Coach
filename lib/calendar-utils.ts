@@ -251,6 +251,21 @@ export function filterLessonsForMonth(lessons: Lesson[], monthDate: Date): Lesso
   )
 }
 
+/** 캘린더 보기(일·주·월)에 맞춰 목록 필터 */
+export function filterLessonsForView(
+  lessons: Lesson[],
+  date: Date,
+  view: CalendarView,
+): Lesson[] {
+  if (view === 'month') {
+    return filterLessonsForMonth(lessons, date)
+  }
+  const { dateFrom, dateTo } = getRangeForView(date, view)
+  return lessons.filter(
+    (lesson) => lesson.lesson_date >= dateFrom && lesson.lesson_date <= dateTo,
+  )
+}
+
 export function sortLessonsBySchedule(lessons: Lesson[]): Lesson[] {
   return [...lessons].sort((a, b) => {
     const dateCmp = a.lesson_date.localeCompare(b.lesson_date)

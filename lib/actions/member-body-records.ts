@@ -52,9 +52,12 @@ const WELLNESS_WITH_PAIN_SELECT =
   `${WELLNESS_SELECT}, pain_level, pain_area_note`
 
 const NUTRITION_SELECT =
-  `${WELLNESS_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
+  `${WELLNESS_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, protein_intake_by_slot, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
 
 const FULL_SELECT =
+  `${WELLNESS_WITH_PAIN_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, protein_intake_by_slot, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
+
+const FULL_SELECT_WITHOUT_PROTEIN_SLOTS =
   `${WELLNESS_WITH_PAIN_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
 
 const BODY_RECORD_SELECT = FULL_SELECT
@@ -72,6 +75,11 @@ function isMissingNutritionColumns(message: string | undefined) {
     lower.includes('supplement_status') ||
     lower.includes('nutrition_note')
   )
+}
+
+function isMissingProteinIntakeBySlotColumn(message: string | undefined) {
+  if (!message) return false
+  return message.toLowerCase().includes('protein_intake_by_slot')
 }
 
 function isMissingWellnessColumns(message: string | undefined) {
@@ -139,6 +147,7 @@ function nutritionPayload(
     protein_status: nutrition.protein_status,
     protein_target_g: nutrition.protein_target_g,
     protein_intake_g: nutrition.protein_intake_g,
+    protein_intake_by_slot: nutrition.protein_intake_by_slot,
     protein_goal_multiplier: nutrition.protein_goal_multiplier,
     post_workout_meal_status: nutrition.post_workout_meal_status,
     hydration_status: nutrition.hydration_status,
@@ -188,6 +197,7 @@ function parseNutritionRow(row: Record<string, unknown>): MemberBodyRecordNutrit
     protein_status: row.protein_status as BodyNutritionInput['protein_status'],
     protein_target_g: row.protein_target_g as number | null | undefined,
     protein_intake_g: row.protein_intake_g as number | null | undefined,
+    protein_intake_by_slot: row.protein_intake_by_slot as BodyNutritionInput['protein_intake_by_slot'],
     protein_goal_multiplier: row.protein_goal_multiplier as number | null | undefined,
     post_workout_meal_status:
       row.post_workout_meal_status as BodyNutritionInput['post_workout_meal_status'],
@@ -273,6 +283,11 @@ async function queryMemberBodyRecords(
 
   let selectTier: BodyRecordSaveTier = 'full'
   let { data, error } = await run(FULL_SELECT)
+  if (error && isMissingProteinIntakeBySlotColumn(error.message)) {
+    const retry = await run(FULL_SELECT_WITHOUT_PROTEIN_SLOTS)
+    data = retry.data
+    error = retry.error
+  }
   if (error && isMissingNutritionColumns(error.message)) {
     selectTier = 'wellness'
     const retry = await run(WELLNESS_WITH_PAIN_SELECT)
@@ -327,22 +342,42 @@ async function persistMemberBodyRecord(
       )
       const select = selectForTier(tier, tier === 'basic' ? undefined : { includePainDetail })
 
-      const result = params.existingId
-        ? await supabase
-            .from('member_body_records')
-            .update(payload)
-            .eq('id', params.existingId)
-            .select(select)
-            .single()
-        : await supabase
-            .from('member_body_records')
-            .insert({
-              member_id: params.memberId,
-              recorded_at: params.recordedAt,
-              ...payload,
-            })
-            .select(select)
-            .single()
+      const runPersist = async (body: Record<string, unknown>) =>
+        params.existingId
+          ? await supabase
+              .from('member_body_records')
+              .update(body)
+              .eq('id', params.existingId)
+              .select(select)
+              .single()
+          : await supabase
+              .from('member_body_records')
+              .insert({
+                member_id: params.memberId,
+                recorded_at: params.recordedAt,
+                ...body,
+              })
+              .select(select)
+              .single()
+
+      let result = await runPersist(payload)
+
+      if (
+        result.error &&
+        isMissingProteinIntakeBySlotColumn(result.error.message) &&
+        'protein_intake_by_slot' in payload
+      ) {
+        const { protein_intake_by_slot: _removed, ...fallbackPayload } = payload
+        result = await runPersist(fallbackPayload)
+        if (!result.error && result.data) {
+          const saved = normalizeRecord(result.data as Record<string, unknown>)
+          return {
+            record: saved,
+            migrationHint:
+              'supabase/add-member-protein-intake-by-slot.sql (protein-slots)',
+          }
+        }
+      }
 
       if (!result.error && result.data) {
         const saved = normalizeRecord(result.data as Record<string, unknown>)
@@ -400,6 +435,7 @@ function createBootstrapRecord(
     protein_status: null,
     protein_target_g: null,
     protein_intake_g: null,
+    protein_intake_by_slot: null,
     protein_goal_multiplier: null,
     post_workout_meal_status: null,
     hydration_status: null,

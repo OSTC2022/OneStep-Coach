@@ -39,3 +39,25 @@ export const PROTEIN_QUICK_FOODS: ProteinQuickFood[] = [
   { id: 'yogurt', label: '그릭요거트 1개', grams: 10 },
   { id: 'protein_shake', label: '프로틴 1회', grams: 20 },
 ]
+
+export type ProteinIntakeSlotId =
+  | 'breakfast'
+  | 'lunch'
+  | 'dinner'
+  | 'pre_workout'
+  | 'post_workout'
+  | 'snack'
+
+export const PROTEIN_INTAKE_SLOTS: ReadonlyArray<{
+  id: ProteinIntakeSlotId
+  label: string
+}> = [
+  { id: 'breakfast', label: '아침' },
+  { id: 'lunch', label: '점심' },
+  { id: 'dinner', label: '저녁' },
+  { id: 'pre_workout', label: '운동 전' },
+  { id: 'post_workout', label: '운동 후' },
+  { id: 'snack', label: '간식' },
+]
+
+export type ProteinIntakeBySlot = Partial<Record<ProteinIntakeSlotId, number>>

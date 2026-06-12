@@ -826,6 +826,7 @@ export function LessonCalendar({
             instructors={instructors}
             lessons={searchLessons}
             currentDate={currentDate}
+            view={view}
             highlightedLessonIds={highlight?.lessonIds}
             onLoadMonthPool={loadSearchPool}
             onSelectLesson={handleListSelectLesson}

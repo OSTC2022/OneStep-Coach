@@ -159,7 +159,7 @@ export function inferRecurrenceFromSlotLessons(
   siblingIds: string[]
   endDate: string | null
 } | null {
-  const siblings = filterLessonsBySlotKey(target, candidates).sort((a, b) =>
+  const siblings = filterLessonsBySeriesDeleteKey(target, candidates).sort((a, b) =>
     a.lesson_date.localeCompare(b.lesson_date),
   )
   const slotKey = buildLessonSlotKey(target)

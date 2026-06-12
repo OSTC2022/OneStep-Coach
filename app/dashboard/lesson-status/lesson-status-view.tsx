@@ -58,8 +58,9 @@ import {
 } from '@/lib/calendar-utils'
 import { cn } from '@/lib/utils'
 import {
-  AUTO_INSTRUCTOR_CALENDAR_COLOR,
+  AUTO_INSTRUCTOR_BORDER_COLOR,
   getInstructorCalendarColor,
+  resolveLessonDisplayColor,
 } from '@/lib/instructor-colors'
 import {
   CalendarDays,
@@ -188,10 +189,7 @@ function resolveLessonInstructorColor(
   lesson: Lesson,
   instructorLookup: Map<string, Instructor>,
 ) {
-  if (!lesson.instructor_id) return AUTO_INSTRUCTOR_CALENDAR_COLOR
-  const instructor =
-    lesson.instructor ?? instructorLookup.get(lesson.instructor_id) ?? null
-  return getInstructorCalendarColor(instructor)
+  return resolveLessonDisplayColor(lesson, [...instructorLookup.values()])
 }
 
 const AthleteTile = memo(function AthleteTile({
@@ -641,7 +639,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   )
 
   function resolveInstructorColor(instructorId: string) {
-    if (instructorId === AUTO_INSTRUCTOR_ID) return AUTO_INSTRUCTOR_CALENDAR_COLOR
+    if (instructorId === AUTO_INSTRUCTOR_ID) return AUTO_INSTRUCTOR_BORDER_COLOR
     return getInstructorCalendarColor(instructorLookup.get(instructorId) ?? null)
   }
 

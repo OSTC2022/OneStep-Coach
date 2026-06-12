@@ -15,8 +15,11 @@ export const INSTRUCTOR_CALENDAR_COLORS = [
 
 export const DEFAULT_INSTRUCTOR_CALENDAR_COLOR = INSTRUCTOR_CALENDAR_COLORS[0].hex
 
-/** 강사 미지정(자율배정) 수업 표시색 */
-export const AUTO_INSTRUCTOR_CALENDAR_COLOR = '#94A3B8'
+/** 강사 미지정(자율배정) — 연한 회색·흰색 테두리 */
+export const AUTO_INSTRUCTOR_BORDER_COLOR = '#E2E8F0'
+
+/** @deprecated 테두리는 AUTO_INSTRUCTOR_BORDER_COLOR 사용 */
+export const AUTO_INSTRUCTOR_CALENDAR_COLOR = AUTO_INSTRUCTOR_BORDER_COLOR
 
 export type InstructorCalendarColorId =
   (typeof INSTRUCTOR_CALENDAR_COLORS)[number]['id']
@@ -43,6 +46,39 @@ export function getInstructorCalendarColor(
     return instructor.calendar_color
   }
   return DEFAULT_INSTRUCTOR_CALENDAR_COLOR
+}
+
+export function isAutoAssignedLesson(
+  lesson: Pick<Lesson, 'instructor_id'>,
+): boolean {
+  return !lesson.instructor_id
+}
+
+/** 자율배정 — 어두운 배경 + 밝은 테두리 (수업현황·출석 타일과 동일) */
+export function getAutoAssignedLessonBlockStyle(): CSSProperties {
+  return {
+    backgroundColor: 'rgba(13, 27, 42, 0.92)',
+    borderColor: AUTO_INSTRUCTOR_BORDER_COLOR,
+    color: '#ffffff',
+  }
+}
+
+export function getAutoAssignedLessonChipStyle(): CSSProperties {
+  return {
+    backgroundColor: 'rgba(226, 232, 240, 0.08)',
+    color: '#ffffff',
+    borderColor: 'rgba(226, 232, 240, 0.45)',
+  }
+}
+
+export function resolveLessonDisplayColor(
+  lesson: Pick<Lesson, 'instructor_id' | 'instructor'>,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): string {
+  if (isAutoAssignedLesson(lesson)) {
+    return AUTO_INSTRUCTOR_BORDER_COLOR
+  }
+  return getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))
 }
 
 /** instructor_id 기준으로 강사 색상 소스 결정 (저장 후 stale join 방지) */
@@ -114,8 +150,31 @@ export function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-export function getContrastTextColor(hex: string): string {
-  const bg = relativeLuminance(hex)
+function parseCssColorChannels(
+  color: string,
+): { r: number; g: number; b: number } | null {
+  const rgba = color.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i)
+  if (rgba) {
+    return { r: Number(rgba[1]), g: Number(rgba[2]), b: Number(rgba[3]) }
+  }
+  if (color.startsWith('#')) {
+    return hexToRgb(color)
+  }
+  return null
+}
+
+function relativeLuminanceFromChannels(r: number, g: number, b: number): number {
+  return (
+    0.2126 * channelLuminance(r) +
+    0.7152 * channelLuminance(g) +
+    0.0722 * channelLuminance(b)
+  )
+}
+
+export function getContrastTextColor(color: string): string {
+  const channels = parseCssColorChannels(color)
+  if (!channels) return '#ffffff'
+  const bg = relativeLuminanceFromChannels(channels.r, channels.g, channels.b)
   const whiteContrast = contrastRatio(bg, 1)
   const blackContrast = contrastRatio(bg, 0)
   return whiteContrast >= blackContrast ? '#ffffff' : '#0f172a'
@@ -133,11 +192,26 @@ export function getCalendarBlockTextStyle(
   const color = getContrastTextColor(backgroundColor)
   if (color === '#ffffff') {
     return {
-      color,
-      textShadow: '0 1px 2px rgba(0,0,0,0.35)',
+      color: '#ffffff',
+      textShadow: '0 1px 2px rgba(0,0,0,0.45)',
     }
   }
   return { color }
+}
+
+export function getLessonCalendarBlockTextStyle(
+  lesson: Lesson,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): Pick<CSSProperties, 'color' | 'textShadow'> {
+  if (isAutoAssignedLesson(lesson)) {
+    return {
+      color: '#ffffff',
+      textShadow: '0 1px 2px rgba(0,0,0,0.45)',
+    }
+  }
+  return getCalendarBlockTextStyle(
+    getLessonCalendarBlockBackgroundColor(lesson, instructors),
+  )
 }
 
 const STATUS_BLOCK_STYLES: Record<string, CSSProperties & { _bg: string }> = {
@@ -171,6 +245,10 @@ export function getLessonCalendarBlockStyle(
     return style
   }
 
+  if (isAutoAssignedLesson(lesson)) {
+    return getAutoAssignedLessonBlockStyle()
+  }
+
   const color = getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))
   const textColor = getContrastTextColor(color)
   return {
@@ -188,6 +266,9 @@ export function getLessonCalendarBlockBackgroundColor(
   if (status !== 'present' && STATUS_BLOCK_STYLES[status]) {
     return STATUS_BLOCK_STYLES[status]._bg
   }
+  if (isAutoAssignedLesson(lesson)) {
+    return getAutoAssignedLessonBlockStyle().backgroundColor as string
+  }
   return getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))
 }
 
@@ -203,6 +284,10 @@ export function getLessonCalendarChipStyle(
       color: base.color,
       borderColor: base.borderColor,
     }
+  }
+
+  if (isAutoAssignedLesson(lesson)) {
+    return getAutoAssignedLessonChipStyle()
   }
 
   const color = getInstructorCalendarColor(resolveLessonInstructor(lesson, instructors))

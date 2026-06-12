@@ -7,12 +7,11 @@ import { Loader2, Minus, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  getCalendarBlockTextStyle,
   getInstructorCalendarColor,
-  getLessonCalendarBlockBackgroundColor,
   getLessonCalendarBlockStyle,
+  getLessonCalendarBlockTextStyle,
+  resolveLessonDisplayColor,
   resolveLessonInstructor,
-  AUTO_INSTRUCTOR_CALENDAR_COLOR,
   hexToRgba,
   type InstructorColorSource,
 } from '@/lib/instructor-colors'
@@ -250,9 +249,7 @@ function LessonBlockContent({
   const fullLabel = getLessonCalendarLabel(lesson)
   const layout = getLessonLabelLayout({ columnCount, blockHeight, hourHeight })
   const showTime = Boolean(start) && layout === 'horizontal' && blockHeight >= 56 && !meta
-  const textStyle = getCalendarBlockTextStyle(
-    getLessonCalendarBlockBackgroundColor(lesson, instructors),
-  )
+  const textStyle = getLessonCalendarBlockTextStyle(lesson, instructors)
   const sizes = getLessonLabelFontSizes(
     layout,
     blockHeight,
@@ -1228,7 +1225,7 @@ export function TimeGrid({
                       ),
                     }}
                   >
-                    <p className="text-[10px] font-semibold text-primary truncate tabular-nums">
+                    <p className="text-[10px] font-semibold text-white truncate tabular-nums drop-shadow-sm">
                       {createPreviewTimes.start} – {createPreviewTimes.end}
                     </p>
                   </div>
@@ -1255,10 +1252,10 @@ export function TimeGrid({
                       className="flex min-h-0 flex-1 w-full flex-col items-center justify-center px-1.5 py-0.5 touch-manipulation"
                       onClick={handlePendingConfirm}
                     >
-                      <p className="text-[10px] font-semibold text-primary tabular-nums">
+                      <p className="text-[10px] font-semibold text-white tabular-nums drop-shadow-sm">
                         {pendingBlock.start} – {pendingBlock.end}
                       </p>
-                      <p className="text-[9px] text-primary/80">탭하여 등록</p>
+                      <p className="text-[9px] text-white/90 drop-shadow-sm">탭하여 등록</p>
                     </button>
                     <div
                       data-pending-resize
@@ -1304,11 +1301,7 @@ export function TimeGrid({
                     const isMultiSelected = selectedLessonIds
                       ? selectedLessonIds.has(lesson.id)
                       : Boolean(isLessonSelected?.(lesson.id))
-                    const highlightColor = lesson.instructor_id
-                      ? getInstructorCalendarColor(
-                          resolveLessonInstructor(lesson, instructors),
-                        )
-                      : AUTO_INSTRUCTOR_CALENDAR_COLOR
+                    const highlightColor = resolveLessonDisplayColor(lesson, instructors)
                     return (
                       <div
                         key={lesson.id}

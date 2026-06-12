@@ -34,6 +34,7 @@ export type GoogleCalendarEvent = {
   summary?: string
   description?: string
   updated?: string
+  recurringEventId?: string
   start?: { dateTime?: string; date?: string; timeZone?: string }
   end?: { dateTime?: string; date?: string; timeZone?: string }
 }
@@ -47,6 +48,7 @@ export type GoogleCalendarListEntry = {
 export type GoogleCalendarSyncResult = {
   created: number
   updated: number
+  linked: number
   cancelled: number
   pendingMember: number
   skipped: number
