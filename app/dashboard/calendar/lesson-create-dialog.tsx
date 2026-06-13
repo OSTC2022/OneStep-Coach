@@ -73,6 +73,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { useTouchFriendlyLayout } from '@/hooks/use-touch-friendly-layout'
 import type { Instructor, Lesson } from '@/lib/types'
 
 interface MemberOption {
@@ -213,6 +214,9 @@ export function LessonCreateDialog({
 }: LessonCreateDialogProps) {
   const isEditing = Boolean(lesson)
   const isPopup = variant === 'popup'
+  const touchFriendly = useTouchFriendlyLayout()
+  const useAnchoredPopup = isPopup && !touchFriendly
+  const isCompactForm = isPopup && !touchFriendly
   const popupRef = useRef<HTMLDivElement>(null)
   const initKeyRef = useRef<string | null>(null)
   const originalLessonDateRef = useRef('')
@@ -341,7 +345,7 @@ export function LessonCreateDialog({
   }, [])
 
   useLayoutEffect(() => {
-    if (!open || !isPopup) return
+    if (!open || !useAnchoredPopup) return
 
     const base = anchor
       ? getLessonPopupPosition(anchor)
@@ -365,7 +369,7 @@ export function LessonCreateDialog({
     setPopupPosition({ top, left: base.left, width: base.width })
   }, [
     open,
-    isPopup,
+    useAnchoredPopup,
     anchor,
     isAddingToSlot,
     lesson?.id,
@@ -456,7 +460,7 @@ export function LessonCreateDialog({
   }, [open, isEditing, instructorId, onEditDraftChange])
 
   useEffect(() => {
-    if (!open || !isPopup) return
+    if (!open || !useAnchoredPopup) return
 
     function handlePointerDown(e: PointerEvent) {
       const target = e.target as Element
@@ -472,7 +476,7 @@ export function LessonCreateDialog({
 
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [open, isPopup])
+  }, [open, useAnchoredPopup])
 
   function handleMemberChange(
     nextMemberId: string,
@@ -990,19 +994,19 @@ export function LessonCreateDialog({
 
   const formFields = (
     <>
-      <LessonFormSection label="날짜" htmlFor="lesson-date" isPopup={isPopup}>
+      <LessonFormSection label="날짜" htmlFor="lesson-date" isPopup={isCompactForm}>
         <KoreanDatePicker
           id="lesson-date"
           value={date}
           onChange={setDate}
           placeholder="날짜 선택"
-          compact={isPopup}
-          className={isPopup ? POPUP_INPUT_VALUE : undefined}
+          compact={isCompactForm}
+          className={isCompactForm ? POPUP_INPUT_VALUE : undefined}
         />
       </LessonFormSection>
 
-      <LessonFormSection label="시작 / 종료" isPopup={isPopup}>
-        {isPopup ? (
+      <LessonFormSection label="시작 / 종료" isPopup={isCompactForm}>
+        {isCompactForm ? (
           <div className="grid grid-cols-2 gap-2">
             <SimpleTimeRangeInput
               startId="start-time"
@@ -1013,7 +1017,7 @@ export function LessonCreateDialog({
               onEndChange={setEndTime}
               calendarStartTime={draft?.startTime ?? null}
               endPlaceholder={draft?.endTime || '19:30'}
-              compact={isPopup}
+              compact={isCompactForm}
               className="col-span-2 [&_input]:h-7 [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-0 [&_input]:text-xs [&_input]:font-semibold [&_input]:shadow-none [&_input]:focus-visible:ring-0"
             />
           </div>
@@ -1032,7 +1036,7 @@ export function LessonCreateDialog({
               onEndChange={setEndTime}
               calendarStartTime={draft?.startTime ?? null}
               endPlaceholder={draft?.endTime || '19:30'}
-              compact={isPopup}
+              compact={isCompactForm}
             />
             <p className="text-xs text-muted-foreground">
               예: 18:00~19:30 (시작 칸에 한 번에 입력 가능)
@@ -1041,7 +1045,7 @@ export function LessonCreateDialog({
         )}
       </LessonFormSection>
 
-      <LessonFormSection label="회원 연결" isPopup={isPopup}>
+      <LessonFormSection label="회원 연결" isPopup={isCompactForm}>
         <MemberSearchSelect
           key={
             isAddingToSlot
@@ -1057,13 +1061,13 @@ export function LessonCreateDialog({
           members={memberOptions}
           placeholder="이름 입력 또는 검색"
           disabledIds={addModeDisabledMemberIds}
-          compact={isPopup}
+          compact={isCompactForm}
           allowFreeText
           inlineSearch
           enableRecentSearches
           onSearchMembers={searchMembersForPicker}
           className={
-            isPopup
+            isCompactForm
               ? '[&_input]:h-7 [&_input]:border-0 [&_input]:bg-transparent [&_input]:pl-7 [&_input]:text-xs [&_input]:font-semibold [&_input]:shadow-none [&_input]:focus-visible:ring-0'
               : undefined
           }
@@ -1073,9 +1077,9 @@ export function LessonCreateDialog({
       <LessonFormSection
         label="캘린더 표시"
         htmlFor="calendar-display"
-        isPopup={isPopup}
+        isPopup={isCompactForm}
         hint={
-          isPopup ? null : (
+          isCompactForm ? null : (
             <p className="text-[11px] text-muted-foreground">
               비우면 회원 정보로 자동 표시 · 예: {calendarPlaceholder}
             </p>
@@ -1087,11 +1091,11 @@ export function LessonCreateDialog({
           value={calendarDisplayText}
           onChange={(e) => setCalendarDisplayText(e.target.value)}
           placeholder={calendarPlaceholder}
-          className={isPopup ? POPUP_INPUT_VALUE : undefined}
+          className={isCompactForm ? POPUP_INPUT_VALUE : undefined}
         />
       </LessonFormSection>
 
-      {isPopup ? (
+      {isCompactForm ? (
         <div className="grid grid-cols-2 gap-1.5">
           <div className={POPUP_SECTION}>
             <InstructorSelectField
@@ -1155,11 +1159,11 @@ export function LessonCreateDialog({
       <div
         className={cn(
           'space-y-1',
-          isPopup ? POPUP_SECTION : 'rounded-md border border-border/70 bg-muted/20 p-2',
+          isCompactForm ? POPUP_SECTION : 'rounded-md border border-border/70 bg-muted/20 p-2',
         )}
       >
         <div className="space-y-0.5">
-          <Label className={isPopup ? POPUP_FIELD_LABEL : undefined}>반복</Label>
+          <Label className={isCompactForm ? POPUP_FIELD_LABEL : undefined}>반복</Label>
           <Select
             value={recurrencePattern}
             onValueChange={(value) =>
@@ -1168,7 +1172,7 @@ export function LessonCreateDialog({
           >
             <SelectTrigger
               className={
-                isPopup
+                isCompactForm
                   ? 'h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none'
                   : undefined
               }
@@ -1189,7 +1193,7 @@ export function LessonCreateDialog({
           <div className="space-y-1">
             <Label
               htmlFor="recurrence-end-date"
-              className={isPopup ? POPUP_FIELD_LABEL : undefined}
+              className={isCompactForm ? POPUP_FIELD_LABEL : undefined}
             >
               반복 종료
             </Label>
@@ -1198,8 +1202,8 @@ export function LessonCreateDialog({
               value={recurrenceEndDate}
               onChange={setRecurrenceEndDate}
               placeholder="종료 날짜"
-              compact={isPopup}
-              className={isPopup ? POPUP_INPUT_VALUE : undefined}
+              compact={isCompactForm}
+              className={isCompactForm ? POPUP_INPUT_VALUE : undefined}
             />
             {recurrencePreview ? (
               <p className="text-[11px] font-medium text-primary">
@@ -1301,10 +1305,10 @@ export function LessonCreateDialog({
   const form = (
     <form
       onSubmit={handleSubmit}
-      className={cn('space-y-3', isPopup && 'text-sm')}
+      className={cn('space-y-3', isCompactForm && 'text-sm')}
     >
       {formFields}
-      {!isPopup && dialogFooter}
+      {!useAnchoredPopup && dialogFooter}
     </form>
   )
 
@@ -1318,7 +1322,7 @@ export function LessonCreateDialog({
           if (!isLoading) setSaveScopeOpen(next)
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent mobileSheet>
           <AlertDialogHeader>
             <AlertDialogTitle>수업 수정 범위</AlertDialogTitle>
             <AlertDialogDescription>
@@ -1362,7 +1366,7 @@ export function LessonCreateDialog({
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-scope-title"
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4"
+          className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget && !isLoading) {
               setDeleteScopeOpen(false)
@@ -1370,7 +1374,7 @@ export function LessonCreateDialog({
           }}
         >
           <div
-            className="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-2xl"
+            className="w-full max-w-sm rounded-t-2xl border border-border bg-card p-5 shadow-2xl sm:rounded-lg"
             onPointerDown={(e) => e.stopPropagation()}
           >
             <h3 id="delete-scope-title" className="text-base font-semibold">
@@ -1424,7 +1428,7 @@ export function LessonCreateDialog({
     </>
   )
 
-  if (isPopup) {
+  if (useAnchoredPopup) {
     if (!open || !mounted) return null
 
     return createPortal(
@@ -1485,8 +1489,19 @@ export function LessonCreateDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent
+          mobileSheet
+          className={cn(
+            'sm:max-w-md',
+            touchFriendly &&
+              'max-lg:flex max-lg:max-h-[inherit] max-lg:flex-col max-lg:gap-0 max-lg:overflow-hidden max-lg:p-0',
+          )}
+        >
+          <DialogHeader
+            className={cn(
+              touchFriendly && 'shrink-0 border-b border-border px-4 py-3 text-left',
+            )}
+          >
             <DialogTitle className="flex flex-wrap items-baseline gap-x-1 text-base leading-snug">
               {isEditing ? (
                 popupTitle
@@ -1494,13 +1509,31 @@ export function LessonCreateDialog({
                 <span className="font-semibold text-foreground">수업 추가</span>
               )}
             </DialogTitle>
-            <DialogDescription>
-              {isEditing
-                ? '수업 일정과 정보를 수정합니다.'
-                : '드래그한 시간에 새 수업을 등록합니다.'}
-            </DialogDescription>
+            {!touchFriendly ? (
+              <DialogDescription>
+                {isEditing
+                  ? '수업 일정과 정보를 수정합니다.'
+                  : '드래그한 시간에 새 수업을 등록합니다.'}
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
-          {form}
+          {touchFriendly ? (
+            <form
+              onSubmit={handleSubmit}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+                <div className={cn('space-y-3', isCompactForm && 'text-sm')}>
+                  {formFields}
+                </div>
+              </div>
+              <div className="shrink-0 border-t border-border px-4 py-3">
+                {dialogFooter}
+              </div>
+            </form>
+          ) : (
+            form
+          )}
         </DialogContent>
       </Dialog>
       {scopeDialogs}

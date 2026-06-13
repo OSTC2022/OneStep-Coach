@@ -13,6 +13,7 @@ import {
   isMemberPortalRole,
 } from '@/lib/member-portal-routes'
 import type { User } from '@/lib/types'
+import { VisualViewportOffsetHandler } from '@/components/visual-viewport-offset-handler'
 
 interface DashboardShellProps {
   user: User
@@ -27,6 +28,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
   if (memberPortal) {
     return (
       <div className="flex min-h-svh flex-col bg-background">
+        <VisualViewportOffsetHandler />
         <MemberPortalScrollHandler />
         <MemberPortalHeader user={user} />
         <main
@@ -42,6 +44,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
 
   return (
     <SidebarProvider>
+      <VisualViewportOffsetHandler />
       <DashboardSidebar user={user} />
       <SidebarInset className="min-h-0 overflow-hidden">
         <DashboardHeader user={user} />

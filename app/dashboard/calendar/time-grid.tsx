@@ -140,6 +140,12 @@ const CALENDAR_START_MINUTES = CALENDAR_START_HOUR * 60
 const CALENDAR_END_MINUTES = CALENDAR_END_HOUR * 60
 const DRAG_THRESHOLD = 6
 const CREATE_DRAG_THRESHOLD = 8
+/** 길게 누른 뒤에만 수업 블록 이동 시작 */
+const LESSON_LONG_PRESS_MS = 450
+/** 길게 누르기 전에 이 거리 이상 움직이면 스크롤로 간주하고 취소 */
+const LESSON_SCROLL_CANCEL_PX = 14
+/** 길게 누른 뒤 드래그 시작 최소 이동(px) */
+const LESSON_DRAG_THRESHOLD = 10
 
 type PendingCreate = {
   col: number
@@ -462,6 +468,9 @@ export function TimeGrid({
     startMin: number
     endMin: number
   } | null>(null)
+  const [longPressLessonId, setLongPressLessonId] = useState<string | null>(null)
+  const longPressReadyRef = useRef(false)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function armPendingClickGuard() {
     pendingSkipClickRef.current = true
@@ -478,6 +487,9 @@ export function TimeGrid({
     return () => {
       if (pendingSkipClickTimerRef.current) {
         clearTimeout(pendingSkipClickTimerRef.current)
+      }
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
       }
     }
   }, [])
@@ -653,16 +665,46 @@ export function TimeGrid({
   useEffect(() => {
     if (!lessonPress) return
 
+    longPressReadyRef.current = false
+    setLongPressLessonId(null)
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+    }
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressReadyRef.current = true
+      setLongPressLessonId(lessonPress.lesson.id)
+    }, LESSON_LONG_PRESS_MS)
+
+    function clearLongPressTimer() {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
+    }
+
     function handlePointerMove(e: PointerEvent) {
-      if (lessonDragStartedRef.current) return
       const dist = Math.hypot(
         e.clientX - lessonPress.startX,
         e.clientY - lessonPress.startY,
       )
-      if (dist < DRAG_THRESHOLD) return
+
+      if (!longPressReadyRef.current) {
+        if (dist >= LESSON_SCROLL_CANCEL_PX) {
+          clearLongPressTimer()
+          longPressReadyRef.current = false
+          setLongPressLessonId(null)
+          setLessonPress(null)
+        }
+        return
+      }
+
+      if (lessonDragStartedRef.current) return
+      if (dist < LESSON_DRAG_THRESHOLD) return
       if (!onLessonMove) return
 
+      clearLongPressTimer()
       lessonDragStartedRef.current = true
+      setLongPressLessonId(null)
       setMoveDrag({
         lessons: lessonPress.lessons,
         lesson: lessonPress.lesson,
@@ -682,21 +724,48 @@ export function TimeGrid({
     }
 
     function handlePointerUp() {
+      clearLongPressTimer()
+      setLongPressLessonId(null)
+
       if (altSelectClickRef.current) {
         altSelectClickRef.current = false
+        longPressReadyRef.current = false
         setLessonPress(null)
         return
       }
-      if (lessonDragStartedRef.current) return
+      if (lessonDragStartedRef.current) {
+        longPressReadyRef.current = false
+        return
+      }
+
+      if (!longPressReadyRef.current) {
+        longPressReadyRef.current = false
+        activateLesson?.(lessonPress.lesson, lessonPress.anchor)
+        setLessonPress(null)
+        return
+      }
+
+      longPressReadyRef.current = false
       activateLesson?.(lessonPress.lesson, lessonPress.anchor)
+      setLessonPress(null)
+    }
+
+    function handlePointerCancel() {
+      clearLongPressTimer()
+      longPressReadyRef.current = false
+      setLongPressLessonId(null)
       setLessonPress(null)
     }
 
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
     return () => {
+      clearLongPressTimer()
+      longPressReadyRef.current = false
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
     }
   }, [lessonPress, onLessonMove, activateLesson, gridHeight, hourHeight, dates])
 
@@ -1378,16 +1447,20 @@ export function TimeGrid({
                       ? selectedLessonIds.has(lesson.id)
                       : Boolean(isLessonSelected?.(lesson.id))
                     const highlightColor = resolveLessonDisplayColor(lesson, instructors)
+                    const isLongPressReady = longPressLessonId === lesson.id
                     return (
                       <div
                         key={lesson.id}
                         data-lesson-event
                         data-lesson-id={lesson.id}
                         className={cn(
-                          'absolute z-[5] flex min-w-0 flex-col overflow-hidden rounded-md border touch-none',
+                          'absolute z-[5] flex min-w-0 flex-col overflow-hidden rounded-md border',
                           lesson.attendance_status === 'cancelled' && 'line-through opacity-80',
                           isResizing && 'z-40 ring-2 ring-primary/70',
-                          isMoving && 'opacity-60 ring-2 ring-primary/60',
+                          isMoving && 'z-40 touch-none opacity-60 ring-2 ring-primary/60',
+                          isLongPressReady &&
+                            'z-20 touch-none ring-2 ring-primary ring-offset-1 ring-offset-background',
+                          !isMoving && !isLongPressReady && 'touch-pan-y',
                           isHighlighted && 'z-30',
                           isMultiSelected &&
                             'z-[25] ring-2 ring-white ring-offset-1 ring-offset-transparent',
@@ -1411,7 +1484,7 @@ export function TimeGrid({
                                 }
                               : {}),
                         }}
-                        title={`${memberLabel} · ${timeLabel} · ${lesson.lesson_type}${onLessonMove ? ' · 드래그 이동 · 위·아래 드래그로 시간 조절' : ''}${activateLesson ? ' · 클릭 수정 · Alt+클릭 선택' : ''}`}
+                        title={`${memberLabel} · ${timeLabel} · ${lesson.lesson_type}${onLessonMove ? ' · 길게 누른 뒤 드래그로 이동 · 위·아래 드래그로 시간 조절' : ''}${activateLesson ? ' · 짧게 탭 수정 · Alt+클릭 선택' : ''}`}
                         onPointerDown={(e) => handleLessonPointerDown(e, lesson, col)}
                         onClick={(e) => {
                           if (!e.altKey) return

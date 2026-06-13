@@ -178,8 +178,9 @@ export function LessonStatusWeightInput({
         }}
       >
         <DialogContent
+          mobileSheet
           showCloseButton={false}
-          className="w-[min(100vw-2rem,13rem)] gap-0 p-3 sm:max-w-[13rem]"
+          className="gap-0 p-4 sm:max-w-sm"
           onPointerDownOutside={(e) => {
             if (saving) e.preventDefault()
           }}

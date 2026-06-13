@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TimeInput24 } from '@/components/ui/time-input-24'
 import { cn } from '@/lib/utils'
+import { useTouchFriendlyLayout } from '@/hooks/use-touch-friendly-layout'
 import {
   Dialog,
   DialogContent,
@@ -67,6 +68,7 @@ export function SignaturePadDialog({
   defaultEndTime = '',
   onConfirm,
 }: SignaturePadDialogProps) {
+  const touchFriendly = useTouchFriendlyLayout()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isDrawing, setIsDrawing] = useState(false)
@@ -80,7 +82,9 @@ export function SignaturePadDialog({
     if (!canvas || !container) return
 
     const width = container.clientWidth
-    const height = Math.max(280, Math.min(360, Math.round(width * 0.45)))
+    const height = touchFriendly
+      ? Math.max(160, Math.min(220, Math.round(width * 0.38)))
+      : Math.max(280, Math.min(360, Math.round(width * 0.45)))
     const dpr = window.devicePixelRatio || 1
 
     canvas.width = Math.floor(width * dpr)
@@ -99,7 +103,7 @@ export function SignaturePadDialog({
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     setSignatureData(null)
-  }, [])
+  }, [touchFriendly])
 
   useEffect(() => {
     if (!open) {
@@ -198,7 +202,11 @@ export function SignaturePadDialog({
       }}
     >
       <DialogContent
-        className="max-w-3xl gap-4"
+        mobileSheet
+        className={cn(
+          'max-w-3xl gap-0 overflow-hidden p-0',
+          touchFriendly && 'max-lg:flex max-lg:max-h-[inherit] max-lg:flex-col',
+        )}
         onPointerDownOutside={(e) => {
           if (isSubmitting) e.preventDefault()
         }}
@@ -206,7 +214,7 @@ export function SignaturePadDialog({
           if (isSubmitting) e.preventDefault()
         }}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0 space-y-1 px-4 pt-4 pb-2 text-left sm:px-6 sm:pt-6">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {memberLabel ? (
@@ -219,6 +227,7 @@ export function SignaturePadDialog({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pb-2 sm:px-6">
         {showEndTime ? (
           <div className="space-y-1.5">
             <Label htmlFor="lesson-end-time">종료 시간</Label>
@@ -260,11 +269,13 @@ export function SignaturePadDialog({
           <RotateCcw className="mr-2 h-4 w-4" />
           다시 서명
         </Button>
+        </div>
 
         <DialogFooter
-          className={
-            showPastLessonFinder ? 'gap-2 sm:justify-between' : 'gap-2 sm:justify-end'
-          }
+          className={cn(
+            'shrink-0 border-t border-border px-4 py-3 sm:px-6',
+            showPastLessonFinder ? 'gap-2 sm:justify-between' : 'gap-2 sm:justify-end',
+          )}
         >
           {showPastLessonFinder ? (
             <Button

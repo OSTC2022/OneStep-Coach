@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Redo2, RefreshCw, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -734,7 +734,9 @@ export function LessonCalendar({
       )
     }
 
-    toast.success('수업 일정이 변경되었습니다.')
+    toast.message('수업 일정 이동', {
+      description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
+    })
   }
 
   async function handleLessonLineUpdate(lesson: Lesson, line: string) {
@@ -867,6 +869,42 @@ export function LessonCalendar({
               className={`h-4 w-4 ${loadState.refreshing ? 'animate-spin' : ''}`}
             />
           </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            disabled={!lessonHistory.canUndo}
+            onClick={() => void lessonHistory.undo()}
+            title={
+              lessonHistory.canUndo
+                ? `실행 취소 (${lessonHistory.undoCount}단계 · Ctrl+Z)`
+                : '실행 취소'
+            }
+            aria-label={
+              lessonHistory.canUndo
+                ? `실행 취소 ${lessonHistory.undoCount}단계`
+                : '실행 취소'
+            }
+          >
+            <Undo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            disabled={!lessonHistory.canRedo}
+            onClick={() => void lessonHistory.redo()}
+            title={
+              lessonHistory.canRedo
+                ? `다시 실행 (${lessonHistory.redoCount}단계 · Ctrl+Y)`
+                : '다시 실행'
+            }
+            aria-label={
+              lessonHistory.canRedo
+                ? `다시 실행 ${lessonHistory.redoCount}단계`
+                : '다시 실행'
+            }
+          >
+            <Redo2 className="h-4 w-4" />
+          </Button>
           <h2 className="ml-1 flex items-center gap-2 text-base font-semibold sm:text-lg">
             {title}
             {showToolbarSpinner && (
@@ -931,17 +969,11 @@ export function LessonCalendar({
               {selectionCount}개 선택 · 휴지통으로 삭제 · Esc 해제
             </span>
           )}
-          {(lessonHistory.canUndo || lessonHistory.canRedo) && (
-            <span className="hidden text-xs text-muted-foreground sm:inline">
-              {lessonHistory.canUndo
-                ? `Ctrl+Z (${lessonHistory.undoCount}단계)`
-                : ''}
-              {lessonHistory.canUndo && lessonHistory.canRedo ? ' · ' : ''}
-              {lessonHistory.canRedo
-                ? `Ctrl+Y (${lessonHistory.redoCount}단계)`
-                : ''}
+          {lessonHistory.canUndo ? (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              실행 취소 {lessonHistory.undoCount}단계
             </span>
-          )}
+          ) : null}
         </div>
       </div>
 

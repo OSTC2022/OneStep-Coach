@@ -816,22 +816,22 @@ export function navigateDate(
 
 export function getViewTitle(date: Date, view: CalendarView): string {
   if (view === 'day') {
-    return format(date, 'yyyy년 M월 d일 (EEE)', { locale: ko })
+    return format(date, 'yy년 M월 d일 (EEE)', { locale: ko })
   }
   if (view === 'week') {
     const week = getWeekDates(date)
     const start = week[0]
     const end = week[6]
     if (start.getMonth() === end.getMonth()) {
-      return format(start, 'yyyy년 M월 d일', { locale: ko }) +
+      return format(start, 'yy년 M월 d일', { locale: ko }) +
         ' – ' +
         format(end, 'd일', { locale: ko })
     }
-    return format(start, 'M월 d일', { locale: ko }) +
+    return format(start, 'yy년 M월 d일', { locale: ko }) +
       ' – ' +
       format(end, 'M월 d일', { locale: ko })
   }
-  return format(date, 'yyyy년 M월', { locale: ko })
+  return format(date, 'yy년 M월', { locale: ko })
 }
 
 export function getRangeForView(date: Date, view: CalendarView): {

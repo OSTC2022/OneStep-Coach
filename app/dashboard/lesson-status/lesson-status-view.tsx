@@ -32,6 +32,13 @@ import { Label } from '@/components/ui/label'
 import { TimeInput24 } from '@/components/ui/time-input-24'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -417,63 +424,74 @@ const AthleteTile = memo(function AthleteTile({
                 종료 {formatTime(lesson.end_time)}
               </button>
               {canEditEndTime ? (
-                <Popover
-                  open={endTimeEditOpen}
-                  onOpenChange={(open) => {
-                    if (!isSavingEndTime) {
-                      setEndTimeEditOpen(open)
-                      if (open) {
-                        setEditEndTime(formatTime(lesson.end_time) ?? '')
-                      }
-                    }
-                  }}
-                >
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={isLoading || isSavingEndTime}
-                      title="종료 시간 수정"
-                      className={cn(
-                        'shrink-0 rounded border border-border bg-muted/40 px-1 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                        (isLoading || isSavingEndTime) && 'opacity-50',
-                      )}
-                    >
-                      <Pencil className="h-2.5 w-2.5" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-auto space-y-2 p-3"
-                    align="end"
-                    onOpenAutoFocus={(e) => e.preventDefault()}
+                <>
+                  <button
+                    type="button"
+                    disabled={isLoading || isSavingEndTime}
+                    title="종료 시간 수정"
+                    onClick={() => {
+                      setEditEndTime(formatTime(lesson.end_time) ?? '')
+                      setEndTimeEditOpen(true)
+                    }}
+                    className={cn(
+                      'shrink-0 rounded border border-border bg-muted/40 px-1 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                      (isLoading || isSavingEndTime) && 'opacity-50',
+                    )}
                   >
-                    <Label htmlFor={`end-time-${lesson.id}`} className="text-xs">
-                      종료 시간
-                    </Label>
-                    <TimeInput24
-                      id={`end-time-${lesson.id}`}
-                      value={editEndTime}
-                      onChange={setEditEndTime}
-                      compact
-                      inline
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="w-full"
-                      disabled={isSavingEndTime || !editEndTime.trim()}
-                      onClick={() => void handleSaveEndTime()}
+                    <Pencil className="h-2.5 w-2.5" />
+                  </button>
+                  <Dialog
+                    open={endTimeEditOpen}
+                    onOpenChange={(open) => {
+                      if (!isSavingEndTime) setEndTimeEditOpen(open)
+                    }}
+                  >
+                    <DialogContent
+                      mobileSheet
+                      showCloseButton={false}
+                      className="gap-4 sm:max-w-sm"
+                      onPointerDownOutside={() => setEndTimeEditOpen(false)}
                     >
-                      {isSavingEndTime ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          저장 중
-                        </>
-                      ) : (
-                        '저장'
-                      )}
-                    </Button>
-                  </PopoverContent>
-                </Popover>
+                      <DialogHeader className="text-left">
+                        <DialogTitle className="text-base">종료 시간 수정</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-2">
+                        <Label htmlFor={`end-time-${lesson.id}`} className="text-xs">
+                          종료 시간
+                        </Label>
+                        <TimeInput24
+                          id={`end-time-${lesson.id}`}
+                          value={editEndTime}
+                          onChange={setEditEndTime}
+                        />
+                      </div>
+                      <DialogFooter className="gap-2 sm:justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={isSavingEndTime}
+                          onClick={() => setEndTimeEditOpen(false)}
+                        >
+                          취소
+                        </Button>
+                        <Button
+                          type="button"
+                          disabled={isSavingEndTime || !editEndTime.trim()}
+                          onClick={() => void handleSaveEndTime()}
+                        >
+                          {isSavingEndTime ? (
+                            <>
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              저장 중
+                            </>
+                          ) : (
+                            '저장'
+                          )}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </>
               ) : null}
             </div>
           ) : (
@@ -572,7 +590,7 @@ const AthleteTile = memo(function AthleteTile({
         if (!isCancelling) setCancelOpen(open)
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent mobileSheet>
         <AlertDialogHeader>
           <AlertDialogTitle>종료 취소</AlertDialogTitle>
           <AlertDialogDescription>
