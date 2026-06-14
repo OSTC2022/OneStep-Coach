@@ -63,6 +63,7 @@ import {
   toDateKey,
   type CalendarView,
 } from '@/lib/calendar-utils'
+import { formatSessionOverageAlert } from '@/lib/session-package-utils'
 import { cn } from '@/lib/utils'
 import {
   AUTO_INSTRUCTOR_BORDER_COLOR,
@@ -258,6 +259,14 @@ const AthleteTile = memo(function AthleteTile({
       toast.success(`${label} 수업 종료`, {
         description: `종료 ${formatTime(result.data.end_time)} · 보호자 서명 저장 · 세션 1회 차감`,
       })
+      if (result.data.session_overage && result.data.session_overage > 0) {
+        toast.warning(
+          formatSessionOverageAlert(result.data.session_overage, {
+            noPackage: result.data.no_session_package,
+          }),
+          { duration: 8000 },
+        )
+      }
     }
 
     setSignatureOpen(false)

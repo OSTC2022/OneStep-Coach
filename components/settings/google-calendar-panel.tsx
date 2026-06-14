@@ -269,6 +269,10 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           </p>
           <p>2. 일정 제목은 <strong className="text-foreground">회원명(나이종목)</strong> 형식을 권장합니다. 예: 윤찬민(14축구)</p>
           <p>3. iPhone 캘린더를 쓰는 경우, iCloud/Google과 「수업」「수업2」 캘린더를 동기화해 두면 같은 일정이 반영됩니다.</p>
+          <p>
+            4. 「지금 동기화」는 최근 90일~앞으로 1년 구간의 일정을 전부 다시 가져옵니다. 누락된
+            일정이 있으면 이 버튼을 눌러 주세요.
+          </p>
         </CardContent>
       </Card>
     </div>

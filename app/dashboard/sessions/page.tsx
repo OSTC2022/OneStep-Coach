@@ -5,11 +5,11 @@ import { SessionsList } from './sessions-list'
 export default async function SessionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ member?: string }>
+  searchParams: Promise<{ member?: string; sort?: string }>
 }) {
   const params = await searchParams
-  const { packages, totalCount, monthlyRevenue, members } =
-    await getSessionsPageData(params.member)
+  const { packages, totalCount, monthlyRevenue, members, orderBy } =
+    await getSessionsPageData(params.member, params.sort)
 
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
@@ -27,6 +27,7 @@ export default async function SessionsPage({
         pageSize={LIST_PAGE_SIZE}
         members={members}
         selectedMemberId={params.member}
+        initialOrderBy={orderBy}
       />
     </div>
   )

@@ -60,7 +60,10 @@ import {
   formatPackageSessionsDisplay,
   formatPackageTallyRemainingDisplay,
   formatPackageTallyTotalDisplay,
+  formatSessionOverageAlert,
+  getPackageRemainingColorClass,
   isPackageUsableForLesson,
+  isSessionPackageOverage,
   UNLIMITED_SESSIONS_DISPLAY,
 } from '@/lib/session-package-utils'
 
@@ -172,6 +175,9 @@ export function MemberDetail({
     tallyRemainingDisplay === UNLIMITED_SESSIONS_DISPLAY
   const activePackage = sessionPackages.find((p) => isPackageUsableForLesson(p))
   const totalRemainingSessions = packageTally.remaining
+  const hasSessionOverage = totalRemainingSessions < 0
+  const isLowRemaining =
+    totalRemainingSessions <= 3 && totalRemainingSessions > 0
 
   async function handleDeletePackage() {
     if (!deleteTarget) return
@@ -272,14 +278,24 @@ export function MemberDetail({
         />
 
         {/* Session Info */}
-        <Card className={totalRemainingSessions <= 3 && totalRemainingSessions > 0 ? 'border-warning' : ''}>
+        <Card
+          className={
+            hasSessionOverage
+              ? 'border-destructive'
+              : isLowRemaining
+                ? 'border-warning'
+                : ''
+          }
+        >
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <CreditCard className="h-5 w-5 text-primary" />
               수업권 현황
-              {totalRemainingSessions <= 3 && totalRemainingSessions > 0 && (
+              {hasSessionOverage ? (
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+              ) : isLowRemaining ? (
                 <AlertTriangle className="h-4 w-4 text-warning" />
-              )}
+              ) : null}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -291,7 +307,9 @@ export function MemberDetail({
                 </p>
               </div>
               <div>
-                <p className="text-2xl font-bold tabular-nums text-primary">
+                <p
+                  className={`text-2xl font-bold tabular-nums ${getPackageRemainingColorClass(totalRemainingSessions)}`}
+                >
                   {tallyRemainingDisplay}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
@@ -299,6 +317,11 @@ export function MemberDetail({
                 </p>
               </div>
             </div>
+            {hasSessionOverage ? (
+              <p className="mt-2 text-center text-sm font-medium text-destructive">
+                {formatSessionOverageAlert(Math.abs(totalRemainingSessions))}
+              </p>
+            ) : null}
             {activePackage && (
               <div className="text-sm text-muted-foreground space-y-1 border-t border-border pt-3 mt-3">
                 <p>
@@ -307,10 +330,18 @@ export function MemberDetail({
                     activePackage.note,
                   )}{' '}
                   · 잔여{' '}
-                  {formatPackageRemainingDisplay(
-                    activePackage.remaining_sessions,
-                    activePackage.note,
-                  )}
+                  <span
+                    className={getPackageRemainingColorClass(
+                      activePackage.remaining_sessions,
+                      activePackage.note,
+                      activePackage.is_active,
+                    )}
+                  >
+                    {formatPackageRemainingDisplay(
+                      activePackage.remaining_sessions,
+                      activePackage.note,
+                    )}
+                  </span>
                 </p>
                 {activePackage.expires_at && (
                   <p>만료일: {formatPackageDate(activePackage.expires_at)}</p>
@@ -432,13 +463,18 @@ export function MemberDetail({
                       {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
                     </TableCell>
                     <TableCell
-                      className={
-                        pkg.remaining_sessions <= 3 && pkg.remaining_sessions > 0
-                          ? 'text-warning font-medium'
-                          : ''
-                      }
+                      className={getPackageRemainingColorClass(
+                        pkg.remaining_sessions,
+                        pkg.note,
+                        pkg.is_active,
+                      )}
                     >
                       {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}
+                      {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
+                        <Badge variant="destructive" className="ml-2 text-[10px]">
+                          초과
+                        </Badge>
+                      ) : null}
                     </TableCell>
                     <TableCell>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</TableCell>
                     <TableCell>{formatPackageDate(pkg.paid_at)}</TableCell>
@@ -513,6 +549,11 @@ export function MemberDetail({
               <TableBody>
                 {pagedLessons.map((lesson) => {
                   const sessionNumber = sessionNumberByLessonId[lesson.id] ?? null
+                  const isSessionOver =
+                    lesson.session_deducted &&
+                    sessionNumber != null &&
+                    packageTally.total > 0 &&
+                    sessionNumber > packageTally.total
                   const schedule = getLessonScheduleParts({
                     lessonDate: lesson.lesson_date,
                     start_time: lesson.start_time,
@@ -528,8 +569,16 @@ export function MemberDetail({
                           <button
                             type="button"
                             onClick={() => setDetailLesson(lesson)}
-                            className="rounded bg-primary/15 px-1.5 py-0.5 text-xs font-semibold text-primary hover:bg-primary/25"
-                            title={`수업권 ${sessionNumber}/${packageTally.total}회`}
+                            className={`rounded px-1.5 py-0.5 text-xs font-semibold hover:opacity-90 ${
+                              isSessionOver
+                                ? 'bg-destructive/15 text-destructive hover:bg-destructive/25'
+                                : 'bg-primary/15 text-primary hover:bg-primary/25'
+                            }`}
+                            title={
+                              isSessionOver
+                                ? `수업권 ${sessionNumber - packageTally.total}회 초과 (${sessionNumber}/${packageTally.total}회)`
+                                : `수업권 ${sessionNumber}/${packageTally.total}회`
+                            }
                           >
                             {sessionNumber}회
                           </button>

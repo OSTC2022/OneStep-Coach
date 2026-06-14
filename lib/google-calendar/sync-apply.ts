@@ -17,6 +17,7 @@ import type { GoogleCalendarEvent, GoogleCalendarSyncResult } from '@/lib/google
 
 export const MAX_EVENTS_PER_SYNC = 100
 const UPDATE_CHUNK_SIZE = 12
+const APPLY_BATCH_SIZE = 100
 
 type ExistingLesson = {
   id: string
@@ -53,23 +54,28 @@ export async function loadExistingByGoogleEventId(
   const map = new Map<string, ExistingLesson>()
   if (googleEventIds.length === 0) return map
 
-  const { data, error } = await supabase
-    .from('lessons')
-    .select('id, google_event_id, session_deducted')
-    .in('google_event_id', googleEventIds)
+  const chunkSize = 200
+  for (let offset = 0; offset < googleEventIds.length; offset += chunkSize) {
+    const chunk = googleEventIds.slice(offset, offset + chunkSize)
+    const { data, error } = await supabase
+      .from('lessons')
+      .select('id, google_event_id, session_deducted')
+      .in('google_event_id', chunk)
 
-  if (error) {
-    if (error.message.includes('google_event_id')) return map
-    throw new Error(error.message)
+    if (error) {
+      if (error.message.includes('google_event_id')) return map
+      throw new Error(error.message)
+    }
+
+    for (const row of data ?? []) {
+      if (!row.google_event_id) continue
+      map.set(row.google_event_id, {
+        id: row.id,
+        session_deducted: Boolean(row.session_deducted),
+      })
+    }
   }
 
-  for (const row of data ?? []) {
-    if (!row.google_event_id) continue
-    map.set(row.google_event_id, {
-      id: row.id,
-      session_deducted: Boolean(row.session_deducted),
-    })
-  }
   return map
 }
 
@@ -125,9 +131,35 @@ export async function applyGoogleEventsBatch(
   existingMap: Map<string, ExistingLesson>,
 ): Promise<GoogleCalendarSyncResult> {
   const result = emptySyncResult()
-
   const sorted = [...events].sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)))
-  const limited = sorted.slice(0, MAX_EVENTS_PER_SYNC)
+
+  for (let offset = 0; offset < sorted.length; offset += APPLY_BATCH_SIZE) {
+    const chunk = sorted.slice(offset, offset + APPLY_BATCH_SIZE)
+    const chunkResult = await applyGoogleEventsChunk(
+      supabase,
+      chunk,
+      memberMap,
+      existingMap,
+    )
+    result.created += chunkResult.created
+    result.updated += chunkResult.updated
+    result.linked += chunkResult.linked
+    result.cancelled += chunkResult.cancelled
+    result.pendingMember += chunkResult.pendingMember
+    result.skipped += chunkResult.skipped
+  }
+
+  return result
+}
+
+async function applyGoogleEventsChunk(
+  supabase: ReturnType<typeof createAdminClient>,
+  events: GoogleCalendarEvent[],
+  memberMap: Map<string, string>,
+  existingMap: Map<string, ExistingLesson>,
+): Promise<GoogleCalendarSyncResult> {
+  const result = emptySyncResult()
+  const limited = events
 
   type PendingEvent = {
     event: GoogleCalendarEvent
@@ -269,21 +301,33 @@ export async function applyGoogleEventsBatch(
   }
 
   if (toInsert.length > 0) {
-    let { error } = await supabase.from('lessons').insert(toInsert)
-    if (error?.message.includes('recurrence_group_id')) {
+    let insertResult = await supabase.from('lessons').insert(toInsert).select('id, google_event_id')
+    if (insertResult.error?.message.includes('recurrence_group_id')) {
       const fallbackRows = toInsert.map((row) => {
         const { recurrence_group_id: _removed, ...rest } = row
         return rest
       })
-      const retry = await supabase.from('lessons').insert(fallbackRows)
-      error = retry.error
+      insertResult = await supabase
+        .from('lessons')
+        .insert(fallbackRows)
+        .select('id, google_event_id')
     }
-    if (error) throw new Error(error.message)
+    if (insertResult.error) throw new Error(insertResult.error.message)
+
     result.created = toInsert.length
     result.pendingMember += toInsert.filter(
       (row) => row.google_sync_status === 'pending_member',
     ).length
     result.created -= result.pendingMember
+
+    for (const row of insertResult.data ?? []) {
+      if (!row.google_event_id) continue
+      existingMap.set(row.google_event_id, {
+        id: row.id,
+        session_deducted: false,
+        google_event_id: row.google_event_id,
+      })
+    }
   }
 
   for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
@@ -308,8 +352,15 @@ export async function applyGoogleEventsBatch(
     result.pendingMember += chunk.filter((item) => item.pending).length
   }
 
-  if (sorted.length > MAX_EVENTS_PER_SYNC) {
-    result.skipped += sorted.length - MAX_EVENTS_PER_SYNC
+  for (const item of toUpdate) {
+    const googleEventId = item.payload.google_event_id
+    if (typeof googleEventId === 'string') {
+      existingMap.set(googleEventId, {
+        id: item.id,
+        session_deducted: false,
+        google_event_id: googleEventId,
+      })
+    }
   }
 
   return result

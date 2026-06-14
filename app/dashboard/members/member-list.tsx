@@ -60,7 +60,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Edit, Plus, Search, Trash2, ArrowDown, ArrowUp, CalendarDays, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { Edit, Plus, Search, Trash2, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { RecentLessonSortIcon } from '@/components/dashboard/recent-lesson-sort-icon'
 import { MemberTrashSheet } from './member-trash-sheet'
 import { LIST_ROW_LINK_PREFETCH } from '@/lib/navigation-prefetch'
 
@@ -70,26 +71,17 @@ interface MemberListProps {
   pageSize?: number
   initialTrashCount?: number
   canManage?: boolean
+  preferRecentLessonSort?: boolean
 }
 
 function MemberSortIcon({
   active,
   asc,
-  recentLesson = false,
 }: {
   active: boolean
   asc: boolean
-  recentLesson?: boolean
 }) {
   if (!active) return null
-  if (recentLesson) {
-    return (
-      <span className="inline-flex items-center gap-0.5 text-primary">
-        <CalendarDays className="h-3 w-3" aria-hidden />
-        {asc ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
-      </span>
-    )
-  }
   return asc ? (
     <ArrowUp className="h-3 w-3 text-primary" aria-hidden />
   ) : (
@@ -114,20 +106,26 @@ function SortableMemberHead({
   className?: string
   onSort: (field: MemberListSortField) => void
 }) {
+  const isRecentLessonActive = recentLesson && sortField === field
+
   return (
     <TableHead className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 font-medium transition-colors hover:text-primary"
-        onClick={() => onSort(field)}
-      >
-        {label}
-        <MemberSortIcon
-          active={sortField === field}
-          asc={sortAsc}
-          recentLesson={recentLesson}
-        />
-      </button>
+      <div className="inline-flex items-center gap-0.5">
+        {recentLesson ? (
+          <RecentLessonSortIcon
+            active={isRecentLessonActive}
+            onClick={() => onSort(field)}
+          />
+        ) : null}
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 font-medium transition-colors hover:text-primary"
+          onClick={() => onSort(field)}
+        >
+          {label}
+          <MemberSortIcon active={sortField === field} asc={sortAsc} />
+        </button>
+      </div>
     </TableHead>
   )
 }
@@ -138,6 +136,7 @@ export function MemberList({
   pageSize = LIST_PAGE_SIZE,
   initialTrashCount = 0,
   canManage = true,
+  preferRecentLessonSort = false,
 }: MemberListProps) {
   const [members, setMembers] = useState(initialMembers)
   const [listTotalCount, setListTotalCount] = useState(totalCount)
@@ -164,6 +163,14 @@ export function MemberList({
     setMembers(initialMembers)
     setListTotalCount(totalCount)
   }, [initialMembers, totalCount])
+
+  useEffect(() => {
+    if (!preferRecentLessonSort) return
+    setSortField('recent_lesson')
+    setSortAsc(false)
+    setCurrentPage(1)
+    skipFetchRef.current = false
+  }, [preferRecentLessonSort])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -52,16 +52,21 @@ import {
   adjustPriceForPaymentMethod,
   formatPackagePlanLabel,
   formatPackageRemainingDisplay,
+  getPackageRemainingColorClass,
   getPresetPrice,
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
+  isSessionPackageOverage,
 } from '@/lib/session-package-utils'
 import {
   deleteSessionPackage,
   getSessionPackagesPage,
   updateSessionPackage,
+  type SessionPackageListOrderBy,
 } from '@/lib/actions/sessions'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+import { cn } from '@/lib/utils'
+import { RecentLessonSortIcon } from '@/components/dashboard/recent-lesson-sort-icon'
 
 function formatPackageDate(value: string | null | undefined) {
   if (!value) return '-'
@@ -99,6 +104,7 @@ interface SessionsListProps {
   pageSize?: number
   members: { id: string; name: string }[]
   selectedMemberId?: string
+  initialOrderBy?: SessionPackageListOrderBy
 }
 
 function formatRevenueMan(value: number) {
@@ -115,8 +121,12 @@ export function SessionsList({
   pageSize = LIST_PAGE_SIZE,
   members,
   selectedMemberId,
+  initialOrderBy = 'created_at',
 }: SessionsListProps) {
+  const router = useRouter()
   const [packages, setPackages] = useState(initialPackages)
+  const [listOrderBy, setListOrderBy] =
+    useState<SessionPackageListOrderBy>(initialOrderBy)
   const [loadedCount, setLoadedCount] = useState(initialPackages.length)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
@@ -137,6 +147,31 @@ export function SessionsList({
   })
   const hasMore = loadedCount < totalCount
 
+  useEffect(() => {
+    setPackages(initialPackages)
+    setLoadedCount(initialPackages.length)
+    setListOrderBy(initialOrderBy)
+  }, [initialPackages, initialOrderBy])
+
+  async function handleRecentLessonSort() {
+    if (listOrderBy === 'recent_lesson') return
+    setLoadingMore(true)
+    try {
+      const { data } = await getSessionPackagesPage({
+        memberId: selectedMemberId,
+        limit: pageSize,
+        offset: 0,
+        orderBy: 'recent_lesson',
+      })
+      setPackages(data as SessionPackage[])
+      setLoadedCount(data.length)
+      setListOrderBy('recent_lesson')
+      router.replace('/dashboard/sessions?sort=recent_lesson', { scroll: false })
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   async function handleLoadMore() {
     if (!hasMore || loadingMore) return
     setLoadingMore(true)
@@ -145,6 +180,7 @@ export function SessionsList({
         memberId: selectedMemberId,
         limit: pageSize,
         offset: loadedCount,
+        orderBy: listOrderBy,
       })
       if (data.length > 0) {
         setPackages((prev) => {
@@ -157,7 +193,6 @@ export function SessionsList({
       setLoadingMore(false)
     }
   }
-  const router = useRouter()
 
   const [formData, setFormData] = useState({
     member_id: selectedMemberId || '',
@@ -553,7 +588,15 @@ export function SessionsList({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>회원</TableHead>
+              <TableHead>
+                <div className="inline-flex items-center gap-0.5">
+                  <RecentLessonSortIcon
+                    active={listOrderBy === 'recent_lesson'}
+                    onClick={() => void handleRecentLessonSort()}
+                  />
+                  <span className="font-medium">회원</span>
+                </div>
+              </TableHead>
               <TableHead>수업권</TableHead>
               <TableHead className="hidden sm:table-cell">잔여/전체</TableHead>
               <TableHead className="hidden md:table-cell">결제액</TableHead>
@@ -600,20 +643,24 @@ export function SessionsList({
                   <TableCell className="hidden sm:table-cell">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`font-bold ${
-                          isMonthlyPlanPackage(pkg.note) || pkg.is_active
-                            ? pkg.remaining_sessions <= 3 &&
-                                pkg.remaining_sessions > 0 &&
-                                !isMonthlyPlanPackage(pkg.note)
-                              ? 'text-warning'
-                              : 'text-primary'
-                            : 'text-destructive'
-                        }`}
+                        className={cn(
+                          'font-bold',
+                          getPackageRemainingColorClass(
+                            pkg.remaining_sessions,
+                            pkg.note,
+                            pkg.is_active,
+                          ),
+                        )}
                       >
                         {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}
                       </span>
                       {!isMonthlyPlanPackage(pkg.note) ? (
                         <span className="text-muted-foreground">/ {pkg.total_sessions}</span>
+                      ) : null}
+                      {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
+                        <Badge variant="destructive" className="text-[10px]">
+                          초과
+                        </Badge>
                       ) : null}
                     </div>
                   </TableCell>

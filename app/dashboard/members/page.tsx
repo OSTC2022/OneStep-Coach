@@ -6,11 +6,17 @@ import { UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MemberList } from './member-list'
 
-export default async function MembersPage() {
+export default async function MembersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>
+}) {
+  const params = await searchParams
+  const preferRecentLessonSort = params.sort === 'recent_lesson'
   const { canManage } = await requireMemberViewer()
   const { data: members, count: totalCount } = await getMembers({
-  orderBy: 'recent_lesson',
-  orderAsc: false,
+    orderBy: 'recent_lesson',
+    orderAsc: false,
     limit: LIST_PAGE_SIZE,
     offset: 0,
   })
@@ -42,6 +48,7 @@ export default async function MembersPage() {
         pageSize={LIST_PAGE_SIZE}
         initialTrashCount={0}
         canManage={canManage}
+        preferRecentLessonSort={preferRecentLessonSort}
       />
     </div>
   )

@@ -15,12 +15,12 @@ import { getLessonCalendarDisplayParts, resolveLessonTitle } from '@/lib/calenda
 import { countsTowardSessionNumber, getTodayDateKey } from '@/lib/lesson-record-utils'
 import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
 import {
-  queryActiveSessionPackageId,
-  reconcileSessionPackageRemaining,
+  adjustSessionPackageRemaining,
+  querySessionPackageIdForDeduction,
 } from '@/lib/actions/sessions'
 import {
+  getSessionPackageOverageCount,
   isMonthlyUnlimitedSessions,
-  isPackageUsableForLesson,
 } from '@/lib/session-package-utils'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { canRoleSetAttendanceStatus } from '@/lib/roles'
@@ -30,6 +30,9 @@ type CheckInResult = {
   success?: boolean
   lesson_session_id?: string
   member_remaining_sessions?: number
+  session_package_remaining?: number
+  session_overage?: number
+  no_session_package?: boolean
   error?: string
 }
 
@@ -389,7 +392,7 @@ export async function clearLessonAttendanceCheck(
       (await resolveSessionPackageId(supabase, lesson))
 
     if (sessionPackageId) {
-      const reconcile = await reconcileSessionPackageRemaining(sessionPackageId)
+      const reconcile = await adjustSessionPackageRemaining(sessionPackageId, 1)
       if (reconcile.error) {
         return { error: reconcile.error }
       }
@@ -513,7 +516,7 @@ async function resolveSessionPackageId(
   },
 ) {
   if (lesson.session_package_id) return lesson.session_package_id
-  return queryActiveSessionPackageId(supabase, lesson.member_id)
+  return querySessionPackageIdForDeduction(supabase, lesson.member_id)
 }
 
 async function tryDeductLessonSessionOnce(
@@ -531,6 +534,8 @@ async function tryDeductLessonSessionOnce(
   deducted: boolean
   newRemaining?: number
   memberRemaining?: number
+  sessionOverage?: number
+  noSessionPackage?: boolean
   error?: string
 }> {
   const {
@@ -554,10 +559,6 @@ async function tryDeductLessonSessionOnce(
   }
 
   const unlimited = isMonthlyUnlimitedSessions(pkg.note)
-
-  if (!unlimited && !isPackageUsableForLesson(pkg)) {
-    return { deducted: false, error: '남은 수업 횟수가 없습니다.' }
-  }
 
   const claimPayload: Record<string, unknown> = { session_deducted: true }
   if (!existingSessionPackageId) {
@@ -594,7 +595,7 @@ async function tryDeductLessonSessionOnce(
     }
   }
 
-  const reconcile = await reconcileSessionPackageRemaining(sessionPackageId)
+  const reconcile = await adjustSessionPackageRemaining(sessionPackageId, -1)
 
   if (reconcile.error || reconcile.remaining == null) {
     await supabase.from('lessons').update({ session_deducted: false }).eq('id', lessonId)
@@ -632,6 +633,7 @@ async function tryDeductLessonSessionOnce(
     deducted: true,
     newRemaining: reconcile.remaining,
     memberRemaining: member?.remaining_sessions ?? undefined,
+    sessionOverage: getSessionPackageOverageCount(reconcile.remaining),
   }
 }
 
@@ -648,6 +650,9 @@ export async function completeLessonWithSignature(
     attendance_status: AttendanceStatus
     signature_id: string | null
     member_remaining_sessions?: number
+    session_package_remaining?: number
+    session_overage?: number
+    no_session_package?: boolean
   }
   error?: string
 }> {
@@ -769,29 +774,36 @@ export async function completeLessonWithSignature(
   }
 
   let memberRemaining: number | undefined
+  let sessionPackageRemaining: number | undefined
+  let sessionOverage: number | undefined
+  let noSessionPackage = false
   let sessionDeducted = lesson.session_deducted
 
   if (!lesson.session_deducted) {
     if (!sessionPackageId) {
-      return { error: '차감할 수업권이 없습니다.' }
+      sessionDeducted = true
+      sessionOverage = 1
+      noSessionPackage = true
+    } else {
+      const deduct = await tryDeductLessonSessionOnce(supabase, {
+        lessonId,
+        memberId: lesson.member_id,
+        sessionPackageId,
+        userId: user.id,
+        reason: 'lesson_complete',
+        lessonSessionId: sessionId,
+        existingSessionPackageId: lesson.session_package_id,
+      })
+
+      if (deduct.error) {
+        return { error: deduct.error }
+      }
+
+      memberRemaining = deduct.memberRemaining
+      sessionPackageRemaining = deduct.newRemaining
+      sessionOverage = deduct.sessionOverage
+      sessionDeducted = true
     }
-
-    const deduct = await tryDeductLessonSessionOnce(supabase, {
-      lessonId,
-      memberId: lesson.member_id,
-      sessionPackageId,
-      userId: user.id,
-      reason: 'lesson_complete',
-      lessonSessionId: sessionId,
-      existingSessionPackageId: lesson.session_package_id,
-    })
-
-    if (deduct.error) {
-      return { error: deduct.error }
-    }
-
-    memberRemaining = deduct.memberRemaining
-    sessionDeducted = true
   }
 
   const attendanceStatus: AttendanceStatus = 'present'
@@ -855,6 +867,9 @@ export async function completeLessonWithSignature(
         signature_id: string | null
       }),
       member_remaining_sessions: memberRemaining,
+      session_package_remaining: sessionPackageRemaining,
+      session_overage: sessionOverage,
+      no_session_package: noSessionPackage || undefined,
     },
   }
 }
@@ -1019,7 +1034,7 @@ export async function cancelLessonCompletion(lessonId: string): Promise<{
   }
 
   if (sessionPackageId) {
-    const reconcile = await reconcileSessionPackageRemaining(sessionPackageId)
+    const reconcile = await adjustSessionPackageRemaining(sessionPackageId, 1)
     if (reconcile.error) {
       return { error: reconcile.error }
     }
@@ -1677,6 +1692,8 @@ export async function addSignatureToPastLesson(
     end_time: string | null
     session_deducted: boolean
     attendance_status: AttendanceStatus
+    session_overage?: number
+    no_session_package?: boolean
   }
   error?: string
 }> {
@@ -1775,6 +1792,8 @@ async function addSignatureToPastLessonViaComplete(
           end_time: result.data.end_time,
           session_deducted: result.data.session_deducted,
           attendance_status: result.data.attendance_status,
+          session_overage: result.data.session_overage,
+          no_session_package: result.data.no_session_package,
         }
       : undefined,
   }

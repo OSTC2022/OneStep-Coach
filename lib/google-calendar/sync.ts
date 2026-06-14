@@ -16,12 +16,15 @@ import {
   watchGoogleCalendarEvents,
   withGoogleAccessToken,
 } from '@/lib/google-calendar/client'
-import { getGoogleSyncTimeBounds } from '@/lib/google-calendar/event-mapper'
+import {
+  getGoogleRecentSyncWindow,
+  getGoogleSyncTimeBounds,
+  getGoogleUpdatedSince,
+} from '@/lib/google-calendar/event-mapper'
 import {
   applyGoogleEventsBatch,
   loadExistingByGoogleEventId,
   loadMemberNameMap,
-  MAX_EVENTS_PER_SYNC,
 } from '@/lib/google-calendar/sync-apply'
 import type {
   GoogleCalendarEvent,
@@ -32,7 +35,7 @@ import type {
 const SYNC_SELECT =
   'id, connected_email, refresh_token, calendar_id, calendar_name, sync_token, watch_channel_id, watch_resource_id, watch_expiration, calendar_id_2, calendar_name_2, sync_token_2, watch_channel_id_2, watch_resource_id_2, watch_expiration_2, sync_enabled, last_synced_at, last_sync_error, pending_member_count, updated_at'
 
-const MAX_FETCH_PAGES = 1
+const MAX_FETCH_PAGES = 100
 
 function isMissingGoogleSyncTable(error: { message?: string; code?: string } | null) {
   if (!error) return false
@@ -132,47 +135,82 @@ async function countPendingMemberLessons(
   return count ?? 0
 }
 
-async function fetchChangedEventsFast(
+function mergeGoogleEventsById(
+  ...lists: GoogleCalendarEvent[][]
+): GoogleCalendarEvent[] {
+  const map = new Map<string, GoogleCalendarEvent>()
+  for (const list of lists) {
+    for (const event of list) {
+      if (event.id) map.set(event.id, event)
+    }
+  }
+  return Array.from(map.values())
+}
+
+async function paginateGoogleCalendarEvents(
   accessToken: string,
   calendarId: string,
-  syncToken: string | null,
+  query: {
+    timeMin?: string
+    timeMax?: string
+    updatedMin?: string
+    orderBy?: 'startTime' | 'updated'
+  },
 ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
   const events: GoogleCalendarEvent[] = []
   let pageToken: string | null = null
-  let nextSyncToken: string | null = syncToken
-  let useFullSync = !syncToken
+  let nextSyncToken: string | null = null
   let pages = 0
 
   do {
-    try {
-      const bounds = getGoogleSyncTimeBounds()
-      const response = await listGoogleCalendarEvents(accessToken, calendarId, {
-        syncToken: useFullSync ? null : nextSyncToken,
-        pageToken,
-        timeMin: useFullSync ? bounds.timeMin : undefined,
-        timeMax: useFullSync ? bounds.timeMax : undefined,
-      })
+    const response = await listGoogleCalendarEvents(accessToken, calendarId, {
+      pageToken,
+      ...query,
+    })
 
-      events.push(...(response.items ?? []))
-      pageToken = response.nextPageToken ?? null
-      if (response.nextSyncToken) {
-        nextSyncToken = response.nextSyncToken
-      }
-      pages += 1
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (!useFullSync && message.includes('410')) {
-        useFullSync = true
-        pageToken = null
-        nextSyncToken = null
-        pages = 0
-        continue
-      }
-      throw error
+    events.push(...(response.items ?? []))
+    pageToken = response.nextPageToken ?? null
+    if (response.nextSyncToken) {
+      nextSyncToken = response.nextSyncToken
     }
+    pages += 1
   } while (pageToken && pages < MAX_FETCH_PAGES)
 
+  if (pageToken) {
+    console.warn(
+      `[google-calendar] event fetch capped at ${MAX_FETCH_PAGES} pages for calendar ${calendarId}`,
+    )
+  }
+
   return { events, nextSyncToken }
+}
+
+async function fetchEventsForSync(
+  accessToken: string,
+  calendarId: string,
+  options?: { reason?: string },
+): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
+  const bounds =
+    options?.reason === 'manual'
+      ? getGoogleSyncTimeBounds()
+      : getGoogleRecentSyncWindow()
+
+  const [windowResult, recentUpdates] = await Promise.all([
+    paginateGoogleCalendarEvents(accessToken, calendarId, {
+      timeMin: bounds.timeMin,
+      timeMax: bounds.timeMax,
+      orderBy: 'startTime',
+    }),
+    paginateGoogleCalendarEvents(accessToken, calendarId, {
+      updatedMin: getGoogleUpdatedSince(7),
+      orderBy: 'updated',
+    }),
+  ])
+
+  return {
+    events: mergeGoogleEventsById(windowResult.events, recentUpdates.events),
+    nextSyncToken: windowResult.nextSyncToken ?? recentUpdates.nextSyncToken,
+  }
 }
 
 function buildLessonCalendarPatch(
@@ -258,10 +296,10 @@ export async function syncGoogleCalendarLessons(options?: {
       }
 
       for (const calendar of calendarsToSync) {
-        const { events, nextSyncToken } = await fetchChangedEventsFast(
+        const { events, nextSyncToken } = await fetchEventsForSync(
           accessToken,
           calendar.calendarId,
-          calendar.syncToken,
+          { reason: options?.reason },
         )
 
         const googleEventIds = events
@@ -294,7 +332,7 @@ export async function syncGoogleCalendarLessons(options?: {
             calendarId: calendar.calendarId,
             ...result,
             fetched: events.length,
-            capped: events.length > MAX_EVENTS_PER_SYNC,
+            reason: options?.reason,
           })
         }
       }

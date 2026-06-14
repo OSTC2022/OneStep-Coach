@@ -58,15 +58,47 @@ export function isGoogleEventCancelled(event: GoogleCalendarEvent): boolean {
   return event.status === 'cancelled'
 }
 
+function addCalendarDays(base: Date, days: number): Date {
+  const next = new Date(base)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+/** KST 기준 해당 날짜 00:00을 RFC3339로 (Google timeMin/timeMax용) */
+function toKstDayBoundaryIso(date: Date, endOfDay = false): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: KST,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const year = parts.find((part) => part.type === 'year')?.value ?? '1970'
+  const month = parts.find((part) => part.type === 'month')?.value ?? '01'
+  const day = parts.find((part) => part.type === 'day')?.value ?? '01'
+  const time = endOfDay ? 'T23:59:59' : 'T00:00:00'
+  return `${year}-${month}-${day}${time}+09:00`
+}
+
 export function getGoogleSyncTimeBounds() {
   const now = new Date()
-  const timeMin = new Date(now)
-  timeMin.setDate(timeMin.getDate() - 3)
-  const timeMax = new Date(now)
-  timeMax.setDate(timeMax.getDate() + 60)
-
   return {
-    timeMin: timeMin.toISOString(),
-    timeMax: timeMax.toISOString(),
+    timeMin: toKstDayBoundaryIso(addCalendarDays(now, -90)),
+    timeMax: toKstDayBoundaryIso(addCalendarDays(now, 365), true),
   }
+}
+
+/** Push·자동 동기화 — 최근 일정 위주 (과거 45일 ~ 앞으로 1년) */
+export function getGoogleRecentSyncWindow() {
+  const now = new Date()
+  return {
+    timeMin: toKstDayBoundaryIso(addCalendarDays(now, -45)),
+    timeMax: toKstDayBoundaryIso(addCalendarDays(now, 365), true),
+  }
+}
+
+/** 최근 N일 이내 수정·생성된 일정 보강 조회용 */
+export function getGoogleUpdatedSince(days: number): string {
+  const since = addCalendarDays(new Date(), -days)
+  return since.toISOString()
 }

@@ -128,12 +128,14 @@ export async function listGoogleCalendarEvents(
     pageToken?: string | null
     timeMin?: string
     timeMax?: string
+    updatedMin?: string
+    orderBy?: 'startTime' | 'updated'
   },
 ): Promise<GoogleEventsListResponse> {
   const params = new URLSearchParams({
     singleEvents: 'true',
     showDeleted: 'true',
-    maxResults: '100',
+    maxResults: '250',
   })
 
   if (options.syncToken) {
@@ -141,6 +143,13 @@ export async function listGoogleCalendarEvents(
   } else {
     if (options.timeMin) params.set('timeMin', options.timeMin)
     if (options.timeMax) params.set('timeMax', options.timeMax)
+    if (options.updatedMin) params.set('updatedMin', options.updatedMin)
+    if (options.orderBy) {
+      params.set('orderBy', options.orderBy)
+      if (options.orderBy === 'startTime') {
+        params.set('sortOrder', 'ascending')
+      }
+    }
   }
 
   if (options.pageToken) {

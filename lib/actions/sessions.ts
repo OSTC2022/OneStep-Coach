@@ -16,6 +16,9 @@ import {
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
 } from '@/lib/session-package-utils'
+import { fetchLastLessonDateByMember } from '@/lib/member-list-sort'
+
+export type SessionPackageListOrderBy = 'created_at' | 'recent_lesson'
 
 function mapSessionPackageError(message: string): string {
   if (message.includes('row-level security') || message.includes('permission denied')) {
@@ -269,7 +272,81 @@ async function countDeductedLessonsForPackage(
   return deductedCount
 }
 
-/** 차감된 수업 수 기준으로 잔여 횟수 재계산 */
+/** 차감·복구 시 현재 잔여 횟수 기준으로 ±1 (수동 수정값 유지) */
+export async function adjustSessionPackageRemaining(
+  packageId: string,
+  delta: number,
+  client?: Awaited<ReturnType<typeof createStaffDataClient>>,
+): Promise<{ remaining?: number; error?: string }> {
+  const supabase = client ?? (await createStaffDataClient())
+
+  const { data: pkg, error: pkgError } = await supabase
+    .from('session_packages')
+    .select(
+      'id, member_id, total_sessions, remaining_sessions, note, expires_at, is_active',
+    )
+    .eq('id', packageId)
+    .single()
+
+  if (pkgError || !pkg) {
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  try {
+    if (isMonthlyPlanPackage(pkg.note)) {
+      const stillActive = isPackageUsableForLesson({
+        is_active: pkg.is_active,
+        remaining_sessions: 0,
+        note: pkg.note,
+        expires_at: pkg.expires_at,
+      })
+
+      if (stillActive !== pkg.is_active) {
+        const { error: updateError } = await supabase
+          .from('session_packages')
+          .update({ is_active: stillActive })
+          .eq('id', packageId)
+
+        if (updateError) {
+          return { error: mapSessionPackageError(updateError.message) }
+        }
+      }
+
+      return { remaining: 0 }
+    }
+
+    let newRemaining = pkg.remaining_sessions + delta
+    if (delta > 0) {
+      newRemaining = Math.min(pkg.total_sessions, newRemaining)
+    }
+
+    const { error: updateError } = await supabase
+      .from('session_packages')
+      .update({
+        remaining_sessions: newRemaining,
+        is_active: newRemaining > 0,
+      })
+      .eq('id', packageId)
+
+    if (updateError) {
+      return { error: mapSessionPackageError(updateError.message) }
+    }
+
+    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+      p_member_id: pkg.member_id,
+    })
+    if (syncError) {
+      console.warn('sync_member_remaining_sessions:', syncError.message)
+    }
+
+    return { remaining: newRemaining }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '잔여 횟수 변경 실패'
+    return { error: message }
+  }
+}
+
+/** 차감된 수업 수 기준으로 잔여 횟수 재계산 (관리자 수동 재계산용) */
 export async function reconcileSessionPackageRemaining(
   packageId: string,
   client?: Awaited<ReturnType<typeof createStaffDataClient>>,
@@ -456,39 +533,43 @@ export async function getSessionPackagesPage(options?: {
   memberId?: string
   limit?: number
   offset?: number
+  orderBy?: SessionPackageListOrderBy
 }): Promise<{ data: SessionPackage[]; count: number }> {
+  const orderBy = options?.orderBy ?? 'created_at'
+  const limit = options?.limit ?? LIST_PAGE_SIZE
+  const offset = options?.offset ?? 0
+  const useRecentLessonSort = orderBy === 'recent_lesson'
+
   const { data, count } = await getSessionPackages({
     memberId: options?.memberId,
-    limit: options?.limit ?? LIST_PAGE_SIZE,
-    offset: options?.offset ?? 0,
+    limit: useRecentLessonSort ? undefined : limit,
+    offset: useRecentLessonSort ? undefined : offset,
   })
 
-  if (data.length === 0) {
+  if (!useRecentLessonSort || data.length === 0) {
     return { data, count }
   }
 
   const supabase = await createStaffDataClient()
-  const reconciled = await Promise.all(
-    data.map(async (pkg) => {
-      const result = await reconcileSessionPackageRemaining(pkg.id, supabase)
-      if (result.remaining == null) return pkg
-      const monthly = isMonthlyPlanPackage(pkg.note)
-      return {
-        ...pkg,
-        remaining_sessions: result.remaining,
-        is_active: monthly
-          ? isPackageUsableForLesson({
-              is_active: pkg.is_active,
-              remaining_sessions: result.remaining,
-              note: pkg.note,
-              expires_at: pkg.expires_at,
-            })
-          : result.remaining > 0,
-      }
-    }),
-  )
+  const memberIds = [...new Set(data.map((pkg) => pkg.member_id))]
+  const lastLessonByMember = await fetchLastLessonDateByMember(supabase, memberIds)
 
-  return { data: reconciled, count }
+  const sorted = [...data].sort((a, b) => {
+    const da = lastLessonByMember.get(a.member_id) ?? ''
+    const db = lastLessonByMember.get(b.member_id) ?? ''
+    const nameA = a.member?.name ?? ''
+    const nameB = b.member?.name ?? ''
+    if (!da && !db) return nameA.localeCompare(nameB, 'ko')
+    if (!da) return 1
+    if (!db) return -1
+    const cmp = db.localeCompare(da)
+    return cmp !== 0 ? cmp : nameA.localeCompare(nameB, 'ko')
+  })
+
+  return {
+    data: sorted.slice(offset, offset + limit),
+    count: count ?? sorted.length,
+  }
 }
 
 export async function queryActiveSessionPackageId(
@@ -513,6 +594,32 @@ export async function queryActiveSessionPackageId(
 
   const usable = data.find((pkg) => isPackageUsableForLesson(pkg))
   return usable?.id ?? null
+}
+
+/** 차감 대상 수업권 — 활성·잔여 없음·만료 포함 최근 수업권까지 조회 */
+export async function querySessionPackageIdForDeduction(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  memberId: string,
+): Promise<string | null> {
+  const activeId = await queryActiveSessionPackageId(supabase, memberId)
+  if (activeId) return activeId
+
+  const trashEnabled = await isSessionPackageTrashEnabled()
+
+  let query = supabase
+    .from('session_packages')
+    .select('id')
+    .eq('member_id', memberId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  const { data, error } = await query
+  if (error || !data?.length) return null
+  return data[0].id
 }
 
 export async function getActivePackageForMember(memberId: string): Promise<SessionPackage | null> {
@@ -647,6 +754,15 @@ export async function updateSessionPackage(
   if (error) {
     console.error('Error updating session package:', error)
     return { error: mapSessionPackageError(error.message) }
+  }
+
+  if (data?.member_id) {
+    const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+      p_member_id: data.member_id,
+    })
+    if (syncError) {
+      console.warn('sync_member_remaining_sessions:', syncError.message)
+    }
   }
 
   revalidatePath('/dashboard/members')

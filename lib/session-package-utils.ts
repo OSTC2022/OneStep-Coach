@@ -163,6 +163,42 @@ export function formatPackageRemainingDisplay(
   return `${remainingSessions}회`
 }
 
+/** 잔여 0 미만일 때 초과 횟수 (예: -2 → 2) */
+export function getSessionPackageOverageCount(remainingSessions: number): number {
+  return remainingSessions < 0 ? Math.abs(remainingSessions) : 0
+}
+
+export function isSessionPackageOverage(
+  remainingSessions: number,
+  note?: string | null,
+): boolean {
+  return !isMonthlyPlanPackage(note) && remainingSessions < 0
+}
+
+export function formatSessionOverageAlert(
+  overage: number,
+  options?: { noPackage?: boolean },
+): string {
+  if (options?.noPackage) {
+    return `등록된 수업권이 없습니다. 수업권 ${overage}회 초과하였습니다.`
+  }
+  return `수업권 ${overage}회 초과하였습니다.`
+}
+
+export function getPackageRemainingColorClass(
+  remainingSessions: number,
+  note?: string | null,
+  isActive = true,
+): string {
+  if (isMonthlyPlanPackage(note)) {
+    return isActive ? 'text-primary' : 'text-destructive'
+  }
+  if (remainingSessions < 0) return 'text-destructive font-bold'
+  if (!isActive || remainingSessions <= 0) return 'text-destructive'
+  if (remainingSessions <= 3) return 'text-warning'
+  return 'text-primary'
+}
+
 export function isPackageUsableForLesson(pkg: {
   is_active: boolean
   remaining_sessions: number

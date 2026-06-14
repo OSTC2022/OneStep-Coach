@@ -13,6 +13,7 @@ import {
   formatShortLessonDate,
   formatTimeValue,
 } from '@/lib/lesson-record-utils'
+import { formatSessionOverageAlert } from '@/lib/session-package-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -217,6 +218,14 @@ export function PastLessonSignatureDialog({
         session_deducted: result.data.session_deducted,
         attendance_status: result.data.attendance_status,
       })
+      if (result.data.session_overage && result.data.session_overage > 0) {
+        toast.warning(
+          formatSessionOverageAlert(result.data.session_overage, {
+            noPackage: result.data.no_session_package,
+          }),
+          { duration: 8000 },
+        )
+      }
     }
 
     toast.success('서명이 저장되었습니다.')
