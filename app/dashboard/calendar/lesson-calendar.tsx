@@ -33,6 +33,7 @@ import {
   minutesToTimeString,
   navigateDate,
   parseTimeToMinutes,
+  enrichLessonWithMemberCatalog,
   type CalendarMemberSearchItem,
   type CalendarMemberSearchResult,
   type CalendarView,
@@ -62,6 +63,11 @@ import {
   logCalendarFetch,
   withCalendarFetchTimeout,
 } from '@/lib/calendar-client-fetch'
+import { normalizeCalendarLessonsForDisplay } from '@/lib/calendar-recurrence/expand-lessons'
+import {
+  isPersistedRecurringLesson,
+  parseVirtualLessonId,
+} from '@/lib/calendar-recurrence/types'
 
 function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   const map = new Map<string, Lesson>()
@@ -157,8 +163,13 @@ export function LessonCalendar({
   }, [editOpen])
 
   const searchLessons = useMemo(
-    () => mergeLessonsById(searchPoolLessons, lessons),
-    [searchPoolLessons, lessons],
+    () =>
+      normalizeCalendarLessonsForDisplay(
+        mergeLessonsById(searchPoolLessons, lessons)
+          .filter((item) => item.event_type !== 'recurring_master')
+          .map((item) => enrichLessonWithMemberCatalog(item, members)),
+      ),
+    [searchPoolLessons, lessons, members],
   )
 
   const lessonsWithEditPreview = useMemo(() => {
@@ -171,11 +182,14 @@ export function LessonCalendar({
     return searchLessons.map((item) => {
       if (item.id !== editingLesson.id) return item
       return enrichLessonWithInstructorCatalog(
-        { ...item, instructor_id: normalizedId },
+        enrichLessonWithMemberCatalog(
+          { ...item, instructor_id: normalizedId },
+          members,
+        ),
         instructors,
       )
     })
-  }, [searchLessons, editOpen, editingLesson, editDraftInstructorId, instructors])
+  }, [searchLessons, editOpen, editingLesson, editDraftInstructorId, instructors, members])
 
   const filteredLessons = useMemo(
     () => filterLessonsByCoach(lessonsWithEditPreview, instructorFilter),
@@ -621,20 +635,44 @@ export function LessonCalendar({
 
   function handleLessonDeleted(lessonIds: string[]) {
     const idSet = new Set(lessonIds)
-    const removed = [...lessons, ...searchPoolLessons].filter((lesson) =>
-      idSet.has(lesson.id),
-    )
+    const virtualOccurrences = new Map<string, Set<string>>()
+
+    for (const id of lessonIds) {
+      const virtual = parseVirtualLessonId(id)
+      if (!virtual) continue
+      const dates = virtualOccurrences.get(virtual.masterId) ?? new Set<string>()
+      dates.add(virtual.occurrenceDate)
+      virtualOccurrences.set(virtual.masterId, dates)
+    }
+
+    const shouldRemove = (lesson: Lesson) => {
+      if (idSet.has(lesson.id)) return true
+
+      for (const [masterId, dates] of virtualOccurrences) {
+        const virtual = parseVirtualLessonId(lesson.id)
+        if (virtual?.masterId === masterId && dates.has(virtual.occurrenceDate)) {
+          return true
+        }
+        if (lesson.recurring_master_id === masterId && dates.has(lesson.lesson_date)) {
+          return true
+        }
+      }
+
+      return false
+    }
+
+    const removed = [...lessons, ...searchPoolLessons].filter(shouldRemove)
     const uniqueRemoved = Array.from(
       new Map(removed.map((lesson) => [lesson.id, lesson])).values(),
     )
 
     setLessons((prev) => {
-      const next = prev.filter((l) => !idSet.has(l.id))
+      const next = prev.filter((lesson) => !shouldRemove(lesson))
       const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
       setCachedLessons(cacheKey, next)
       return next
     })
-    setSearchPoolLessons((prev) => prev.filter((l) => !idSet.has(l.id)))
+    setSearchPoolLessons((prev) => prev.filter((lesson) => !shouldRemove(lesson)))
     for (const lesson of uniqueRemoved) {
       lessonHistory.pushLessonDelete(lesson)
     }
@@ -644,6 +682,17 @@ export function LessonCalendar({
 
   const handleLessonSaved = useCallback(
     (lesson: Lesson) => {
+      const needsRecurrenceRefresh =
+        lesson.event_type === 'recurring_master' ||
+        parseVirtualLessonId(lesson.id) != null ||
+        isPersistedRecurringLesson(lesson) ||
+        Boolean(lesson.recurrence_pattern && lesson.recurrence_pattern !== 'none')
+
+      if (needsRecurrenceRefresh) {
+        void syncRange(currentDate, view, { force: true })
+        return
+      }
+
       const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
 
       setLessons((prev) => {
@@ -671,7 +720,7 @@ export function LessonCalendar({
         return [...prev, enriched]
       })
     },
-    [lessonHistory, currentDate, view, instructors],
+    [lessonHistory, currentDate, view, instructors, syncRange],
   )
 
   const lessonSavedRef = useRef(handleLessonSaved)

@@ -41,7 +41,10 @@ export type GoogleCalendarEvent = {
   summary?: string
   description?: string
   updated?: string
+  recurrence?: string[]
   recurringEventId?: string
+  iCalUID?: string
+  originalStartTime?: { dateTime?: string; date?: string; timeZone?: string }
   start?: { dateTime?: string; date?: string; timeZone?: string }
   end?: { dateTime?: string; date?: string; timeZone?: string }
 }

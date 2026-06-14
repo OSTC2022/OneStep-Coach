@@ -130,10 +130,11 @@ export async function listGoogleCalendarEvents(
     timeMax?: string
     updatedMin?: string
     orderBy?: 'startTime' | 'updated'
+    singleEvents?: boolean
   },
 ): Promise<GoogleEventsListResponse> {
   const params = new URLSearchParams({
-    singleEvents: 'true',
+    singleEvents: options.singleEvents === false ? 'false' : 'true',
     showDeleted: 'true',
     maxResults: '250',
   })

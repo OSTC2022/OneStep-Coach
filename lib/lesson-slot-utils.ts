@@ -170,6 +170,61 @@ export async function loadExistingLessonsBySlotKeys(
   return map
 }
 
+const MEMBER_SLOT_CONFLICT_SELECT =
+  'id, lesson_date, start_time, member_id, event_type, recurrence, lesson_date'
+
+/** 같은 날·같은 시작 시각·같은 회원 중복 여부 (강사 무관) */
+export async function findMemberSlotConflict(
+  supabase: SupabaseClient,
+  params: {
+    lessonDate: string
+    startTime?: string | null
+    memberId: string
+    excludeLessonIds?: string[]
+  },
+): Promise<{ id: string } | null> {
+  const { lessonDate, startTime, memberId } = params
+  const exclude = new Set(params.excludeLessonIds ?? [])
+  const startKey = startTime?.slice(0, 5) ?? ''
+
+  const { data: stored, error } = await supabase
+    .from('lessons')
+    .select(MEMBER_SLOT_CONFLICT_SELECT)
+    .eq('lesson_date', lessonDate)
+    .eq('member_id', memberId)
+    .neq('event_type', 'recurring_master')
+
+  if (error) return null
+
+  for (const row of stored ?? []) {
+    if (exclude.has(row.id)) continue
+    if ((row.start_time?.slice(0, 5) ?? '') !== startKey) continue
+    return { id: row.id }
+  }
+
+  const { data: masters } = await supabase
+    .from('lessons')
+    .select(MEMBER_SLOT_CONFLICT_SELECT)
+    .eq('member_id', memberId)
+    .eq('event_type', 'recurring_master')
+
+  if (!masters?.length) return null
+
+  const { masterHasOccurrenceOnDate } = await import(
+    '@/lib/calendar-recurrence/expand-lessons'
+  )
+
+  for (const master of masters) {
+    if (exclude.has(master.id)) continue
+    if ((master.start_time?.slice(0, 5) ?? '') !== startKey) continue
+    if (masterHasOccurrenceOnDate(master, lessonDate)) {
+      return { id: master.id }
+    }
+  }
+
+  return null
+}
+
 /** Google 반복 시리즈 ID → UUID 형식 recurrence_group_id */
 export function googleRecurrenceGroupId(recurringEventId: string): string {
   const hash = createHash('sha256')

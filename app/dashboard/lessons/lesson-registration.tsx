@@ -105,6 +105,7 @@ const LESSON_TYPES = [
   { value: '그룹레슨', label: '그룹레슨' },
   { value: '체험레슨', label: '체험레슨' },
   { value: '러닝레슨', label: '러닝레슨' },
+  { value: '육상부', label: '육상부' },
 ]
 
 export function LessonRegistration({

@@ -12,15 +12,19 @@ import {
   getLessonRecurrenceInfo,
   updateLesson,
   updateLessonSeries,
+  removeLessonRecurrence,
+  convertLessonToRecurringSeries,
   type LessonSeriesScope,
 } from '@/lib/actions/lessons'
+import { getRecurrenceDisplayLabel, isPersistedRecurringLesson } from '@/lib/calendar-recurrence/types'
 import { resolveLessonRecurrence } from '@/lib/lesson-recurrence-legacy'
 import {
   defaultRecurrenceEndDate,
   formatRecurrencePreview,
-  getAdditionalRecurrenceDates,
+  isOpenEndedRecurrencePattern,
   LESSON_RECURRENCE_OPTIONS,
   parseLessonRecurrencePattern,
+  resolveRecurrenceEndDate,
   type LessonRecurrencePattern,
 } from '@/lib/lesson-recurrence'
 import { AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
@@ -252,6 +256,7 @@ export function LessonCreateDialog({
   const [seriesGroupId, setSeriesGroupId] = useState<string | null>(null)
   const [saveScopeOpen, setSaveScopeOpen] = useState(false)
   const [deleteScopeOpen, setDeleteScopeOpen] = useState(false)
+  const recurrenceUserEditedRef = useRef(false)
 
   function getActiveSeriesGroupId(targetLesson?: typeof lesson) {
     return seriesGroupId ?? resolveLessonRecurrence(targetLesson ?? lesson ?? {}).groupId
@@ -395,6 +400,7 @@ export function LessonCreateDialog({
 
     if (initKeyRef.current === initKey) return
     initKeyRef.current = initKey
+    recurrenceUserEditedRef.current = false
 
     if (lesson) {
       const primaryMemberId = getLessonMemberId(lesson)
@@ -422,12 +428,22 @@ export function LessonCreateDialog({
       const recurrence = resolveLessonRecurrence(lesson)
       setSeriesGroupId(recurrence.groupId)
       setRecurrencePattern(recurrence.pattern)
-      setRecurrenceEndDate(defaultRecurrenceEndDate(lesson.lesson_date))
+      setRecurrenceEndDate(
+        defaultRecurrenceEndDate(lesson.lesson_date, recurrence.pattern),
+      )
       void getLessonRecurrenceInfo(lesson.id).then((info) => {
         if (!info || initKeyRef.current !== initKey) return
         setSeriesGroupId(info.groupId)
-        setRecurrencePattern(info.pattern)
-        if (info.endDate) setRecurrenceEndDate(info.endDate)
+        if (!recurrenceUserEditedRef.current) {
+          setRecurrencePattern(info.pattern)
+        }
+        if (
+          info.endDate &&
+          !isOpenEndedRecurrencePattern(info.pattern) &&
+          !recurrenceUserEditedRef.current
+        ) {
+          setRecurrenceEndDate(info.endDate)
+        }
       })
       return
     }
@@ -449,8 +465,12 @@ export function LessonCreateDialog({
   useEffect(() => {
     if (!open || recurrencePattern === 'none') return
     if (!date) return
+    if (isOpenEndedRecurrencePattern(recurrencePattern)) {
+      if (recurrenceEndDate) setRecurrenceEndDate('')
+      return
+    }
     if (!recurrenceEndDate || recurrenceEndDate < date) {
-      setRecurrenceEndDate(defaultRecurrenceEndDate(date))
+      setRecurrenceEndDate(defaultRecurrenceEndDate(date, recurrencePattern))
     }
   }, [open, recurrencePattern, date, recurrenceEndDate])
 
@@ -521,6 +541,7 @@ export function LessonCreateDialog({
 
   function validateRecurrenceSelection() {
     if (recurrencePattern === 'none') return true
+    if (isOpenEndedRecurrencePattern(recurrencePattern)) return true
     if (!recurrenceEndDate) {
       toast.error('반복 종료 날짜를 선택해주세요.')
       return false
@@ -530,6 +551,21 @@ export function LessonCreateDialog({
       return false
     }
     return true
+  }
+
+  function validateLessonIdentityForRecurrence() {
+    const resolvedMemberId = memberId || getLessonMemberId(lesson)
+    const resolvedTitle =
+      calendarDisplayText.trim() || entryText.trim() || resolveLessonTitle(lesson)
+    if (!resolvedMemberId && !resolvedTitle) {
+      toast.error('반복 등록 전 회원을 선택하거나 이름을 입력해주세요.')
+      return false
+    }
+    return true
+  }
+
+  function getResolvedRecurrenceEndDate() {
+    return resolveRecurrenceEndDate(date, recurrencePattern, recurrenceEndDate)
   }
 
   async function saveNewLessons(
@@ -547,6 +583,10 @@ export function LessonCreateDialog({
     successLabel: string,
   ) {
     if (recurrencePattern !== 'none') {
+      if (!validateLessonIdentityForRecurrence()) {
+        setIsLoading(false)
+        return
+      }
       if (!validateRecurrenceSelection()) {
         setIsLoading(false)
         return
@@ -559,7 +599,7 @@ export function LessonCreateDialog({
         },
         {
           pattern: recurrencePattern,
-          endDate: recurrenceEndDate,
+          endDate: getResolvedRecurrenceEndDate(),
           recurrencePattern,
         },
       )
@@ -580,8 +620,12 @@ export function LessonCreateDialog({
         toast.success(`${created}개 등록, ${linked}개 기존 일정 연결`)
       } else if (linked > 0) {
         toast.success(`${linked}개 기존 일정을 반복 시리즈에 연결했습니다.`)
+      } else if (result.data?.length) {
+        toast.success(
+          `${getRecurrenceDisplayLabel(recurrencePattern) ?? '반복'} 일정이 등록되었습니다.`,
+        )
       } else {
-        toast.success(`${created || result.data?.length || 0}개 ${successLabel}`)
+        toast.success(successLabel)
       }
       handleOpenChange(false)
       return
@@ -628,7 +672,9 @@ export function LessonCreateDialog({
     if (info?.pattern && info.pattern !== 'none') {
       setRecurrencePattern(info.pattern)
     }
-    if (info?.endDate) setRecurrenceEndDate(info.endDate)
+    if (info?.endDate && info.pattern && !isOpenEndedRecurrencePattern(info.pattern)) {
+      setRecurrenceEndDate(info.endDate)
+    }
 
     const hasSeries =
       Boolean(info?.groupId) ||
@@ -654,7 +700,7 @@ export function LessonCreateDialog({
       const result = await deleteLessonsInSeries(
         lesson.id,
         scope,
-        originalLessonDateRef.current || lesson.lesson_date,
+        date || originalLessonDateRef.current || lesson.lesson_date,
       )
 
       if (result.error) {
@@ -710,13 +756,99 @@ export function LessonCreateDialog({
   ) {
     if (!lesson) return
 
-    const activeSeriesGroupId = getActiveSeriesGroupId()
-    const hadRecurrenceGroup = Boolean(activeSeriesGroupId)
+    const persistedRecurrence = isPersistedRecurringLesson(lesson)
+    const hasRecurringContext =
+      persistedRecurrence || Boolean(getActiveSeriesGroupId())
 
     setIsLoading(true)
     setSaveScopeOpen(false)
 
-    const anchorDate = originalLessonDateRef.current || lesson.lesson_date
+    const anchorDate =
+      updates.lesson_date ||
+      originalLessonDateRef.current ||
+      lesson.lesson_date
+
+    if (recurrencePattern === 'none' && hasRecurringContext) {
+      const result = await removeLessonRecurrence(lesson.id, scope, anchorDate, updates)
+
+      if (result.error) {
+        setIsLoading(false)
+        toast.error('반복 해제 실패', { description: result.error })
+        return
+      }
+
+      const deletedIds = new Set(result.deletedIds ?? [])
+      deletedIds.add(lesson.id)
+      onDeleted?.([...deletedIds])
+      result.data?.forEach((item) => onSaved(item))
+
+      setIsLoading(false)
+      toast.success('반복이 해제되었습니다.')
+      handleOpenChange(false)
+      return
+    }
+
+    if (recurrencePattern !== 'none' && !persistedRecurrence) {
+      if (!validateLessonIdentityForRecurrence()) {
+        setIsLoading(false)
+        return
+      }
+      if (!validateRecurrenceSelection()) {
+        setIsLoading(false)
+        return
+      }
+
+      const result = await convertLessonToRecurringSeries(
+        lesson.id,
+        scope,
+        anchorDate,
+        updates,
+        recurrencePattern,
+        isOpenEndedRecurrencePattern(recurrencePattern)
+          ? null
+          : resolveRecurrenceEndDate(date, recurrencePattern, recurrenceEndDate),
+      )
+
+      if (result.error) {
+        setIsLoading(false)
+        toast.error('반복 일정 등록 실패', { description: result.error })
+        return
+      }
+
+      if (result.deletedIds?.length) {
+        onDeleted?.(result.deletedIds)
+      }
+      result.data?.forEach((item) => onSaved(item))
+
+      setIsLoading(false)
+      toast.success(
+        `${getRecurrenceDisplayLabel(recurrencePattern) ?? '반복'} 일정으로 등록되었습니다.`,
+      )
+      handleOpenChange(false)
+      return
+    }
+
+    if (recurrencePattern === 'none') {
+      const result = await updateLesson(lesson.id, {
+        ...updates,
+        recurrence_pattern: 'none',
+        recurrence_group_id: null,
+      })
+
+      if (result.error) {
+        setIsLoading(false)
+        toast.error('수업 수정 실패', { description: result.error })
+        return
+      }
+
+      if (result.data) onSaved(result.data)
+      showSaveWarning(result.warning)
+      setIsLoading(false)
+      toast.success('수업이 수정되었습니다.')
+      handleOpenChange(false)
+      return
+    }
+
     const result = await updateLessonSeries(lesson.id, updates, scope, anchorDate)
 
     if (result.error) {
@@ -725,97 +857,15 @@ export function LessonCreateDialog({
       return
     }
 
+    if (result.deletedIds?.length) {
+      onDeleted?.(result.deletedIds)
+    }
     result.data?.forEach((item) => onSaved(item))
     showSaveWarning(result.warning)
 
-    let createdCount = 0
-
-    if (recurrencePattern !== 'none' && !hadRecurrenceGroup) {
-      if (!validateRecurrenceSelection()) {
-        setIsLoading(false)
-        return
-      }
-
-      const additionalDates = getAdditionalRecurrenceDates(
-        date,
-        recurrencePattern,
-        recurrenceEndDate,
-      )
-
-      if (additionalDates.length > 0) {
-        const updatedPrimary =
-          result.data?.find((item) => item.id === lesson.id) ?? result.data?.[0]
-        let groupId =
-          scope === 'future'
-            ? activeSeriesGroupId ?? updatedPrimary?.recurrence_group_id
-            : updatedPrimary?.recurrence_group_id
-
-        if (!groupId) {
-          groupId = crypto.randomUUID()
-          const linkResult = await updateLesson(lesson.id, {
-            recurrence_group_id: groupId,
-            recurrence_pattern: recurrencePattern,
-          })
-          if (linkResult.data) onSaved(linkResult.data)
-        } else if (scope === 'future') {
-          const linkResult = await updateLesson(lesson.id, {
-            recurrence_pattern: recurrencePattern,
-          })
-          if (linkResult.data) onSaved(linkResult.data)
-        }
-
-        const recurringResult = await createRecurringLessons(
-          {
-            instructor_id: updates.instructor_id,
-            lesson_date: date,
-            start_time: updates.start_time,
-            end_time: updates.end_time,
-            lesson_type: updates.lesson_type,
-            member_id: updates.member_id,
-            title: updates.title,
-          },
-          {
-            dates: additionalDates,
-            recurrenceGroupId: groupId!,
-            recurrencePattern,
-          },
-        )
-
-        if (recurringResult.error) {
-          setIsLoading(false)
-          toast.error('반복 수업 추가 실패', {
-            description: recurringResult.error,
-          })
-          return
-        }
-
-        recurringResult.data?.forEach((item) => onSaved(item))
-        showSaveWarning(recurringResult.warning)
-        createdCount = recurringResult.createdCount ?? additionalDates.length
-        const linkedCount = recurringResult.linkedCount ?? 0
-        setIsLoading(false)
-
-        if (createdCount > 0 || linkedCount > 0) {
-          const parts: string[] = []
-          if (createdCount > 0) parts.push(`${createdCount}개 추가`)
-          if (linkedCount > 0) parts.push(`${linkedCount}개 기존 일정 연결`)
-          toast.success(`수업이 수정되었고 ${parts.join(', ')}되었습니다.`)
-        } else if ((result.data?.length ?? 0) > 1) {
-          toast.success(`${result.data?.length ?? 0}개 수업이 수정되었습니다.`)
-        } else {
-          toast.success('수업이 수정되었습니다.')
-        }
-
-        handleOpenChange(false)
-        return
-      }
-    }
-
     setIsLoading(false)
 
-    if (createdCount > 0) {
-      toast.success(`수업이 수정되었고 ${createdCount}개 일정이 추가되었습니다.`)
-    } else if ((result.data?.length ?? 0) > 1) {
+    if ((result.data?.length ?? 0) > 1) {
       toast.success(`${result.data?.length ?? 0}개 수업이 수정되었습니다.`)
     } else {
       toast.success('수업이 수정되었습니다.')
@@ -924,13 +974,26 @@ export function LessonCreateDialog({
       return
     }
 
-    const schedulePayload = {
-      instructor_id: normalizePrimaryInstructorId(instructorId) || undefined,
+    if (
+      !isEditing &&
+      !isAddingToSlot &&
+      submitMemberId &&
+      sameSlotLessons.some((item) => getLessonMemberId(item) === submitMemberId)
+    ) {
+      setIsLoading(false)
+      toast.error('이미 같은 시간에 배정된 회원입니다.')
+      return
+    }
+
+    const schedulePayload: Partial<LessonFormData> = {
       lesson_date: date,
       start_time: startTime || undefined,
       end_time: endTime || undefined,
       lesson_type: lessonType,
     }
+    Object.assign(schedulePayload, {
+      instructor_id: normalizePrimaryInstructorId(instructorId),
+    })
 
     const identityPayload = {
       member_id: submitMemberId,
@@ -959,7 +1022,15 @@ export function LessonCreateDialog({
         return
       }
 
-      if (getActiveSeriesGroupId()) {
+      const hasRecurringContext =
+        isPersistedRecurringLesson(lesson) || Boolean(getActiveSeriesGroupId())
+
+      if (hasRecurringContext && recurrencePattern === 'none') {
+        await executeEditSave('all', updates)
+        return
+      }
+
+      if (hasRecurringContext) {
         pendingEditUpdatesRef.current = updates
         setIsLoading(false)
         setSaveScopeOpen(true)
@@ -968,7 +1039,7 @@ export function LessonCreateDialog({
 
       if (recurrencePattern !== 'none') {
         setIsLoading(false)
-        await executeEditSave('single', updates)
+        await executeEditSave('all', updates)
         return
       }
 
@@ -1166,9 +1237,12 @@ export function LessonCreateDialog({
           <Label className={isCompactForm ? POPUP_FIELD_LABEL : undefined}>반복</Label>
           <Select
             value={recurrencePattern}
-            onValueChange={(value) =>
-              setRecurrencePattern(value as LessonRecurrencePattern)
-            }
+            onValueChange={(value) => {
+              const next = value as LessonRecurrencePattern
+              recurrenceUserEditedRef.current = true
+              setRecurrencePattern(next)
+              setRecurrenceEndDate(defaultRecurrenceEndDate(date, next))
+            }}
           >
             <SelectTrigger
               className={
@@ -1191,20 +1265,28 @@ export function LessonCreateDialog({
 
         {recurrencePattern !== 'none' ? (
           <div className="space-y-1">
-            <Label
-              htmlFor="recurrence-end-date"
-              className={isCompactForm ? POPUP_FIELD_LABEL : undefined}
-            >
-              반복 종료
-            </Label>
-            <KoreanDatePicker
-              id="recurrence-end-date"
-              value={recurrenceEndDate}
-              onChange={setRecurrenceEndDate}
-              placeholder="종료 날짜"
-              compact={isCompactForm}
-              className={isCompactForm ? POPUP_INPUT_VALUE : undefined}
-            />
+            {isOpenEndedRecurrencePattern(recurrencePattern) ? (
+              <p className="text-[11px] text-muted-foreground">
+                삭제할 때까지 같은 시간·강사로 계속 반복됩니다.
+              </p>
+            ) : (
+              <>
+                <Label
+                  htmlFor="recurrence-end-date"
+                  className={isCompactForm ? POPUP_FIELD_LABEL : undefined}
+                >
+                  반복 종료
+                </Label>
+                <KoreanDatePicker
+                  id="recurrence-end-date"
+                  value={recurrenceEndDate}
+                  onChange={setRecurrenceEndDate}
+                  placeholder="종료 날짜"
+                  compact={isCompactForm}
+                  className={isCompactForm ? POPUP_INPUT_VALUE : undefined}
+                />
+              </>
+            )}
             {recurrencePreview ? (
               <p className="text-[11px] font-medium text-primary">
                 {recurrencePreview}
@@ -1327,7 +1409,9 @@ export function LessonCreateDialog({
             <AlertDialogTitle>수업 수정 범위</AlertDialogTitle>
             <AlertDialogDescription>
               <span className="font-medium text-foreground">{editLabel}</span>{' '}
-              반복 일정입니다. 어떻게 수정할까요? 이전 날짜는 변경되지 않습니다.
+              {recurrencePattern === 'none'
+                ? '반복 일정입니다. 반복을 해제할 범위를 선택하세요.'
+                : '반복 일정입니다. 어떻게 수정할까요? 이전 날짜는 변경되지 않습니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
@@ -1341,18 +1425,34 @@ export function LessonCreateDialog({
                 void executeEditSave('single', pendingEditUpdatesRef.current)
               }}
             >
-              이것만 수정
+              {recurrencePattern === 'none' ? '이 날만 단일 수업으로' : '이것만 수정'}
             </Button>
+            {recurrencePattern !== 'none' ? (
+              <Button
+                type="button"
+                className="w-full"
+                disabled={isLoading || !pendingEditUpdatesRef.current}
+                onClick={() => {
+                  if (!pendingEditUpdatesRef.current) return
+                  void executeEditSave('all', pendingEditUpdatesRef.current)
+                }}
+              >
+                전체 수정
+              </Button>
+            ) : null}
             <Button
               type="button"
               className="w-full"
               disabled={isLoading || !pendingEditUpdatesRef.current}
               onClick={() => {
                 if (!pendingEditUpdatesRef.current) return
-                void executeEditSave('future', pendingEditUpdatesRef.current)
+                void executeEditSave(
+                  recurrencePattern === 'none' ? 'all' : 'future',
+                  pendingEditUpdatesRef.current,
+                )
               }}
             >
-              이후 모두 수정
+              {recurrencePattern === 'none' ? '전체 반복 해제' : '이후 모두 수정'}
             </Button>
             <AlertDialogCancel disabled={isLoading} className="w-full">
               취소
@@ -1383,6 +1483,9 @@ export function LessonCreateDialog({
             <p className="mt-2 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">{editLabel}</span>{' '}
               반복 일정입니다. 어떻게 삭제할까요?
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              전체·이후 삭제는 이 회원의 같은 요일·같은 시작 시간 일정만 대상입니다.
             </p>
             <div className="mt-4 flex flex-col gap-2">
               <Button

@@ -155,6 +155,7 @@ async function paginateGoogleCalendarEvents(
     timeMax?: string
     updatedMin?: string
     orderBy?: 'startTime' | 'updated'
+    singleEvents?: boolean
   },
 ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
   const events: GoogleCalendarEvent[] = []
@@ -195,20 +196,32 @@ async function fetchEventsForSync(
       ? getGoogleSyncTimeBounds()
       : getGoogleRecentSyncWindow()
 
-  const [windowResult, recentUpdates] = await Promise.all([
+  const [windowResult, recentUpdates, masterResult] = await Promise.all([
     paginateGoogleCalendarEvents(accessToken, calendarId, {
       timeMin: bounds.timeMin,
       timeMax: bounds.timeMax,
       orderBy: 'startTime',
+      singleEvents: true,
     }),
     paginateGoogleCalendarEvents(accessToken, calendarId, {
       updatedMin: getGoogleUpdatedSince(7),
       orderBy: 'updated',
+      singleEvents: true,
+    }),
+    paginateGoogleCalendarEvents(accessToken, calendarId, {
+      timeMin: bounds.timeMin,
+      timeMax: bounds.timeMax,
+      orderBy: 'startTime',
+      singleEvents: false,
     }),
   ])
 
   return {
-    events: mergeGoogleEventsById(windowResult.events, recentUpdates.events),
+    events: mergeGoogleEventsById(
+      masterResult.events,
+      windowResult.events,
+      recentUpdates.events,
+    ),
     nextSyncToken: windowResult.nextSyncToken ?? recentUpdates.nextSyncToken,
   }
 }
@@ -316,6 +329,7 @@ export async function syncGoogleCalendarLessons(options?: {
           events,
           memberMap,
           existingMap,
+          calendar.calendarId,
         )
 
         aggregated.created += result.created

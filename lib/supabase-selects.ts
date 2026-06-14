@@ -53,7 +53,14 @@ const LESSON_CORE_SELECT = `
 
 const LESSON_RECURRENCE_SELECT = `
   recurrence_group_id,
-  recurrence_pattern
+  recurrence_pattern,
+  event_type,
+  recurrence,
+  recurring_master_id,
+  google_event_id,
+  google_recurring_event_id,
+  original_start_time,
+  event_status
 `
 
 export const ATTENDANCE_LESSON_SELECT = `

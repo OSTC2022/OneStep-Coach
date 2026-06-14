@@ -2,6 +2,7 @@ import {
   type LessonRecurrencePattern,
   parseLessonRecurrencePattern,
 } from '@/lib/lesson-recurrence'
+import { getDay, parseISO } from 'date-fns'
 
 export const LESSON_RECURRENCE_NOTE_PREFIX = '__cal_recurrence__:'
 
@@ -131,6 +132,55 @@ export function filterLessonsBySeriesDeleteKey<
   )
 }
 
+function getLessonWeekday(lessonDate: string) {
+  return getDay(parseISO(lessonDate))
+}
+
+/** 반복 슬롯 매칭 — 강사 변경과 무관하게 같은 회원/제목·요일·시작 시각 */
+export function buildRecurringSlotMatchKey(lesson: {
+  member_id?: string | null
+  title?: string | null
+  start_time?: string | null
+}) {
+  if (lesson.member_id) {
+    return `m:${lesson.member_id}|${(lesson.start_time ?? '').slice(0, 5)}`
+  }
+  return `t:${lesson.title?.trim() ?? ''}|${(lesson.start_time ?? '').slice(0, 5)}`
+}
+
+export function filterLessonsByRecurringSlotMatch<
+  T extends {
+    lesson_date: string
+    member_id?: string | null
+    title?: string | null
+    start_time?: string | null
+  },
+>(target: T, candidates: T[]): T[] {
+  const weekday = getLessonWeekday(target.lesson_date)
+  const key = buildRecurringSlotMatchKey(target)
+  return candidates.filter(
+    (lesson) =>
+      buildRecurringSlotMatchKey(lesson) === key &&
+      getLessonWeekday(lesson.lesson_date) === weekday,
+  )
+}
+
+/** 반복 삭제·수정 범위 — 같은 회원(또는 제목)·같은 요일·같은 시작 시각 */
+export function filterLessonsByRecurringSlot<
+  T extends {
+    lesson_date: string
+    member_id?: string | null
+    instructor_id?: string | null
+    start_time?: string | null
+    title?: string | null
+  },
+>(target: T, candidates: T[]): T[] {
+  const weekday = getLessonWeekday(target.lesson_date)
+  return filterLessonsBySeriesDeleteKey(target, candidates).filter(
+    (lesson) => getLessonWeekday(lesson.lesson_date) === weekday,
+  )
+}
+
 type LessonSeriesRow = {
   id: string
   lesson_date: string
@@ -159,7 +209,7 @@ export function inferRecurrenceFromSlotLessons(
   siblingIds: string[]
   endDate: string | null
 } | null {
-  const siblings = filterLessonsBySeriesDeleteKey(target, candidates).sort((a, b) =>
+  const siblings = filterLessonsByRecurringSlotMatch(target, candidates).sort((a, b) =>
     a.lesson_date.localeCompare(b.lesson_date),
   )
   const slotKey = buildLessonSlotKey(target)

@@ -124,6 +124,15 @@ export interface Lesson {
   google_sync_status?: string | null
   recurrence_group_id?: string | null
   recurrence_pattern?: string | null
+  event_type?: 'single' | 'recurring_master' | 'exception' | 'materialized' | null
+  recurrence?: string[] | null
+  recurring_master_id?: string | null
+  google_calendar_id?: string | null
+  google_ical_uid?: string | null
+  google_recurring_event_id?: string | null
+  original_start_time?: string | null
+  event_timezone?: string | null
+  event_status?: 'confirmed' | 'cancelled' | null
   created_at: string
   created_by: string | null
   // Joined fields
@@ -177,6 +186,8 @@ export interface LessonFormData {
   attendance_status?: AttendanceStatus
   recurrence_group_id?: string | null
   recurrence_pattern?: string | null
+  event_type?: 'single' | 'recurring_master' | 'exception' | 'materialized' | null
+  recurrence?: string[] | null
 }
 
 export interface CenterSettings {

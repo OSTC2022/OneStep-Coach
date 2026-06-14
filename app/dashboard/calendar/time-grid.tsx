@@ -15,6 +15,7 @@ import {
   hexToRgba,
   type InstructorColorSource,
 } from '@/lib/instructor-colors'
+import { getRecurrenceDisplayLabel } from '@/lib/calendar-recurrence/types'
 import { getDateColorClass, isKoreanHoliday } from '@/lib/korean-holidays'
 import {
   CALENDAR_END_HOUR,
@@ -184,6 +185,48 @@ function getClickCreateSlotFromY(y: number, hourHeight: number) {
     startMin,
     endMin: Math.min(startMin + DEFAULT_CREATE_DURATION_MIN, CALENDAR_END_MINUTES),
   }
+}
+
+function isCalendarBackgroundTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.closest('[data-lesson-event]')) return false
+  if (target.closest('[data-pending-create]')) return false
+  if (target.closest('[data-move-preview]')) return false
+  if (target.closest('[data-resize-handle]')) return false
+  if (target.closest('[data-pending-resize]')) return false
+  return true
+}
+
+function findScrollableAncestor(
+  start: HTMLElement | null,
+  exclude?: HTMLElement,
+): HTMLElement | null {
+  let node = start?.parentElement ?? null
+  while (node) {
+    if (node === exclude) {
+      node = node.parentElement
+      continue
+    }
+    const { overflowY } = getComputedStyle(node)
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll') &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
+function applyVerticalScroll(el: HTMLElement, deltaY: number): boolean {
+  if (deltaY === 0) return false
+  const maxScroll = el.scrollHeight - el.clientHeight
+  if (maxScroll <= 0) return false
+  const next = Math.min(maxScroll, Math.max(0, el.scrollTop + deltaY))
+  if (next === el.scrollTop) return false
+  el.scrollTop = next
+  return true
 }
 
 const SLOT_INSET_PX = 4
@@ -446,6 +489,9 @@ export function TimeGrid({
   const minLessonHeight = Math.max(36, hourHeight * 0.45)
   const dragRafRef = useRef<number | null>(null)
   const columnRefs = useRef<(HTMLDivElement | null)[]>([])
+  const dragCaptureRef = useRef<{ pointerId: number } | null>(null)
+  const dragPointerIdRef = useRef<number | null>(null)
+  const dragScrollTopRef = useRef(0)
   const lessonDragStartedRef = useRef(false)
   const altSelectClickRef = useRef(false)
   const pendingAdjustStartedRef = useRef(false)
@@ -500,17 +546,36 @@ export function TimeGrid({
 
     function handleWheel(e: WheelEvent) {
       if (fitHourHeight) return
-      if (!e.ctrlKey && !e.metaKey) return
-      e.preventDefault()
-      setHourHeight((prev) => {
-        const delta = e.deltaY < 0 ? HOUR_HEIGHT_ZOOM_STEP : -HOUR_HEIGHT_ZOOM_STEP
-        return Math.max(MIN_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, prev + delta))
-      })
+
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        setHourHeight((prev) => {
+          const delta = e.deltaY < 0 ? HOUR_HEIGHT_ZOOM_STEP : -HOUR_HEIGHT_ZOOM_STEP
+          return Math.max(MIN_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, prev + delta))
+        })
+        return
+      }
+
+      if (collapsed) return
+      if (!isCalendarBackgroundTarget(e.target)) return
+
+      const deltaY = e.deltaY
+      if (deltaY === 0) return
+
+      if (applyVerticalScroll(el, deltaY)) {
+        e.preventDefault()
+        return
+      }
+
+      const pageScroll = findScrollableAncestor(el.parentElement, el)
+      if (pageScroll && applyVerticalScroll(pageScroll, deltaY)) {
+        e.preventDefault()
+      }
     }
 
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
-  }, [fitHourHeight])
+  }, [fitHourHeight, collapsed])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -942,8 +1007,10 @@ export function TimeGrid({
     if (!e.altKey) onClearLessonSelection?.()
     const rect = e.currentTarget.getBoundingClientRect()
     const y = e.clientY - rect.top
+    dragPointerIdRef.current = e.pointerId
+    dragCaptureRef.current = null
+    dragScrollTopRef.current = scrollRef.current?.scrollTop ?? 0
     setDrag({ col, startY: y, currentY: y })
-    e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   function handlePointerMove(
@@ -951,8 +1018,29 @@ export function TimeGrid({
     col: number,
   ) {
     if (!drag || drag.col !== col) return
+    if (dragPointerIdRef.current !== e.pointerId) return
+
     const rect = e.currentTarget.getBoundingClientRect()
     const currentY = e.clientY - rect.top
+    const dist = Math.abs(currentY - drag.startY)
+    const scrollDelta = Math.abs(
+      (scrollRef.current?.scrollTop ?? 0) - dragScrollTopRef.current,
+    )
+
+    if (!dragCaptureRef.current) {
+      if (scrollDelta > 0) {
+        setDrag(null)
+        dragPointerIdRef.current = null
+        return
+      }
+      if (dist >= CREATE_DRAG_THRESHOLD) {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        dragCaptureRef.current = { pointerId: e.pointerId }
+      } else {
+        return
+      }
+    }
+
     if (dragRafRef.current != null) return
     dragRafRef.current = window.requestAnimationFrame(() => {
       dragRafRef.current = null
@@ -967,10 +1055,16 @@ export function TimeGrid({
     col: number,
   ) {
     if (!drag || drag.col !== col) return
+    if (dragPointerIdRef.current !== e.pointerId) return
 
     const dragDistance = Math.abs(drag.currentY - drag.startY)
+    const wasCaptured = dragCaptureRef.current?.pointerId === e.pointerId
+    if (wasCaptured) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+    dragCaptureRef.current = null
+    dragPointerIdRef.current = null
     setDrag(null)
-    e.currentTarget.releasePointerCapture(e.pointerId)
 
     if (dragDistance < CREATE_DRAG_THRESHOLD) {
       const slot = getClickCreateSlotFromY(drag.startY, hourHeight)
@@ -1207,7 +1301,7 @@ export function TimeGrid({
           'relative w-full min-w-0',
           collapsed
             ? 'shrink-0 overflow-hidden'
-            : 'min-h-0 flex-1 overflow-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]',
+            : 'min-h-0 flex-1 overflow-auto overscroll-y-auto touch-pan-x touch-pan-y [-webkit-overflow-scrolling:touch]',
         )}
       >
         <div
@@ -1339,7 +1433,7 @@ export function TimeGrid({
                 }}
                 className={cn(
                   dayColumnClass,
-                  'relative border-r border-border last:border-r-0',
+                  'relative touch-pan-y border-r border-border last:border-r-0',
                   isToday && 'bg-primary/[0.02]',
                 )}
                 style={{ height: gridHeight, ...columnGridStyle }}
@@ -1440,6 +1534,7 @@ export function TimeGrid({
                       SLOT_GAP_PX,
                     )
                     const memberLabel = getLessonCalendarLabel(lesson)
+                    const recurrenceLabel = getRecurrenceDisplayLabel(lesson.recurrence_pattern)
                     const timeLabel = `${lessonStart}${lessonEnd ? ` – ${lessonEnd}` : ''}`
                     const blockStyle = getLessonCalendarBlockStyle(lesson, instructors)
                     const isHighlighted = highlightedSet.has(lesson.id)
@@ -1492,6 +1587,11 @@ export function TimeGrid({
                           e.stopPropagation()
                         }}
                       >
+                        {recurrenceLabel ? (
+                          <span className="pointer-events-none absolute left-0.5 top-0 z-20 rounded bg-black/60 px-1 py-px text-[8px] font-bold leading-none text-primary">
+                            {recurrenceLabel}
+                          </span>
+                        ) : null}
                         {onLessonMove && (
                           <div
                             data-resize-handle
@@ -1499,7 +1599,12 @@ export function TimeGrid({
                             onPointerDown={(e) => beginResize(e, lesson, col, 'start')}
                           />
                         )}
-                        <div className="flex min-h-0 flex-1 items-center justify-center">
+                        <div
+                          className={cn(
+                            'relative flex min-h-0 flex-1 items-center justify-center',
+                            recurrenceLabel && 'pt-2.5',
+                          )}
+                        >
                           <MemoLessonBlockContent
                             lesson={lesson}
                             start={lessonStart}

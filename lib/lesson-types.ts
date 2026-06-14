@@ -4,6 +4,7 @@ export const LESSON_TYPE_OPTIONS = [
   '그룹레슨',
   '체험레슨',
   '러닝레슨',
+  '육상부',
 ] as const
 
 export type LessonTypeOption = (typeof LESSON_TYPE_OPTIONS)[number]
@@ -24,6 +25,12 @@ export function isRunningLessonType(
 ): boolean {
   const normalized = normalizeLessonType(lessonType)
   return normalized === '러닝레슨'
+}
+
+export function isAthleticsClubLessonType(
+  lessonType: string | null | undefined,
+): boolean {
+  return normalizeLessonType(lessonType) === '육상부'
 }
 
 /** 신규 저장 시 러닝레슨으로 통일 */

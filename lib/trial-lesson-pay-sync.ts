@@ -12,7 +12,11 @@ import {
   getRunningLessonPayAmount,
   isRunningLessonPayAmount,
 } from '@/lib/running-lesson-pay'
-import { isRunningLessonType } from '@/lib/lesson-types'
+import { isRunningLessonType, isAthleticsClubLessonType } from '@/lib/lesson-types'
+import {
+  getAthleticsClubLessonPayAmount,
+  isAthleticsClubPayAmount,
+} from '@/lib/athletics-club-lesson-pay'
 
 type TrialLessonPaySyncRow = {
   id: string
@@ -38,11 +42,18 @@ function getFixedLessonPayAmount(lesson: TrialLessonPaySyncRow): number | null {
   if (isRunningLessonType(lesson.lesson_type)) {
     return getRunningLessonPayAmount()
   }
+  if (isAthleticsClubLessonType(lesson.lesson_type)) {
+    return getAthleticsClubLessonPayAmount()
+  }
   return null
 }
 
 function isFixedLessonPayAmount(amount: number): boolean {
-  return isTrialLessonPayAmount(amount) || isRunningLessonPayAmount(amount)
+  return (
+    isTrialLessonPayAmount(amount) ||
+    isRunningLessonPayAmount(amount) ||
+    isAthleticsClubPayAmount(amount)
+  )
 }
 
 /** 체험·러닝레슨 등 고정 강사료 override 동기화 */

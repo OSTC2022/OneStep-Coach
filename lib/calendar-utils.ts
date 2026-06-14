@@ -54,6 +54,38 @@ export function getLessonCalendarLabel(
   return '일정'
 }
 
+export function enrichLessonWithMemberCatalog<
+  T extends Pick<Lesson, 'member_id' | 'member'>,
+>(
+  lesson: T,
+  members: Array<
+    Pick<import('@/lib/types').Member, 'id' | 'name'> &
+      Partial<Pick<import('@/lib/types').Member, 'age' | 'birth_date' | 'sport'>>
+  >,
+): T {
+  if (lesson.member || !lesson.member_id) return lesson
+  const member = members.find((item) => item.id === lesson.member_id)
+  if (!member) return lesson
+  return { ...lesson, member }
+}
+
+/** 캘린더에 표시할 가치가 있는 수업만 (취소·「일정」 placeholder 제외) */
+export function isLessonCalendarVisible(
+  lesson: Pick<Lesson, 'attendance_status' | 'event_status'>,
+): boolean {
+  if (lesson.attendance_status === 'cancelled') return false
+  if (lesson.event_status === 'cancelled') return false
+  return true
+}
+
+/** 캘린더에 표시할 가치가 있는 수업만 (「일정」 placeholder 제외) */
+export function filterDisplayableCalendarLessons<T extends Lesson>(lessons: T[]): T[] {
+  return lessons.filter(
+    (lesson) =>
+      isLessonCalendarVisible(lesson) && getLessonCalendarLabel(lesson) !== '일정',
+  )
+}
+
 export function getDefaultLessonCalendarLabel(
   member: Pick<import('@/lib/types').Member, 'name' | 'age' | 'birth_date' | 'sport'> | null | undefined,
 ): string {

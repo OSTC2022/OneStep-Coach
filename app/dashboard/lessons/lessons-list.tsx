@@ -324,6 +324,8 @@ export function LessonsList({
                     <SelectItem value="개인레슨">개인레슨</SelectItem>
                     <SelectItem value="그룹레슨">그룹레슨</SelectItem>
                     <SelectItem value="체험레슨">체험레슨</SelectItem>
+                    <SelectItem value="러닝레슨">러닝레슨</SelectItem>
+                    <SelectItem value="육상부">육상부</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

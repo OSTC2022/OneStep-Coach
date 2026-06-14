@@ -15,18 +15,34 @@ import {
 } from '@/lib/calendar-utils'
 import {
   generateRecurrenceDates,
+  getRecurrenceMaterializeEndDate,
+  isOpenEndedRecurrencePattern,
   MAX_RECURRING_LESSONS,
   parseLessonRecurrencePattern,
+  resolveRecurrenceEndDate,
   type LessonRecurrencePattern,
 } from '@/lib/lesson-recurrence'
+import { fetchExpandedCalendarLessons } from '@/lib/actions/calendar-lessons-range'
+import {
+  deleteRecurringMasterSeries,
+  resolveRecurringDeleteTarget,
+} from '@/lib/actions/calendar-recurrence-series'
+import { updateRecurringMasterSeries } from '@/lib/actions/calendar-recurrence-update'
+import { removeLessonRecurrence as removeLessonRecurrenceInternal } from '@/lib/actions/calendar-recurrence-remove'
+import {
+  convertLessonToRecurringSeries as convertLessonToRecurringSeriesInternal,
+} from '@/lib/actions/calendar-recurrence-convert'
+import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
+import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import {
   findExistingLessonsByDates,
+  findMemberSlotConflict,
   type LessonSlotIdentity,
 } from '@/lib/lesson-slot-utils'
 import {
   encodeRecurrenceInSpecialNote,
   enrichLessonRecurrenceFields,
-  filterLessonsBySeriesDeleteKey,
+  filterLessonsByRecurringSlotMatch,
   inferRecurrenceFromSlotLessons,
   resolveLessonRecurrence,
   stripRecurrenceFromSpecialNote,
@@ -215,21 +231,42 @@ async function fetchLessonSeriesCandidates(
   supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
   lesson: LessonSeriesRow,
 ) {
-  if (!lesson.member_id) return []
-
-  let query = await supabase
-    .from('lessons')
-    .select(LESSON_SERIES_SELECT)
-    .eq('member_id', lesson.member_id)
-
-  if (query.error && isMissingRecurrenceColumn(query.error)) {
-    query = await supabase
+  if (lesson.member_id) {
+    let query = await supabase
       .from('lessons')
-      .select(LESSON_SERIES_SELECT_LEGACY)
+      .select(LESSON_SERIES_SELECT)
       .eq('member_id', lesson.member_id)
+
+    if (query.error && isMissingRecurrenceColumn(query.error)) {
+      query = await supabase
+        .from('lessons')
+        .select(LESSON_SERIES_SELECT_LEGACY)
+        .eq('member_id', lesson.member_id)
+    }
+
+    return (query.data as LessonSeriesRow[] | null) ?? []
   }
 
-  return (query.data as LessonSeriesRow[] | null) ?? []
+  const title = lesson.title?.trim()
+  if (title) {
+    let query = await supabase
+      .from('lessons')
+      .select(LESSON_SERIES_SELECT)
+      .eq('title', title)
+      .is('member_id', null)
+
+    if (query.error && isMissingRecurrenceColumn(query.error)) {
+      query = await supabase
+        .from('lessons')
+        .select(LESSON_SERIES_SELECT_LEGACY)
+        .eq('title', title)
+        .is('member_id', null)
+    }
+
+    return (query.data as LessonSeriesRow[] | null) ?? []
+  }
+
+  return []
 }
 
 type SeriesSiblingScope = Exclude<LessonSeriesScope, 'single'>
@@ -241,7 +278,7 @@ async function inferSeriesSiblingIds(
   scope: SeriesSiblingScope,
 ): Promise<string[] | null> {
   const candidates = await fetchLessonSeriesCandidates(supabase, lesson)
-  let matching = filterLessonsBySeriesDeleteKey(lesson, candidates)
+  let matching = filterLessonsByRecurringSlotMatch(lesson, candidates)
   if (scope === 'future') {
     matching = matching.filter((row) => row.lesson_date >= anchorDate)
   }
@@ -259,47 +296,50 @@ async function fetchSeriesSiblingIds(
   if (scope === 'single') return [lesson.id]
 
   const seriesScope: SeriesSiblingScope = scope === 'all' ? 'all' : 'future'
+
+  function pickMatchingSiblingIds(rows: LessonSeriesRow[]) {
+    let matching = filterLessonsByRecurringSlotMatch(lesson, rows)
+    if (seriesScope === 'future') {
+      matching = matching.filter((row) => row.lesson_date >= anchorDate)
+    }
+    return matching.map((item) => item.id)
+  }
+
   const { groupId } = resolveLessonRecurrence(lesson)
 
   if (groupId && !groupId.startsWith('slot:')) {
     let groupQuery = supabase
       .from('lessons')
-      .select('id, lesson_date')
+      .select(LESSON_SERIES_SELECT)
       .eq('recurrence_group_id', groupId)
-    if (seriesScope === 'future') {
-      groupQuery = groupQuery.gte('lesson_date', anchorDate)
-    }
 
     const { data: groupSiblings, error: groupError } = await groupQuery
 
     if (!groupError && groupSiblings?.length) {
-      return groupSiblings.map((item) => item.id)
+      const ids = pickMatchingSiblingIds(groupSiblings as LessonSeriesRow[])
+      if (ids.length > 0) return ids
     }
 
     let legacyQuery = supabase
       .from('lessons')
-      .select('id, lesson_date')
+      .select(LESSON_SERIES_SELECT_LEGACY)
       .ilike('special_note', `%${groupId}%`)
-    if (seriesScope === 'future') {
-      legacyQuery = legacyQuery.gte('lesson_date', anchorDate)
-    }
 
     const { data: legacySiblings, error: legacyError } = await legacyQuery
 
     if (!legacyError && legacySiblings?.length) {
-      return legacySiblings.map((item) => item.id)
+      const ids = pickMatchingSiblingIds(legacySiblings as LessonSeriesRow[])
+      if (ids.length > 0) return ids
     }
   }
 
-  if (lesson.member_id) {
-    const inferredIds = await inferSeriesSiblingIds(
-      supabase,
-      lesson,
-      anchorDate,
-      seriesScope,
-    )
-    if (inferredIds?.length) return inferredIds
-  }
+  const inferredIds = await inferSeriesSiblingIds(
+    supabase,
+    lesson,
+    anchorDate,
+    seriesScope,
+  )
+  if (inferredIds?.length) return inferredIds
 
   return [lesson.id]
 }
@@ -517,6 +557,28 @@ async function syncTrialPayForLesson(
   )
 }
 
+const MEMBER_SLOT_CONFLICT_MESSAGE = '이미 같은 시간에 배정된 회원입니다.'
+
+async function assertMemberSlotAvailable(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+  params: {
+    lessonDate: string
+    startTime?: string | null
+    memberId: string | null | undefined
+    excludeLessonIds?: string[]
+  },
+): Promise<{ error?: string }> {
+  if (!params.memberId) return {}
+  const conflict = await findMemberSlotConflict(supabase, {
+    lessonDate: params.lessonDate,
+    startTime: params.startTime,
+    memberId: params.memberId,
+    excludeLessonIds: params.excludeLessonIds,
+  })
+  if (conflict) return { error: MEMBER_SLOT_CONFLICT_MESSAGE }
+  return {}
+}
+
 export async function getLessons(options?: {
   memberId?: string
   instructorId?: string
@@ -645,14 +707,24 @@ export async function getLessonsForMonth(year: number, month: number): Promise<L
   const dateFrom = `${year}-${String(month).padStart(2, '0')}-01`
   const lastDay = new Date(year, month, 0).getDate()
   const dateTo = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-  return getLessons({ dateFrom, dateTo, limit: CALENDAR_MONTH_LESSON_LIMIT })
+  const { lessons } = await fetchExpandedCalendarLessons(
+    dateFrom,
+    dateTo,
+    CALENDAR_MONTH_LESSON_LIMIT,
+  )
+  return lessons
 }
 
 export async function getLessonsForRange(
   dateFrom: string,
   dateTo: string,
 ): Promise<Lesson[]> {
-  return getLessons({ dateFrom, dateTo, limit: CALENDAR_RANGE_LESSON_LIMIT })
+  const { lessons } = await fetchExpandedCalendarLessons(
+    dateFrom,
+    dateTo,
+    CALENDAR_RANGE_LESSON_LIMIT,
+  )
+  return lessons
 }
 
 export async function getTodayLessons(): Promise<Lesson[]> {
@@ -673,6 +745,13 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   if (!memberId && !title) {
     return { error: '이름을 입력해주세요.' }
   }
+
+  const slotConflict = await assertMemberSlotAvailable(supabase, {
+    lessonDate: formData.lesson_date,
+    startTime: formData.start_time,
+    memberId,
+  })
+  if (slotConflict.error) return { error: slotConflict.error }
 
   let lessonNo: number | null = null
   if (memberId) {
@@ -748,6 +827,125 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   return { data: lesson, warning }
 }
 
+async function supportsRecurringMasterStorage(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+) {
+  const probe = await supabase.from('lessons').select('event_type').limit(1)
+  if (!probe.error) return true
+  const message = probe.error.message?.toLowerCase() ?? ''
+  return !message.includes('event_type')
+}
+
+async function createRecurringMasterLesson(
+  formData: LessonFormData,
+  options: {
+    pattern: LessonRecurrencePattern
+    recurrenceGroupId?: string
+    endDate?: string
+    silent?: boolean
+  },
+): Promise<RecurringLessonMutationResult> {
+  const supabase = await lessonWriteClient()
+  const user = await getCurrentUser()
+  const enriched = await enrichLessonIdentity(supabase, formData)
+  const memberId = enriched.memberId
+  const title = enriched.title
+  const sessionPackageId = enriched.sessionPackageId
+
+  if (!memberId && !title) {
+    return { error: '이름을 입력해주세요.' }
+  }
+
+  const slotConflict = await assertMemberSlotAvailable(supabase, {
+    lessonDate: formData.lesson_date,
+    startTime: formData.start_time,
+    memberId,
+  })
+  if (slotConflict.error) return { error: slotConflict.error }
+
+  const recurrenceGroupId = options.recurrenceGroupId ?? crypto.randomUUID()
+  let recurrenceLines = buildAppRecurringMasterPayload(
+    formData,
+    options.pattern,
+    recurrenceGroupId,
+  ).recurrence as string[]
+
+  if (options.endDate && !isOpenEndedRecurrencePattern(options.pattern)) {
+    const { truncateRecurrenceUntil } = await import(
+      '@/lib/calendar-recurrence/expand-lessons'
+    )
+    recurrenceLines = truncateRecurrenceUntil(recurrenceLines, options.endDate)
+  }
+
+  const payload = {
+    ...buildAppRecurringMasterPayload(formData, options.pattern, recurrenceGroupId),
+    recurrence: recurrenceLines,
+    member_id: memberId,
+    title,
+    lesson_type: toStoredLessonType(formData.lesson_type),
+    session_package_id: sessionPackageId ?? formData.session_package_id,
+    session_deducted: false,
+    lesson_no: null as number | null,
+    created_by: user?.id ?? null,
+  }
+
+  if (memberId) {
+    const { data: lastLesson } = await supabase
+      .from('lessons')
+      .select('lesson_no')
+      .eq('member_id', memberId)
+      .order('lesson_no', { ascending: false })
+      .limit(1)
+      .single()
+    payload.lesson_no = (lastLesson?.lesson_no || 0) + 1
+  }
+
+  let { data, error } = await supabase
+    .from('lessons')
+    .insert(payload)
+    .select(LESSON_MUTATION_SELECT)
+    .single()
+
+  if (error?.message.includes('event_type') || error?.message.includes('recurrence_pattern')) {
+    const legacyInsert = await supabase
+      .from('lessons')
+      .insert(payload)
+      .select(LESSON_MUTATION_SELECT_LEGACY)
+      .single()
+    data = legacyInsert.data
+    error = legacyInsert.error
+  }
+
+  if (error?.message.includes('event_type')) {
+    return {
+      error:
+        '반복 일정 저장을 위해 supabase/add-calendar-recurrence-v2.sql 마이그레이션을 실행해 주세요.',
+    }
+  }
+
+  if (error) {
+    return { error: mapLessonError(error.message) }
+  }
+
+  const lesson = normalizeLessonRecord(data as Lesson)
+  await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
+
+  if (!options.silent) {
+    revalidatePath('/dashboard/lessons')
+    revalidatePath('/dashboard/attendance')
+    revalidatePath('/dashboard/calendar')
+    revalidatePath('/dashboard/lesson-status')
+    revalidatePath('/dashboard/instructors')
+    revalidatePath('/dashboard/reports')
+  }
+
+  return {
+    data: [lesson],
+    createdCount: 0,
+    linkedCount: 0,
+  }
+}
+
 export async function createRecurringLessons(
   formData: LessonFormData,
   options: {
@@ -756,6 +954,7 @@ export async function createRecurringLessons(
     dates?: string[]
     recurrenceGroupId?: string
     recurrencePattern?: LessonRecurrencePattern
+    silent?: boolean
   },
 ): Promise<RecurringLessonMutationResult> {
   await requireRole(['admin', 'instructor'])
@@ -771,15 +970,42 @@ export async function createRecurringLessons(
     return { error: '이름을 입력해주세요.' }
   }
 
+  const pattern = options.recurrencePattern ?? options.pattern ?? null
+
+  if (pattern && pattern !== 'none' && !options.dates?.length) {
+    const hasV2 = await supportsRecurringMasterStorage(supabase)
+    if (hasV2) {
+      return createRecurringMasterLesson(formData, {
+        pattern,
+        recurrenceGroupId: options.recurrenceGroupId,
+        endDate: options.endDate,
+        silent: options.silent,
+      })
+    }
+  }
+
   const dates =
     options.dates ??
     (options.pattern && options.endDate
       ? generateRecurrenceDates(
           formData.lesson_date,
           options.pattern,
-          options.endDate,
+          resolveRecurrenceEndDate(
+            formData.lesson_date,
+            options.pattern,
+            options.endDate,
+          ),
         )
-      : [])
+      : options.pattern && isOpenEndedRecurrencePattern(options.pattern)
+        ? generateRecurrenceDates(
+            formData.lesson_date,
+            options.pattern,
+            getRecurrenceMaterializeEndDate(
+              formData.lesson_date,
+              options.pattern,
+            ),
+          )
+        : [])
 
   if (dates.length === 0) {
     return { error: '반복 일정 날짜를 계산할 수 없습니다.' }
@@ -794,8 +1020,7 @@ export async function createRecurringLessons(
   let baseLessonNo = 0
 
   const recurrenceGroupId = options.recurrenceGroupId ?? crypto.randomUUID()
-  const recurrencePattern =
-    options.recurrencePattern ?? options.pattern ?? null
+  const recurrencePattern = pattern
 
   const slotIdentity: LessonSlotIdentity = {
     memberId,
@@ -957,12 +1182,14 @@ export async function createRecurringLessons(
     await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
   }
 
-  revalidatePath('/dashboard/lessons')
-  revalidatePath('/dashboard/attendance')
-  revalidatePath('/dashboard/calendar')
-  revalidatePath('/dashboard/lesson-status')
-  revalidatePath('/dashboard/instructors')
-  revalidatePath('/dashboard/reports')
+  if (!options.silent) {
+    revalidatePath('/dashboard/lessons')
+    revalidatePath('/dashboard/attendance')
+    revalidatePath('/dashboard/calendar')
+    revalidatePath('/dashboard/lesson-status')
+    revalidatePath('/dashboard/instructors')
+    revalidatePath('/dashboard/reports')
+  }
 
   return {
     data: savedLessons,
@@ -976,13 +1203,19 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   await requireRole(['admin', 'instructor'])
   const supabase = await lessonWriteClient()
 
+  const { data: existing } = await supabase
+    .from('lessons')
+    .select('id, lesson_date, start_time, member_id')
+    .eq('id', id)
+    .maybeSingle()
+
   const payload: Record<string, unknown> = { ...updates }
   let titleForFallback: string | null = null
 
   if ('member_id' in updates || 'title' in updates) {
     const enriched = await enrichLessonIdentity(supabase, {
       ...updates,
-      lesson_date: updates.lesson_date ?? '',
+      lesson_date: updates.lesson_date ?? existing?.lesson_date ?? '',
     })
     const memberId = enriched.memberId
     const title = enriched.title
@@ -1097,6 +1330,14 @@ export async function markAttendance(
 function buildLessonUpdatePayload(updates: Partial<LessonFormData>) {
   const payload: Record<string, unknown> = { ...updates }
 
+  if ('instructor_id' in updates) {
+    payload.instructor_id = updates.instructor_id?.trim() || null
+  }
+
+  if ('lesson_type' in updates) {
+    payload.lesson_type = toStoredLessonType(updates.lesson_type)
+  }
+
   if ('member_id' in updates || 'title' in updates) {
     const memberId = updates.member_id?.trim() || null
     const title = updates.title?.trim() || null
@@ -1121,17 +1362,20 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
   await requireRole(['admin', 'instructor'])
   const supabase = await createStaffDataClient()
 
+  const virtual = parseVirtualLessonId(lessonId)
+  const resolvedId = virtual?.masterId ?? lessonId
+
   let { data: lesson, error } = await supabase
     .from('lessons')
     .select(LESSON_SERIES_SELECT)
-    .eq('id', lessonId)
+    .eq('id', resolvedId)
     .maybeSingle()
 
   if (error && isMissingRecurrenceColumn(error)) {
     const legacy = await supabase
       .from('lessons')
       .select(LESSON_SERIES_SELECT_LEGACY)
-      .eq('id', lessonId)
+      .eq('id', resolvedId)
       .maybeSingle()
     lesson = legacy.data
     error = legacy.error
@@ -1152,6 +1396,17 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
           .eq('member_id', lesson.member_id)
         const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
         endDate = inferred?.endDate ?? null
+      } else {
+        const title = resolveLessonTitle(lesson)
+        if (title) {
+          const { data: candidates } = await supabase
+            .from('lessons')
+            .select(LESSON_SERIES_SELECT)
+            .eq('title', title)
+            .is('member_id', null)
+          const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
+          endDate = inferred?.endDate ?? null
+        }
       }
     } else {
       const { data: groupSiblings, error: groupError } = await supabase
@@ -1177,7 +1432,7 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
     return {
       pattern: resolved.pattern,
       groupId: resolved.groupId,
-      endDate,
+      endDate: isOpenEndedRecurrencePattern(resolved.pattern) ? null : endDate,
     }
   }
 
@@ -1197,6 +1452,46 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
     }
   }
 
+  const title = resolveLessonTitle(lesson)
+  if (title && !lesson.member_id) {
+    const { data: candidates } = await supabase
+      .from('lessons')
+      .select(LESSON_SERIES_SELECT)
+      .eq('title', title)
+      .is('member_id', null)
+
+    const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
+    if (inferred) {
+      return {
+        pattern: inferred.pattern,
+        groupId: inferred.groupId,
+        endDate: inferred.endDate,
+      }
+    }
+  }
+
+  const recurringTarget = await resolveRecurringDeleteTarget(lessonId, lesson.lesson_date)
+  if (recurringTarget) {
+    const { data: master } = await supabase
+      .from('lessons')
+      .select(LESSON_SERIES_SELECT)
+      .eq('id', recurringTarget.masterId)
+      .maybeSingle()
+
+    if (master) {
+      const masterResolved = resolveLessonRecurrence(master)
+      if (masterResolved.groupId && masterResolved.pattern !== 'none') {
+        return {
+          pattern: masterResolved.pattern,
+          groupId: masterResolved.groupId,
+          endDate: isOpenEndedRecurrencePattern(masterResolved.pattern)
+            ? null
+            : null,
+        }
+      }
+    }
+  }
+
   return {
     pattern: 'none',
     groupId: null,
@@ -1204,13 +1499,66 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
   }
 }
 
+export async function removeLessonRecurrence(
+  lessonId: string,
+  scope: LessonSeriesScope,
+  anchorDate: string,
+  updates: Partial<LessonFormData>,
+): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
+  await requireRole(['admin', 'instructor'])
+  const result = await removeLessonRecurrenceInternal(lessonId, scope, anchorDate, updates)
+  return result
+}
+
+export async function convertLessonToRecurringSeries(
+  lessonId: string,
+  scope: LessonSeriesScope,
+  anchorDate: string,
+  updates: Partial<LessonFormData>,
+  pattern: LessonRecurrencePattern,
+  endDate?: string | null,
+): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
+  await requireRole(['admin', 'instructor'])
+  return convertLessonToRecurringSeriesInternal(
+    lessonId,
+    scope,
+    anchorDate,
+    updates,
+    pattern,
+    endDate,
+  )
+}
+
 export async function updateLessonSeries(
   lessonId: string,
   updates: Partial<LessonFormData>,
   scope: LessonSeriesScope,
   anchorDate: string,
-): Promise<{ data?: Lesson[]; error?: string; warning?: string }> {
+): Promise<{ data?: Lesson[]; error?: string; warning?: string; deletedIds?: string[] }> {
   const user = await requireRole(['admin', 'instructor'])
+
+  const virtual = parseVirtualLessonId(lessonId)
+  if (virtual) {
+    const result = await updateRecurringMasterSeries(
+      virtual.masterId,
+      scope,
+      virtual.occurrenceDate,
+      updates,
+    )
+    return result
+  }
+
+  const recurringTarget = await resolveRecurringDeleteTarget(lessonId, anchorDate)
+  if (recurringTarget) {
+    const result = await updateRecurringMasterSeries(
+      recurringTarget.masterId,
+      scope,
+      recurringTarget.occurrenceDate,
+      updates,
+    )
+    return result
+  }
+
   const supabase = await lessonWriteClient()
 
   const { data: lesson, error: lessonError } = await fetchLessonSeriesRow(
@@ -1224,7 +1572,7 @@ export async function updateLessonSeries(
 
   const { groupId } = resolveLessonRecurrence(lesson)
   const inferredFutureIds =
-    !groupId && scope !== 'single' && lesson.member_id
+    !groupId && scope !== 'single'
       ? await inferSeriesSiblingIds(supabase, lesson, anchorDate, 'future')
       : null
   const hasInferredSeries = Boolean(inferredFutureIds?.length)
@@ -1319,6 +1667,25 @@ export async function deleteLessonsInSeries(
   anchorDate: string,
 ): Promise<{ deletedIds?: string[]; error?: string }> {
   await requireRole(['admin', 'instructor'])
+
+  const virtual = parseVirtualLessonId(lessonId)
+  if (virtual) {
+    return deleteRecurringMasterSeries(
+      virtual.masterId,
+      scope,
+      virtual.occurrenceDate,
+    )
+  }
+
+  const recurringTarget = await resolveRecurringDeleteTarget(lessonId, anchorDate)
+  if (recurringTarget) {
+    return deleteRecurringMasterSeries(
+      recurringTarget.masterId,
+      scope,
+      recurringTarget.occurrenceDate,
+    )
+  }
+
   const supabase = await lessonDeleteClient()
 
   const { data: lesson, error: lessonError } = await fetchLessonSeriesRow(
