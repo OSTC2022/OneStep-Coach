@@ -16,30 +16,31 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'OneStep Coach - 스포츠 트레이닝 센터 관리',
-  description: '회원, 수업, 출석 관리를 위한 통합 솔루션',
-  generator: 'v0.app',
+  title: '원스텝 트레이닝 센터',
+  description: '회원, 수업, 출석 관리를 위한 OneStep Training Center',
+  applicationName: '원스텝',
+  appleWebApp: {
+    capable: true,
+    title: '원스텝',
+    statusBarStyle: 'black-translucent',
+  },
+  formatDetection: {
+    telephone: false,
+  },
   icons: {
     icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
+      { url: '/icons/icon-32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
     ],
-    apple: '/apple-icon.png',
+    apple: [
+      { url: '/icons/apple-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
   },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0A0A0A',
+  themeColor: '#0a1628',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,

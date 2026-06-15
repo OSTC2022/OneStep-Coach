@@ -54,6 +54,7 @@ import {
   fetchCalendarLessons,
   filterLessonsByCoach,
   getCachedLessons,
+  invalidateAllCalendarCache,
   prefetchAdjacentCalendarRanges,
   resolveRangeKey,
   seedCalendarCache,
@@ -240,6 +241,11 @@ export function LessonCalendar({
       }))
 
       try {
+        const shouldReplacePool = Boolean(options?.force || options?.refreshing)
+        if (shouldReplacePool) {
+          invalidateAllCalendarCache()
+        }
+
         const data = await fetchCalendarLessons({
           date,
           view: nextView,
@@ -251,11 +257,19 @@ export function LessonCalendar({
               : 'initial',
           force: options?.force,
         })
+
         setLessons(data)
         setCachedLessons(cacheKey, data)
-        if (nextView === 'month') {
+
+        if (shouldReplacePool) {
+          setSearchPoolLessons(data)
+          if (nextView === 'month') {
+            setSearchPoolKey(`${date.getFullYear()}-${date.getMonth() + 1}`)
+          }
+        } else if (nextView === 'month') {
           syncMonthPool(date, data)
         }
+
         if (!options?.refreshing) {
           lessonHistory.clear()
         }
@@ -378,7 +392,7 @@ export function LessonCalendar({
 
   function handleRefresh() {
     if (loadState.refreshing) return
-    navigateRange(currentDate, view, { force: true, refreshing: true })
+    void syncRange(currentDate, view, { force: true, refreshing: true })
   }
 
   function handleViewChange(nextView: CalendarView) {
@@ -630,7 +644,7 @@ export function LessonCalendar({
     })
 
     applyCachedRange(lessonDate, nextView)
-    void syncRange(lessonDate, nextView, { force: true })
+    void syncRange(lessonDate, nextView, { force: true, refreshing: true })
   }
 
   function handleLessonDeleted(lessonIds: string[]) {
@@ -677,7 +691,7 @@ export function LessonCalendar({
       lessonHistory.pushLessonDelete(lesson)
     }
 
-    void syncRange(currentDate, view, { force: true })
+    void syncRange(currentDate, view, { force: true, refreshing: true })
   }
 
   const handleLessonSaved = useCallback(
@@ -689,7 +703,7 @@ export function LessonCalendar({
         Boolean(lesson.recurrence_pattern && lesson.recurrence_pattern !== 'none')
 
       if (needsRecurrenceRefresh) {
-        void syncRange(currentDate, view, { force: true })
+        void syncRange(currentDate, view, { force: true, refreshing: true })
         return
       }
 

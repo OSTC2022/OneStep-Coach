@@ -86,6 +86,16 @@ export type CalendarFetchOptions = {
   force?: boolean
 }
 
+export function invalidateAllCalendarCache() {
+  memoryCache.clear()
+  for (const controller of abortByKey.values()) {
+    controller.abort()
+  }
+  abortByKey.clear()
+  inFlightRequests.clear()
+  activeFetchKey = null
+}
+
 export async function fetchCalendarLessons(
   options: CalendarFetchOptions,
 ): Promise<Lesson[]> {
@@ -96,6 +106,16 @@ export async function fetchCalendarLessons(
     coachId,
   )
   const mode = options.mode ?? 'initial'
+
+  if (options.force) {
+    memoryCache.delete(cacheKey)
+    const inflight = inFlightRequests.get(cacheKey)
+    if (inflight) {
+      abortByKey.get(cacheKey)?.abort()
+      inFlightRequests.delete(cacheKey)
+      abortByKey.delete(cacheKey)
+    }
+  }
 
   if (!options.force && memoryCache.has(cacheKey) && mode === 'prefetch') {
     return memoryCache.get(cacheKey)!
