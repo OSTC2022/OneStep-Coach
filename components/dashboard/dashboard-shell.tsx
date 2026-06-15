@@ -46,9 +46,9 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
     <SidebarProvider>
       <VisualViewportOffsetHandler />
       <DashboardSidebar user={user} />
-      <SidebarInset className="min-h-0 overflow-hidden">
+      <SidebarInset className="flex h-svh max-h-svh min-h-0 flex-col overflow-hidden">
         <DashboardHeader user={user} />
-        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto overscroll-y-contain bg-background p-4 touch-pan-y [-webkit-overflow-scrolling:touch] md:p-6">
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto overscroll-y-auto bg-background p-4 touch-pan-y [-webkit-overflow-scrolling:touch] md:p-6">
           {children}
         </div>
       </SidebarInset>

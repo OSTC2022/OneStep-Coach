@@ -187,31 +187,23 @@ function getClickCreateSlotFromY(y: number, hourHeight: number) {
   }
 }
 
-function isCalendarBackgroundTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.closest('[data-lesson-event]')) return false
-  if (target.closest('[data-pending-create]')) return false
-  if (target.closest('[data-move-preview]')) return false
-  if (target.closest('[data-resize-handle]')) return false
-  if (target.closest('[data-pending-resize]')) return false
-  return true
+function isVerticallyScrollable(el: HTMLElement): boolean {
+  const { overflowY } = getComputedStyle(el)
+  return (
+    (overflowY === 'auto' ||
+      overflowY === 'scroll' ||
+      overflowY === 'overlay') &&
+    el.scrollHeight > el.clientHeight + 1
+  )
 }
 
 function findScrollableAncestor(
   start: HTMLElement | null,
   exclude?: HTMLElement,
 ): HTMLElement | null {
-  let node = start?.parentElement ?? null
+  let node = start
   while (node) {
-    if (node === exclude) {
-      node = node.parentElement
-      continue
-    }
-    const { overflowY } = getComputedStyle(node)
-    if (
-      (overflowY === 'auto' || overflowY === 'scroll') &&
-      node.scrollHeight > node.clientHeight + 1
-    ) {
+    if (node !== exclude && isVerticallyScrollable(node)) {
       return node
     }
     node = node.parentElement
@@ -557,23 +549,32 @@ export function TimeGrid({
       }
 
       if (collapsed) return
-      if (!isCalendarBackgroundTarget(e.target)) return
+
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('[data-resize-handle], [data-pending-resize]')
+      ) {
+        return
+      }
 
       const deltaY = e.deltaY
       if (deltaY === 0) return
 
-      if (applyVerticalScroll(el, deltaY)) {
-        e.preventDefault()
-        return
-      }
+      const scrollTargets = [
+        el,
+        findScrollableAncestor(el.parentElement, el),
+      ].filter((node): node is HTMLElement => node != null)
 
-      const pageScroll = findScrollableAncestor(el.parentElement, el)
-      if (pageScroll && applyVerticalScroll(pageScroll, deltaY)) {
-        e.preventDefault()
+      for (const scrollEl of scrollTargets) {
+        if (applyVerticalScroll(scrollEl, deltaY)) {
+          e.preventDefault()
+          return
+        }
       }
     }
 
-    el.addEventListener('wheel', handleWheel, { passive: false })
+    el.addEventListener('wheel', handleWheel, { passive: false, capture: true })
     return () => el.removeEventListener('wheel', handleWheel)
   }, [fitHourHeight, collapsed])
 

@@ -12,7 +12,6 @@ import {
   normalizeProteinIntakeBySlot,
   proteinStatusLabel,
   PROTEIN_INTAKE_SLOTS,
-  PROTEIN_QUICK_FOODS,
   resolveProteinMultiplier,
   setProteinSlotInputValue,
   sumProteinIntakeBySlot,
@@ -24,7 +23,12 @@ import {
   getNutritionChoiceTone,
   nutritionToneClasses,
 } from '@/lib/member-body-nutrition'
-import { Button } from '@/components/ui/button'
+import { FoodInputSection } from '@/components/members/food-input-section'
+import {
+  calculateProteinGramsForServing,
+} from '@/lib/food-search-utils'
+import { recordFoodUse } from '@/lib/food-quick-input-storage'
+import type { FoodItem } from '@/lib/food-search-types'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -46,6 +50,7 @@ export function ProteinIntakePanel({
   onIntakeBySlotChange,
 }: ProteinIntakePanelProps) {
   const [activeSlot, setActiveSlot] = useState<ProteinIntakeSlotId>('breakfast')
+  const [quickRefreshKey, setQuickRefreshKey] = useState(0)
   const slotInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -96,9 +101,15 @@ export function ProteinIntakePanel({
           ? '[&_[data-slot=progress-indicator]]:bg-red-500'
           : '[&_[data-slot=progress-indicator]]:bg-primary'
 
-  function addQuickGrams(grams: number) {
-    onIntakeBySlotChange(addProteinSlotGrams(slots, activeSlot, grams))
+  function addFoodToSlot(food: FoodItem) {
+    const proteinG = calculateProteinGramsForServing(food)
+    if (proteinG <= 0) return
+    onIntakeBySlotChange(addProteinSlotGrams(slots, activeSlot, proteinG))
+    recordFoodUse(food)
+    setQuickRefreshKey((key) => key + 1)
   }
+
+  const activeSlotMeta = PROTEIN_INTAKE_SLOTS.find((slot) => slot.id === activeSlot)
 
   return (
     <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
@@ -174,11 +185,17 @@ export function ProteinIntakePanel({
                 value={slot.id}
                 disabled={disabled}
                 onClick={focusSlotInput}
-                className="group h-auto min-h-8 flex-col gap-0.5 border border-transparent px-1 py-1 text-[11px] leading-tight data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none"
+                className={cn(
+                  'group h-auto min-h-8 flex-col gap-0.5 border px-1 py-1 text-[11px] leading-tight',
+                  'border-border/50 bg-background/40 text-foreground',
+                  'data-[state=active]:!border-2 data-[state=active]:!border-primary data-[state=active]:bg-primary/10',
+                  'data-[state=active]:text-foreground data-[state=active]:shadow-none',
+                  'dark:data-[state=active]:!border-primary dark:data-[state=active]:bg-primary/10',
+                )}
               >
                 <span>{slot.label}</span>
                 {grams > 0 ? (
-                  <span className="text-[10px] font-semibold tabular-nums text-primary group-data-[state=active]:text-primary-foreground/90">
+                  <span className="text-[10px] font-semibold tabular-nums text-primary group-data-[state=active]:text-primary">
                     {grams}g
                   </span>
                 ) : null}
@@ -216,29 +233,13 @@ export function ProteinIntakePanel({
         ))}
       </Tabs>
 
-      <div className="space-y-1">
-        <p className="text-[11px] font-medium text-foreground/80">
-          빠른 입력 · {PROTEIN_INTAKE_SLOTS.find((slot) => slot.id === activeSlot)?.label}
-        </p>
-        <div className="flex flex-wrap gap-1">
-          {PROTEIN_QUICK_FOODS.map((food) => (
-            <Button
-              key={food.id}
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={disabled || targetG == null}
-              className="h-8 shrink-0 whitespace-nowrap border-border/60 bg-background/40 px-2.5 text-xs font-normal text-foreground/85"
-              onClick={() => addQuickGrams(food.grams)}
-            >
-              {food.label}{' '}
-              <span className="font-medium tabular-nums text-primary/90">
-                +{food.grams}g
-              </span>
-            </Button>
-          ))}
-        </div>
-      </div>
+      <FoodInputSection
+        activeSlotLabel={activeSlotMeta?.label ?? '선택 시간'}
+        disabled={disabled || targetG == null}
+        refreshKey={quickRefreshKey}
+        onAddFood={addFoodToSlot}
+        onStorageChange={() => setQuickRefreshKey((key) => key + 1)}
+      />
 
       <p className="text-[11px] leading-relaxed text-foreground/55">
         성장기 선수 기본 기준은 체중 × {multiplier}g입니다. 고강도
