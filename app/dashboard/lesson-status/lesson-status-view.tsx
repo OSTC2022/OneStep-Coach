@@ -184,6 +184,8 @@ interface AthleteTileProps {
   isLoading: boolean
   instructorLookup: Map<string, Instructor>
   inInstructorGroup?: boolean
+  compact?: boolean
+  expanded?: boolean
   canEditEndTime?: boolean
   bodyWeightByKey: Record<string, number>
   onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
@@ -205,6 +207,8 @@ const AthleteTile = memo(function AthleteTile({
   isLoading,
   instructorLookup,
   inInstructorGroup = false,
+  compact = false,
+  expanded = false,
   canEditEndTime = false,
   bodyWeightByKey,
   onBodyWeightChange,
@@ -232,6 +236,22 @@ const AthleteTile = memo(function AthleteTile({
   const instructorBorderColor = resolveLessonInstructorColor(lesson, instructorLookup)
   const canEndLesson = isPresentMarked && !completed && !isCancelled
   const isGuestTrialMarked = lesson.lesson_type === '체험레슨' && !isCancelled
+  const instructorName =
+    lesson.instructor?.name ??
+    (lesson.instructor_id
+      ? instructorLookup.get(lesson.instructor_id)?.name
+      : undefined) ??
+    '—'
+  const statusLabel = completed
+    ? `종료 ${formatTime(lesson.end_time) ?? ''}`.trim()
+    : isCancelled
+      ? '취소'
+      : isPresentMarked
+        ? '출석'
+        : isPresent
+          ? '출석(미체크)'
+          : '대기'
+  const showActions = !compact
 
   async function handleCompleteLesson(signatureData: string, endTimeInput?: string) {
     const endTime = endTimeInput?.trim()
@@ -332,6 +352,7 @@ const AthleteTile = memo(function AthleteTile({
     <div
       className={cn(
         'flex min-w-0 flex-col rounded-md bg-card/60 p-1.5',
+        expanded && 'p-2',
         inInstructorGroup
           ? 'border-0'
           : cn(
@@ -348,18 +369,36 @@ const AthleteTile = memo(function AthleteTile({
       {isMemberLinked && lesson.member_id ? (
         <Link
           href={`/dashboard/members/${lesson.member_id}`}
-          className="truncate text-[11px] font-semibold leading-tight text-foreground hover:text-primary hover:underline"
+          className={cn(
+            'truncate font-semibold leading-tight text-foreground hover:text-primary hover:underline',
+            expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
+          )}
           title={`${label} 회원 페이지`}
         >
           {label}
         </Link>
       ) : (
-        <p className="truncate text-[11px] font-semibold leading-tight" title={label}>
+        <p
+          className={cn(
+            'truncate font-semibold leading-tight',
+            expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
+          )}
+          title={label}
+        >
           {label}
         </p>
       )}
 
-      {isMemberLinked ? (
+      {compact ? (
+        <>
+          <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+            담당: {instructorName}
+          </p>
+          <p className="mt-0.5 text-[10px] font-medium text-primary/90">{statusLabel}</p>
+        </>
+      ) : null}
+
+      {showActions && isMemberLinked ? (
         <>
           <div className="mt-1 grid grid-cols-2 gap-0.5" role="group" aria-label={`${label} 출석 상태`}>
             {MEMBER_STATUS_OPTIONS.map((option) => {
@@ -531,7 +570,7 @@ const AthleteTile = memo(function AthleteTile({
             </button>
           )}
         </>
-      ) : (
+      ) : showActions ? (
         <div className="mt-1 grid grid-cols-2 gap-0.5" role="group" aria-label={`${label} 출석/취소`}>
           {GUEST_OPTIONS.map((option) => {
             const isActive =
@@ -567,7 +606,9 @@ const AthleteTile = memo(function AthleteTile({
             )
           })}
         </div>
-      )}
+      ) : compact ? (
+        <p className="mt-0.5 text-[10px] font-medium text-primary/90">{statusLabel}</p>
+      ) : null}
     </div>
 
     {signatureOpen && (
@@ -646,6 +687,24 @@ interface TimeSlotsPanelProps {
   emptyMessage?: string
 }
 
+function getMobileAthleteFlexClass(
+  lessonId: string,
+  expandedAthleteId: string | null,
+  useScrollRow: boolean,
+) {
+  if (expandedAthleteId == null) {
+    return useScrollRow
+      ? 'min-w-[7.25rem] shrink-0 flex-[0_0_auto]'
+      : 'min-w-0 flex-1 basis-0'
+  }
+  if (expandedAthleteId === lessonId) {
+    return 'z-[1] min-w-[9.5rem] flex-[2.7] basis-0 shadow-md ring-1 ring-primary/30'
+  }
+  return useScrollRow
+    ? 'min-w-[4.75rem] shrink-0 flex-[0_0_auto] opacity-85'
+    : 'min-w-0 flex-[0.65] basis-0 opacity-85'
+}
+
 const TimeSlotsPanel = memo(function TimeSlotsPanel({
   lessons,
   instructors,
@@ -660,6 +719,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   onLessonCompleted,
   emptyMessage = '등록된 수업이 없습니다.',
 }: TimeSlotsPanelProps) {
+  const [expandedAthleteId, setExpandedAthleteId] = useState<string | null>(null)
   const timeSlots = useMemo(
     () => buildLessonStatusTimeSlots(lessons, instructors),
     [lessons, instructors],
@@ -678,8 +738,104 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
     )
   }
 
+  const allLessonsInSlot = (slot: (typeof timeSlots)[number]) =>
+    slot.rows.flatMap((rowChunks) =>
+      rowChunks.flatMap((chunk) => chunk.lessons),
+    )
+
   return (
-    <div className="space-y-1.5">
+    <>
+      <div className="space-y-2 md:hidden">
+        {timeSlots.map((slot) => {
+          const slotLessons = allLessonsInSlot(slot)
+          const useScrollRow = slotLessons.length >= 4
+
+          return (
+            <div
+              key={slot.start || 'none'}
+              className="rounded-md border border-border bg-muted/20 p-3"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  setExpandedAthleteId(null)
+                }
+              }}
+            >
+              <div className="mb-2 flex items-baseline gap-2">
+                <p className="text-sm font-bold text-primary leading-none tabular-nums">
+                  {formatStartTimeLabel(slot.start)}
+                </p>
+                <p className="text-xs text-muted-foreground">{slot.total}명</p>
+              </div>
+
+              <div
+                className={cn(
+                  'flex min-w-0 gap-2',
+                  useScrollRow && 'overflow-x-auto overscroll-x-contain',
+                )}
+              >
+                {slotLessons.map((lesson) => {
+                  const expanded = expandedAthleteId === lesson.id
+                  const color = resolveLessonInstructorColor(lesson, instructorLookup)
+                  return (
+                    <div
+                      key={lesson.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={expanded}
+                      className={cn(
+                        'min-w-0 cursor-pointer overflow-hidden rounded-xl border-2 bg-card/60 transition-all duration-200 ease-out',
+                        getMobileAthleteFlexClass(
+                          lesson.id,
+                          expandedAthleteId,
+                          useScrollRow,
+                        ),
+                      )}
+                      style={{ borderColor: color }}
+                      onClick={(event) => {
+                        const target = event.target as HTMLElement
+                        if (
+                          target.closest(
+                            'button, a, input, textarea, select, label, [role="dialog"]',
+                          )
+                        ) {
+                          return
+                        }
+                        setExpandedAthleteId((prev) =>
+                          prev === lesson.id ? null : lesson.id,
+                        )
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return
+                        event.preventDefault()
+                        setExpandedAthleteId((prev) =>
+                          prev === lesson.id ? null : lesson.id,
+                        )
+                      }}
+                    >
+                      <AthleteTile
+                        lesson={lesson}
+                        compact={!expanded}
+                        expanded={expanded}
+                        isLoading={isUpdating === lesson.id}
+                        canEditEndTime={canEditEndTime}
+                        instructorLookup={instructorLookup}
+                        bodyWeightByKey={bodyWeightByKey}
+                        onBodyWeightChange={onBodyWeightChange}
+                        onStatusChange={onStatusChange}
+                        onClearAttendanceCheck={onClearAttendanceCheck}
+                        onGuestStatusChange={onGuestStatusChange}
+                        onLessonCompleted={onLessonCompleted}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="hidden space-y-1.5 md:block">
       {timeSlots.map((slot) =>
         slot.rows.map((rowChunks, rowIndex) => (
           <div
@@ -743,7 +899,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
           </div>
         )),
       )}
-    </div>
+      </div>
+    </>
   )
 })
 

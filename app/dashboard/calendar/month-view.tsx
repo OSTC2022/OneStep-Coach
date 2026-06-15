@@ -4,6 +4,8 @@ import { useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { CalendarMobileWeek } from './calendar-mobile-week'
+import { useIsMobileViewport } from '@/hooks/use-min-md'
 import { cn } from '@/lib/utils'
 import {
   getDateColorClass,
@@ -66,6 +68,7 @@ export function MonthView({
   isLessonSelected,
   onClearLessonSelection,
 }: MonthViewProps) {
+  const isMobile = useIsMobileViewport()
   const [gridExpanded, setGridExpanded] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
   const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
@@ -108,15 +111,33 @@ export function MonthView({
   }, [lessons])
 
   const today = new Date()
+  const monthDates = useMemo(
+    () => gridDates.filter((date) => isSameMonth(date, currentDate)),
+    [gridDates, currentDate],
+  )
 
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
-        isDragging && 'select-none',
-      )}
-    >
+    <>
+      {isMobile ? (
+      <div className="flex h-full min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-x-clip">
+        <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+          <CalendarMobileWeek
+            dates={monthDates}
+            selectedDate={selectedDate}
+            lessons={lessons}
+            onSelectDate={onSelectDate}
+            onLessonActivate={onLessonActivate}
+          />
+        </div>
+      </div>
+      ) : (
+      <div
+        ref={containerRef}
+        className={cn(
+          'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
+          isDragging && 'select-none',
+        )}
+      >
       <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 py-1.5">
         <Button
           type="button"
@@ -255,6 +276,8 @@ export function MonthView({
           isLessonSelected={isLessonSelected}
         />
       </div>
-    </div>
+      </div>
+      )}
+    </>
   )
 }
