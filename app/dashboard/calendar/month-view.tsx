@@ -4,8 +4,6 @@ import { useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { CalendarMobileWeek } from './calendar-mobile-week'
-import { useIsMobileViewport } from '@/hooks/use-min-md'
 import { cn } from '@/lib/utils'
 import {
   getDateColorClass,
@@ -68,7 +66,6 @@ export function MonthView({
   isLessonSelected,
   onClearLessonSelection,
 }: MonthViewProps) {
-  const isMobile = useIsMobileViewport()
   const [gridExpanded, setGridExpanded] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
   const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
@@ -111,33 +108,15 @@ export function MonthView({
   }, [lessons])
 
   const today = new Date()
-  const monthDates = useMemo(
-    () => gridDates.filter((date) => isSameMonth(date, currentDate)),
-    [gridDates, currentDate],
-  )
 
   return (
-    <>
-      {isMobile ? (
-      <div className="flex h-full min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-x-clip">
-        <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-          <CalendarMobileWeek
-            dates={monthDates}
-            selectedDate={selectedDate}
-            lessons={lessons}
-            onSelectDate={onSelectDate}
-            onLessonActivate={onLessonActivate}
-          />
-        </div>
-      </div>
-      ) : (
-      <div
-        ref={containerRef}
-        className={cn(
-          'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
-          isDragging && 'select-none',
-        )}
-      >
+    <div
+      ref={containerRef}
+      className={cn(
+        'flex h-full min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
+        isDragging && 'select-none',
+      )}
+    >
       <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 py-1.5">
         <Button
           type="button"
@@ -163,7 +142,9 @@ export function MonthView({
       <div
         className={cn(
           'flex min-h-0 flex-col overflow-hidden transition-[flex-grow] duration-300',
-          gridExpanded ? 'min-h-0 flex-1' : 'shrink-0',
+          gridExpanded
+            ? 'max-md:shrink-0 max-md:flex-none md:min-h-0 md:flex-1'
+            : 'shrink-0',
         )}
       >
         <div className="grid shrink-0 grid-cols-7 border-b border-border bg-muted/30">
@@ -171,7 +152,7 @@ export function MonthView({
             <div
               key={label}
               className={cn(
-                'py-2 text-center text-xs font-medium',
+                'py-2 text-center text-xs font-medium max-md:py-1.5 max-md:text-[10px]',
                 getWeekdayHeaderColorClass(i),
               )}
             >
@@ -182,8 +163,9 @@ export function MonthView({
 
         <div
           className={cn(
-            'flex min-h-0 flex-1 flex-col overflow-y-auto',
+            'flex min-h-0 flex-col max-md:shrink-0 max-md:overflow-hidden md:overflow-y-auto',
             !gridExpanded && 'overflow-hidden',
+            gridExpanded && 'md:flex-1',
           )}
         >
           {visibleWeeks.map((week, wi) => (
@@ -191,7 +173,9 @@ export function MonthView({
               key={wi}
               className={cn(
                 'grid grid-cols-7 border-b border-border last:border-b-0',
-                gridExpanded ? 'min-h-[72px] flex-1' : 'min-h-[64px]',
+                gridExpanded
+                  ? 'min-h-[52px] max-md:flex-none md:min-h-[72px] md:flex-1'
+                  : 'min-h-[52px] max-md:min-h-[48px] md:min-h-[64px]',
               )}
             >
               {week.map((date) => {
@@ -208,17 +192,17 @@ export function MonthView({
                     key={dateKey}
                     type="button"
                     className={cn(
-                      'flex min-h-[64px] flex-col border-r border-border p-1 text-left last:border-r-0',
+                      'flex min-h-[52px] flex-col border-r border-border p-0.5 text-left last:border-r-0 max-md:min-h-0 md:min-h-[64px] md:p-1',
                       !inMonth && 'bg-muted/20',
                       isToday && !isSelected && 'bg-primary/5',
                       isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/50',
                     )}
                     onClick={() => onSelectDate(date)}
                   >
-                    <div className="mb-1 flex items-center justify-between">
+                    <div className="mb-0.5 flex items-center justify-between md:mb-1">
                       <span
                         className={cn(
-                          'flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium tabular-nums',
+                          'flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium tabular-nums md:h-7 md:w-7 md:text-sm',
                           !isSelected && !isToday && dateColor,
                           isToday && !isSelected && 'ring-1 ring-primary/40',
                           isSelected && 'bg-primary text-primary-foreground',
@@ -227,7 +211,9 @@ export function MonthView({
                         {format(date, 'd')}
                       </span>
                       {isHoliday && !isSelected && (
-                        <span className="text-[9px] font-medium text-red-500">휴</span>
+                        <span className="text-[8px] font-medium text-red-500 md:text-[9px]">
+                          휴
+                        </span>
                       )}
                     </div>
 
@@ -259,11 +245,17 @@ export function MonthView({
         </div>
       </div>
 
-      <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
+      <div className="max-md:hidden">
+        <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
+      </div>
 
       <div
-        className="w-full shrink-0 self-start overflow-y-auto"
-        style={{ maxHeight: `${bottomPx}px` }}
+        className={cn(
+          'flex w-full min-w-0 flex-col overflow-hidden',
+          'max-md:min-h-0 max-md:flex-1',
+          'md:max-h-[var(--month-panel-max)] md:shrink-0 md:overflow-y-auto',
+        )}
+        style={{ '--month-panel-max': `${bottomPx}px` } as React.CSSProperties}
       >
         <MonthDayPanel
           selectedDate={selectedDate}
@@ -276,8 +268,6 @@ export function MonthView({
           isLessonSelected={isLessonSelected}
         />
       </div>
-      </div>
-      )}
-    </>
+    </div>
   )
 }

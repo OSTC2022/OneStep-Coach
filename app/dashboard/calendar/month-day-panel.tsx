@@ -108,7 +108,7 @@ export function MonthDayPanel({
   }
 
   return (
-    <div className="flex w-full flex-col bg-card">
+    <div className="flex h-full min-h-0 w-full flex-col bg-card">
       <div className="shrink-0 border-b border-border px-4 py-3">
         <h3 className="text-base font-semibold">{dateLabel}</h3>
         <p className="text-xs text-muted-foreground">
@@ -117,7 +117,7 @@ export function MonthDayPanel({
         </p>
       </div>
 
-      <div className="overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {dayLessons.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
             이 날짜에 등록된 수업이 없습니다.

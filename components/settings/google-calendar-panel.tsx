@@ -104,7 +104,7 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
 
   if (!status.configured) {
     return (
-      <Card>
+      <Card className="w-full min-w-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CalendarSync className="h-4 w-4" />
@@ -134,8 +134,8 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
+    <div className="w-full min-w-0 max-w-full space-y-4">
+      <Card className="w-full min-w-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CalendarSync className="h-4 w-4" />
@@ -256,7 +256,7 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="w-full min-w-0">
         <CardHeader>
           <CardTitle className="text-base">사용 방법</CardTitle>
         </CardHeader>

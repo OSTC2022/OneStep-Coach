@@ -3,7 +3,7 @@ import { SettingsNav } from './settings-nav'
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="space-y-6 pt-12 lg:pt-0">
+    <div className="w-full min-w-0 max-w-full space-y-6 pt-12 lg:pt-0">
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold lg:text-3xl">설정</h1>
