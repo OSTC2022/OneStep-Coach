@@ -154,7 +154,6 @@ async function paginateGoogleCalendarEvents(
     timeMin?: string
     timeMax?: string
     updatedMin?: string
-    orderBy?: 'startTime' | 'updated'
     singleEvents?: boolean
   },
 ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
@@ -196,17 +195,11 @@ async function fetchEventsForSync(
       ? getGoogleSyncTimeBounds()
       : getGoogleRecentSyncWindow()
 
-  const [windowResult, recentUpdates, masterResult] = await Promise.all([
+  const [windowResult, masterResult] = await Promise.all([
     paginateGoogleCalendarEvents(accessToken, calendarId, {
       timeMin: bounds.timeMin,
       timeMax: bounds.timeMax,
-      orderBy: 'startTime',
       singleEvents: true,
-    }),
-    paginateGoogleCalendarEvents(accessToken, calendarId, {
-      updatedMin: getGoogleUpdatedSince(7),
-      orderBy: 'updated',
-      singleEvents: false,
     }),
     paginateGoogleCalendarEvents(accessToken, calendarId, {
       timeMin: bounds.timeMin,
@@ -215,13 +208,29 @@ async function fetchEventsForSync(
     }),
   ])
 
+  let recentEvents: GoogleCalendarEvent[] = []
+  let recentSyncToken: string | null = null
+  try {
+    const recentUpdates = await paginateGoogleCalendarEvents(accessToken, calendarId, {
+      updatedMin: getGoogleUpdatedSince(7),
+      singleEvents: false,
+    })
+    recentEvents = recentUpdates.events
+    recentSyncToken = recentUpdates.nextSyncToken
+  } catch (error) {
+    console.warn(
+      '[google-calendar] updatedMin fetch skipped:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
   return {
     events: mergeGoogleEventsById(
       masterResult.events,
       windowResult.events,
-      recentUpdates.events,
+      recentEvents,
     ),
-    nextSyncToken: windowResult.nextSyncToken ?? recentUpdates.nextSyncToken,
+    nextSyncToken: windowResult.nextSyncToken ?? recentSyncToken,
   }
 }
 

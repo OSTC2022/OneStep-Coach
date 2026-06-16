@@ -129,12 +129,10 @@ export async function listGoogleCalendarEvents(
     timeMin?: string
     timeMax?: string
     updatedMin?: string
-    orderBy?: 'startTime' | 'updated'
     singleEvents?: boolean
   },
 ): Promise<GoogleEventsListResponse> {
   const params = new URLSearchParams({
-    singleEvents: options.singleEvents === false ? 'false' : 'true',
     showDeleted: 'true',
     maxResults: '250',
   })
@@ -142,19 +140,10 @@ export async function listGoogleCalendarEvents(
   if (options.syncToken) {
     params.set('syncToken', options.syncToken)
   } else {
+    params.set('singleEvents', options.singleEvents === false ? 'false' : 'true')
     if (options.timeMin) params.set('timeMin', options.timeMin)
     if (options.timeMax) params.set('timeMax', options.timeMax)
     if (options.updatedMin) params.set('updatedMin', options.updatedMin)
-    if (options.orderBy === 'startTime') {
-      params.set('orderBy', 'startTime')
-      params.set('sortOrder', 'ascending')
-      params.set('singleEvents', 'true')
-    } else if (options.orderBy === 'updated') {
-      params.set('orderBy', 'updated')
-      params.set('singleEvents', 'false')
-    } else if (options.singleEvents === false) {
-      params.set('singleEvents', 'false')
-    }
   }
 
   if (options.pageToken) {
