@@ -25,7 +25,7 @@ import {
 import {
   getGoogleSyncTimeBounds,
 } from '@/lib/google-calendar/event-mapper'
-import { buildMemberLookup, type MemberLookup } from '@/lib/google-calendar/member-matcher'
+import { buildGoogleCalendarInstructorResolver, backfillGoogleCalendarInstructor } from '@/lib/google-calendar/calendar-instructor'
 import {
   applyGoogleEventsBatch,
   loadExistingByGoogleEventId,
@@ -408,6 +408,7 @@ export async function syncGoogleCalendarLessons(options?: {
 
   try {
     const memberLookup = await buildMemberLookup(supabase)
+    const instructorResolver = await buildGoogleCalendarInstructorResolver(supabase, row)
 
     await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
       row = await refreshLessonCalendarIds(row!, accessToken)
@@ -458,6 +459,10 @@ export async function syncGoogleCalendarLessons(options?: {
               googleCalendarId: calendar.calendarId,
             })
 
+            const calendarInstructorId = instructorResolver.resolveInstructorId(
+              calendar.calendarId,
+            )
+
             const result = await applyGoogleEventsBatch(
               supabase,
               events,
@@ -465,6 +470,13 @@ export async function syncGoogleCalendarLessons(options?: {
               existingMap,
               calendar.calendarId,
               googleAccountId,
+              calendarInstructorId,
+            )
+
+            await backfillGoogleCalendarInstructor(
+              supabase,
+              calendar.calendarId,
+              calendarInstructorId,
             )
 
             aggregated.created += result.created

@@ -290,6 +290,7 @@ function buildGoogleLessonBase(
   memberId: string | null,
   title: string,
   calendarId?: string,
+  instructorId?: string | null,
 ): Record<string, unknown> | null {
   const schedule = parseGoogleEventDateTime(event)
   if (!schedule || !event.id) return null
@@ -300,6 +301,7 @@ function buildGoogleLessonBase(
     end_time: schedule.endTime,
     title: memberId ? null : title,
     member_id: memberId,
+    instructor_id: instructorId ?? null,
     session_package_id: null,
     google_event_id: event.id,
     google_calendar_id: calendarId ?? null,
@@ -319,8 +321,9 @@ function buildMasterPayload(
   memberId: string | null,
   title: string,
   calendarId?: string,
+  instructorId?: string | null,
 ): Record<string, unknown> | null {
-  const base = buildGoogleLessonBase(event, memberId, title, calendarId)
+  const base = buildGoogleLessonBase(event, memberId, title, calendarId, instructorId)
   if (!base || !event.recurrence?.length) return null
 
   const pattern = googleRecurrenceToPattern(event.recurrence)
@@ -342,8 +345,9 @@ function buildExceptionPayload(
   title: string,
   masterId: string | null,
   calendarId?: string,
+  instructorId?: string | null,
 ): Record<string, unknown> | null {
-  const base = buildGoogleLessonBase(event, memberId, title, calendarId)
+  const base = buildGoogleLessonBase(event, memberId, title, calendarId, instructorId)
   if (!base || !event.recurringEventId) return null
 
   const originalStart = parseGoogleOriginalStartIso(event)
@@ -365,8 +369,9 @@ function buildSinglePayload(
   memberId: string | null,
   title: string,
   calendarId?: string,
+  instructorId?: string | null,
 ): Record<string, unknown> | null {
-  const base = buildGoogleLessonBase(event, memberId, title, calendarId)
+  const base = buildGoogleLessonBase(event, memberId, title, calendarId, instructorId)
   if (!base) return null
   return {
     ...base,
@@ -392,6 +397,7 @@ export async function applyGoogleEventsBatch(
   existingMap: Map<string, ExistingLesson>,
   calendarId?: string,
   googleAccountId?: string,
+  instructorId?: string | null,
 ): Promise<GoogleCalendarSyncResult> {
   const result = emptySyncResult()
   const sorted = [...events].sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)))
@@ -407,6 +413,7 @@ export async function applyGoogleEventsBatch(
       existingMap,
       calId,
       accountId,
+      instructorId,
     )
     result.created += chunkResult.created
     result.updated += chunkResult.updated
@@ -567,6 +574,7 @@ async function applyGoogleEventsChunk(
   existingMap: Map<string, ExistingLesson>,
   calendarId: string,
   googleAccountId: string,
+  instructorId?: string | null,
 ): Promise<GoogleCalendarSyncResult> {
   const result = emptySyncResult()
   const masterIdCache = new Map<string, string | null>()
@@ -628,7 +636,7 @@ async function applyGoogleEventsChunk(
 
     const title = normalizeGoogleEventTitle(event.summary)
     const memberId = memberLookup.resolveMemberId(title)
-    const payload = buildMasterPayload(event, memberId, title, calendarId)
+    const payload = buildMasterPayload(event, memberId, title, calendarId, instructorId)
     if (!payload) {
       result.skipped += 1
       continue
@@ -724,7 +732,14 @@ async function applyGoogleEventsChunk(
       continue
     }
 
-    const payload = buildExceptionPayload(event, memberId, title, masterId, calendarId)
+    const payload = buildExceptionPayload(
+      event,
+      memberId,
+      title,
+      masterId,
+      calendarId,
+      instructorId,
+    )
     if (!payload) {
       result.skipped += 1
       continue
@@ -813,7 +828,7 @@ async function applyGoogleEventsChunk(
 
     const title = normalizeGoogleEventTitle(event.summary)
     const memberId = memberLookup.resolveMemberId(title)
-    const payload = buildSinglePayload(event, memberId, title, calendarId)
+    const payload = buildSinglePayload(event, memberId, title, calendarId, instructorId)
     if (!payload) {
       result.skipped += 1
       continue

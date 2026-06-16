@@ -360,8 +360,11 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           <p>2. 일정 제목은 <strong className="text-foreground">회원명(나이종목)</strong> 형식을 권장합니다. 예: 윤찬민(14축구)</p>
           <p>3. iPhone 캘린더를 쓰는 경우, iCloud/Google과 「수업」「수업2」 캘린더를 동기화해 두면 같은 일정이 반영됩니다.</p>
           <p>
-            4. 「지금 동기화」는 저장된 syncToken으로 <strong className="text-foreground">변경분만</strong> 빠르게
-            가져옵니다. 최초 연결 시에만 과거 30일~앞으로 180일 구간을 전체 동기화합니다.
+            4. 「수업」 캘린더 일정은 <strong className="text-foreground">이교직</strong>, 「수업2」는{' '}
+            <strong className="text-foreground">장지용</strong> 강사·색상으로 자동 반영됩니다.
+          </p>
+          <p>
+            5. 「지금 동기화」는 Google 캘린더 변경분을 가져와 일정·강사·회원 연결을 갱신합니다.
           </p>
         </CardContent>
       </Card>

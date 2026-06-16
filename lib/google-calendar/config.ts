@@ -10,6 +10,12 @@ export const GOOGLE_LESSON_CALENDAR_NAMES = [
   GOOGLE_LESSON_CALENDAR_NAME_2,
 ] as const
 
+/** Google 캘린더 이름 → 기본 담당 강사 (캘린더 블록 색상은 강사 calendar_color 사용) */
+export const GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME: Record<string, string> = {
+  [GOOGLE_LESSON_CALENDAR_NAME]: '이교직',
+  [GOOGLE_LESSON_CALENDAR_NAME_2]: '장지용',
+}
+
 export const GOOGLE_OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
