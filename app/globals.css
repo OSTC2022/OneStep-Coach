@@ -131,8 +131,30 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body {
+    width: 100%;
+    min-width: 0;
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground;
+  }
+  [data-slot='sidebar-wrapper'] {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+  }
+  [data-slot='sidebar-inset'] {
+    flex: 1 1 0%;
+    width: 100%;
+    min-width: 0;
+  }
+  [data-calendar-scope],
+  [data-calendar-panel],
+  [data-calendar-toolbar] {
+    width: 100%;
+    max-width: none;
   }
 }
 

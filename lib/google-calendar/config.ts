@@ -4,15 +4,27 @@ import { getSiteUrl } from '@/lib/site-url'
 
 export const GOOGLE_CALENDAR_SYNC_ID = 'default'
 export const GOOGLE_LESSON_CALENDAR_NAME = '수업'
+export const GOOGLE_LESSON_CALENDAR_NAME_ALT = '수업1'
 export const GOOGLE_LESSON_CALENDAR_NAME_2 = '수업2'
 export const GOOGLE_LESSON_CALENDAR_NAMES = [
   GOOGLE_LESSON_CALENDAR_NAME,
+  GOOGLE_LESSON_CALENDAR_NAME_ALT,
   GOOGLE_LESSON_CALENDAR_NAME_2,
 ] as const
+
+export function isPrimaryLessonCalendarName(name?: string | null): boolean {
+  const trimmed = name?.trim()
+  return trimmed === GOOGLE_LESSON_CALENDAR_NAME || trimmed === GOOGLE_LESSON_CALENDAR_NAME_ALT
+}
+
+export function isSecondaryLessonCalendarName(name?: string | null): boolean {
+  return name?.trim() === GOOGLE_LESSON_CALENDAR_NAME_2
+}
 
 /** Google 캘린더 이름 → 기본 담당 강사 (캘린더 블록 색상은 강사 calendar_color 사용) */
 export const GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME: Record<string, string> = {
   [GOOGLE_LESSON_CALENDAR_NAME]: '이교직',
+  [GOOGLE_LESSON_CALENDAR_NAME_ALT]: '이교직',
   [GOOGLE_LESSON_CALENDAR_NAME_2]: '장지용',
 }
 

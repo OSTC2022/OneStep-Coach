@@ -48,12 +48,16 @@ export function formatGoogleCalendarSyncError(error: unknown): string {
   }
 
   if (error instanceof Error) {
-    const lower = error.message.toLowerCase()
+    const message = error.message.trim()
+    const lower = message.toLowerCase()
     if (lower.includes('orderby') || lower.includes('requested ordering')) {
       return 'Google 캘린더 동기화 조건이 맞지 않아 다시 전체 동기화를 시도합니다.'
     }
     if (lower.includes('410') || lower.includes('full sync')) {
       return '반복 일정 동기화 설정을 복구했습니다. 다시 동기화해주세요.'
+    }
+    if (message.length > 0 && message.length <= 120 && !message.startsWith('Google Calendar API')) {
+      return message
     }
   }
 

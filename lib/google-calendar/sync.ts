@@ -4,8 +4,8 @@ import { randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
   GOOGLE_CALENDAR_SYNC_ID,
-  GOOGLE_LESSON_CALENDAR_NAME,
-  GOOGLE_LESSON_CALENDAR_NAMES,
+  isPrimaryLessonCalendarName,
+  isSecondaryLessonCalendarName,
   getGoogleCalendarWebhookSecret,
   getGoogleCalendarWebhookUrl,
 } from '@/lib/google-calendar/config'
@@ -26,6 +26,7 @@ import {
   getGoogleSyncTimeBounds,
 } from '@/lib/google-calendar/event-mapper'
 import { buildGoogleCalendarInstructorResolver, backfillGoogleCalendarInstructor } from '@/lib/google-calendar/calendar-instructor'
+import { buildMemberLookup } from '@/lib/google-calendar/member-matcher'
 import {
   applyGoogleEventsBatch,
   loadExistingByGoogleEventId,
@@ -301,11 +302,11 @@ function buildLessonCalendarPatch(
   row: GoogleCalendarSyncRow,
   lessonCalendars: { id: string; summary: string }[],
 ): Partial<GoogleCalendarSyncRow> {
-  const primary = lessonCalendars.find(
-    (calendar) => calendar.summary === GOOGLE_LESSON_CALENDAR_NAME,
+  const primary = lessonCalendars.find((calendar) =>
+    isPrimaryLessonCalendarName(calendar.summary),
   )
-  const secondary = lessonCalendars.find(
-    (calendar) => calendar.summary !== GOOGLE_LESSON_CALENDAR_NAME,
+  const secondary = lessonCalendars.find((calendar) =>
+    isSecondaryLessonCalendarName(calendar.summary),
   )
 
   const patch: Partial<GoogleCalendarSyncRow> = {}
@@ -408,10 +409,10 @@ export async function syncGoogleCalendarLessons(options?: {
 
   try {
     const memberLookup = await buildMemberLookup(supabase)
-    const instructorResolver = await buildGoogleCalendarInstructorResolver(supabase, row)
 
     await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
       row = await refreshLessonCalendarIds(row!, accessToken)
+      const instructorResolver = await buildGoogleCalendarInstructorResolver(supabase, row!)
 
       const calendarsToSync: {
         calendarId: string
@@ -558,6 +559,7 @@ export async function syncGoogleCalendarLessons(options?: {
     return aggregated
   } catch (error) {
     const message = formatGoogleCalendarSyncError(error)
+    console.error('[google-calendar] sync failed:', error)
     await upsertGoogleCalendarSyncRow({
       last_sync_error: message,
       sync_status: 'failure',
@@ -673,11 +675,17 @@ export function findLessonCalendars(
   calendars: { id: string; summary?: string }[],
 ): { id: string; summary: string }[] {
   const found: { id: string; summary: string }[] = []
-  for (const name of GOOGLE_LESSON_CALENDAR_NAMES) {
-    const match = calendars.find((calendar) => calendar.summary?.trim() === name)
-    if (match?.id) {
-      found.push({ id: match.id, summary: match.summary!.trim() })
-    }
+  const primary = calendars.find((calendar) =>
+    isPrimaryLessonCalendarName(calendar.summary),
+  )
+  if (primary?.id) {
+    found.push({ id: primary.id, summary: primary.summary!.trim() })
+  }
+  const secondary = calendars.find((calendar) =>
+    isSecondaryLessonCalendarName(calendar.summary),
+  )
+  if (secondary?.id) {
+    found.push({ id: secondary.id, summary: secondary.summary!.trim() })
   }
   return found
 }
@@ -685,8 +693,8 @@ export function findLessonCalendars(
 export function findLessonCalendarId(
   calendars: { id: string; summary?: string }[],
 ): { id: string; summary: string } | null {
-  const match = calendars.find(
-    (calendar) => calendar.summary?.trim() === GOOGLE_LESSON_CALENDAR_NAME,
+  const match = calendars.find((calendar) =>
+    isPrimaryLessonCalendarName(calendar.summary),
   )
   if (!match?.id) return null
   return { id: match.id, summary: match.summary!.trim() }

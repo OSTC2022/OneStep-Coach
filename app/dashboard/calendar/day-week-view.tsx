@@ -95,7 +95,7 @@ export function DayWeekView({
 
   if (isMobile) {
     return (
-      <div className="flex h-full min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-x-clip">
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-clip">
         <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
           <CalendarMobileWeek
             dates={dates}
@@ -144,7 +144,7 @@ export function DayWeekView({
 
         <div
           className={cn(
-            'min-h-0 overflow-hidden',
+            'min-h-0 w-full overflow-hidden',
             gridExpanded ? 'flex-1' : 'shrink-0',
           )}
         >
@@ -173,7 +173,7 @@ export function DayWeekView({
         <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
 
         <div
-          className="w-full shrink-0 self-start overflow-y-auto"
+          className="w-full shrink-0 overflow-y-auto"
           style={{ maxHeight: `${bottomPx}px` }}
         >
           <MonthDayPanel

@@ -13,7 +13,7 @@ import {
   syncGoogleCalendarLessons,
   upsertGoogleCalendarSyncRow,
 } from '@/lib/google-calendar/sync'
-import { GOOGLE_LESSON_CALENDAR_NAME } from '@/lib/google-calendar/config'
+import { isPrimaryLessonCalendarName, isSecondaryLessonCalendarName } from '@/lib/google-calendar/config'
 
 export async function connectGoogleCalendarFromOAuthCode(
   code: string,
@@ -34,17 +34,17 @@ export async function connectGoogleCalendarFromOAuthCode(
     const email = await fetchGoogleUserEmail(token.access_token)
     const calendars = await listGoogleCalendars(token.access_token)
     const lessonCalendars = findLessonCalendars(calendars)
-    const primaryCalendar = lessonCalendars.find(
-      (calendar) => calendar.summary === GOOGLE_LESSON_CALENDAR_NAME,
+    const primaryCalendar = lessonCalendars.find((calendar) =>
+      isPrimaryLessonCalendarName(calendar.summary),
     )
-    const secondaryCalendar = lessonCalendars.find(
-      (calendar) => calendar.summary !== GOOGLE_LESSON_CALENDAR_NAME,
+    const secondaryCalendar = lessonCalendars.find((calendar) =>
+      isSecondaryLessonCalendarName(calendar.summary),
     )
 
     if (!primaryCalendar) {
       return {
         error:
-          'Google 캘린더에서 "수업" 이름의 캘린더를 찾지 못했습니다. Google Calendar에 "수업" 캘린더를 만든 뒤 다시 연결해 주세요.',
+          'Google 캘린더에서 "수업" 또는 "수업1" 이름의 캘린더를 찾지 못했습니다. Google Calendar에 해당 캘린더를 만든 뒤 다시 연결해 주세요.',
       }
     }
 

@@ -2,8 +2,6 @@ import 'server-only'
 
 import {
   GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME,
-  GOOGLE_LESSON_CALENDAR_NAME,
-  GOOGLE_LESSON_CALENDAR_NAME_2,
 } from '@/lib/google-calendar/config'
 import type { GoogleCalendarSyncRow } from '@/lib/google-calendar/types'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -22,7 +20,7 @@ export async function buildGoogleCalendarInstructorResolver(
   const instructorNameByCalendarId = new Map<string, string>()
 
   if (row.calendar_id) {
-    const calendarName = row.calendar_name?.trim() || GOOGLE_LESSON_CALENDAR_NAME
+    const calendarName = row.calendar_name?.trim() ?? ''
     const instructorName = GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME[calendarName]
     if (instructorName) {
       instructorNameByCalendarId.set(row.calendar_id, instructorName)
@@ -30,7 +28,7 @@ export async function buildGoogleCalendarInstructorResolver(
   }
 
   if (row.calendar_id_2) {
-    const calendarName = row.calendar_name_2?.trim() || GOOGLE_LESSON_CALENDAR_NAME_2
+    const calendarName = row.calendar_name_2?.trim() ?? ''
     const instructorName = GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME[calendarName]
     if (instructorName) {
       instructorNameByCalendarId.set(row.calendar_id_2, instructorName)

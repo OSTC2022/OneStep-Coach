@@ -84,7 +84,24 @@ const WEEK_DAY_COLUMN_WIDTH_PX = 72
 
 function getDayColumnClass(multiDay: boolean) {
   if (!multiDay) return 'min-w-0 flex-1'
-  return 'min-w-0 flex-1 max-md:w-[72px] max-md:shrink-0 max-md:flex-none'
+  return 'min-w-0 max-md:w-[72px] max-md:shrink-0 max-md:flex-none md:min-w-0'
+}
+
+function getWeekRowClass(multiDay: boolean) {
+  if (!multiDay) return 'flex w-full min-w-full'
+  return cn(
+    'w-full min-w-full max-md:flex md:grid',
+  )
+}
+
+function getWeekRowStyle(
+  multiDay: boolean,
+  dayCount: number,
+): React.CSSProperties | undefined {
+  if (!multiDay) return undefined
+  return {
+    gridTemplateColumns: `3rem repeat(${dayCount}, minmax(0, 1fr))`,
+  }
 }
 
 function touchDistance(touches: TouchList) {
@@ -461,6 +478,8 @@ export function TimeGrid({
     ? TIME_GUTTER_WIDTH_PX + dates.length * WEEK_DAY_COLUMN_WIDTH_PX
     : undefined
   const dayColumnClass = getDayColumnClass(isMultiDay)
+  const weekRowClass = getWeekRowClass(isMultiDay)
+  const weekRowStyle = getWeekRowStyle(isMultiDay, dates.length)
   const zoomPercent = Math.round((hourHeight / DEFAULT_HOUR_HEIGHT) * 100)
 
   const zoomIn = useCallback(() => {
@@ -1318,7 +1337,11 @@ export function TimeGrid({
         >
           <div
             ref={dayHeaderRef}
-            className="sticky top-0 z-20 flex w-full shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm"
+            className={cn(
+              'sticky top-0 z-20 w-full shrink-0 border-b border-border bg-card max-md:bg-card md:bg-card/95 md:backdrop-blur-sm',
+              weekRowClass,
+            )}
+            style={weekRowStyle}
           >
             <div className="sticky left-0 z-30 w-12 shrink-0 border-r border-border bg-card max-md:bg-card md:bg-card/95" />
             {dates.map((date) => {
@@ -1399,7 +1422,7 @@ export function TimeGrid({
           </div>
 
           {!collapsed ? (
-          <div className="flex w-full min-w-full">
+          <div className={weekRowClass} style={weekRowStyle}>
           <div
             className="sticky left-0 z-10 w-12 shrink-0 border-r border-border bg-card relative"
             style={{ height: gridHeight }}

@@ -113,7 +113,7 @@ export function MonthView({
     <div
       ref={containerRef}
       className={cn(
-        'flex h-full min-h-0 w-full min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
+        'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
         isDragging && 'select-none',
       )}
     >
