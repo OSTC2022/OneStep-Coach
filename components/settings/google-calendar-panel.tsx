@@ -28,6 +28,32 @@ interface GoogleCalendarPanelProps {
   initialStatus: GoogleCalendarSyncStatus
 }
 
+function syncStatusLabel(status: GoogleCalendarSyncStatus['syncStatus']): string {
+  switch (status) {
+    case 'success':
+      return '성공'
+    case 'partial_success':
+      return '부분 성공'
+    case 'failure':
+      return '실패'
+    default:
+      return '-'
+  }
+}
+
+function syncStatusClass(status: GoogleCalendarSyncStatus['syncStatus']): string {
+  switch (status) {
+    case 'success':
+      return 'text-primary'
+    case 'partial_success':
+      return 'text-amber-600 dark:text-amber-400'
+    case 'failure':
+      return 'text-destructive'
+    default:
+      return 'text-muted-foreground'
+  }
+}
+
 export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -65,12 +91,16 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
       const nextStatus = await getGoogleCalendarSyncStatus()
       setStatus(nextStatus)
 
-      if (nextStatus.lastSyncError?.includes('복구했습니다')) {
-        toast.info('동기화 복구', { description: nextStatus.lastSyncError })
-      } else {
-        toast.success('동기화 완료', {
-          description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 기존 연결 ${result.data?.linked ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
+      const summary = `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 기존 연결 ${result.data?.linked ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}${
+        result.data?.deduped ? ` · 중복 정리 ${result.data.deduped}건` : ''
+      }`
+
+      if (result.warning) {
+        toast.warning('부분 동기화', {
+          description: `${result.warning}\n${summary}`,
         })
+      } else {
+        toast.success('동기화 완료', { description: summary })
       }
     } catch {
       toast.error('동기화 실패', {
@@ -184,16 +214,30 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Push 알림</dt>
+                  <dt className="text-muted-foreground">Push 알림 (웹훅)</dt>
                   <dd className="font-medium">
                     {status.watchActive ? '활성' : '비활성 / 갱신 필요'}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">마지막 동기화</dt>
+                  <dt className="text-muted-foreground">동기화 상태</dt>
+                  <dd className={`font-medium ${syncStatusClass(status.syncStatus)}`}>
+                    {syncStatusLabel(status.syncStatus)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">마지막 동기화 (전체 성공)</dt>
                   <dd className="font-medium">
                     {status.lastSyncedAt
                       ? format(parseISO(status.lastSyncedAt), 'M월 d일 HH:mm', { locale: ko })
+                      : '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">마지막 시도</dt>
+                  <dd className="font-medium">
+                    {status.lastSyncAttemptAt
+                      ? format(parseISO(status.lastSyncAttemptAt), 'M월 d일 HH:mm', { locale: ko })
                       : '-'}
                   </dd>
                 </div>
@@ -201,15 +245,7 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             ) : null}
 
             {status.lastSyncError ? (
-              <p
-                className={
-                  status.lastSyncError.includes('복구했습니다')
-                    ? 'mt-3 text-xs text-amber-600 dark:text-amber-400'
-                    : 'mt-3 text-xs text-destructive'
-                }
-              >
-                {status.lastSyncError}
-              </p>
+              <p className="mt-3 text-xs text-destructive">{status.lastSyncError}</p>
             ) : null}
 
             {status.pendingMemberCount > 0 ? (

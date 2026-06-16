@@ -1,3 +1,5 @@
+export type GoogleCalendarSyncStatusValue = 'success' | 'partial_success' | 'failure'
+
 export type GoogleCalendarSyncRow = {
   id: string
   connected_email: string | null
@@ -16,7 +18,10 @@ export type GoogleCalendarSyncRow = {
   watch_expiration_2: string | null
   sync_enabled: boolean
   last_synced_at: string | null
+  last_sync_attempt_at: string | null
   last_sync_error: string | null
+  sync_status: GoogleCalendarSyncStatusValue | null
+  sync_status_detail: string | null
   pending_member_count: number
   updated_at: string
 }
@@ -29,7 +34,10 @@ export type GoogleCalendarSyncStatus = {
   calendarNames: string[]
   syncEnabled: boolean
   lastSyncedAt: string | null
+  lastSyncAttemptAt: string | null
   lastSyncError: string | null
+  syncStatus: GoogleCalendarSyncStatusValue | null
+  syncStatusDetail: string | null
   pendingMemberCount: number
   watchActive: boolean
   watchExpiresAt: string | null
@@ -62,4 +70,6 @@ export type GoogleCalendarSyncResult = {
   cancelled: number
   pendingMember: number
   skipped: number
+  syncStatus?: GoogleCalendarSyncStatusValue
+  deduped?: number
 }

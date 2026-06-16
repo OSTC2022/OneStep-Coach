@@ -30,7 +30,10 @@ export async function getGoogleCalendarSyncStatus(): Promise<GoogleCalendarSyncS
       calendarNames: [],
       syncEnabled: false,
       lastSyncedAt: null,
+      lastSyncAttemptAt: null,
       lastSyncError: null,
+      syncStatus: null,
+      syncStatusDetail: null,
       pendingMemberCount: 0,
       watchActive: false,
       watchExpiresAt: null,
@@ -58,7 +61,10 @@ export async function getGoogleCalendarSyncStatus(): Promise<GoogleCalendarSyncS
     calendarNames,
     syncEnabled: row?.sync_enabled ?? false,
     lastSyncedAt: row?.last_synced_at ?? null,
+    lastSyncAttemptAt: row?.last_sync_attempt_at ?? null,
     lastSyncError: row?.last_sync_error ?? null,
+    syncStatus: row?.sync_status ?? null,
+    syncStatusDetail: row?.sync_status_detail ?? null,
     pendingMemberCount: row?.pending_member_count ?? 0,
     watchActive,
     watchExpiresAt,
@@ -84,6 +90,7 @@ export async function disconnectGoogleCalendar(): Promise<{ error?: string }> {
 export async function runGoogleCalendarSyncNow(): Promise<{
   data?: GoogleCalendarSyncResult
   error?: string
+  warning?: string
 }> {
   await requireRole(['admin'])
 
@@ -92,9 +99,18 @@ export async function runGoogleCalendarSyncNow(): Promise<{
     revalidatePath('/dashboard/settings/google-calendar')
     revalidatePath('/dashboard/calendar')
     revalidatePath('/dashboard')
+
+    if (data.syncStatus === 'partial_success') {
+      const row = await getGoogleCalendarSyncRow()
+      return {
+        data,
+        warning: row?.last_sync_error ?? '일부 캘린더만 동기화되었습니다.',
+      }
+    }
+
     return { data }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = formatGoogleCalendarSyncError(error)
     return { error: message }
   }
 }

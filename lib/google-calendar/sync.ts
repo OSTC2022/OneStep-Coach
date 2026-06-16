@@ -31,14 +31,48 @@ import {
   loadExistingByGoogleEventId,
   loadMemberNameMap,
 } from '@/lib/google-calendar/sync-apply'
+import { dedupeGoogleCalendarLessons } from '@/lib/google-calendar/sync-dedupe'
 import type {
   GoogleCalendarEvent,
   GoogleCalendarSyncResult,
   GoogleCalendarSyncRow,
+  GoogleCalendarSyncStatusValue,
 } from '@/lib/google-calendar/types'
 
 const SYNC_SELECT =
-  'id, connected_email, refresh_token, calendar_id, calendar_name, sync_token, watch_channel_id, watch_resource_id, watch_expiration, calendar_id_2, calendar_name_2, sync_token_2, watch_channel_id_2, watch_resource_id_2, watch_expiration_2, sync_enabled, last_synced_at, last_sync_error, pending_member_count, updated_at'
+  'id, connected_email, refresh_token, calendar_id, calendar_name, sync_token, watch_channel_id, watch_resource_id, watch_expiration, calendar_id_2, calendar_name_2, sync_token_2, watch_channel_id_2, watch_resource_id_2, watch_expiration_2, sync_enabled, last_synced_at, last_sync_attempt_at, last_sync_error, sync_status, sync_status_detail, pending_member_count, updated_at'
+
+const SYNC_ROW_DEFAULTS: Omit<GoogleCalendarSyncRow, 'id' | 'updated_at'> = {
+  connected_email: null,
+  refresh_token: null,
+  calendar_id: null,
+  calendar_name: null,
+  sync_token: null,
+  watch_channel_id: null,
+  watch_resource_id: null,
+  watch_expiration: null,
+  calendar_id_2: null,
+  calendar_name_2: null,
+  sync_token_2: null,
+  watch_channel_id_2: null,
+  watch_resource_id_2: null,
+  watch_expiration_2: null,
+  sync_enabled: false,
+  last_synced_at: null,
+  last_sync_attempt_at: null,
+  last_sync_error: null,
+  sync_status: null,
+  sync_status_detail: null,
+  pending_member_count: 0,
+}
+
+type SyncCalendarOutcome = {
+  calendarName: string
+  calendarId: string
+  ok: boolean
+  error?: string
+  fetched?: number
+}
 
 const MAX_FETCH_PAGES = 100
 
@@ -68,10 +102,33 @@ export async function getGoogleCalendarSyncRow(): Promise<GoogleCalendarSyncRow 
 
   if (error) {
     if (isMissingGoogleSyncTable(error)) return null
+    if (
+      error.message.includes('last_sync_attempt_at') ||
+      error.message.includes('sync_status')
+    ) {
+      const legacy = await supabase
+        .from('google_calendar_sync')
+        .select(
+          'id, connected_email, refresh_token, calendar_id, calendar_name, sync_token, watch_channel_id, watch_resource_id, watch_expiration, calendar_id_2, calendar_name_2, sync_token_2, watch_channel_id_2, watch_resource_id_2, watch_expiration_2, sync_enabled, last_synced_at, last_sync_error, pending_member_count, updated_at',
+        )
+        .eq('id', GOOGLE_CALENDAR_SYNC_ID)
+        .maybeSingle()
+      if (legacy.error) throw new Error(legacy.error.message)
+      if (!legacy.data) return null
+      return {
+        ...SYNC_ROW_DEFAULTS,
+        ...(legacy.data as GoogleCalendarSyncRow),
+        id: GOOGLE_CALENDAR_SYNC_ID,
+      }
+    }
     throw new Error(error.message)
   }
 
-  return (data as GoogleCalendarSyncRow | null) ?? null
+  if (!data) return null
+  return {
+    ...SYNC_ROW_DEFAULTS,
+    ...(data as GoogleCalendarSyncRow),
+  }
 }
 
 export async function upsertGoogleCalendarSyncRow(
@@ -79,31 +136,19 @@ export async function upsertGoogleCalendarSyncRow(
 ): Promise<GoogleCalendarSyncRow> {
   const supabase = createAdminClient()
   const current = await getGoogleCalendarSyncRow()
-  const payload = {
+
+  const payload: GoogleCalendarSyncRow = {
     id: GOOGLE_CALENDAR_SYNC_ID,
-    connected_email: patch.connected_email ?? current?.connected_email ?? null,
-    refresh_token: patch.refresh_token ?? current?.refresh_token ?? null,
-    calendar_id: patch.calendar_id ?? current?.calendar_id ?? null,
-    calendar_name: patch.calendar_name ?? current?.calendar_name ?? null,
-    sync_token: patch.sync_token ?? current?.sync_token ?? null,
-    watch_channel_id: patch.watch_channel_id ?? current?.watch_channel_id ?? null,
-    watch_resource_id: patch.watch_resource_id ?? current?.watch_resource_id ?? null,
-    watch_expiration: patch.watch_expiration ?? current?.watch_expiration ?? null,
-    calendar_id_2: patch.calendar_id_2 ?? current?.calendar_id_2 ?? null,
-    calendar_name_2: patch.calendar_name_2 ?? current?.calendar_name_2 ?? null,
-    sync_token_2: patch.sync_token_2 ?? current?.sync_token_2 ?? null,
-    watch_channel_id_2:
-      patch.watch_channel_id_2 ?? current?.watch_channel_id_2 ?? null,
-    watch_resource_id_2:
-      patch.watch_resource_id_2 ?? current?.watch_resource_id_2 ?? null,
-    watch_expiration_2:
-      patch.watch_expiration_2 ?? current?.watch_expiration_2 ?? null,
-    sync_enabled: patch.sync_enabled ?? current?.sync_enabled ?? false,
-    last_synced_at: patch.last_synced_at ?? current?.last_synced_at ?? null,
-    last_sync_error: patch.last_sync_error ?? current?.last_sync_error ?? null,
-    pending_member_count:
-      patch.pending_member_count ?? current?.pending_member_count ?? 0,
     updated_at: new Date().toISOString(),
+    ...(SYNC_ROW_DEFAULTS as Omit<GoogleCalendarSyncRow, 'id' | 'updated_at'>),
+    ...(current ?? {}),
+  }
+
+  for (const [key, value] of Object.entries(patch) as [
+    keyof Omit<GoogleCalendarSyncRow, 'id' | 'updated_at'>,
+    GoogleCalendarSyncRow[keyof GoogleCalendarSyncRow],
+  ][]) {
+    payload[key] = value as never
   }
 
   const { data, error } = await supabase
@@ -113,6 +158,34 @@ export async function upsertGoogleCalendarSyncRow(
     .single()
 
   if (error) {
+    if (isMissingGoogleSyncTable(error)) {
+      throw new Error(
+        'google_calendar_sync 테이블이 없습니다. supabase/add-google-calendar-sync.sql을 실행해 주세요.',
+      )
+    }
+    if (
+      error.message.includes('last_sync_attempt_at') ||
+      error.message.includes('sync_status')
+    ) {
+      const {
+        last_sync_attempt_at: _a,
+        sync_status: _b,
+        sync_status_detail: _c,
+        ...legacyPayload
+      } = payload
+      const legacyResult = await supabase
+        .from('google_calendar_sync')
+        .upsert(legacyPayload)
+        .select(
+          'id, connected_email, refresh_token, calendar_id, calendar_name, sync_token, watch_channel_id, watch_resource_id, watch_expiration, calendar_id_2, calendar_name_2, sync_token_2, watch_channel_id_2, watch_resource_id_2, watch_expiration_2, sync_enabled, last_synced_at, last_sync_error, pending_member_count, updated_at',
+        )
+        .single()
+      if (legacyResult.error) throw new Error(legacyResult.error.message)
+      return {
+        ...SYNC_ROW_DEFAULTS,
+        ...(legacyResult.data as GoogleCalendarSyncRow),
+      }
+    }
     throw new Error(error.message)
   }
 
@@ -267,6 +340,24 @@ async function refreshLessonCalendarIds(
   return upsertGoogleCalendarSyncRow(patch)
 }
 
+function buildSyncStatusMessage(outcomes: SyncCalendarOutcome[]): string {
+  const failed = outcomes.filter((item) => !item.ok)
+  if (failed.length === 0) return ''
+  const names = failed.map((item) => item.calendarName).join(', ')
+  const firstError = failed[0]?.error ?? '알 수 없는 오류'
+  if (failed.length === 1) {
+    return `「${names}」 캘린더 동기화 실패: ${firstError}`
+  }
+  return `「${names}」 캘린더 동기화 실패. ${firstError}`
+}
+
+function resolveSyncStatus(outcomes: SyncCalendarOutcome[]): GoogleCalendarSyncStatusValue {
+  const successCount = outcomes.filter((item) => item.ok).length
+  if (successCount === outcomes.length) return 'success'
+  if (successCount === 0) return 'failure'
+  return 'partial_success'
+}
+
 export async function syncGoogleCalendarLessons(options?: {
   reason?: string
 }): Promise<GoogleCalendarSyncResult> {
@@ -276,99 +367,177 @@ export async function syncGoogleCalendarLessons(options?: {
   }
 
   const supabase = createAdminClient()
+  const attemptAt = new Date().toISOString()
+
+  await upsertGoogleCalendarSyncRow({
+    last_sync_attempt_at: attemptAt,
+  })
+
+  const aggregated: GoogleCalendarSyncResult = {
+    created: 0,
+    updated: 0,
+    linked: 0,
+    cancelled: 0,
+    pendingMember: 0,
+    skipped: 0,
+  }
+
+  const syncTokenPatch: Partial<GoogleCalendarSyncRow> = {}
+  const calendarOutcomes: SyncCalendarOutcome[] = []
+  let deduped = 0
 
   try {
-    const aggregated: GoogleCalendarSyncResult = {
-      created: 0,
-      updated: 0,
-      linked: 0,
-      cancelled: 0,
-      pendingMember: 0,
-      skipped: 0,
-    }
-    const syncTokenPatch: Partial<GoogleCalendarSyncRow> = {}
-    let recoveredFromExpiredToken = false
+    deduped = await dedupeGoogleCalendarLessons()
+  } catch (error) {
+    console.warn(
+      '[google-calendar] dedupe skipped:',
+      error instanceof Error ? error.message : error,
+    )
+  }
 
+  const googleAccountId = row.connected_email ?? 'default'
+
+  try {
     await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
       row = await refreshLessonCalendarIds(row!, accessToken)
 
       const calendarsToSync: {
         calendarId: string
+        calendarName: string
         syncToken: string | null
         syncTokenKey: 'sync_token' | 'sync_token_2'
-      }[] = [{ calendarId: row.calendar_id!, syncToken: row.sync_token, syncTokenKey: 'sync_token' }]
+      }[] = [
+        {
+          calendarId: row.calendar_id!,
+          calendarName: row.calendar_name ?? '수업',
+          syncToken: row.sync_token,
+          syncTokenKey: 'sync_token',
+        },
+      ]
 
       if (row.calendar_id_2) {
         calendarsToSync.push({
           calendarId: row.calendar_id_2,
+          calendarName: row.calendar_name_2 ?? '수업2',
           syncToken: row.sync_token_2,
           syncTokenKey: 'sync_token_2',
         })
       }
 
       for (const calendar of calendarsToSync) {
-        const { events, nextSyncToken, recoveredFromExpiredToken: recovered } =
-          await fetchEventsForCalendar(accessToken, calendar.calendarId, {
-            syncToken: calendar.syncToken,
-            reason: options?.reason,
+        try {
+          const { events, nextSyncToken } = await fetchEventsForCalendar(
+            accessToken,
+            calendar.calendarId,
+            {
+              syncToken: calendar.syncToken,
+              reason: options?.reason,
+            },
+          )
+
+          const googleEventIds = events
+            .map((event) => event.id)
+            .filter((id): id is string => Boolean(id))
+
+          const [memberMap, existingMap] = await Promise.all([
+            loadMemberNameMap(supabase),
+            loadExistingByGoogleEventId(supabase, googleEventIds, {
+              googleAccountId,
+              googleCalendarId: calendar.calendarId,
+            }),
+          ])
+
+          const result = await applyGoogleEventsBatch(
+            supabase,
+            events,
+            memberMap,
+            existingMap,
+            calendar.calendarId,
+            googleAccountId,
+          )
+
+          aggregated.created += result.created
+          aggregated.updated += result.updated
+          aggregated.linked += result.linked
+          aggregated.cancelled += result.cancelled
+          aggregated.pendingMember += result.pendingMember
+          aggregated.skipped += result.skipped
+
+          if (nextSyncToken) {
+            syncTokenPatch[calendar.syncTokenKey] = nextSyncToken
+          }
+
+          calendarOutcomes.push({
+            calendarName: calendar.calendarName,
+            calendarId: calendar.calendarId,
+            ok: true,
+            fetched: events.length,
           })
 
-        if (recovered) {
-          recoveredFromExpiredToken = true
-        }
-
-        const googleEventIds = events
-          .map((event) => event.id)
-          .filter((id): id is string => Boolean(id))
-
-        const [memberMap, existingMap] = await Promise.all([
-          loadMemberNameMap(supabase),
-          loadExistingByGoogleEventId(supabase, googleEventIds),
-        ])
-
-        const result = await applyGoogleEventsBatch(
-          supabase,
-          events,
-          memberMap,
-          existingMap,
-          calendar.calendarId,
-        )
-
-        aggregated.created += result.created
-        aggregated.updated += result.updated
-        aggregated.linked += result.linked
-        aggregated.cancelled += result.cancelled
-        aggregated.pendingMember += result.pendingMember
-        aggregated.skipped += result.skipped
-
-        syncTokenPatch[calendar.syncTokenKey] = nextSyncToken
-
-        if (options?.reason) {
-          console.info('[google-calendar] sync complete', options.reason, {
+          if (options?.reason) {
+            console.info('[google-calendar] sync complete', options.reason, {
+              calendarId: calendar.calendarId,
+              ...result,
+              fetched: events.length,
+            })
+          }
+        } catch (error) {
+          const message = formatGoogleCalendarSyncError(error)
+          calendarOutcomes.push({
+            calendarName: calendar.calendarName,
             calendarId: calendar.calendarId,
-            ...result,
-            fetched: events.length,
-            reason: options?.reason,
+            ok: false,
+            error: message,
+          })
+          console.error('[google-calendar] calendar sync failed', {
+            calendarId: calendar.calendarId,
+            error: message,
           })
         }
       }
     })
 
+    const syncStatus = resolveSyncStatus(calendarOutcomes)
+    const allSucceeded = syncStatus === 'success'
     const pendingCount = await countPendingMemberLessons(supabase)
+
     await upsertGoogleCalendarSyncRow({
       ...syncTokenPatch,
-      last_synced_at: new Date().toISOString(),
-      last_sync_error: recoveredFromExpiredToken
-        ? '반복 일정 동기화 설정을 복구했습니다. 다시 동기화해주세요.'
-        : null,
+      ...(allSucceeded
+        ? { last_synced_at: new Date().toISOString(), last_sync_error: null }
+        : { last_sync_error: buildSyncStatusMessage(calendarOutcomes) }),
+      sync_status: syncStatus,
+      sync_status_detail: JSON.stringify({
+        succeeded: calendarOutcomes.filter((item) => item.ok).map((item) => item.calendarName),
+        failed: calendarOutcomes
+          .filter((item) => !item.ok)
+          .map((item) => ({ name: item.calendarName, error: item.error })),
+      }),
       pending_member_count: pendingCount,
     })
+
+    aggregated.syncStatus = syncStatus
+    aggregated.deduped = deduped
+
+    if (syncStatus === 'failure') {
+      throw new Error(buildSyncStatusMessage(calendarOutcomes))
+    }
 
     return aggregated
   } catch (error) {
     const message = formatGoogleCalendarSyncError(error)
     await upsertGoogleCalendarSyncRow({
       last_sync_error: message,
+      sync_status: 'failure',
+      sync_status_detail: JSON.stringify({
+        succeeded: calendarOutcomes.filter((item) => item.ok).map((item) => item.calendarName),
+        failed:
+          calendarOutcomes.length > 0
+            ? calendarOutcomes
+                .filter((item) => !item.ok)
+                .map((item) => ({ name: item.calendarName, error: item.error ?? message }))
+            : [{ name: '전체', error: message }],
+      }),
     })
     throw new Error(message)
   }

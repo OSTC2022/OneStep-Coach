@@ -54,6 +54,10 @@ export async function loadMemberNameMap(
 export async function loadExistingByGoogleEventId(
   supabase: ReturnType<typeof createAdminClient>,
   googleEventIds: string[],
+  options?: {
+    googleAccountId?: string | null
+    googleCalendarId?: string | null
+  },
 ): Promise<Map<string, ExistingLesson>> {
   const map = new Map<string, ExistingLesson>()
   if (googleEventIds.length === 0) return map
@@ -61,10 +65,19 @@ export async function loadExistingByGoogleEventId(
   const chunkSize = 200
   for (let offset = 0; offset < googleEventIds.length; offset += chunkSize) {
     const chunk = googleEventIds.slice(offset, offset + chunkSize)
-    const { data, error } = await supabase
+    let query = supabase
       .from('lessons')
-      .select('id, google_event_id, session_deducted, event_type')
+      .select('id, google_event_id, google_calendar_id, google_account_id, session_deducted, event_type')
       .in('google_event_id', chunk)
+
+    if (options?.googleAccountId) {
+      query = query.eq('google_account_id', options.googleAccountId)
+    }
+    if (options?.googleCalendarId) {
+      query = query.eq('google_calendar_id', options.googleCalendarId)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       if (error.message.includes('google_event_id')) return map
@@ -73,16 +86,125 @@ export async function loadExistingByGoogleEventId(
 
     for (const row of data ?? []) {
       if (!row.google_event_id) continue
-      map.set(row.google_event_id, {
-        id: row.id,
-        session_deducted: Boolean(row.session_deducted),
-        google_event_id: row.google_event_id,
-        event_type: row.event_type,
-      })
+      if (!map.has(row.google_event_id)) {
+        map.set(row.google_event_id, {
+          id: row.id,
+          session_deducted: Boolean(row.session_deducted),
+          google_event_id: row.google_event_id,
+          event_type: row.event_type,
+        })
+      }
     }
   }
 
   return map
+}
+
+async function findExistingByGoogleKey(
+  supabase: ReturnType<typeof createAdminClient>,
+  googleAccountId: string,
+  googleCalendarId: string,
+  googleEventId: string,
+): Promise<ExistingLesson | null> {
+  const { data, error } = await supabase
+    .from('lessons')
+    .select('id, google_event_id, session_deducted, event_type')
+    .eq('google_account_id', googleAccountId)
+    .eq('google_calendar_id', googleCalendarId)
+    .eq('google_event_id', googleEventId)
+    .maybeSingle()
+
+  if (error) {
+    if (
+      error.message.includes('google_account_id') ||
+      error.message.includes('google_calendar_id')
+    ) {
+      const { data: legacy } = await supabase
+        .from('lessons')
+        .select('id, google_event_id, session_deducted, event_type')
+        .eq('google_event_id', googleEventId)
+        .maybeSingle()
+      return legacy
+        ? {
+            id: legacy.id,
+            session_deducted: Boolean(legacy.session_deducted),
+            google_event_id: legacy.google_event_id,
+            event_type: legacy.event_type,
+          }
+        : null
+    }
+    throw new Error(error.message)
+  }
+
+  if (!data?.id) return null
+  return {
+    id: data.id,
+    session_deducted: Boolean(data.session_deducted),
+    google_event_id: data.google_event_id,
+    event_type: data.event_type,
+  }
+}
+
+async function upsertGoogleLessonRow(
+  supabase: ReturnType<typeof createAdminClient>,
+  payload: Record<string, unknown>,
+  googleAccountId: string,
+  calendarId: string,
+  existing?: ExistingLesson | null,
+): Promise<{ id: string; google_event_id: string; created: boolean }> {
+  const googleEventId = payload.google_event_id as string | undefined
+  if (!googleEventId) {
+    throw new Error('google_event_id is required for Google Calendar sync')
+  }
+
+  const rowPayload = {
+    ...payload,
+    google_account_id: googleAccountId,
+    google_calendar_id: calendarId,
+    lesson_type: '개인레슨',
+    session_deducted: false,
+  }
+
+  const resolvedExisting =
+    existing ??
+    (await findExistingByGoogleKey(supabase, googleAccountId, calendarId, googleEventId))
+
+  if (resolvedExisting) {
+    const { error } = await supabase
+      .from('lessons')
+      .update(rowPayload)
+      .eq('id', resolvedExisting.id)
+    if (error) throw new Error(error.message)
+    return { id: resolvedExisting.id, google_event_id: googleEventId, created: false }
+  }
+
+  const { data, error } = await supabase
+    .from('lessons')
+    .insert(rowPayload)
+    .select('id, google_event_id')
+    .single()
+
+  if (error) {
+    if (error.code === '23505' || error.message.includes('duplicate')) {
+      const dupe = await findExistingByGoogleKey(
+        supabase,
+        googleAccountId,
+        calendarId,
+        googleEventId,
+      )
+      if (dupe) {
+        const { error: updateError } = await supabase
+          .from('lessons')
+          .update(rowPayload)
+          .eq('id', dupe.id)
+        if (updateError) throw new Error(updateError.message)
+        return { id: dupe.id, google_event_id: googleEventId, created: false }
+      }
+    }
+    throw new Error(error.message)
+  }
+
+  return { id: data.id, google_event_id: data.google_event_id, created: true }
 }
 
 export async function loadExistingByGoogleRecurringInstance(
@@ -123,6 +245,18 @@ export async function loadExistingByGoogleRecurringInstance(
 
 function eventSortKey(event: GoogleCalendarEvent): string {
   return event.start?.dateTime ?? event.start?.date ?? ''
+}
+
+function withGoogleSyncKeys(
+  payload: Record<string, unknown>,
+  googleAccountId: string,
+  calendarId: string,
+): Record<string, unknown> {
+  return {
+    ...payload,
+    google_account_id: googleAccountId,
+    google_calendar_id: calendarId,
+  }
 }
 
 function buildGoogleLessonBase(
@@ -231,9 +365,12 @@ export async function applyGoogleEventsBatch(
   memberMap: Map<string, string>,
   existingMap: Map<string, ExistingLesson>,
   calendarId?: string,
+  googleAccountId?: string,
 ): Promise<GoogleCalendarSyncResult> {
   const result = emptySyncResult()
   const sorted = [...events].sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)))
+  const accountId = googleAccountId ?? 'default'
+  const calId = calendarId ?? ''
 
   for (let offset = 0; offset < sorted.length; offset += APPLY_BATCH_SIZE) {
     const chunk = sorted.slice(offset, offset + APPLY_BATCH_SIZE)
@@ -242,7 +379,8 @@ export async function applyGoogleEventsBatch(
       chunk,
       memberMap,
       existingMap,
-      calendarId,
+      calId,
+      accountId,
     )
     result.created += chunkResult.created
     result.updated += chunkResult.updated
@@ -401,7 +539,8 @@ async function applyGoogleEventsChunk(
   events: GoogleCalendarEvent[],
   memberMap: Map<string, string>,
   existingMap: Map<string, ExistingLesson>,
-  calendarId?: string,
+  calendarId: string,
+  googleAccountId: string,
 ): Promise<GoogleCalendarSyncResult> {
   const result = emptySyncResult()
 
@@ -467,7 +606,10 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
-      const { error } = await supabase.from('lessons').update(payload).eq('id', existing.id)
+      const { error } = await supabase
+        .from('lessons')
+        .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+        .eq('id', existing.id)
       if (error) throw new Error(error.message)
       result.updated += 1
       if (!memberId) result.pendingMember += 1
@@ -480,36 +622,32 @@ async function applyGoogleEventsChunk(
       continue
     }
 
-    const { data, error } = await supabase
-      .from('lessons')
-      .insert({ ...payload, lesson_type: '개인레슨', session_deducted: false })
-      .select('id, google_event_id')
-      .single()
+    const saved = await upsertGoogleLessonRow(
+      supabase,
+      payload,
+      googleAccountId,
+      calendarId,
+      existing,
+    )
 
-    if (error) {
-      if (error.message.includes('event_type')) {
-        result.skipped += 1
-        continue
-      }
-      throw new Error(error.message)
+    if (saved.created) {
+      result.created += 1
+    } else {
+      result.updated += 1
     }
-
-    result.created += 1
     if (!memberId) result.pendingMember += 1
-    if (data?.google_event_id) {
-      existingMap.set(data.google_event_id, {
-        id: data.id,
-        session_deducted: false,
-        google_event_id: data.google_event_id,
-        event_type: 'recurring_master',
-      })
-      await consolidateGoogleRecurringSeriesRows(supabase, {
-        masterGoogleEventId: event.id,
-        masterDbId: data.id,
-        recurrenceGroupId: googleRecurrenceGroupId(event.id),
-        instanceGoogleEventIds: skippedByMasterEventId.get(event.id) ?? [],
-      })
-    }
+    existingMap.set(saved.google_event_id, {
+      id: saved.id,
+      session_deducted: false,
+      google_event_id: saved.google_event_id,
+      event_type: 'recurring_master',
+    })
+    await consolidateGoogleRecurringSeriesRows(supabase, {
+      masterGoogleEventId: event.id,
+      masterDbId: saved.id,
+      recurrenceGroupId: googleRecurrenceGroupId(event.id),
+      instanceGoogleEventIds: skippedByMasterEventId.get(event.id) ?? [],
+    })
   }
 
   for (const event of exceptions) {
@@ -568,7 +706,10 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
-      const { error } = await supabase.from('lessons').update(payload).eq('id', existing.id)
+      const { error } = await supabase
+        .from('lessons')
+        .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+        .eq('id', existing.id)
       if (error) throw new Error(error.message)
       result.updated += 1
       continue
@@ -583,24 +724,40 @@ async function applyGoogleEventsChunk(
         .eq('original_start_time', originalStart)
         .maybeSingle()
       if (dupe?.id) {
-        await supabase.from('lessons').update(payload).eq('id', dupe.id)
+        await supabase
+          .from('lessons')
+          .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+          .eq('id', dupe.id)
         result.updated += 1
         continue
       }
     }
 
-    const { error } = await supabase
-      .from('lessons')
-      .insert({ ...payload, lesson_type: '개인레슨', session_deducted: false })
-
-    if (error) {
-      if (error.message.includes('event_type')) {
+    try {
+      const saved = await upsertGoogleLessonRow(
+        supabase,
+        payload,
+        googleAccountId,
+        calendarId,
+        existing,
+      )
+      if (saved.created) {
+        result.created += 1
+      } else {
+        result.updated += 1
+      }
+      existingMap.set(saved.google_event_id, {
+        id: saved.id,
+        session_deducted: false,
+        google_event_id: saved.google_event_id,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('event_type')) {
         result.skipped += 1
         continue
       }
-      throw new Error(error.message)
+      throw error
     }
-    result.created += 1
   }
 
   for (const event of singles) {
@@ -639,29 +796,35 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
-      const { error } = await supabase.from('lessons').update(payload).eq('id', existing.id)
+      const { error } = await supabase
+        .from('lessons')
+        .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+        .eq('id', existing.id)
       if (error) throw new Error(error.message)
       result.updated += 1
       if (!memberId) result.pendingMember += 1
       continue
     }
 
-    const { data, error } = await supabase
-      .from('lessons')
-      .insert({ ...payload, lesson_type: '개인레슨', session_deducted: false })
-      .select('id, google_event_id')
-      .single()
+    const saved = await upsertGoogleLessonRow(
+      supabase,
+      payload,
+      googleAccountId,
+      calendarId,
+      existing,
+    )
 
-    if (error) throw new Error(error.message)
-    result.created += 1
-    if (!memberId) result.pendingMember += 1
-    if (data?.google_event_id) {
-      existingMap.set(data.google_event_id, {
-        id: data.id,
-        session_deducted: false,
-        google_event_id: data.google_event_id,
-      })
+    if (saved.created) {
+      result.created += 1
+    } else {
+      result.updated += 1
     }
+    if (!memberId) result.pendingMember += 1
+    existingMap.set(saved.google_event_id, {
+      id: saved.id,
+      session_deducted: false,
+      google_event_id: saved.google_event_id,
+    })
   }
 
   return result

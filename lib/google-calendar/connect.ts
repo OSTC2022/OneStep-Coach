@@ -65,6 +65,9 @@ export async function connectGoogleCalendarFromOAuthCode(
       watch_resource_id_2: null,
       watch_expiration_2: null,
       last_sync_error: null,
+      sync_status: null,
+      sync_status_detail: null,
+      last_sync_attempt_at: null,
     })
 
     await ensureGoogleCalendarWatch()

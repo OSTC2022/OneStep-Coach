@@ -128,6 +128,7 @@ export interface Lesson {
   recurrence?: string[] | null
   recurring_master_id?: string | null
   google_calendar_id?: string | null
+  google_account_id?: string | null
   google_ical_uid?: string | null
   google_recurring_event_id?: string | null
   original_start_time?: string | null
