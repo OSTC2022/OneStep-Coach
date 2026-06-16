@@ -5,6 +5,7 @@ import {
   getGoogleOAuthClientSecret,
   getGoogleOAuthRedirectUri,
 } from '@/lib/google-calendar/config'
+import { GoogleCalendarApiError } from '@/lib/google-calendar/errors'
 import type {
   GoogleCalendarEvent,
   GoogleCalendarListEntry,
@@ -18,11 +19,28 @@ type GoogleTokenResponse = {
   refresh_token?: string
 }
 
-type GoogleEventsListResponse = {
+export type GoogleEventsListResponse = {
   items?: GoogleCalendarEvent[]
   nextSyncToken?: string
   nextPageToken?: string
 }
+
+export type GoogleEventsFullListQuery = {
+  mode: 'full'
+  timeMin: string
+  timeMax: string
+  pageToken?: string | null
+}
+
+export type GoogleEventsIncrementalListQuery = {
+  mode: 'incremental'
+  syncToken: string
+  pageToken?: string | null
+}
+
+export type GoogleEventsListQuery =
+  | GoogleEventsFullListQuery
+  | GoogleEventsIncrementalListQuery
 
 export async function exchangeGoogleOAuthCode(code: string): Promise<GoogleTokenResponse> {
   const body = new URLSearchParams({
@@ -100,7 +118,7 @@ async function googleFetch<T>(
 
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(`Google Calendar API 오류 (${response.status}): ${text}`)
+    throw new GoogleCalendarApiError(response.status, text)
   }
 
   if (response.status === 204) {
@@ -120,34 +138,36 @@ export async function listGoogleCalendars(
   return data.items ?? []
 }
 
+/**
+ * Google Calendar events.list
+ * - 증분(syncToken): syncToken + showDeleted + maxResults (+ pageToken) 만 사용
+ * - 전체: timeMin/timeMax + singleEvents=true + orderBy=startTime (+ pageToken)
+ */
 export async function listGoogleCalendarEvents(
   accessToken: string,
   calendarId: string,
-  options: {
-    syncToken?: string | null
-    pageToken?: string | null
-    timeMin?: string
-    timeMax?: string
-    updatedMin?: string
-    singleEvents?: boolean
-  },
+  query: GoogleEventsListQuery,
 ): Promise<GoogleEventsListResponse> {
   const params = new URLSearchParams({
-    showDeleted: 'true',
-    maxResults: '250',
+    maxResults: '2500',
   })
 
-  if (options.syncToken) {
-    params.set('syncToken', options.syncToken)
+  if (query.mode === 'incremental') {
+    params.set('syncToken', query.syncToken)
+    params.set('showDeleted', 'true')
+    if (query.pageToken) {
+      params.set('pageToken', query.pageToken)
+    }
   } else {
-    params.set('singleEvents', options.singleEvents === false ? 'false' : 'true')
-    if (options.timeMin) params.set('timeMin', options.timeMin)
-    if (options.timeMax) params.set('timeMax', options.timeMax)
-    if (options.updatedMin) params.set('updatedMin', options.updatedMin)
-  }
-
-  if (options.pageToken) {
-    params.set('pageToken', options.pageToken)
+    params.set('timeMin', query.timeMin)
+    params.set('timeMax', query.timeMax)
+    params.set('singleEvents', 'true')
+    params.set('orderBy', 'startTime')
+    params.set('sortOrder', 'ascending')
+    params.set('showDeleted', 'false')
+    if (query.pageToken) {
+      params.set('pageToken', query.pageToken)
+    }
   }
 
   const encodedCalendarId = encodeURIComponent(calendarId)

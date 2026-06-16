@@ -15,11 +15,16 @@ import {
   stopGoogleCalendarWatch,
   watchGoogleCalendarEvents,
   withGoogleAccessToken,
+  type GoogleEventsFullListQuery,
+  type GoogleEventsIncrementalListQuery,
 } from '@/lib/google-calendar/client'
+import {
+  formatGoogleCalendarSyncError,
+  isGoogleCalendarInvalidSyncQuery,
+} from '@/lib/google-calendar/errors'
 import {
   getGoogleRecentSyncWindow,
   getGoogleSyncTimeBounds,
-  getGoogleUpdatedSince,
 } from '@/lib/google-calendar/event-mapper'
 import {
   applyGoogleEventsBatch,
@@ -135,27 +140,16 @@ async function countPendingMemberLessons(
   return count ?? 0
 }
 
-function mergeGoogleEventsById(
-  ...lists: GoogleCalendarEvent[][]
-): GoogleCalendarEvent[] {
-  const map = new Map<string, GoogleCalendarEvent>()
-  for (const list of lists) {
-    for (const event of list) {
-      if (event.id) map.set(event.id, event)
-    }
-  }
-  return Array.from(map.values())
+type CalendarFetchResult = {
+  events: GoogleCalendarEvent[]
+  nextSyncToken: string | null
+  recoveredFromExpiredToken: boolean
 }
 
 async function paginateGoogleCalendarEvents(
   accessToken: string,
   calendarId: string,
-  query: {
-    timeMin?: string
-    timeMax?: string
-    updatedMin?: string
-    singleEvents?: boolean
-  },
+  query: GoogleEventsFullListQuery | GoogleEventsIncrementalListQuery,
 ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
   const events: GoogleCalendarEvent[] = []
   let pageToken: string | null = null
@@ -163,10 +157,9 @@ async function paginateGoogleCalendarEvents(
   let pages = 0
 
   do {
-    const response = await listGoogleCalendarEvents(accessToken, calendarId, {
-      pageToken,
-      ...query,
-    })
+    const pageQuery = { ...query, pageToken }
+
+    const response = await listGoogleCalendarEvents(accessToken, calendarId, pageQuery)
 
     events.push(...(response.items ?? []))
     pageToken = response.nextPageToken ?? null
@@ -185,53 +178,49 @@ async function paginateGoogleCalendarEvents(
   return { events, nextSyncToken }
 }
 
-async function fetchEventsForSync(
+async function fetchEventsFullSync(
   accessToken: string,
   calendarId: string,
-  options?: { reason?: string },
+  reason?: string,
 ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
   const bounds =
-    options?.reason === 'manual'
-      ? getGoogleSyncTimeBounds()
-      : getGoogleRecentSyncWindow()
+    reason === 'manual' ? getGoogleSyncTimeBounds() : getGoogleRecentSyncWindow()
 
-  const [windowResult, masterResult] = await Promise.all([
-    paginateGoogleCalendarEvents(accessToken, calendarId, {
-      timeMin: bounds.timeMin,
-      timeMax: bounds.timeMax,
-      singleEvents: true,
-    }),
-    paginateGoogleCalendarEvents(accessToken, calendarId, {
-      timeMin: bounds.timeMin,
-      timeMax: bounds.timeMax,
-      singleEvents: false,
-    }),
-  ])
+  return paginateGoogleCalendarEvents(accessToken, calendarId, {
+    mode: 'full',
+    timeMin: bounds.timeMin,
+    timeMax: bounds.timeMax,
+  })
+}
 
-  let recentEvents: GoogleCalendarEvent[] = []
-  let recentSyncToken: string | null = null
-  try {
-    const recentUpdates = await paginateGoogleCalendarEvents(accessToken, calendarId, {
-      updatedMin: getGoogleUpdatedSince(7),
-      singleEvents: false,
-    })
-    recentEvents = recentUpdates.events
-    recentSyncToken = recentUpdates.nextSyncToken
-  } catch (error) {
-    console.warn(
-      '[google-calendar] updatedMin fetch skipped:',
-      error instanceof Error ? error.message : error,
-    )
+async function fetchEventsForCalendar(
+  accessToken: string,
+  calendarId: string,
+  options: { syncToken?: string | null; reason?: string },
+): Promise<CalendarFetchResult> {
+  const forceFullSync = options.reason === 'manual' || !options.syncToken
+
+  if (!forceFullSync && options.syncToken) {
+    try {
+      const incremental = await paginateGoogleCalendarEvents(accessToken, calendarId, {
+        mode: 'incremental',
+        syncToken: options.syncToken,
+      })
+      return { ...incremental, recoveredFromExpiredToken: false }
+    } catch (error) {
+      if (!isGoogleCalendarInvalidSyncQuery(error)) {
+        throw error
+      }
+      console.info(
+        `[google-calendar] sync query invalid for ${calendarId}, retrying full sync`,
+      )
+      const full = await fetchEventsFullSync(accessToken, calendarId, options.reason)
+      return { ...full, recoveredFromExpiredToken: true }
+    }
   }
 
-  return {
-    events: mergeGoogleEventsById(
-      masterResult.events,
-      windowResult.events,
-      recentEvents,
-    ),
-    nextSyncToken: windowResult.nextSyncToken ?? recentSyncToken,
-  }
+  const full = await fetchEventsFullSync(accessToken, calendarId, options.reason)
+  return { ...full, recoveredFromExpiredToken: false }
 }
 
 function buildLessonCalendarPatch(
@@ -298,6 +287,7 @@ export async function syncGoogleCalendarLessons(options?: {
       skipped: 0,
     }
     const syncTokenPatch: Partial<GoogleCalendarSyncRow> = {}
+    let recoveredFromExpiredToken = false
 
     await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
       row = await refreshLessonCalendarIds(row!, accessToken)
@@ -317,11 +307,15 @@ export async function syncGoogleCalendarLessons(options?: {
       }
 
       for (const calendar of calendarsToSync) {
-        const { events, nextSyncToken } = await fetchEventsForSync(
-          accessToken,
-          calendar.calendarId,
-          { reason: options?.reason },
-        )
+        const { events, nextSyncToken, recoveredFromExpiredToken: recovered } =
+          await fetchEventsForCalendar(accessToken, calendar.calendarId, {
+            syncToken: calendar.syncToken,
+            reason: options?.reason,
+          })
+
+        if (recovered) {
+          recoveredFromExpiredToken = true
+        }
 
         const googleEventIds = events
           .map((event) => event.id)
@@ -364,17 +358,19 @@ export async function syncGoogleCalendarLessons(options?: {
     await upsertGoogleCalendarSyncRow({
       ...syncTokenPatch,
       last_synced_at: new Date().toISOString(),
-      last_sync_error: null,
+      last_sync_error: recoveredFromExpiredToken
+        ? '반복 일정 동기화 설정을 복구했습니다. 다시 동기화해주세요.'
+        : null,
       pending_member_count: pendingCount,
     })
 
     return aggregated
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = formatGoogleCalendarSyncError(error)
     await upsertGoogleCalendarSyncRow({
       last_sync_error: message,
     })
-    throw error
+    throw new Error(message)
   }
 }
 

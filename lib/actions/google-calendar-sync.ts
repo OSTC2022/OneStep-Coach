@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { formatGoogleCalendarSyncError } from '@/lib/google-calendar/errors'
 import { requireRole } from '@/lib/actions/auth'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import {
@@ -110,6 +111,6 @@ export async function refreshGoogleCalendarWatchAction(): Promise<{ error?: stri
     revalidatePath('/dashboard/settings/google-calendar')
     return {}
   } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) }
+    return { error: formatGoogleCalendarSyncError(error) }
   }
 }

@@ -65,9 +65,13 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
       const nextStatus = await getGoogleCalendarSyncStatus()
       setStatus(nextStatus)
 
-      toast.success('동기화 완료', {
-        description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 기존 연결 ${result.data?.linked ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
-      })
+      if (nextStatus.lastSyncError?.includes('복구했습니다')) {
+        toast.info('동기화 복구', { description: nextStatus.lastSyncError })
+      } else {
+        toast.success('동기화 완료', {
+          description: `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 기존 연결 ${result.data?.linked ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}`,
+        })
+      }
     } catch {
       toast.error('동기화 실패', {
         description: '요청 시간이 초과되었거나 연결이 끊어졌습니다. 잠시 후 다시 시도해 주세요.',
@@ -197,7 +201,15 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             ) : null}
 
             {status.lastSyncError ? (
-              <p className="mt-3 text-xs text-destructive">{status.lastSyncError}</p>
+              <p
+                className={
+                  status.lastSyncError.includes('복구했습니다')
+                    ? 'mt-3 text-xs text-amber-600 dark:text-amber-400'
+                    : 'mt-3 text-xs text-destructive'
+                }
+              >
+                {status.lastSyncError}
+              </p>
             ) : null}
 
             {status.pendingMemberCount > 0 ? (
