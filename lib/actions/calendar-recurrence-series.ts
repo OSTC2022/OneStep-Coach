@@ -10,8 +10,10 @@ import {
 import {
   buildVirtualLessonId,
   parseVirtualLessonId,
+  patternToRRuleLines,
   type RecurrenceCapableLesson,
 } from '@/lib/calendar-recurrence/types'
+import { parseLessonRecurrencePattern } from '@/lib/lesson-recurrence'
 import { parseGoogleOriginalStartIso } from '@/lib/calendar-recurrence/google-sync-mapper'
 import type { LessonSeriesScope } from '@/lib/actions/lessons'
 import { requireRole } from '@/lib/actions/auth'
@@ -150,12 +152,27 @@ export async function deleteRecurringMasterSeries(
 
   // future — remove this occurrence and all following
   const untilDate = dayBefore(occurrenceDate)
-  await supabase
+
+  let recurrenceLines = [...(row.recurrence ?? [])]
+  if (!recurrenceLines.some((line) => line.startsWith('RRULE:'))) {
+    const pattern = row.recurrence_pattern
+    if (pattern && pattern !== 'none') {
+      recurrenceLines = patternToRRuleLines(
+        parseLessonRecurrencePattern(pattern),
+        row.lesson_date,
+      )
+    }
+  }
+
+  const nextRecurrence = truncateRecurrenceUntil(recurrenceLines, untilDate)
+  const { error: truncateError } = await supabase
     .from('lessons')
-    .update({
-      recurrence: truncateRecurrenceUntil(row.recurrence, untilDate),
-    })
+    .update({ recurrence: nextRecurrence })
     .eq('id', masterId)
+
+  if (truncateError) return { error: truncateError.message }
+
+  deletedIds.push(buildVirtualLessonId(masterId, occurrenceDate))
 
   const { data: futureExceptions } = await supabase
     .from('lessons')
@@ -165,12 +182,50 @@ export async function deleteRecurringMasterSeries(
 
   if (futureExceptions?.length) {
     const ids = futureExceptions.map((item) => item.id)
-    await supabase.from('lessons').delete().in('id', ids)
+    await bulkDeleteByIds(supabase, ids)
     deletedIds.push(...ids)
   }
 
+  if (row.recurrence_group_id) {
+    const { data: groupRows } = await supabase
+      .from('lessons')
+      .select('id')
+      .eq('recurrence_group_id', row.recurrence_group_id)
+      .gte('lesson_date', occurrenceDate)
+      .neq('event_type', 'recurring_master')
+
+    const groupIds = (groupRows ?? [])
+      .map((item) => item.id)
+      .filter((id) => id !== masterId)
+    if (groupIds.length) {
+      await bulkDeleteByIds(supabase, groupIds)
+      deletedIds.push(...groupIds)
+    }
+  }
+
+  if (row.member_id) {
+    const startKey = (row.start_time ?? '').slice(0, 5)
+    const { data: slotRows } = await supabase
+      .from('lessons')
+      .select('id, start_time, event_type')
+      .eq('member_id', row.member_id)
+      .gte('lesson_date', occurrenceDate)
+
+    const slotDeleteIds: string[] = []
+    for (const slotRow of slotRows ?? []) {
+      if (slotRow.id === masterId) continue
+      if (slotRow.event_type === 'recurring_master') continue
+      if ((slotRow.start_time ?? '').slice(0, 5) !== startKey) continue
+      slotDeleteIds.push(slotRow.id)
+    }
+    if (slotDeleteIds.length) {
+      await bulkDeleteByIds(supabase, slotDeleteIds)
+      deletedIds.push(...slotDeleteIds)
+    }
+  }
+
   revalidateCalendarPaths()
-  return { deletedIds }
+  return { deletedIds: [...new Set(deletedIds)] }
 }
 
 export async function resolveRecurringDeleteTarget(

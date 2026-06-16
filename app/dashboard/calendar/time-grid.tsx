@@ -36,8 +36,9 @@ import {
   minutesToTimeString,
   minutesToTop,
   parseTimeToMinutes,
+  snapDragTop,
   toDateKey,
-  yToMinutes,
+  yToDragMinutes,
   type LessonDraft,
   type LessonEditAnchor,
 } from '@/lib/calendar-utils'
@@ -655,7 +656,15 @@ export function TimeGrid({
   }, [fitHourHeight])
 
   function getMinutesFromY(y: number) {
-    return yToMinutes(y, hourHeight)
+    return yToDragMinutes(y, hourHeight)
+  }
+
+  function getMaxDragTop(durationMin: number) {
+    const blockHeight = Math.max(
+      minutesToHeight(durationMin, hourHeight, minLessonHeight),
+      minLessonHeight,
+    )
+    return Math.max(0, gridHeight - blockHeight)
   }
 
   function findColumnAt(clientX: number) {
@@ -672,13 +681,20 @@ export function TimeGrid({
     return clientY - colEl.getBoundingClientRect().top
   }
 
-  function getPreviewFromPointer(clientX: number, clientY: number, grabOffsetY: number) {
+  function getPreviewFromPointer(
+    clientX: number,
+    clientY: number,
+    grabOffsetY: number,
+    durationMin = 60,
+  ) {
     const col = findColumnAt(clientX)
     if (col === -1) return null
     const y = getYInColumn(clientY, col)
     if (y == null) return null
-    const top = y - grabOffsetY
-    return { col, top: Math.max(0, Math.min(gridHeight - 24, top)) }
+    const maxTop = getMaxDragTop(durationMin)
+    const rawTop = y - grabOffsetY
+    const top = snapDragTop(rawTop, hourHeight, maxTop)
+    return { col, top }
   }
 
   function commitLessonUpdate(
@@ -711,6 +727,7 @@ export function TimeGrid({
         e.clientX,
         e.clientY,
         moveDrag.grabOffsetY,
+        moveDrag.durationMin,
       )
       if (preview) setMovePreview(preview)
     }
@@ -720,6 +737,7 @@ export function TimeGrid({
         e.clientX,
         e.clientY,
         moveDrag.grabOffsetY,
+        moveDrag.durationMin,
       )
       if (preview) {
         const startMin = getMinutesFromY(preview.top)
@@ -801,6 +819,7 @@ export function TimeGrid({
         e.clientX,
         e.clientY,
         lessonPress.grabOffsetY,
+        getLessonDurationMinutes(lessonPress.lesson),
       )
       setMovePreview(
         preview ?? { col: lessonPress.col, top: lessonPress.originTop },
@@ -944,9 +963,11 @@ export function TimeGrid({
       const duration = pendingAdjust.anchorEndMin - pendingAdjust.anchorStartMin
 
       if (pendingAdjust.mode === 'move') {
-        const top = Math.max(
-          0,
-          Math.min(gridHeight - 24, y - pendingAdjust.grabOffsetY),
+        const maxTop = getMaxDragTop(duration)
+        const top = snapDragTop(
+          y - pendingAdjust.grabOffsetY,
+          hourHeight,
+          maxTop,
         )
         let startMin = getMinutesFromY(top)
         let endMin = startMin + duration

@@ -40,6 +40,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
+import { formatBirthDateDisplay } from '@/lib/member-utils'
 
 const APPROVE_ROLES: { value: SettingsAssignableRole; label: string }[] = [
   { value: 'member', label: '회원' },
@@ -117,7 +118,7 @@ export function PendingApprovalsPanel({
       toast.error('강사 프로필을 선택해주세요.')
       return
     }
-    if (approveRole === 'member' && !memberId) {
+    if (approveRole === 'member' && !memberId && !selected.signupMemberId) {
       toast.error('연결할 센터 회원을 선택해주세요.')
       return
     }
@@ -127,7 +128,7 @@ export function PendingApprovalsPanel({
       selected.id,
       approveRole,
       approveRole === 'instructor' ? instructorId : null,
-      approveRole === 'member' ? memberId : null,
+      approveRole === 'member' ? memberId || selected.signupMemberId : null,
     )
     setBusy(false)
 
@@ -216,7 +217,7 @@ export function PendingApprovalsPanel({
                       className="cursor-pointer"
                       onClick={() => {
                         setSelectedId(row.id)
-                        setMemberId('')
+                        setMemberId(row.signupMemberId ?? '')
                         setApproveRole(
                           row.role === 'guardian'
                             ? 'guardian'
@@ -284,6 +285,35 @@ export function PendingApprovalsPanel({
                 <p className="text-xs text-muted-foreground mt-1">
                   신청: {selected.roleLabel}
                 </p>
+                {(selected.birth_date || selected.phone || selected.parent_phone) && (
+                  <dl className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                    {selected.birth_date ? (
+                      <div className="flex justify-between gap-2">
+                        <dt>생년월일</dt>
+                        <dd className="text-foreground tabular-nums">
+                          {formatBirthDateDisplay(selected.birth_date)}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {selected.phone ? (
+                      <div className="flex justify-between gap-2">
+                        <dt>개인 연락처</dt>
+                        <dd className="text-foreground">{selected.phone}</dd>
+                      </div>
+                    ) : null}
+                    {selected.parent_phone ? (
+                      <div className="flex justify-between gap-2">
+                        <dt>보호자 연락처</dt>
+                        <dd className="text-foreground">{selected.parent_phone}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                )}
+                {selected.signupMemberId ? (
+                  <p className="mt-2 text-[11px] text-primary">
+                    가입 시 입력한 회원 프로필이 자동 연결됩니다.
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-1.5">

@@ -77,6 +77,10 @@ function instructorSortLabel(
   return formatPrimaryInstructorName(member.primary_instructor)
 }
 
+function memberCreatedSortKey(member: Member): string {
+  return member.created_at ?? member.registered_at ?? ''
+}
+
 export async function sortMembersForList<
   T extends Member & { primary_instructor?: { id: string; name: string } | null },
 >(
@@ -92,9 +96,17 @@ export async function sortMembersForList<
       case 'recent_lesson': {
         const da = lastLessonByMember.get(a.id) ?? ''
         const db = lastLessonByMember.get(b.id) ?? ''
-        if (!da && !db) return a.name.localeCompare(b.name, 'ko') * dir
-        if (!da) return 1
-        if (!db) return -1
+        const hasA = Boolean(da)
+        const hasB = Boolean(db)
+
+        // 수업 이력 없음(신규) → 최근 등록 순으로 목록 상단
+        if (!hasA && !hasB) {
+          const cmp = memberCreatedSortKey(b).localeCompare(memberCreatedSortKey(a))
+          return cmp !== 0 ? cmp * dir : a.name.localeCompare(b.name, 'ko')
+        }
+        if (!hasA && hasB) return -1 * dir
+        if (hasA && !hasB) return 1 * dir
+
         const cmp = da.localeCompare(db)
         return cmp !== 0 ? cmp * dir : a.name.localeCompare(b.name, 'ko')
       }

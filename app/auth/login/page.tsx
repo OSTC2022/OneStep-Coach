@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from 'react'
 import { requestPasswordReset, signIn } from '@/lib/actions/auth'
 import { signUpPublic } from '@/lib/actions/auth-registration'
+import { BirthDateInput } from '@/components/members/birth-date-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,6 +21,7 @@ import { Loader2, Dumbbell } from 'lucide-react'
 export default function LoginPage() {
   const [tab, setTab] = useState('login')
   const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [signUpBirthDate, setSignUpBirthDate] = useState('')
   const [loginState, loginAction, loginPending] = useActionState(signIn, null)
   const [signUpState, signUpAction, signUpPending] = useActionState(signUpPublic, null)
   const [resetState, resetAction, resetPending] = useActionState(requestPasswordReset, null)
@@ -43,6 +45,7 @@ export default function LoginPage() {
         duration: 10000,
       })
       setTab('login')
+      setSignUpBirthDate('')
     }
   }, [signUpState])
 
@@ -81,6 +84,7 @@ export default function LoginPage() {
             onValueChange={(value) => {
               setTab(value)
               setShowForgotPassword(false)
+              if (value !== 'signup') setSignUpBirthDate('')
             }}
             className="w-full"
           >
@@ -199,6 +203,42 @@ export default function LoginPage() {
                     minLength={2}
                     disabled={signUpPending}
                     className="bg-input border-border"
+                  />
+                </div>
+                <BirthDateInput
+                  id="signup-birth_date"
+                  value={signUpBirthDate}
+                  onChange={setSignUpBirthDate}
+                />
+                <input type="hidden" name="birth_date" value={signUpBirthDate} />
+                <div className="space-y-2">
+                  <Label htmlFor="signup-phone">
+                    개인 연락처 <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="signup-phone"
+                    name="phone"
+                    type="tel"
+                    placeholder="010-1234-5678"
+                    required
+                    disabled={signUpPending}
+                    className="bg-input border-border"
+                    autoComplete="tel"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-parent-phone">
+                    보호자 연락처 <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="signup-parent-phone"
+                    name="parent_phone"
+                    type="tel"
+                    placeholder="010-9876-5432"
+                    required
+                    disabled={signUpPending}
+                    className="bg-input border-border"
+                    autoComplete="tel"
                   />
                 </div>
                 <div className="space-y-2">

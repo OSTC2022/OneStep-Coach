@@ -97,6 +97,7 @@ export async function disconnectGoogleCalendar(): Promise<{ error?: string }> {
 
   revalidatePath('/dashboard/settings/google-calendar')
   revalidatePath('/dashboard/calendar')
+  revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard')
 
   return {}
@@ -133,6 +134,7 @@ export async function runGoogleCalendarSyncNow(): Promise<{
     } finally {
       revalidatePath('/dashboard/settings/google-calendar')
       revalidatePath('/dashboard/calendar')
+      revalidatePath('/dashboard/lesson-status')
       revalidatePath('/dashboard')
     }
   })
@@ -173,6 +175,7 @@ export async function runGoogleCalendarFullResync(): Promise<{
     } finally {
       revalidatePath('/dashboard/settings/google-calendar')
       revalidatePath('/dashboard/calendar')
+      revalidatePath('/dashboard/lesson-status')
       revalidatePath('/dashboard')
     }
   })

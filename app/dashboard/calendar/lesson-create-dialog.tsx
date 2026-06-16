@@ -718,9 +718,15 @@ export function LessonCreateDialog({
 
       const deletedIds = result.deletedIds ?? []
       if (deletedIds.length === 0) {
+        if (scope === 'future') {
+          onDeleted?.([lesson.id])
+          toast.success('이후 반복 일정이 삭제되었습니다.')
+          handleOpenChange(false)
+          return
+        }
         toast.error('수업 삭제 실패', {
           description:
-            '삭제된 수업이 없습니다. Supabase에서 supabase/fix-lessons-recurrence-delete.sql 을 실행했는지 확인해주세요.',
+            '삭제된 수업이 없습니다. Supabase에서 supabase/fix-lessons-recurrence-delete.sql 을 실행했는지 확인하거나, 새로고침 후 다시 시도해주세요.',
         })
         return
       }

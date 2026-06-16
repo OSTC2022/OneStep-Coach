@@ -1,6 +1,6 @@
 import dynamic from 'next/dynamic'
 import { parseISO } from 'date-fns'
-import { getLessons } from '@/lib/actions/lessons'
+import { getLessonsForStatusView } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
 import { getMemberBodyWeightsForLessons } from '@/lib/actions/member-body-records'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
@@ -55,15 +55,13 @@ export default async function LessonStatusPage({
 
   const [lessons, instructors] = await Promise.all([
     viewMode === 'day'
-      ? getLessons({
+      ? getLessonsForStatusView({
           date: selectedDate,
           limit: LESSON_STATUS_LIMIT,
-          includeCheckIn: true,
         })
-      : getLessons({
+      : getLessonsForStatusView({
           ...lessonsQuery,
           limit: LESSON_STATUS_LIMIT,
-          includeCheckIn: true,
         }),
     getInstructors({
       isActive: true,

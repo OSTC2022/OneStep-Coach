@@ -19,6 +19,10 @@ import {
   parseRequiredEmail,
 } from '@/lib/auth-email'
 import { resolveApprovalStatus } from '@/lib/profile-approval'
+import {
+  parseBirthDateSlash,
+  resolveMemberAgeAndBirthDate,
+} from '@/lib/member-utils'
 import type { SettingsAssignableRole } from '@/lib/settings-accounts-types'
 
 export type PublicSignUpRole = 'member'
@@ -32,6 +36,60 @@ export type PendingAccountRow = {
   role: ProfileRole
   roleLabel: string
   created_at: string
+  birth_date?: string | null
+  phone?: string | null
+  parent_phone?: string | null
+  /** 가입 시 자동 생성된 회원 프로필 */
+  signupMemberId?: string | null
+}
+
+function normalizeSignupPhone(value: string, label: string): string | { error: string } {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return { error: `${label}을(를) 입력해주세요.` }
+  }
+  const digits = trimmed.replace(/\D/g, '')
+  if (digits.length < 9 || digits.length > 11) {
+    return { error: `${label} 형식이 올바르지 않습니다.` }
+  }
+  return trimmed
+}
+
+async function createSignupMemberProfile(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  payload: {
+    name: string
+    email: string
+    birth_date: string
+    phone: string
+    parent_phone: string
+  },
+): Promise<{ memberId?: string; error?: string }> {
+  const { birth_date, age } = resolveMemberAgeAndBirthDate(payload.birth_date)
+
+  const { data, error } = await admin
+    .from('members')
+    .insert({
+      name: payload.name,
+      birth_date,
+      age,
+      phone: payload.phone,
+      parent_phone: payload.parent_phone,
+      auth_user_id: userId,
+      invite_email: payload.email,
+      is_active: true,
+      memo: '로그인 화면 가입 신청 (승인 대기)',
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    console.error('createSignupMemberProfile:', error)
+    return { error: `회원 정보 저장 실패: ${error.message}` }
+  }
+
+  return { memberId: data.id as string }
 }
 
 export async function signUpPublic(
@@ -42,10 +100,31 @@ export async function signUpPublic(
   const password = formData.get('password') as string
   const passwordConfirm = formData.get('password_confirm') as string
   const requestedRole = (formData.get('role') as PublicSignUpRole) || 'member'
+  const birthDateRaw = (formData.get('birth_date') as string)?.trim() ?? ''
+  const birth_date = birthDateRaw.includes('-')
+    ? birthDateRaw
+    : parseBirthDateSlash(birthDateRaw)
+  const phoneResult = normalizeSignupPhone(
+    (formData.get('phone') as string) ?? '',
+    '개인 연락처',
+  )
+  const parentPhoneResult = normalizeSignupPhone(
+    (formData.get('parent_phone') as string) ?? '',
+    '보호자 연락처',
+  )
 
   if (!fullName || fullName.length < 2) {
     return { error: '이름을 2자 이상 입력해주세요.' }
   }
+
+  if (!birth_date) {
+    return { error: '생년월일을 yymmdd 형식(6자리)으로 입력해주세요.' }
+  }
+
+  if ('error' in phoneResult) return { error: phoneResult.error }
+  if ('error' in parentPhoneResult) return { error: parentPhoneResult.error }
+  const phone = phoneResult
+  const parent_phone = parentPhoneResult
 
   const emailResult = parseRequiredEmail(formData.get('email') as string)
   if (emailResult.error || !emailResult.email) {
@@ -83,6 +162,9 @@ export async function signUpPublic(
         full_name: fullName,
         role: requestedRole,
         approval_status: 'pending',
+        birth_date,
+        phone,
+        parent_phone,
       },
     })
 
@@ -112,6 +194,35 @@ export async function signUpPublic(
   })
   if (profileResult.error) {
     return { error: `가입 정보 저장 실패: ${profileResult.error}` }
+  }
+
+  const memberResult = await createSignupMemberProfile(admin, userId, {
+    name: fullName,
+    email: authEmail,
+    birth_date,
+    phone,
+    parent_phone,
+  })
+  if (memberResult.error) {
+    return { error: memberResult.error }
+  }
+
+  if (memberResult.memberId) {
+    try {
+      await admin.auth.admin.updateUserById(userId, {
+        user_metadata: {
+          full_name: fullName,
+          role: requestedRole,
+          approval_status: 'pending',
+          birth_date,
+          phone,
+          parent_phone,
+          signup_member_id: memberResult.memberId,
+        },
+      })
+    } catch (e) {
+      console.error('signUpPublic signup_member_id metadata:', e)
+    }
   }
 
   await admin.from('users').upsert(
@@ -161,26 +272,68 @@ export async function listPendingAccounts(): Promise<PendingAccountRow[]> {
     return []
   }
 
-  return (data ?? []).map((row) =>
-    mapPendingAccountRow({
-      id: row.id,
-      email: row.email,
-      full_name: row.full_name,
-      role: row.role as ProfileRole,
-      approval_status: row.approval_status as ProfileApprovalStatus,
-      created_at: row.created_at,
-    }),
-  )
+  const pendingRows = data ?? []
+  const authIds = pendingRows.map((row) => row.id)
+  const memberByAuthId = new Map<
+    string,
+    {
+      id: string
+      birth_date: string | null
+      phone: string | null
+      parent_phone: string | null
+    }
+  >()
+
+  if (authIds.length > 0) {
+    const { data: signupMembers } = await admin
+      .from('members')
+      .select('id, auth_user_id, birth_date, phone, parent_phone')
+      .in('auth_user_id', authIds)
+
+    for (const member of signupMembers ?? []) {
+      if (member.auth_user_id) {
+        memberByAuthId.set(member.auth_user_id, {
+          id: member.id,
+          birth_date: member.birth_date,
+          phone: member.phone,
+          parent_phone: member.parent_phone,
+        })
+      }
+    }
+  }
+
+  return pendingRows.map((row) => {
+    const linked = memberByAuthId.get(row.id)
+    return mapPendingAccountRow(
+      {
+        id: row.id,
+        email: row.email,
+        full_name: row.full_name,
+        role: row.role as ProfileRole,
+        approval_status: row.approval_status as ProfileApprovalStatus,
+        created_at: row.created_at,
+      },
+      linked,
+    )
+  })
 }
 
-function mapPendingAccountRow(row: {
-  id: string
-  email: string | null
-  full_name: string | null
-  role: ProfileRole
-  approval_status: ProfileApprovalStatus
-  created_at: string
-}): PendingAccountRow {
+function mapPendingAccountRow(
+  row: {
+    id: string
+    email: string | null
+    full_name: string | null
+    role: ProfileRole
+    approval_status: ProfileApprovalStatus
+    created_at: string
+  },
+  signupMember?: {
+    id: string
+    birth_date: string | null
+    phone: string | null
+    parent_phone: string | null
+  } | null,
+): PendingAccountRow {
   const appRole = profileRoleToAppRole(row.role)
   return {
     id: row.id,
@@ -197,6 +350,10 @@ function mapPendingAccountRow(row: {
             ? '강사'
             : '회원',
     created_at: row.created_at,
+    birth_date: signupMember?.birth_date ?? null,
+    phone: signupMember?.phone ?? null,
+    parent_phone: signupMember?.parent_phone ?? null,
+    signupMemberId: signupMember?.id ?? null,
   }
 }
 
@@ -260,11 +417,24 @@ export async function approveAccount(
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
 
-  if (role === 'member' && !memberId?.trim()) {
+  const admin = createAdminClient()
+  let resolvedMemberId = memberId?.trim() || null
+
+  if (role === 'member' && !resolvedMemberId) {
+    const { data: signupMember } = await admin
+      .from('members')
+      .select('id')
+      .eq('auth_user_id', userId)
+      .maybeSingle()
+    if (signupMember?.id) {
+      resolvedMemberId = signupMember.id
+    }
+  }
+
+  if (role === 'member' && !resolvedMemberId) {
     return { error: '회원 권한은 센터 회원 프로필을 선택해 연결해주세요.' }
   }
 
-  const admin = createAdminClient()
   const allProfiles = await fetchAllProfiles(admin)
   const profile = allProfiles.find((p) => p.id === userId)
 
@@ -362,7 +532,7 @@ export async function approveAccount(
     const { updateAccountRole } = await import('@/lib/actions/settings-accounts')
     const result = await updateAccountRole(userId, role, {
       skipApprovalCheck: true,
-      memberId: role === 'member' ? memberId : null,
+      memberId: role === 'member' ? resolvedMemberId : null,
     })
     if (result.error) return result
   }

@@ -293,6 +293,7 @@ export function useCalendarLessonHistory(
   }, [syncStacks])
 
   return {
+    pushCommand: push,
     pushLessonUpdate,
     pushLessonCreate,
     pushLessonDelete,

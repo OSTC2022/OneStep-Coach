@@ -18,6 +18,7 @@ import {
   deleteLesson,
   getLessonsForMonth,
   updateLesson,
+  updateLessonSeries,
 } from '@/lib/actions/lessons'
 import { useCalendarSelection } from '@/components/dashboard/calendar-selection-context'
 import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
@@ -778,11 +779,40 @@ export function LessonCalendar({
     const target = lessons.find((l) => l.id === lessonId)
     if (!target) return
 
-    const result = await updateLesson(target.id, {
+    const updates = {
       lesson_date: update.date,
       start_time: update.startTime,
       end_time: update.endTime,
-    })
+    }
+
+    const virtual = parseVirtualLessonId(target.id)
+    const usesSeriesUpdate =
+      virtual != null ||
+      Boolean(target.recurring_master_id) ||
+      isPersistedRecurringLesson(target)
+
+    if (usesSeriesUpdate) {
+      const result = await updateLessonSeries(
+        target.id,
+        updates,
+        'single',
+        virtual?.occurrenceDate ?? target.lesson_date,
+      )
+
+      if (result.error) {
+        toast.error('수업 일정 변경 실패', { description: result.error })
+        return
+      }
+
+      lessonHistory.pushLessonUpdate(target, { ...target, ...updates })
+      void syncRange(currentDate, view, { force: true, refreshing: true })
+      toast.message('수업 일정 이동', {
+        description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
+      })
+      return
+    }
+
+    const result = await updateLesson(target.id, updates)
 
     if (result.error) {
       toast.error('수업 일정 변경 실패', { description: result.error })

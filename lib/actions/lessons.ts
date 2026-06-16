@@ -24,6 +24,10 @@ import {
 } from '@/lib/lesson-recurrence'
 import { fetchExpandedCalendarLessons } from '@/lib/actions/calendar-lessons-range'
 import {
+  findDisplayableMemberSlotConflict,
+  purgeOrphanMemberSlotRows,
+} from '@/lib/actions/member-slot-conflict'
+import {
   deleteRecurringMasterSeries,
   resolveRecurringDeleteTarget,
 } from '@/lib/actions/calendar-recurrence-series'
@@ -36,7 +40,7 @@ import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import {
   findExistingLessonsByDates,
-  findMemberSlotConflict,
+  findMemberSlotRowIds,
   type LessonSlotIdentity,
 } from '@/lib/lesson-slot-utils'
 import {
@@ -569,13 +573,22 @@ async function assertMemberSlotAvailable(
   },
 ): Promise<{ error?: string }> {
   if (!params.memberId) return {}
-  const conflict = await findMemberSlotConflict(supabase, {
+
+  const conflict = await findDisplayableMemberSlotConflict({
     lessonDate: params.lessonDate,
     startTime: params.startTime,
     memberId: params.memberId,
     excludeLessonIds: params.excludeLessonIds,
   })
   if (conflict) return { error: MEMBER_SLOT_CONFLICT_MESSAGE }
+
+  await purgeOrphanMemberSlotRows(supabase, {
+    lessonDate: params.lessonDate,
+    startTime: params.startTime,
+    memberId: params.memberId,
+    excludeLessonIds: params.excludeLessonIds,
+  })
+
   return {}
 }
 
@@ -698,6 +711,56 @@ export async function getLessons(options?: {
     }
   }
   return lessons
+}
+
+async function attachCheckInSessions(lessons: Lesson[]): Promise<Lesson[]> {
+  const realIds = lessons
+    .map((lesson) => lesson.id)
+    .filter((id) => id && !id.startsWith('virt:'))
+
+  if (!realIds.length) return lessons
+
+  const supabase = await createStaffDataClient()
+  const { data, error } = await supabase
+    .from('lessons')
+    .select('id, lesson_sessions(checked_in_at)')
+    .in('id', realIds)
+
+  if (error || !data?.length) return lessons
+
+  const sessionsById = new Map(
+    data.map((row) => [
+      row.id as string,
+      (row.lesson_sessions ?? []) as Lesson['lesson_sessions'],
+    ]),
+  )
+
+  return lessons.map((lesson) => {
+    if (lesson.id.startsWith('virt:')) return lesson
+    const sessions = sessionsById.get(lesson.id)
+    if (!sessions) return lesson
+    return { ...lesson, lesson_sessions: sessions }
+  })
+}
+
+/** 수업현황 — 캘린더와 동일한 확장·중복 제거 로직 */
+export async function getLessonsForStatusView(options: {
+  date?: string
+  dateFrom?: string
+  dateTo?: string
+  limit?: number
+}): Promise<Lesson[]> {
+  const dateFrom = options.date ?? options.dateFrom
+  const dateTo = options.date ?? options.dateTo
+  if (!dateFrom || !dateTo) return []
+
+  const { lessons } = await fetchExpandedCalendarLessons(
+    dateFrom,
+    dateTo,
+    options.limit ?? 200,
+  )
+
+  return attachCheckInSessions(lessons.map(normalizeLessonRecord))
 }
 
 const CALENDAR_MONTH_LESSON_LIMIT = 400
@@ -1201,6 +1264,22 @@ export async function createRecurringLessons(
 
 export async function updateLesson(id: string, updates: Partial<LessonFormData>): Promise<LessonMutationResult> {
   await requireRole(['admin', 'instructor'])
+
+  const virtual = parseVirtualLessonId(id)
+  if (virtual) {
+    const seriesResult = await updateLessonSeries(
+      id,
+      updates,
+      'single',
+      virtual.occurrenceDate,
+    )
+    if (seriesResult.error) return { error: seriesResult.error }
+    return {
+      data: seriesResult.data?.[0],
+      warning: seriesResult.warning,
+    }
+  }
+
   const supabase = await lessonWriteClient()
 
   const { data: existing } = await supabase
@@ -1697,12 +1776,28 @@ export async function deleteLessonsInSeries(
     return { error: lessonError ?? '수업을 찾을 수 없습니다.' }
   }
 
-  const targetIds = await fetchSeriesSiblingIds(
+  let targetIds = await fetchSeriesSiblingIds(
     supabase,
     lesson,
     anchorDate,
     scope,
   )
+
+  if (
+    scope === 'single' &&
+    !virtual &&
+    !recurringTarget &&
+    lesson.member_id
+  ) {
+    const slotIds = await findMemberSlotRowIds(supabase, {
+      lessonDate: lesson.lesson_date,
+      startTime: lesson.start_time,
+      memberId: lesson.member_id,
+    })
+    if (slotIds.length > 0) {
+      targetIds = slotIds
+    }
+  }
 
   const uniqueTargetIds = [...new Set(targetIds)]
   if (uniqueTargetIds.length === 0) {

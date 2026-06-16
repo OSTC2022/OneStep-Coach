@@ -4,6 +4,7 @@ import { INSTRUCTOR_CALENDAR_COLORS } from '@/lib/instructor-colors'
 export const MEMBER_SPORT_OPTIONS = [
   '야구',
   '축구',
+  '육상',
   '농구',
   '테니스',
   '골프',
@@ -327,6 +328,7 @@ export function formatMemberCalendarLabel(
 export const MEMBER_SPORT_COLORS: Record<string, string> = {
   야구: '#38BDF8',
   축구: '#10B981',
+  육상: '#FB923C',
   농구: '#F59E0B',
   테니스: '#FB7185',
   골프: '#818CF8',

@@ -57,6 +57,11 @@ export function masterHasOccurrenceOnDate(
   date: string,
 ): boolean {
   if (master.lesson_date > date) return false
+
+  if (exdateKeysFromRecurrence(master.recurrence).has(date)) {
+    return false
+  }
+
   const rule = buildRRuleFromMaster(master)
   if (!rule) return master.lesson_date === date
   const from = parseISO(`${date}T00:00:00`)
@@ -120,6 +125,29 @@ export function collapseSlotDuplicateLessons(lessons: Lesson[]): Lesson[] {
     if (dateCmp !== 0) return dateCmp
     return (a.start_time ?? '').localeCompare(b.start_time ?? '')
   })
+}
+
+function recurringGroupSlotOccurrenceKey(
+  master: RecurrenceCapableLesson,
+  occurrenceDate: string,
+): string | null {
+  const memberKey = memberSlotIdentityKey(master as Lesson)
+  if (!memberKey) return null
+  const groupId = master.recurrence_group_id ?? master.id
+  const start = (master.start_time ?? '').slice(0, 5)
+  return `${groupId}|${occurrenceDate}|${start}|${memberKey}`
+}
+
+function shouldPreferRecurringMasterForOccurrence(
+  candidate: RecurrenceCapableLesson,
+  incumbent: RecurrenceCapableLesson,
+  occurrenceDate: string,
+): boolean {
+  const candidateStart = candidate.lesson_date
+  const incumbentStart = incumbent.lesson_date
+  if (candidateStart <= occurrenceDate && incumbentStart > occurrenceDate) return true
+  if (candidateStart > occurrenceDate && incumbentStart <= occurrenceDate) return false
+  return candidateStart > incumbentStart
 }
 
 function buildRRuleFromMaster(master: RecurrenceCapableLesson): RRule | null {
@@ -231,6 +259,33 @@ export function expandRecurringMastersForRange(
   }
 
   const expanded: Lesson[] = []
+  const virtualByGroupSlot = new Map<
+    string,
+    { master: RecurrenceCapableLesson; lesson: Lesson }
+  >()
+
+  function considerVirtual(
+    master: RecurrenceCapableLesson,
+    lesson: Lesson,
+  ) {
+    const slotKey = recurringGroupSlotOccurrenceKey(master, lesson.lesson_date)
+    if (!slotKey) {
+      expanded.push(lesson)
+      return
+    }
+
+    const existing = virtualByGroupSlot.get(slotKey)
+    if (
+      !existing ||
+      shouldPreferRecurringMasterForOccurrence(
+        master,
+        existing.master,
+        lesson.lesson_date,
+      )
+    ) {
+      virtualByGroupSlot.set(slotKey, { master, lesson })
+    }
+  }
 
   for (const master of masters) {
     if (!isRecurringMaster(master)) continue
@@ -266,13 +321,15 @@ export function expandRecurringMastersForRange(
 
       if (exception) {
         const merged = applyException(base, exception)
-        if (merged) expanded.push(merged)
+        if (merged) considerVirtual(master, merged)
         continue
       }
 
-      expanded.push(base)
+      considerVirtual(master, base)
     }
   }
+
+  expanded.push(...virtualByGroupSlot.values().map((entry) => entry.lesson))
 
   return expanded
 }

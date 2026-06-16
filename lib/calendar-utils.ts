@@ -768,6 +768,8 @@ export const MIN_HOUR_HEIGHT = 32
 export const MAX_HOUR_HEIGHT = 140
 export const HOUR_HEIGHT_ZOOM_STEP = 6
 export const SLOT_MINUTES = 15
+/** 드래그 이동·리사이즈 격자 (분) */
+export const DRAG_SNAP_MINUTES = 5
 export const WEEK_STARTS_ON = 1 as const
 
 export function toDateKey(date: Date): string {
@@ -798,6 +800,25 @@ export function yToMinutes(y: number, hourHeight = DEFAULT_HOUR_HEIGHT): number 
     Math.min(CALENDAR_END_HOUR * 60, raw),
   )
   return snapMinutes(clamped)
+}
+
+/** 드래그 이동·리사이즈 — 5분 단위 스냅 */
+export function yToDragMinutes(y: number, hourHeight = DEFAULT_HOUR_HEIGHT): number {
+  const raw = CALENDAR_START_HOUR * 60 + (y / hourHeight) * 60
+  const clamped = Math.max(
+    CALENDAR_START_HOUR * 60,
+    Math.min(CALENDAR_END_HOUR * 60, raw),
+  )
+  return snapMinutes(clamped, DRAG_SNAP_MINUTES)
+}
+
+export function snapDragTop(
+  top: number,
+  hourHeight = DEFAULT_HOUR_HEIGHT,
+  maxTop = Number.POSITIVE_INFINITY,
+): number {
+  const snapped = minutesToTop(yToDragMinutes(top, hourHeight), hourHeight)
+  return Math.max(0, Math.min(maxTop, snapped))
 }
 
 export function getGridHeight(hourHeight = DEFAULT_HOUR_HEIGHT): number {

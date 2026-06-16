@@ -73,7 +73,9 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
       }
 
       toast.success(member ? '회원 정보가 수정되었습니다.' : '새 회원이 추가되었습니다.')
-      router.push('/dashboard/members')
+      router.push(
+        member ? `/dashboard/members/${member.id}` : '/dashboard/members?sort=recent_lesson',
+      )
     } catch {
       toast.error('오류가 발생했습니다.')
     } finally {

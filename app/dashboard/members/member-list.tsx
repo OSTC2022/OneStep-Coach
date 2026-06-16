@@ -270,9 +270,28 @@ export function MemberList({
 
     if (result.data) {
       setIsAddDialogOpen(false)
+      setSortField('recent_lesson')
+      setSortAsc(false)
       setCurrentPage(1)
-      skipFetchRef.current = false
-      void loadMembers()
+      setPageLoading(true)
+      try {
+        const { data, count } = await getMembers({
+          orderBy: 'recent_lesson',
+          orderAsc: false,
+          limit: pageSize,
+          offset: 0,
+          search: debouncedSearch || undefined,
+          isActive:
+            statusFilter === 'all'
+              ? undefined
+              : statusFilter === 'active',
+        })
+        setMembers(data)
+        setListTotalCount(count)
+      } finally {
+        setPageLoading(false)
+      }
+      skipFetchRef.current = true
       setFormData({
         name: '',
         birth_date: '',

@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   format,
   addDays,
@@ -15,7 +16,17 @@ import {
 } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { Lesson, Instructor, AttendanceStatus } from '@/types/database'
-import { getLessons } from '@/lib/actions/lessons'
+import { getLessonsForStatusView, updateLesson } from '@/lib/actions/lessons'
+import {
+  getGoogleCalendarSyncStatus,
+  runGoogleCalendarSyncNow,
+} from '@/lib/actions/google-calendar-sync'
+import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
+import { isEditableTarget, matchCalendarUndoRedo } from '@/lib/calendar-shortcuts'
+import {
+  lessonAttendanceLocalPatch,
+  restoreLessonAttendanceSnapshot,
+} from '@/lib/lesson-status-attendance-restore'
 import {
   cancelLessonCompletion,
   clearLessonAttendanceCheck,
@@ -80,6 +91,9 @@ import {
   ListChecks,
   Loader2,
   Pencil,
+  Redo2,
+  RefreshCw,
+  Undo2,
 } from 'lucide-react'
 import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
 import { LessonStatusWeightInput } from '@/components/lesson-status/lesson-status-weight-input'
@@ -913,14 +927,19 @@ export function LessonStatusView({
   isAdmin = false,
   initialBodyWeightByKey = EMPTY_BODY_WEIGHT_BY_KEY,
 }: LessonStatusViewProps) {
+  const router = useRouter()
   const [currentDate, setCurrentDate] = useState(selectedDate)
   const [viewMode, setViewMode] = useState<LessonStatusViewMode>(initialViewMode)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const [lessons, setLessons] = useState(() =>
     sortLessonsForStatusDisplay(initialLessons, instructors),
   )
+  const lessonHistory = useCalendarLessonHistory(setLessons)
+  const clearHistoryRef = useRef(lessonHistory.clear)
+  clearHistoryRef.current = lessonHistory.clear
   const [isUpdating, setIsUpdating] = useState<string | null>(null)
   const [isLoadingDate, setIsLoadingDate] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const quickRegisterPanelRef = useRef<HTMLDivElement>(null)
   const [bodyWeightByKey, setBodyWeightByKey] = useState(initialBodyWeightByKey)
   const bodyWeightSeedRef = useRef(initialBodyWeightByKey)
@@ -939,6 +958,7 @@ export function LessonStatusView({
     setCurrentDate(selectedDate)
     setViewMode(initialViewMode)
     setLessons(sortLessonsForStatusDisplay(initialLessons, instructors))
+    clearHistoryRef.current()
   }, [selectedDate, initialViewMode, initialLessons, instructors])
 
   useEffect(() => {
@@ -1028,9 +1048,8 @@ export function LessonStatusView({
       setIsLoadingDate(true)
       try {
         if (mode === 'day') {
-          const nextLessons = await getLessons({
+          const nextLessons = await getLessonsForStatusView({
             date: anchorDate,
-            includeCheckIn: true,
           })
           setLessons(sortLessonsForStatusDisplay(nextLessons, instructors))
           return
@@ -1039,20 +1058,86 @@ export function LessonStatusView({
           parseISO(anchorDate),
           getRangeViewForMode(mode),
         )
-        const nextLessons = await getLessons({
+        const nextLessons = await getLessonsForStatusView({
           dateFrom,
           dateTo,
-          includeCheckIn: true,
         })
         setLessons(sortLessonsForStatusDisplay(nextLessons, instructors))
       } catch {
         toast.error('수업 목록을 불러오지 못했습니다.')
       } finally {
         setIsLoadingDate(false)
+        clearHistoryRef.current()
       }
     },
     [instructors],
   )
+
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing || isLoadingDate) return
+    setIsRefreshing(true)
+    try {
+      if (isAdmin) {
+        const syncResult = await runGoogleCalendarSyncNow()
+        if (syncResult.error && syncResult.started !== false) {
+          toast.error('캘린더 동기화 실패', { description: syncResult.error })
+        } else if (syncResult.started) {
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 2000))
+            const status = await getGoogleCalendarSyncStatus()
+            if (!status.isSyncing) break
+          }
+        }
+      }
+
+      await loadLessons(currentDate, viewMode)
+      router.refresh()
+      toast.success('새로고침 완료', {
+        description: isAdmin
+          ? 'Google 캘린더와 동기화한 뒤 일정을 다시 불러왔습니다.'
+          : '캘린더와 동일한 일정을 다시 불러왔습니다.',
+      })
+    } catch {
+      toast.error('새로고침 실패', {
+        description: '일정을 다시 불러오지 못했습니다.',
+      })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [
+    isRefreshing,
+    isLoadingDate,
+    isAdmin,
+    loadLessons,
+    currentDate,
+    viewMode,
+    router,
+  ])
+
+  const undoRef = useRef(lessonHistory.undo)
+  undoRef.current = lessonHistory.undo
+  const redoRef = useRef(lessonHistory.redo)
+  redoRef.current = lessonHistory.redo
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (isEditableTarget(e.target)) return
+
+      const undoRedo = matchCalendarUndoRedo(e)
+      if (undoRedo === 'undo' && lessonHistory.canUndo && !e.repeat) {
+        e.preventDefault()
+        void undoRef.current()
+        return
+      }
+      if (undoRedo === 'redo' && lessonHistory.canRedo && !e.repeat) {
+        e.preventDefault()
+        void redoRef.current()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [lessonHistory.canUndo, lessonHistory.canRedo])
 
   const navigatePeriod = useCallback(
     async (offset: -1 | 1) => {
@@ -1100,6 +1185,9 @@ export function LessonStatusView({
   )
 
   const handleStatusChange = useCallback(async (lessonId: string, status: AttendanceStatus) => {
+    const before = lessons.find((lesson) => lesson.id === lessonId)
+    if (!before) return
+
     setIsUpdating(lessonId)
     const result = await updateLessonAttendanceStatus(lessonId, status)
     setIsUpdating(null)
@@ -1109,7 +1197,7 @@ export function LessonStatusView({
       return
     }
 
-    updateLessonInPlace(lessonId, {
+    const localPatch: Partial<Lesson> = {
       ...(result.data ?? {}),
       attendance_status: status,
       ...(status === 'present'
@@ -1117,11 +1205,40 @@ export function LessonStatusView({
         : status === 'cancelled'
           ? { lesson_sessions: [] }
           : {}),
+    }
+
+    updateLessonInPlace(lessonId, localPatch)
+
+    const beforeSnap = structuredClone(before)
+    lessonHistory.pushCommand({
+      undo: async () => {
+        const restore = await restoreLessonAttendanceSnapshot(beforeSnap)
+        if (restore.error) {
+          toast.error('실행 취소 실패', { description: restore.error })
+          return
+        }
+        updateLessonInPlace(lessonId, lessonAttendanceLocalPatch(beforeSnap))
+      },
+      redo: async () => {
+        const redoResult = await updateLessonAttendanceStatus(lessonId, status)
+        if (redoResult.error) {
+          toast.error('다시 실행 실패', { description: redoResult.error })
+          return
+        }
+        updateLessonInPlace(lessonId, localPatch)
+      },
     })
-  }, [updateLessonInPlace])
+
+    toast.message('출석 상태 변경', {
+      description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
+    })
+  }, [lessons, updateLessonInPlace, lessonHistory])
 
   const handleClearAttendanceCheck = useCallback(
     async (lessonId: string) => {
+      const before = lessons.find((lesson) => lesson.id === lessonId)
+      if (!before) return
+
       setIsUpdating(lessonId)
       const result = await clearLessonAttendanceCheck(lessonId)
       setIsUpdating(null)
@@ -1131,16 +1248,45 @@ export function LessonStatusView({
         return
       }
 
-      updateLessonInPlace(lessonId, {
+      const localPatch: Partial<Lesson> = {
         attendance_status: 'present',
         lesson_sessions: [],
         session_deducted: false,
+      }
+
+      updateLessonInPlace(lessonId, localPatch)
+
+      const beforeSnap = structuredClone(before)
+      lessonHistory.pushCommand({
+        undo: async () => {
+          const restore = await restoreLessonAttendanceSnapshot(beforeSnap)
+          if (restore.error) {
+            toast.error('실행 취소 실패', { description: restore.error })
+            return
+          }
+          updateLessonInPlace(lessonId, lessonAttendanceLocalPatch(beforeSnap))
+        },
+        redo: async () => {
+          const redoResult = await clearLessonAttendanceCheck(lessonId)
+          if (redoResult.error) {
+            toast.error('다시 실행 실패', { description: redoResult.error })
+            return
+          }
+          updateLessonInPlace(lessonId, localPatch)
+        },
+      })
+
+      toast.message('출석 체크 취소', {
+        description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
       })
     },
-    [updateLessonInPlace],
+    [lessons, updateLessonInPlace, lessonHistory],
   )
 
   const handleGuestStatusChange = useCallback(async (lessonId: string, action: GuestLessonAction) => {
+    const before = lessons.find((lesson) => lesson.id === lessonId)
+    if (!before) return
+
     setIsUpdating(lessonId)
     const result = await markGuestLessonStatus(lessonId, action)
     setIsUpdating(null)
@@ -1150,13 +1296,50 @@ export function LessonStatusView({
       return
     }
 
-    if (result.data) {
-      updateLessonInPlace(lessonId, {
-        lesson_type: result.data.lesson_type,
-        attendance_status: result.data.attendance_status,
-      })
+    if (!result.data) return
+
+    const localPatch: Partial<Lesson> = {
+      lesson_type: result.data.lesson_type,
+      attendance_status: result.data.attendance_status,
     }
-  }, [updateLessonInPlace])
+
+    updateLessonInPlace(lessonId, localPatch)
+
+    const beforeSnap = structuredClone(before)
+    lessonHistory.pushCommand({
+      undo: async () => {
+        const undoResult = await updateLesson(beforeSnap.id, {
+          lesson_type: beforeSnap.lesson_type,
+          attendance_status: beforeSnap.attendance_status,
+        })
+        if (undoResult.error) {
+          toast.error('실행 취소 실패', { description: undoResult.error })
+          return
+        }
+        updateLessonInPlace(lessonId, {
+          lesson_type: beforeSnap.lesson_type,
+          attendance_status: beforeSnap.attendance_status,
+        })
+      },
+      redo: async () => {
+        const redoResult = await markGuestLessonStatus(lessonId, action)
+        if (redoResult.error) {
+          toast.error('다시 실행 실패', { description: redoResult.error })
+          return
+        }
+        if (redoResult.data) {
+          updateLessonInPlace(lessonId, {
+            lesson_type: redoResult.data.lesson_type,
+            attendance_status: redoResult.data.attendance_status,
+          })
+        }
+      },
+    })
+
+    toast.message('미등록 수업 처리', {
+      description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
+    })
+  }, [lessons, updateLessonInPlace, lessonHistory])
 
   const panelProps = {
     instructors,
@@ -1295,7 +1478,7 @@ export function LessonStatusView({
             variant={viewMode === 'list' ? 'default' : 'outline'}
             size="sm"
             className="h-8 shrink-0 px-3 text-xs font-semibold"
-            disabled={isLoadingDate}
+            disabled={isLoadingDate || isRefreshing}
             onClick={() => void handleViewModeChange('list')}
           >
             <ListChecks className="mr-1 h-3.5 w-3.5" />
@@ -1309,7 +1492,7 @@ export function LessonStatusView({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                disabled={isLoadingDate}
+                disabled={isLoadingDate || isRefreshing}
                 onClick={() => void navigatePeriod(-1)}
                 aria-label="이전"
               >
@@ -1320,7 +1503,7 @@ export function LessonStatusView({
                 variant={isToday ? 'default' : 'outline'}
                 size="sm"
                 className="h-8 min-w-[52px] px-2.5 text-xs font-semibold"
-                disabled={isLoadingDate || isToday}
+                disabled={isLoadingDate || isRefreshing || isToday}
                 onClick={() => void goToToday()}
               >
                 오늘
@@ -1330,11 +1513,65 @@ export function LessonStatusView({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                disabled={isLoadingDate}
+                disabled={isLoadingDate || isRefreshing}
                 onClick={() => void navigatePeriod(1)}
                 aria-label="다음"
               >
                 <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={isLoadingDate || isRefreshing}
+                onClick={() => void handleRefresh()}
+                title="캘린더 일정 새로고침"
+                aria-label="캘린더 일정 새로고침"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!lessonHistory.canUndo || isLoadingDate || isRefreshing}
+                onClick={() => void lessonHistory.undo()}
+                title={
+                  lessonHistory.canUndo
+                    ? `실행 취소 (${lessonHistory.undoCount}단계 · Ctrl+Z)`
+                    : '실행 취소'
+                }
+                aria-label={
+                  lessonHistory.canUndo
+                    ? `실행 취소 ${lessonHistory.undoCount}단계`
+                    : '실행 취소'
+                }
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!lessonHistory.canRedo || isLoadingDate || isRefreshing}
+                onClick={() => void lessonHistory.redo()}
+                title={
+                  lessonHistory.canRedo
+                    ? `다시 실행 (${lessonHistory.redoCount}단계 · Ctrl+Y)`
+                    : '다시 실행'
+                }
+                aria-label={
+                  lessonHistory.canRedo
+                    ? `다시 실행 ${lessonHistory.redoCount}단계`
+                    : '다시 실행'
+                }
+              >
+                <Redo2 className="h-4 w-4" />
               </Button>
             </div>
 
@@ -1343,7 +1580,7 @@ export function LessonStatusView({
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left text-sm font-semibold transition-colors hover:bg-muted"
-                  disabled={isLoadingDate}
+                  disabled={isLoadingDate || isRefreshing}
                 >
                   {periodLabel}
                   <span className="text-xs font-medium text-muted-foreground">

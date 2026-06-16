@@ -225,6 +225,36 @@ export async function findMemberSlotConflict(
   return null
 }
 
+/** 같은 날·같은 시작 시각·같은 회원 슬롯의 저장된 수업 id (recurring_master 제외) */
+export async function findMemberSlotRowIds(
+  supabase: SupabaseClient,
+  params: {
+    lessonDate: string
+    startTime?: string | null
+    memberId: string
+    excludeLessonIds?: string[]
+  },
+): Promise<string[]> {
+  const exclude = new Set(params.excludeLessonIds ?? [])
+  const startKey = params.startTime?.slice(0, 5) ?? ''
+
+  const { data, error } = await supabase
+    .from('lessons')
+    .select('id, start_time, event_type')
+    .eq('lesson_date', params.lessonDate)
+    .eq('member_id', params.memberId)
+    .neq('event_type', 'recurring_master')
+
+  if (error || !data) return []
+
+  return data
+    .filter((row) => {
+      if (exclude.has(row.id)) return false
+      return (row.start_time?.slice(0, 5) ?? '') === startKey
+    })
+    .map((row) => row.id)
+}
+
 /** Google 반복 시리즈 ID → UUID 형식 recurrence_group_id */
 export function googleRecurrenceGroupId(recurringEventId: string): string {
   const hash = createHash('sha256')
