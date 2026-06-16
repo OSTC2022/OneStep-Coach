@@ -206,12 +206,11 @@ async function fetchEventsForSync(
     paginateGoogleCalendarEvents(accessToken, calendarId, {
       updatedMin: getGoogleUpdatedSince(7),
       orderBy: 'updated',
-      singleEvents: true,
+      singleEvents: false,
     }),
     paginateGoogleCalendarEvents(accessToken, calendarId, {
       timeMin: bounds.timeMin,
       timeMax: bounds.timeMax,
-      orderBy: 'startTime',
       singleEvents: false,
     }),
   ])

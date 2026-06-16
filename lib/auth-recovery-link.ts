@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createAuthEmailClient } from '@/lib/supabase/auth-email-client'
 import {
   getAppSmtpConfig,
   sendPasswordResetEmailViaSmtp,
@@ -64,7 +65,7 @@ export function formatRecoveryEmailError(message?: string): string {
   }
   if (lower.includes('smtp env not configured')) {
     return (
-      '.env.local에 Gmail SMTP 설정이 없습니다. SMTP_HOST, SMTP_USER, SMTP_PASS를 추가하고 npm run dev를 재시작하세요.'
+      '메일 발송 설정이 없습니다. Vercel(또는 .env.local)에 SMTP_HOST, SMTP_USER, SMTP_PASS를 설정하거나 Supabase Dashboard → Authentication → SMTP를 설정해주세요.'
     )
   }
   if (message) {
@@ -133,26 +134,31 @@ export async function sendPasswordRecoveryEmail(
   email: string,
 ): Promise<{ sent: boolean; error?: string; via?: 'app-smtp' | 'supabase' }> {
   const smtpConfig = getAppSmtpConfig()
-  if (!smtpConfig) {
-    return {
-      sent: false,
-      error:
-        'SMTP env not configured — .env.local에 SMTP_HOST, SMTP_USER, SMTP_PASS를 추가하고 dev 서버를 재시작하세요.',
+
+  if (smtpConfig) {
+    const resetLink = await generatePasswordRecoveryLink(email)
+    if (resetLink) {
+      const smtpResult = await sendPasswordResetEmailViaSmtp(email, resetLink)
+      if (smtpResult.sent) {
+        return { sent: true, via: 'app-smtp' }
+      }
+      console.warn(
+        '[auth-recovery] app SMTP failed, falling back to Supabase email:',
+        smtpResult.error,
+      )
     }
   }
 
-  const resetLink = await generatePasswordRecoveryLink(email)
-  if (!resetLink) {
-    return {
-      sent: false,
-      error:
-        '재설정 링크를 만들 수 없습니다. SUPABASE_SERVICE_ROLE_KEY와 Redirect URL을 확인해주세요.',
+  try {
+    const anon = createAuthEmailClient()
+    const redirectTo = getRecoveryEmailRedirectUrl(getSiteUrl())
+    const { error } = await anon.auth.resetPasswordForEmail(email, { redirectTo })
+    if (!error) {
+      return { sent: true, via: 'supabase' }
     }
+    return { sent: false, error: error.message }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { sent: false, error: message }
   }
-
-  const smtpResult = await sendPasswordResetEmailViaSmtp(email, resetLink)
-  if (smtpResult.sent) {
-    return { sent: true, via: 'app-smtp' }
-  }
-  return { sent: false, error: smtpResult.error }
 }

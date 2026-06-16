@@ -145,11 +145,15 @@ export async function listGoogleCalendarEvents(
     if (options.timeMin) params.set('timeMin', options.timeMin)
     if (options.timeMax) params.set('timeMax', options.timeMax)
     if (options.updatedMin) params.set('updatedMin', options.updatedMin)
-    if (options.orderBy) {
-      params.set('orderBy', options.orderBy)
-      if (options.orderBy === 'startTime') {
-        params.set('sortOrder', 'ascending')
-      }
+    if (options.orderBy === 'startTime') {
+      params.set('orderBy', 'startTime')
+      params.set('sortOrder', 'ascending')
+      params.set('singleEvents', 'true')
+    } else if (options.orderBy === 'updated') {
+      params.set('orderBy', 'updated')
+      params.set('singleEvents', 'false')
+    } else if (options.singleEvents === false) {
+      params.set('singleEvents', 'false')
     }
   }
 
