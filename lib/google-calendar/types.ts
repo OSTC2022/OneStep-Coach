@@ -1,4 +1,18 @@
-export type GoogleCalendarSyncStatusValue = 'success' | 'partial_success' | 'failure'
+export type GoogleCalendarSyncStatusValue =
+  | 'syncing'
+  | 'success'
+  | 'partial_success'
+  | 'failure'
+
+export type GoogleCalendarSyncRunStats = {
+  processed: number
+  created: number
+  updated: number
+  pendingMember: number
+  cancelled: number
+  skipped: number
+  deduped?: number
+}
 
 export type GoogleCalendarSyncRow = {
   id: string
@@ -38,6 +52,8 @@ export type GoogleCalendarSyncStatus = {
   lastSyncError: string | null
   syncStatus: GoogleCalendarSyncStatusValue | null
   syncStatusDetail: string | null
+  runStats: GoogleCalendarSyncRunStats | null
+  isSyncing: boolean
   pendingMemberCount: number
   watchActive: boolean
   watchExpiresAt: string | null

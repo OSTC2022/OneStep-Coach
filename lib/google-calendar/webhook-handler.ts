@@ -8,7 +8,7 @@ import {
 
 export async function handleGoogleCalendarWebhookSync(): Promise<void> {
   await ensureGoogleCalendarWatch()
-  await syncGoogleCalendarLessons({ reason: 'webhook' })
+  await syncGoogleCalendarLessons({ reason: 'webhook', skipDedupe: true })
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard')
 }

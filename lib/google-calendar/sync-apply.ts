@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
+import type { MemberLookup } from '@/lib/google-calendar/member-matcher'
 import { googleRecurrenceGroupId } from '@/lib/lesson-slot-utils'
 import {
   googleRecurrenceToPattern,
@@ -19,36 +19,62 @@ import {
 import type { GoogleCalendarEvent, GoogleCalendarSyncResult } from '@/lib/google-calendar/types'
 
 export const MAX_EVENTS_PER_SYNC = 100
-const UPDATE_CHUNK_SIZE = 12
+const BULK_UPSERT_SIZE = 50
 const APPLY_BATCH_SIZE = 100
 
+async function bulkUpsertLessonRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: Record<string, unknown>[],
+): Promise<void> {
+  if (rows.length === 0) return
+
+  for (let offset = 0; offset < rows.length; offset += BULK_UPSERT_SIZE) {
+    const chunk = rows.slice(offset, offset + BULK_UPSERT_SIZE)
+    const { error } = await supabase.from('lessons').upsert(chunk, {
+      onConflict: 'google_account_id,google_calendar_id,google_event_id',
+    })
+
+    if (error) {
+      if (
+        error.message.includes('google_account_id') ||
+        error.message.includes('on_conflict') ||
+        error.code === '42P10'
+      ) {
+        for (const row of chunk) {
+          await upsertGoogleLessonRow(
+            supabase,
+            row,
+            row.google_account_id as string,
+            row.google_calendar_id as string,
+          )
+        }
+        continue
+      }
+      throw new Error(error.message)
+    }
+  }
+}
+
+async function bulkCancelLessonIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  ids: string[],
+) {
+  if (ids.length === 0) return
+  const unique = [...new Set(ids)]
+  for (let offset = 0; offset < unique.length; offset += BULK_UPSERT_SIZE) {
+    const chunk = unique.slice(offset, offset + BULK_UPSERT_SIZE)
+    const { error } = await supabase
+      .from('lessons')
+      .update({ attendance_status: 'cancelled', event_status: 'cancelled' })
+      .in('id', chunk)
+    if (error) throw new Error(error.message)
+  }
+}
 type ExistingLesson = {
   id: string
   session_deducted: boolean
   google_event_id?: string | null
   event_type?: string | null
-}
-
-export async function loadMemberNameMap(
-  supabase: ReturnType<typeof createAdminClient>,
-): Promise<Map<string, string>> {
-  const { data, error } = await supabase.from('members').select('id, name')
-  if (error) throw new Error(error.message)
-
-  const nameCounts = new Map<string, number>()
-  for (const row of data ?? []) {
-    const name = row.name?.trim()
-    if (!name) continue
-    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1)
-  }
-
-  const map = new Map<string, string>()
-  for (const row of data ?? []) {
-    const name = row.name?.trim()
-    if (!name || nameCounts.get(name) !== 1) continue
-    map.set(name, row.id)
-  }
-  return map
 }
 
 export async function loadExistingByGoogleEventId(
@@ -362,7 +388,7 @@ function emptySyncResult(): GoogleCalendarSyncResult {
 export async function applyGoogleEventsBatch(
   supabase: ReturnType<typeof createAdminClient>,
   events: GoogleCalendarEvent[],
-  memberMap: Map<string, string>,
+  memberLookup: MemberLookup,
   existingMap: Map<string, ExistingLesson>,
   calendarId?: string,
   googleAccountId?: string,
@@ -377,7 +403,7 @@ export async function applyGoogleEventsBatch(
     const chunkResult = await applyGoogleEventsChunk(
       supabase,
       chunk,
-      memberMap,
+      memberLookup,
       existingMap,
       calId,
       accountId,
@@ -537,12 +563,22 @@ async function consolidateGoogleRecurringSeriesRows(
 async function applyGoogleEventsChunk(
   supabase: ReturnType<typeof createAdminClient>,
   events: GoogleCalendarEvent[],
-  memberMap: Map<string, string>,
+  memberLookup: MemberLookup,
   existingMap: Map<string, ExistingLesson>,
   calendarId: string,
   googleAccountId: string,
 ): Promise<GoogleCalendarSyncResult> {
   const result = emptySyncResult()
+  const masterIdCache = new Map<string, string | null>()
+
+  async function resolveMasterIdCached(recurringEventId: string): Promise<string | null> {
+    if (masterIdCache.has(recurringEventId)) {
+      return masterIdCache.get(recurringEventId) ?? null
+    }
+    const masterId = await resolveMasterIdByGoogleRecurringEventId(supabase, recurringEventId)
+    masterIdCache.set(recurringEventId, masterId)
+    return masterId
+  }
 
   const masters = events.filter(isGoogleRecurringMaster)
   const exceptions = events.filter(
@@ -591,8 +627,7 @@ async function applyGoogleEventsChunk(
     }
 
     const title = normalizeGoogleEventTitle(event.summary)
-    const memberName = extractMemberNameFromCalendarLabel(title)
-    const memberId = memberMap.get(memberName.trim()) ?? null
+    const memberId = memberLookup.resolveMemberId(title)
     const payload = buildMasterPayload(event, memberId, title, calendarId)
     if (!payload) {
       result.skipped += 1
@@ -653,12 +688,8 @@ async function applyGoogleEventsChunk(
   for (const event of exceptions) {
     if (!event.id || !event.recurringEventId) continue
     const title = normalizeGoogleEventTitle(event.summary)
-    const memberName = extractMemberNameFromCalendarLabel(title)
-    const memberId = memberMap.get(memberName.trim()) ?? null
-    const masterId = await resolveMasterIdByGoogleRecurringEventId(
-      supabase,
-      event.recurringEventId,
-    )
+    const memberId = memberLookup.resolveMemberId(title)
+    const masterId = await resolveMasterIdCached(event.recurringEventId)
 
     if (isGoogleEventCancelled(event) && masterId) {
       const schedule = parseGoogleEventDateTime(event)
@@ -760,6 +791,9 @@ async function applyGoogleEventsChunk(
     }
   }
 
+  const singleUpsertRows: Record<string, unknown>[] = []
+  const singleCancelIds: string[] = []
+
   for (const event of singles) {
     if (!event.id) continue
     if (shouldSkipGoogleExpandedInstance(event)) {
@@ -770,11 +804,7 @@ async function applyGoogleEventsChunk(
     const existing = existingMap.get(event.id)
     if (isGoogleEventCancelled(event)) {
       if (existing && !existing.session_deducted) {
-        await supabase
-          .from('lessons')
-          .update({ attendance_status: 'cancelled', event_status: 'cancelled' })
-          .eq('id', existing.id)
-        result.cancelled += 1
+        singleCancelIds.push(existing.id)
       } else {
         result.skipped += 1
       }
@@ -782,8 +812,7 @@ async function applyGoogleEventsChunk(
     }
 
     const title = normalizeGoogleEventTitle(event.summary)
-    const memberName = extractMemberNameFromCalendarLabel(title)
-    const memberId = memberMap.get(memberName.trim()) ?? null
+    const memberId = memberLookup.resolveMemberId(title)
     const payload = buildSinglePayload(event, memberId, title, calendarId)
     if (!payload) {
       result.skipped += 1
@@ -796,36 +825,35 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
-      const { error } = await supabase
-        .from('lessons')
-        .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
-        .eq('id', existing.id)
-      if (error) throw new Error(error.message)
       result.updated += 1
       if (!memberId) result.pendingMember += 1
-      continue
+    } else {
+      result.created += 1
+      if (!memberId) result.pendingMember += 1
     }
 
-    const saved = await upsertGoogleLessonRow(
-      supabase,
-      payload,
-      googleAccountId,
-      calendarId,
-      existing,
+    singleUpsertRows.push(
+      withGoogleSyncKeys(
+        {
+          ...payload,
+          lesson_type: '개인레슨',
+          session_deducted: false,
+        },
+        googleAccountId,
+        calendarId,
+      ),
     )
 
-    if (saved.created) {
-      result.created += 1
-    } else {
-      result.updated += 1
-    }
-    if (!memberId) result.pendingMember += 1
-    existingMap.set(saved.google_event_id, {
-      id: saved.id,
+    existingMap.set(event.id, {
+      id: existing?.id ?? event.id,
       session_deducted: false,
-      google_event_id: saved.google_event_id,
+      google_event_id: event.id,
     })
   }
+
+  await bulkCancelLessonIds(supabase, singleCancelIds)
+  result.cancelled += singleCancelIds.length
+  await bulkUpsertLessonRows(supabase, singleUpsertRows)
 
   return result
 }

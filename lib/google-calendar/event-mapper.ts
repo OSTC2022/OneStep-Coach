@@ -83,18 +83,14 @@ function toKstDayBoundaryIso(date: Date, endOfDay = false): string {
 export function getGoogleSyncTimeBounds() {
   const now = new Date()
   return {
-    timeMin: toKstDayBoundaryIso(addCalendarDays(now, -90)),
-    timeMax: toKstDayBoundaryIso(addCalendarDays(now, 365), true),
+    timeMin: toKstDayBoundaryIso(addCalendarDays(now, -30)),
+    timeMax: toKstDayBoundaryIso(addCalendarDays(now, 180), true),
   }
 }
 
-/** Push·자동 동기화 — 최근 일정 위주 (과거 45일 ~ 앞으로 1년) */
+/** @deprecated 전체 동기화와 동일 범위 사용 */
 export function getGoogleRecentSyncWindow() {
-  const now = new Date()
-  return {
-    timeMin: toKstDayBoundaryIso(addCalendarDays(now, -45)),
-    timeMax: toKstDayBoundaryIso(addCalendarDays(now, 365), true),
-  }
+  return getGoogleSyncTimeBounds()
 }
 
 /** 최근 N일 이내 수정·생성된 일정 보강 조회용 */

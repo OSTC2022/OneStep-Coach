@@ -23,15 +23,18 @@ import {
   isGoogleCalendarInvalidSyncQuery,
 } from '@/lib/google-calendar/errors'
 import {
-  getGoogleRecentSyncWindow,
   getGoogleSyncTimeBounds,
 } from '@/lib/google-calendar/event-mapper'
+import { buildMemberLookup, type MemberLookup } from '@/lib/google-calendar/member-matcher'
 import {
   applyGoogleEventsBatch,
   loadExistingByGoogleEventId,
-  loadMemberNameMap,
 } from '@/lib/google-calendar/sync-apply'
 import { dedupeGoogleCalendarLessons } from '@/lib/google-calendar/sync-dedupe'
+import {
+  buildGoogleCalendarSyncDetail,
+  emptyRunStats,
+} from '@/lib/google-calendar/sync-status'
 import type {
   GoogleCalendarEvent,
   GoogleCalendarSyncResult,
@@ -254,10 +257,8 @@ async function paginateGoogleCalendarEvents(
 async function fetchEventsFullSync(
   accessToken: string,
   calendarId: string,
-  reason?: string,
 ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken: string | null }> {
-  const bounds =
-    reason === 'manual' ? getGoogleSyncTimeBounds() : getGoogleRecentSyncWindow()
+  const bounds = getGoogleSyncTimeBounds()
 
   return paginateGoogleCalendarEvents(accessToken, calendarId, {
     mode: 'full',
@@ -269,11 +270,11 @@ async function fetchEventsFullSync(
 async function fetchEventsForCalendar(
   accessToken: string,
   calendarId: string,
-  options: { syncToken?: string | null; reason?: string },
+  options: { syncToken?: string | null; forceFull?: boolean },
 ): Promise<CalendarFetchResult> {
-  const forceFullSync = options.reason === 'manual' || !options.syncToken
+  const useIncremental = Boolean(options.syncToken) && !options.forceFull
 
-  if (!forceFullSync && options.syncToken) {
+  if (useIncremental && options.syncToken) {
     try {
       const incremental = await paginateGoogleCalendarEvents(accessToken, calendarId, {
         mode: 'incremental',
@@ -285,14 +286,14 @@ async function fetchEventsForCalendar(
         throw error
       }
       console.info(
-        `[google-calendar] sync query invalid for ${calendarId}, retrying full sync`,
+        `[google-calendar] syncToken invalid for ${calendarId}, retrying full sync`,
       )
-      const full = await fetchEventsFullSync(accessToken, calendarId, options.reason)
+      const full = await fetchEventsFullSync(accessToken, calendarId)
       return { ...full, recoveredFromExpiredToken: true }
     }
   }
 
-  const full = await fetchEventsFullSync(accessToken, calendarId, options.reason)
+  const full = await fetchEventsFullSync(accessToken, calendarId)
   return { ...full, recoveredFromExpiredToken: false }
 }
 
@@ -360,6 +361,8 @@ function resolveSyncStatus(outcomes: SyncCalendarOutcome[]): GoogleCalendarSyncS
 
 export async function syncGoogleCalendarLessons(options?: {
   reason?: string
+  forceFull?: boolean
+  skipDedupe?: boolean
 }): Promise<GoogleCalendarSyncResult> {
   let row = await getGoogleCalendarSyncRow()
   if (!row?.refresh_token || !row.calendar_id || !row.sync_enabled) {
@@ -368,9 +371,12 @@ export async function syncGoogleCalendarLessons(options?: {
 
   const supabase = createAdminClient()
   const attemptAt = new Date().toISOString()
+  const runStats = emptyRunStats()
 
   await upsertGoogleCalendarSyncRow({
+    sync_status: 'syncing',
     last_sync_attempt_at: attemptAt,
+    sync_status_detail: buildGoogleCalendarSyncDetail({ run: runStats }),
   })
 
   const aggregated: GoogleCalendarSyncResult = {
@@ -386,18 +392,23 @@ export async function syncGoogleCalendarLessons(options?: {
   const calendarOutcomes: SyncCalendarOutcome[] = []
   let deduped = 0
 
-  try {
-    deduped = await dedupeGoogleCalendarLessons()
-  } catch (error) {
-    console.warn(
-      '[google-calendar] dedupe skipped:',
-      error instanceof Error ? error.message : error,
-    )
+  if (!options?.skipDedupe && (options?.forceFull || !row.sync_token)) {
+    try {
+      deduped = await dedupeGoogleCalendarLessons()
+      runStats.deduped = deduped
+    } catch (error) {
+      console.warn(
+        '[google-calendar] dedupe skipped:',
+        error instanceof Error ? error.message : error,
+      )
+    }
   }
 
   const googleAccountId = row.connected_email ?? 'default'
 
   try {
+    const memberLookup = await buildMemberLookup(supabase)
+
     await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
       row = await refreshLessonCalendarIds(row!, accessToken)
 
@@ -424,82 +435,90 @@ export async function syncGoogleCalendarLessons(options?: {
         })
       }
 
-      for (const calendar of calendarsToSync) {
-        try {
-          const { events, nextSyncToken } = await fetchEventsForCalendar(
-            accessToken,
-            calendar.calendarId,
-            {
-              syncToken: calendar.syncToken,
-              reason: options?.reason,
-            },
-          )
+      await Promise.all(
+        calendarsToSync.map(async (calendar) => {
+          try {
+            const { events, nextSyncToken } = await fetchEventsForCalendar(
+              accessToken,
+              calendar.calendarId,
+              {
+                syncToken: calendar.syncToken,
+                forceFull: options?.forceFull,
+              },
+            )
 
-          const googleEventIds = events
-            .map((event) => event.id)
-            .filter((id): id is string => Boolean(id))
+            runStats.processed += events.length
 
-          const [memberMap, existingMap] = await Promise.all([
-            loadMemberNameMap(supabase),
-            loadExistingByGoogleEventId(supabase, googleEventIds, {
+            const googleEventIds = events
+              .map((event) => event.id)
+              .filter((id): id is string => Boolean(id))
+
+            const existingMap = await loadExistingByGoogleEventId(supabase, googleEventIds, {
               googleAccountId,
               googleCalendarId: calendar.calendarId,
-            }),
-          ])
+            })
 
-          const result = await applyGoogleEventsBatch(
-            supabase,
-            events,
-            memberMap,
-            existingMap,
-            calendar.calendarId,
-            googleAccountId,
-          )
+            const result = await applyGoogleEventsBatch(
+              supabase,
+              events,
+              memberLookup,
+              existingMap,
+              calendar.calendarId,
+              googleAccountId,
+            )
 
-          aggregated.created += result.created
-          aggregated.updated += result.updated
-          aggregated.linked += result.linked
-          aggregated.cancelled += result.cancelled
-          aggregated.pendingMember += result.pendingMember
-          aggregated.skipped += result.skipped
+            aggregated.created += result.created
+            aggregated.updated += result.updated
+            aggregated.linked += result.linked
+            aggregated.cancelled += result.cancelled
+            aggregated.pendingMember += result.pendingMember
+            aggregated.skipped += result.skipped
 
-          if (nextSyncToken) {
-            syncTokenPatch[calendar.syncTokenKey] = nextSyncToken
-          }
+            runStats.created += result.created
+            runStats.updated += result.updated
+            runStats.cancelled += result.cancelled
+            runStats.pendingMember += result.pendingMember
+            runStats.skipped += result.skipped
 
-          calendarOutcomes.push({
-            calendarName: calendar.calendarName,
-            calendarId: calendar.calendarId,
-            ok: true,
-            fetched: events.length,
-          })
+            if (nextSyncToken) {
+              syncTokenPatch[calendar.syncTokenKey] = nextSyncToken
+            }
 
-          if (options?.reason) {
-            console.info('[google-calendar] sync complete', options.reason, {
+            calendarOutcomes.push({
+              calendarName: calendar.calendarName,
               calendarId: calendar.calendarId,
-              ...result,
+              ok: true,
               fetched: events.length,
             })
+
+            if (options?.reason) {
+              console.info('[google-calendar] sync complete', options.reason, {
+                calendarId: calendar.calendarId,
+                ...result,
+                fetched: events.length,
+              })
+            }
+          } catch (error) {
+            const message = formatGoogleCalendarSyncError(error)
+            calendarOutcomes.push({
+              calendarName: calendar.calendarName,
+              calendarId: calendar.calendarId,
+              ok: false,
+              error: message,
+            })
+            console.error('[google-calendar] calendar sync failed', {
+              calendarId: calendar.calendarId,
+              error: message,
+            })
           }
-        } catch (error) {
-          const message = formatGoogleCalendarSyncError(error)
-          calendarOutcomes.push({
-            calendarName: calendar.calendarName,
-            calendarId: calendar.calendarId,
-            ok: false,
-            error: message,
-          })
-          console.error('[google-calendar] calendar sync failed', {
-            calendarId: calendar.calendarId,
-            error: message,
-          })
-        }
-      }
+        }),
+      )
     })
 
     const syncStatus = resolveSyncStatus(calendarOutcomes)
     const allSucceeded = syncStatus === 'success'
     const pendingCount = await countPendingMemberLessons(supabase)
+    runStats.pendingMember = pendingCount
 
     await upsertGoogleCalendarSyncRow({
       ...syncTokenPatch,
@@ -507,7 +526,8 @@ export async function syncGoogleCalendarLessons(options?: {
         ? { last_synced_at: new Date().toISOString(), last_sync_error: null }
         : { last_sync_error: buildSyncStatusMessage(calendarOutcomes) }),
       sync_status: syncStatus,
-      sync_status_detail: JSON.stringify({
+      sync_status_detail: buildGoogleCalendarSyncDetail({
+        run: runStats,
         succeeded: calendarOutcomes.filter((item) => item.ok).map((item) => item.calendarName),
         failed: calendarOutcomes
           .filter((item) => !item.ok)
@@ -529,7 +549,8 @@ export async function syncGoogleCalendarLessons(options?: {
     await upsertGoogleCalendarSyncRow({
       last_sync_error: message,
       sync_status: 'failure',
-      sync_status_detail: JSON.stringify({
+      sync_status_detail: buildGoogleCalendarSyncDetail({
+        run: runStats,
         succeeded: calendarOutcomes.filter((item) => item.ok).map((item) => item.calendarName),
         failed:
           calendarOutcomes.length > 0
@@ -541,6 +562,10 @@ export async function syncGoogleCalendarLessons(options?: {
     })
     throw new Error(message)
   }
+}
+
+export function isGoogleCalendarSyncInProgress(row: GoogleCalendarSyncRow | null): boolean {
+  return row?.sync_status === 'syncing'
 }
 
 type WatchChannelFields = {

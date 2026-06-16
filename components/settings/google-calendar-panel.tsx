@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
@@ -20,6 +20,7 @@ import {
   refreshGoogleCalendarWatchAction,
   runGoogleCalendarSyncNow,
 } from '@/lib/actions/google-calendar-sync'
+import { syncStatusLabelKo } from '@/lib/google-calendar/sync-status'
 import type { GoogleCalendarSyncStatus } from '@/lib/google-calendar/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,20 +29,11 @@ interface GoogleCalendarPanelProps {
   initialStatus: GoogleCalendarSyncStatus
 }
 
-function syncStatusLabel(status: GoogleCalendarSyncStatus['syncStatus']): string {
-  switch (status) {
-    case 'success':
-      return '성공'
-    case 'partial_success':
-      return '부분 성공'
-    case 'failure':
-      return '실패'
-    default:
-      return '-'
-  }
-}
-
-function syncStatusClass(status: GoogleCalendarSyncStatus['syncStatus']): string {
+function syncStatusClass(
+  status: GoogleCalendarSyncStatus['syncStatus'],
+  isSyncing: boolean,
+): string {
+  if (isSyncing || status === 'syncing') return 'text-primary'
   switch (status) {
     case 'success':
       return 'text-primary'
@@ -58,8 +50,8 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
   const router = useRouter()
   const searchParams = useSearchParams()
   const [status, setStatus] = useState(initialStatus)
-  const [isSyncing, setIsSyncing] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
+  const completionNotifiedRef = useRef(false)
 
   useEffect(() => {
     if (searchParams.get('connected') === '1') {
@@ -78,37 +70,56 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
     }
   }, [router, searchParams])
 
+  useEffect(() => {
+    if (!status.isSyncing) return
+
+    completionNotifiedRef.current = false
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        const next = await getGoogleCalendarSyncStatus()
+        setStatus(next)
+
+        if (next.isSyncing || completionNotifiedRef.current) return
+
+        completionNotifiedRef.current = true
+        const run = next.runStats
+        const summary = run
+          ? `처리 ${run.processed} · 신규 ${run.created} · 수정 ${run.updated} · 미연결 ${run.pendingMember}`
+          : undefined
+
+        if (next.syncStatus === 'success') {
+          toast.success('동기화 완료', { description: summary })
+        } else if (next.syncStatus === 'partial_success') {
+          toast.warning('부분 동기화', {
+            description: next.lastSyncError ?? summary,
+          })
+        } else if (next.syncStatus === 'failure') {
+          toast.error('동기화 실패', { description: next.lastSyncError ?? undefined })
+        }
+      })()
+    }, 2000)
+
+    return () => window.clearInterval(intervalId)
+  }, [status.isSyncing])
+
   async function handleManualSync() {
-    setIsSyncing(true)
-    try {
-      const result = await runGoogleCalendarSyncNow()
+    const result = await runGoogleCalendarSyncNow()
 
-      if (result.error) {
-        toast.error('동기화 실패', { description: result.error })
-        return
-      }
-
-      const nextStatus = await getGoogleCalendarSyncStatus()
-      setStatus(nextStatus)
-
-      const summary = `신규 ${result.data?.created ?? 0} · 수정 ${result.data?.updated ?? 0} · 기존 연결 ${result.data?.linked ?? 0} · 회원 미연결 ${result.data?.pendingMember ?? 0}${
-        result.data?.deduped ? ` · 중복 정리 ${result.data.deduped}건` : ''
-      }`
-
-      if (result.warning) {
-        toast.warning('부분 동기화', {
-          description: `${result.warning}\n${summary}`,
-        })
-      } else {
-        toast.success('동기화 완료', { description: summary })
-      }
-    } catch {
-      toast.error('동기화 실패', {
-        description: '요청 시간이 초과되었거나 연결이 끊어졌습니다. 잠시 후 다시 시도해 주세요.',
-      })
-    } finally {
-      setIsSyncing(false)
+    if (result.error) {
+      toast.error('동기화 시작 실패', { description: result.error })
+      return
     }
+
+    if (result.started === false) {
+      toast.info('동기화 대기 중', { description: result.error })
+      return
+    }
+
+    const nextStatus = await getGoogleCalendarSyncStatus()
+    setStatus(nextStatus)
+    toast.info('동기화 시작', {
+      description: '변경분만 백그라운드에서 가져옵니다. 완료되면 알림이 표시됩니다.',
+    })
   }
 
   async function handleDisconnect() {
@@ -135,6 +146,8 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
     setStatus(await getGoogleCalendarSyncStatus())
     toast.success('Push 알림 채널이 갱신되었습니다.')
   }
+
+  const runStats = status.runStats
 
   if (!status.configured) {
     return (
@@ -220,13 +233,18 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">동기화 상태</dt>
-                  <dd className={`font-medium ${syncStatusClass(status.syncStatus)}`}>
-                    {syncStatusLabel(status.syncStatus)}
+                  <dt className="text-muted-foreground">현재 상태</dt>
+                  <dd
+                    className={`inline-flex items-center gap-1 font-medium ${syncStatusClass(status.syncStatus, status.isSyncing)}`}
+                  >
+                    {status.isSyncing ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : null}
+                    {syncStatusLabelKo(status.syncStatus, status.isSyncing)}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">마지막 동기화 (전체 성공)</dt>
+                  <dt className="text-muted-foreground">마지막 전체 성공</dt>
                   <dd className="font-medium">
                     {status.lastSyncedAt
                       ? format(parseISO(status.lastSyncedAt), 'M월 d일 HH:mm', { locale: ko })
@@ -241,6 +259,30 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                       : '-'}
                   </dd>
                 </div>
+                {runStats ? (
+                  <>
+                    <div>
+                      <dt className="text-muted-foreground">처리된 일정</dt>
+                      <dd className="font-medium">{runStats.processed}건</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">신규 / 수정</dt>
+                      <dd className="font-medium">
+                        {runStats.created} / {runStats.updated}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">미연결 일정</dt>
+                      <dd className="font-medium">{runStats.pendingMember}건</dd>
+                    </div>
+                    {runStats.deduped ? (
+                      <div>
+                        <dt className="text-muted-foreground">중복 정리</dt>
+                        <dd className="font-medium">{runStats.deduped}건</dd>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
               </dl>
             ) : null}
 
@@ -268,10 +310,10 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={isSyncing}
+                  disabled={status.isSyncing}
                   onClick={() => void handleManualSync()}
                 >
-                  {isSyncing ? (
+                  {status.isSyncing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <RefreshCw className="mr-2 h-4 w-4" />
@@ -318,8 +360,8 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           <p>2. 일정 제목은 <strong className="text-foreground">회원명(나이종목)</strong> 형식을 권장합니다. 예: 윤찬민(14축구)</p>
           <p>3. iPhone 캘린더를 쓰는 경우, iCloud/Google과 「수업」「수업2」 캘린더를 동기화해 두면 같은 일정이 반영됩니다.</p>
           <p>
-            4. 「지금 동기화」는 최근 90일~앞으로 1년 구간의 일정을 전부 다시 가져옵니다. 누락된
-            일정이 있으면 이 버튼을 눌러 주세요.
+            4. 「지금 동기화」는 저장된 syncToken으로 <strong className="text-foreground">변경분만</strong> 빠르게
+            가져옵니다. 최초 연결 시에만 과거 30일~앞으로 180일 구간을 전체 동기화합니다.
           </p>
         </CardContent>
       </Card>
