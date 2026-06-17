@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
+import { AppInitialLoader } from '@/components/brand/app-initial-loader'
 import './globals.css'
 
 const geistSans = Geist({
@@ -60,6 +61,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.className} antialiased bg-background text-foreground min-h-screen`}
       >
+        <AppInitialLoader />
         {children}
         <Toaster richColors position="top-center" />
         {process.env.NODE_ENV === 'production' && <Analytics />}

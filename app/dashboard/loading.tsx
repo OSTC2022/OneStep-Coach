@@ -1,15 +1,7 @@
-import {
-  PageHeaderSkeleton,
-  QuickLinksSkeleton,
-  StatCardsSkeleton,
-} from '@/components/dashboard/page-skeletons'
+import { OnestepSplashScreen } from '@/components/brand/onestep-splash-screen'
 
 export default function DashboardLoading() {
   return (
-    <div className="space-y-6">
-      <PageHeaderSkeleton />
-      <StatCardsSkeleton count={4} />
-      <QuickLinksSkeleton />
-    </div>
+    <OnestepSplashScreen className="fixed inset-0 z-[9998] min-h-svh md:relative md:inset-auto md:z-auto md:min-h-[calc(100svh-4rem)]" />
   )
 }

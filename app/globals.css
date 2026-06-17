@@ -175,3 +175,31 @@ a[href] {
     animation-duration: 0ms !important;
   }
 }
+
+@keyframes onestep-pulse-travel {
+  from {
+    stroke-dashoffset: 140;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes onestep-heartbeat-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.onestep-pulse-line {
+  stroke-dasharray: 140;
+  animation: onestep-pulse-travel 2.4s linear infinite;
+}
+
+.onestep-heartbeat {
+  animation: onestep-heartbeat-pulse 1.2s ease-in-out infinite;
+}
