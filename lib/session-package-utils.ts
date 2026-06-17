@@ -189,7 +189,36 @@ export function formatPackagePlanLabel(
   if (months != null) {
     return `월정액 ${months}개월`
   }
-  return `${totalSessions}회권`
+  return '횟수권'
+}
+
+/** 회원권 만료 여부 (기간·비활성·잔여 소진) */
+export function isSessionPackageExpired(pkg: {
+  is_active: boolean
+  remaining_sessions: number
+  note?: string | null
+  expires_at?: string | null
+}): boolean {
+  if (!pkg.is_active) return true
+  if (pkg.expires_at) {
+    const today = new Date().toISOString().split('T')[0]
+    if (pkg.expires_at.split('T')[0] < today) return true
+  }
+  if (!isMonthlyPlanPackage(pkg.note) && pkg.remaining_sessions <= 0) return true
+  return false
+}
+
+/** 회차권 잔여 — 잔여 / 최근 구매 회차 / 누적 등록 회차 (plain text) */
+export function formatGroupedPackageUsageDisplay(
+  remainingSessions: number,
+  latestPurchaseTotalSessions: number,
+  cumulativeTotalSessions: number,
+  note?: string | null,
+): string {
+  if (isMonthlyPlanPackage(note)) {
+    return formatPackageRemainingDisplay(remainingSessions, note)
+  }
+  return `${remainingSessions}회 / ${latestPurchaseTotalSessions}회 / ${cumulativeTotalSessions}회`
 }
 
 export function formatPackageSessionsDisplay(

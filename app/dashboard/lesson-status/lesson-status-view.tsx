@@ -17,10 +17,6 @@ import {
 import { ko } from 'date-fns/locale'
 import { Lesson, Instructor, AttendanceStatus } from '@/types/database'
 import { getLessonsForStatusView, updateLesson } from '@/lib/actions/lessons'
-import {
-  getGoogleCalendarSyncStatus,
-  runGoogleCalendarSyncNow,
-} from '@/lib/actions/google-calendar-sync'
 import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
 import { isEditableTarget, matchCalendarUndoRedo } from '@/lib/calendar-shortcuts'
 import {
@@ -32,11 +28,17 @@ import {
   clearLessonAttendanceCheck,
   completeLessonWithSignature,
   markGuestLessonStatus,
+  updateAthleticsClubAttendanceStatus,
   updateLessonAttendanceStatus,
   updateLessonEndTime,
   type GuestLessonAction,
 } from '@/lib/actions/lesson-sessions'
 import { isAttendanceMarked } from '@/lib/lesson-record-utils'
+import { isAthleticsClubLessonType } from '@/lib/lesson-types'
+import {
+  isGroupLessonAttendanceMarked,
+  parseGroupAttendanceCheckedInAt,
+} from '@/lib/group-lesson-attendance'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -107,6 +109,8 @@ const SignaturePadDialog = dynamic(
 )
 
 export type LessonStatusViewMode = 'day' | 'week' | 'month' | 'list'
+
+type LessonStatusGridViewMode = Exclude<LessonStatusViewMode, 'list'>
 
 function bodyWeightKey(memberId: string, date: string) {
   return `${memberId}:${date}`
@@ -243,8 +247,14 @@ const AthleteTile = memo(function AthleteTile({
   const display = getLessonCalendarDisplayParts(lesson)
   const label = display.meta ? `${display.name}(${display.meta})` : display.name
   const isMemberLinked = Boolean(lesson.member_id)
+  const isAthleticsGroup =
+    !isMemberLinked && isAthleticsClubLessonType(lesson.lesson_type)
   const isPresent = lesson.attendance_status === 'present'
-  const isPresentMarked = isPresent && isAttendanceMarked(lesson)
+  const isPresentMarked = isMemberLinked
+    ? isPresent && isAttendanceMarked(lesson)
+    : isAthleticsGroup
+      ? isGroupLessonAttendanceMarked(lesson)
+      : false
   const isCancelled = lesson.attendance_status === 'cancelled'
   const completed = isLessonCompleted(lesson)
   const instructorBorderColor = resolveLessonInstructorColor(lesson, instructorLookup)
@@ -285,6 +295,7 @@ const AthleteTile = memo(function AthleteTile({
 
     if (result.data) {
       onLessonCompleted(lesson.id, {
+        id: result.data.id,
         end_time: result.data.end_time,
         session_deducted: result.data.session_deducted,
         attendance_status: result.data.attendance_status,
@@ -412,7 +423,7 @@ const AthleteTile = memo(function AthleteTile({
         </>
       ) : null}
 
-      {showActions && isMemberLinked ? (
+      {showActions && (isMemberLinked || isAthleticsGroup) ? (
         <>
           <div className="mt-1 grid grid-cols-2 gap-0.5" role="group" aria-label={`${label} 출석 상태`}>
             {MEMBER_STATUS_OPTIONS.map((option) => {
@@ -422,16 +433,22 @@ const AthleteTile = memo(function AthleteTile({
                   : isCancelled
               const canClearPresent =
                 option.value === 'present' && isPresentMarked && !completed
+              const canClearCancelled =
+                option.value === 'cancelled' && isCancelled && !completed
               return (
                 <button
                   key={option.value}
                   type="button"
                   disabled={isLoading || completed}
                   title={
-                    canClearPresent ? '출석 취소' : option.label
+                    canClearPresent
+                      ? '출석 취소'
+                      : canClearCancelled
+                        ? '취소 해제'
+                        : option.label
                   }
                   onClick={() => {
-                    if (canClearPresent) {
+                    if (canClearPresent || canClearCancelled) {
                       onClearAttendanceCheck(lesson.id)
                       return
                     }
@@ -445,7 +462,7 @@ const AthleteTile = memo(function AthleteTile({
                         : 'bg-destructive text-destructive-foreground'
                       : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground',
                     (isLoading || completed) && 'opacity-50',
-                    canClearPresent && 'hover:opacity-90',
+                    (canClearPresent || canClearCancelled) && 'hover:opacity-90',
                   )}
                 >
                   {option.label}
@@ -591,14 +608,22 @@ const AthleteTile = memo(function AthleteTile({
               option.action === 'trial' ? isGuestTrialMarked : isCancelled
             const canClearTrial =
               option.action === 'trial' && isGuestTrialMarked
+            const canClearCancelled =
+              option.action === 'cancelled' && isCancelled
             return (
               <button
                 key={option.action}
                 type="button"
                 disabled={isLoading}
-                title={canClearTrial ? '출석 취소' : option.label}
+                title={
+                  canClearTrial
+                    ? '출석 취소'
+                    : canClearCancelled
+                      ? '취소 해제'
+                      : option.label
+                }
                 onClick={() => {
-                  if (canClearTrial) {
+                  if (canClearTrial || canClearCancelled) {
                     onGuestStatusChange(lesson.id, 'unset')
                     return
                   }
@@ -612,7 +637,7 @@ const AthleteTile = memo(function AthleteTile({
                       : 'bg-destructive text-destructive-foreground'
                     : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground',
                   isLoading && 'opacity-50',
-                  canClearTrial && 'hover:opacity-90',
+                  (canClearTrial || canClearCancelled) && 'hover:opacity-90',
                 )}
               >
                 {option.label}
@@ -954,11 +979,23 @@ export function LessonStatusView({
         ? isSameMonth(dateObj, new Date())
         : getWeekDates(dateObj).some((d) => toDateKey(d) === today)
 
+  const navKeyRef = useRef(`${selectedDate}|${initialViewMode}`)
+  const viewBeforeListRef = useRef<LessonStatusGridViewMode>(
+    initialViewMode === 'list' ? 'day' : initialViewMode,
+  )
+
   useEffect(() => {
+    const navKey = `${selectedDate}|${initialViewMode}`
+    const navChanged = navKeyRef.current !== navKey
+    navKeyRef.current = navKey
+
     setCurrentDate(selectedDate)
     setViewMode(initialViewMode)
-    setLessons(sortLessonsForStatusDisplay(initialLessons, instructors))
-    clearHistoryRef.current()
+
+    if (navChanged) {
+      setLessons(sortLessonsForStatusDisplay(initialLessons, instructors))
+      clearHistoryRef.current()
+    }
   }, [selectedDate, initialViewMode, initialLessons, instructors])
 
   useEffect(() => {
@@ -998,7 +1035,12 @@ export function LessonStatusView({
       unregistered: lessons.filter((l) => !l.member_id).length,
       present: lessons.filter((l) => {
         if (l.attendance_status === 'cancelled') return false
-        if (!l.member_id) return l.lesson_type === '체험레슨'
+        if (!l.member_id) {
+          if (isAthleticsClubLessonType(l.lesson_type)) {
+            return isGroupLessonAttendanceMarked(l)
+          }
+          return l.lesson_type === '체험레슨'
+        }
         return l.attendance_status === 'present' && isAttendanceMarked(l)
       }).length,
       cancelled: lessons.filter((l) => l.attendance_status === 'cancelled').length,
@@ -1023,6 +1065,23 @@ export function LessonStatusView({
       )
     },
     [],
+  )
+
+  const replaceLessonInPlace = useCallback(
+    (originalId: string, resolvedId: string | undefined, patch: Partial<Lesson>) => {
+      const activeId = resolvedId ?? originalId
+      if (activeId !== originalId) {
+        setLessons((prev) =>
+          prev.map((lesson) =>
+            lesson.id === originalId ? { ...lesson, ...patch, id: activeId } : lesson,
+          ),
+        )
+      } else {
+        updateLessonInPlace(originalId, patch)
+      }
+      return activeId
+    },
+    [updateLessonInPlace],
   )
 
   const handleQuickLessonCreated = useCallback(
@@ -1077,25 +1136,10 @@ export function LessonStatusView({
     if (isRefreshing || isLoadingDate) return
     setIsRefreshing(true)
     try {
-      if (isAdmin) {
-        const syncResult = await runGoogleCalendarSyncNow()
-        if (syncResult.error && syncResult.started !== false) {
-          toast.error('캘린더 동기화 실패', { description: syncResult.error })
-        } else if (syncResult.started) {
-          for (let attempt = 0; attempt < 30; attempt += 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, 2000))
-            const status = await getGoogleCalendarSyncStatus()
-            if (!status.isSyncing) break
-          }
-        }
-      }
-
       await loadLessons(currentDate, viewMode)
       router.refresh()
       toast.success('새로고침 완료', {
-        description: isAdmin
-          ? 'Google 캘린더와 동기화한 뒤 일정을 다시 불러왔습니다.'
-          : '캘린더와 동일한 일정을 다시 불러왔습니다.',
+        description: '앱 캘린더와 동일한 일정을 다시 불러왔습니다.',
       })
     } catch {
       toast.error('새로고침 실패', {
@@ -1107,7 +1151,6 @@ export function LessonStatusView({
   }, [
     isRefreshing,
     isLoadingDate,
-    isAdmin,
     loadLessons,
     currentDate,
     viewMode,
@@ -1176,20 +1219,41 @@ export function LessonStatusView({
 
   const handleViewModeChange = useCallback(
     async (mode: LessonStatusViewMode) => {
+      if (mode !== 'list' && viewMode !== 'list') {
+        viewBeforeListRef.current = mode
+      }
       setViewMode(mode)
       setDatePickerOpen(false)
       syncUrl(currentDate, mode)
       await loadLessons(currentDate, mode)
     },
-    [currentDate, loadLessons, syncUrl],
+    [currentDate, loadLessons, syncUrl, viewMode],
   )
+
+  const handleListToggle = useCallback(async () => {
+    if (isLoadingDate || isRefreshing) return
+    if (viewMode === 'list') {
+      await handleViewModeChange(viewBeforeListRef.current)
+      return
+    }
+    viewBeforeListRef.current = viewMode
+    await handleViewModeChange('list')
+  }, [viewMode, handleViewModeChange, isLoadingDate, isRefreshing])
 
   const handleStatusChange = useCallback(async (lessonId: string, status: AttendanceStatus) => {
     const before = lessons.find((lesson) => lesson.id === lessonId)
     if (!before) return
 
+    const isAthleticsGroup =
+      !before.member_id && isAthleticsClubLessonType(before.lesson_type)
+
     setIsUpdating(lessonId)
-    const result = await updateLessonAttendanceStatus(lessonId, status)
+    const result = isAthleticsGroup
+      ? await updateAthleticsClubAttendanceStatus(
+          lessonId,
+          status === 'cancelled' ? 'cancelled' : 'present',
+        )
+      : await updateLessonAttendanceStatus(lessonId, status)
     setIsUpdating(null)
 
     if (result.error) {
@@ -1197,50 +1261,101 @@ export function LessonStatusView({
       return
     }
 
+    const checkedInAt =
+      isAthleticsGroup && result.data && 'checked_in_at' in result.data
+        ? result.data.checked_in_at ??
+          parseGroupAttendanceCheckedInAt(
+            'special_note' in result.data ? result.data.special_note : null,
+          ) ??
+          new Date().toISOString()
+        : new Date().toISOString()
+
     const localPatch: Partial<Lesson> = {
       ...(result.data ?? {}),
       attendance_status: status,
+      ...(isAthleticsGroup && result.data && 'special_note' in result.data
+        ? { special_note: result.data.special_note }
+        : {}),
       ...(status === 'present'
-        ? { lesson_sessions: [{ checked_in_at: new Date().toISOString() }] }
+        ? { lesson_sessions: [{ checked_in_at: checkedInAt }] }
         : status === 'cancelled'
           ? { lesson_sessions: [] }
           : {}),
     }
 
-    updateLessonInPlace(lessonId, localPatch)
+    const activeId = replaceLessonInPlace(
+      lessonId,
+      result.data && 'lesson_id' in result.data ? result.data.lesson_id : undefined,
+      localPatch,
+    )
 
     const beforeSnap = structuredClone(before)
     lessonHistory.pushCommand({
       undo: async () => {
+        if (isAthleticsGroup) {
+          const undoResult = await updateLesson(beforeSnap.id, {
+            attendance_status: beforeSnap.attendance_status,
+            lesson_type: beforeSnap.lesson_type,
+            special_note: beforeSnap.special_note ?? undefined,
+          })
+          if (undoResult.error) {
+            toast.error('실행 취소 실패', { description: undoResult.error })
+            return
+          }
+          updateLessonInPlace(activeId, {
+            attendance_status: beforeSnap.attendance_status,
+            lesson_type: beforeSnap.lesson_type,
+            special_note: beforeSnap.special_note,
+            lesson_sessions: beforeSnap.lesson_sessions ?? [],
+          })
+          return
+        }
+
         const restore = await restoreLessonAttendanceSnapshot(beforeSnap)
         if (restore.error) {
           toast.error('실행 취소 실패', { description: restore.error })
           return
         }
-        updateLessonInPlace(lessonId, lessonAttendanceLocalPatch(beforeSnap))
+        updateLessonInPlace(activeId, lessonAttendanceLocalPatch(beforeSnap))
       },
       redo: async () => {
-        const redoResult = await updateLessonAttendanceStatus(lessonId, status)
+        const redoResult = isAthleticsGroup
+          ? await updateAthleticsClubAttendanceStatus(
+              activeId,
+              status === 'cancelled' ? 'cancelled' : 'present',
+            )
+          : await updateLessonAttendanceStatus(activeId, status)
         if (redoResult.error) {
           toast.error('다시 실행 실패', { description: redoResult.error })
           return
         }
-        updateLessonInPlace(lessonId, localPatch)
+        replaceLessonInPlace(
+          activeId,
+          redoResult.data && 'lesson_id' in redoResult.data
+            ? redoResult.data.lesson_id
+            : undefined,
+          localPatch,
+        )
       },
     })
 
     toast.message('출석 상태 변경', {
       description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
     })
-  }, [lessons, updateLessonInPlace, lessonHistory])
+  }, [lessons, replaceLessonInPlace, updateLessonInPlace, lessonHistory])
 
   const handleClearAttendanceCheck = useCallback(
     async (lessonId: string) => {
       const before = lessons.find((lesson) => lesson.id === lessonId)
       if (!before) return
 
+      const isAthleticsGroup =
+        !before.member_id && isAthleticsClubLessonType(before.lesson_type)
+
       setIsUpdating(lessonId)
-      const result = await clearLessonAttendanceCheck(lessonId)
+      const result = isAthleticsGroup
+        ? await updateAthleticsClubAttendanceStatus(lessonId, 'unset')
+        : await clearLessonAttendanceCheck(lessonId)
       setIsUpdating(null)
 
       if (result.error) {
@@ -1248,39 +1363,82 @@ export function LessonStatusView({
         return
       }
 
-      const localPatch: Partial<Lesson> = {
-        attendance_status: 'present',
-        lesson_sessions: [],
-        session_deducted: false,
-      }
+      const localPatch: Partial<Lesson> = isAthleticsGroup
+        ? {
+            attendance_status: 'present',
+            special_note:
+              result.data && 'special_note' in result.data
+                ? result.data.special_note
+                : null,
+            lesson_sessions: [],
+          }
+        : {
+            attendance_status: 'present',
+            lesson_sessions: [],
+            session_deducted: false,
+          }
 
-      updateLessonInPlace(lessonId, localPatch)
+      const activeId = replaceLessonInPlace(
+        lessonId,
+        result.data && 'lesson_id' in result.data ? result.data.lesson_id : undefined,
+        localPatch,
+      )
 
       const beforeSnap = structuredClone(before)
       lessonHistory.pushCommand({
         undo: async () => {
+          if (isAthleticsGroup) {
+            const undoResult = await updateLesson(beforeSnap.id, {
+              attendance_status: beforeSnap.attendance_status,
+              lesson_type: beforeSnap.lesson_type,
+              special_note: beforeSnap.special_note ?? undefined,
+            })
+            if (undoResult.error) {
+              toast.error('실행 취소 실패', { description: undoResult.error })
+              return
+            }
+            updateLessonInPlace(activeId, {
+              attendance_status: beforeSnap.attendance_status,
+              lesson_type: beforeSnap.lesson_type,
+              special_note: beforeSnap.special_note,
+              lesson_sessions: beforeSnap.lesson_sessions ?? [],
+            })
+            return
+          }
+
           const restore = await restoreLessonAttendanceSnapshot(beforeSnap)
           if (restore.error) {
             toast.error('실행 취소 실패', { description: restore.error })
             return
           }
-          updateLessonInPlace(lessonId, lessonAttendanceLocalPatch(beforeSnap))
+          updateLessonInPlace(activeId, lessonAttendanceLocalPatch(beforeSnap))
         },
         redo: async () => {
-          const redoResult = await clearLessonAttendanceCheck(lessonId)
+          const redoResult = isAthleticsGroup
+            ? await updateAthleticsClubAttendanceStatus(activeId, 'unset')
+            : await clearLessonAttendanceCheck(activeId)
           if (redoResult.error) {
             toast.error('다시 실행 실패', { description: redoResult.error })
             return
           }
-          updateLessonInPlace(lessonId, localPatch)
+          replaceLessonInPlace(
+            activeId,
+            redoResult.data && 'lesson_id' in redoResult.data
+              ? redoResult.data.lesson_id
+              : undefined,
+            localPatch,
+          )
         },
       })
 
-      toast.message('출석 체크 취소', {
-        description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
-      })
+      toast.message(
+        before.attendance_status === 'cancelled' ? '수업 취소 해제' : '출석 체크 취소',
+        {
+          description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
+        },
+      )
     },
-    [lessons, updateLessonInPlace, lessonHistory],
+    [lessons, replaceLessonInPlace, updateLessonInPlace, lessonHistory],
   )
 
   const handleGuestStatusChange = useCallback(async (lessonId: string, action: GuestLessonAction) => {
@@ -1301,9 +1459,16 @@ export function LessonStatusView({
     const localPatch: Partial<Lesson> = {
       lesson_type: result.data.lesson_type,
       attendance_status: result.data.attendance_status,
+      ...(result.data && 'special_note' in result.data
+        ? { special_note: result.data.special_note as string | null }
+        : {}),
     }
 
-    updateLessonInPlace(lessonId, localPatch)
+    const activeId = replaceLessonInPlace(
+      lessonId,
+      result.data && 'lesson_id' in result.data ? result.data.lesson_id : undefined,
+      localPatch,
+    )
 
     const beforeSnap = structuredClone(before)
     lessonHistory.pushCommand({
@@ -1316,22 +1481,27 @@ export function LessonStatusView({
           toast.error('실행 취소 실패', { description: undoResult.error })
           return
         }
-        updateLessonInPlace(lessonId, {
+        updateLessonInPlace(activeId, {
           lesson_type: beforeSnap.lesson_type,
           attendance_status: beforeSnap.attendance_status,
+          special_note: beforeSnap.special_note,
         })
       },
       redo: async () => {
-        const redoResult = await markGuestLessonStatus(lessonId, action)
+        const redoResult = await markGuestLessonStatus(activeId, action)
         if (redoResult.error) {
           toast.error('다시 실행 실패', { description: redoResult.error })
           return
         }
         if (redoResult.data) {
-          updateLessonInPlace(lessonId, {
-            lesson_type: redoResult.data.lesson_type,
-            attendance_status: redoResult.data.attendance_status,
-          })
+          replaceLessonInPlace(
+            activeId,
+            redoResult.data.lesson_id,
+            {
+              lesson_type: redoResult.data.lesson_type,
+              attendance_status: redoResult.data.attendance_status,
+            },
+          )
         }
       },
     })
@@ -1339,7 +1509,19 @@ export function LessonStatusView({
     toast.message('미등록 수업 처리', {
       description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
     })
-  }, [lessons, updateLessonInPlace, lessonHistory])
+  }, [lessons, replaceLessonInPlace, updateLessonInPlace, lessonHistory])
+
+  const handleLessonCompleted = useCallback(
+    (lessonId: string, patch: Partial<Lesson>) => {
+      const resolvedId = patch.id
+      if (resolvedId && resolvedId !== lessonId) {
+        replaceLessonInPlace(lessonId, resolvedId, patch)
+        return
+      }
+      updateLessonInPlace(lessonId, patch)
+    },
+    [replaceLessonInPlace, updateLessonInPlace],
+  )
 
   const panelProps = {
     instructors,
@@ -1351,7 +1533,7 @@ export function LessonStatusView({
     onStatusChange: handleStatusChange,
     onClearAttendanceCheck: handleClearAttendanceCheck,
     onGuestStatusChange: handleGuestStatusChange,
-    onLessonCompleted: updateLessonInPlace,
+    onLessonCompleted: handleLessonCompleted,
   }
 
   const weekDates = getWeekDates(dateObj).map((d) => toDateKey(d))
@@ -1479,7 +1661,8 @@ export function LessonStatusView({
             size="sm"
             className="h-8 shrink-0 px-3 text-xs font-semibold"
             disabled={isLoadingDate || isRefreshing}
-            onClick={() => void handleViewModeChange('list')}
+            title={viewMode === 'list' ? '목록 닫기' : '목록 보기'}
+            onClick={() => void handleListToggle()}
           >
             <ListChecks className="mr-1 h-3.5 w-3.5" />
             목록

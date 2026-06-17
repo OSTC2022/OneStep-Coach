@@ -758,6 +758,7 @@ export async function getLessonsForStatusView(options: {
     dateFrom,
     dateTo,
     options.limit ?? 200,
+    { forStatusPage: true },
   )
 
   return attachCheckInSessions(lessons.map(normalizeLessonRecord))
@@ -1284,7 +1285,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
 
   const { data: existing } = await supabase
     .from('lessons')
-    .select('id, lesson_date, start_time, member_id')
+    .select('id, lesson_date, start_time, member_id, special_note')
     .eq('id', id)
     .maybeSingle()
 
@@ -1304,6 +1305,12 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     payload.member_id = memberId
     titleForFallback = title
     payload.title = title
+    if (memberId) {
+      payload.google_sync_status = null
+      if (existing?.special_note?.includes('[구글 캘린더]')) {
+        payload.special_note = null
+      }
+    }
     if (enriched.sessionPackageId && !updates.session_package_id) {
       payload.session_package_id = enriched.sessionPackageId
     }

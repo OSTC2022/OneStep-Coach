@@ -1,7 +1,7 @@
 import { addDays, format, parseISO } from 'date-fns'
 import { RRule, rrulestr } from 'rrule'
 import type { Lesson } from '@/lib/types'
-import { resolveLessonTitle, filterDisplayableCalendarLessons, isLessonCalendarVisible } from '@/lib/calendar-utils'
+import { resolveLessonTitle, filterDisplayableCalendarLessons, isLessonCalendarVisible, isLessonStatusPageVisible } from '@/lib/calendar-utils'
 import {
   buildVirtualLessonId,
   isDisplayStoredLesson,
@@ -92,8 +92,14 @@ function masterIdsForStoredRow(
   return [...ids]
 }
 
-export function normalizeCalendarLessonsForDisplay(lessons: Lesson[]): Lesson[] {
-  return filterDisplayableCalendarLessons(collapseSlotDuplicateLessons(lessons))
+export function normalizeCalendarLessonsForDisplay(
+  lessons: Lesson[],
+  options?: { forStatusPage?: boolean },
+): Lesson[] {
+  return filterDisplayableCalendarLessons(
+    collapseSlotDuplicateLessons(lessons),
+    options,
+  )
 }
 
 function memberSlotIdentityKey(
@@ -340,15 +346,24 @@ export function mergeCalendarLessonsForRange(
   exceptions: RecurrenceCapableLesson[],
   dateFrom: string,
   dateTo: string,
+  options?: { forStatusPage?: boolean },
 ): Lesson[] {
+  const isStoredVisible = options?.forStatusPage
+    ? (row: RecurrenceCapableLesson) =>
+        isLessonStatusPageVisible(row as Lesson) &&
+        isDisplayStoredLesson(row) &&
+        isLessonIdentifiable(row as Lesson)
+    : (row: RecurrenceCapableLesson) =>
+        isDisplayStoredLesson(row) &&
+        isLessonCalendarVisible(row as Lesson) &&
+        isLessonIdentifiable(row as Lesson)
+
   const inRangeStored = stored.filter(
     (row) =>
-      isDisplayStoredLesson(row) &&
-      isLessonCalendarVisible(row as Lesson) &&
+      isStoredVisible(row) &&
       row.lesson_date >= dateFrom &&
       row.lesson_date <= dateTo &&
-      row.event_type !== 'recurring_master' &&
-      isLessonIdentifiable(row as Lesson),
+      row.event_type !== 'recurring_master',
   )
 
   const occupiedDatesByMaster = new Map<string, Set<string>>()
@@ -398,6 +413,7 @@ export function mergeCalendarLessonsForRange(
       if (dateCmp !== 0) return dateCmp
       return (a.start_time ?? '').localeCompare(b.start_time ?? '')
     }),
+    options,
   )
 }
 

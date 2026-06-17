@@ -56,8 +56,7 @@ import {
   linkPackageTallyToSessions,
 } from '@/lib/lesson-record-utils'
 import {
-  formatPackageRemainingDisplay,
-  formatPackageSessionsDisplay,
+  formatPackagePlanLabel,
   formatPackageTallyRemainingDisplay,
   formatPackageTallyTotalDisplay,
   formatSessionOverageAlert,
@@ -66,6 +65,11 @@ import {
   isSessionPackageOverage,
   UNLIMITED_SESSIONS_DISPLAY,
 } from '@/lib/session-package-utils'
+import { GroupedPackageUsageDisplay } from '@/components/sessions/grouped-package-usage-display'
+import {
+  flattenGroupedSessionPackages,
+  groupSessionPackagesForDisplay,
+} from '@/lib/session-package-grouping'
 
 const LESSON_RECORD_PAGE_SIZE = 10
 
@@ -158,22 +162,34 @@ export function MemberDetail({
     setTrashCount(initialTrashCount)
   }, [initialTrashCount])
 
+  const groupedSessionPackages = useMemo(
+    () => groupSessionPackagesForDisplay(sessionPackages),
+    [sessionPackages],
+  )
+  const packagesForTally = useMemo(
+    () => flattenGroupedSessionPackages(groupedSessionPackages),
+    [groupedSessionPackages],
+  )
+
   const packageTally = useMemo(
-    () => linkPackageTallyToSessions(sessionPackages, sessionNumberByLessonId),
-    [sessionPackages, sessionNumberByLessonId],
+    () => linkPackageTallyToSessions(packagesForTally, sessionNumberByLessonId),
+    [packagesForTally, sessionNumberByLessonId],
   )
   const tallyTotalDisplay = useMemo(
-    () => formatPackageTallyTotalDisplay(sessionPackages),
-    [sessionPackages],
+    () => formatPackageTallyTotalDisplay(packagesForTally),
+    [packagesForTally],
   )
   const tallyRemainingDisplay = useMemo(
-    () => formatPackageTallyRemainingDisplay(sessionPackages),
-    [sessionPackages],
+    () => formatPackageTallyRemainingDisplay(packagesForTally),
+    [packagesForTally],
   )
   const isTallyUnlimited =
     tallyTotalDisplay === UNLIMITED_SESSIONS_DISPLAY ||
     tallyRemainingDisplay === UNLIMITED_SESSIONS_DISPLAY
-  const activePackage = sessionPackages.find((p) => isPackageUsableForLesson(p))
+  const activePackageGroup = groupedSessionPackages.find((group) =>
+    isPackageUsableForLesson(group.primary),
+  )
+  const activePackage = activePackageGroup?.primary
   const totalRemainingSessions = packageTally.remaining
   const hasSessionOverage = totalRemainingSessions < 0
   const isLowRemaining =
@@ -322,25 +338,24 @@ export function MemberDetail({
                 {formatSessionOverageAlert(Math.abs(totalRemainingSessions))}
               </p>
             ) : null}
-            {activePackage && (
+            {activePackage && activePackageGroup && (
               <div className="text-sm text-muted-foreground space-y-1 border-t border-border pt-3 mt-3">
                 <p>
-                  {formatPackageSessionsDisplay(
-                    activePackage.total_sessions,
-                    activePackage.note,
-                  )}{' '}
-                  · 잔여{' '}
-                  <span
-                    className={getPackageRemainingColorClass(
-                      activePackage.remaining_sessions,
-                      activePackage.note,
-                      activePackage.is_active,
-                    )}
-                  >
-                    {formatPackageRemainingDisplay(
-                      activePackage.remaining_sessions,
-                      activePackage.note,
-                    )}
+                  {formatPackagePlanLabel(activePackage.total_sessions, activePackage.note)}{' '}
+                  ·{' '}
+                  <span>
+                    <GroupedPackageUsageDisplay
+                      remainingSessions={activePackage.remaining_sessions}
+                      latestPurchaseTotalSessions={
+                        activePackageGroup.latestPurchaseTotalSessions
+                      }
+                      cumulativeTotalSessions={
+                        activePackageGroup.cumulativeTotalSessions
+                      }
+                      note={activePackage.note}
+                      isActive={activePackage.is_active}
+                      expiresAt={activePackage.expires_at}
+                    />
                   </span>
                 </p>
                 {activePackage.expires_at && (
@@ -445,7 +460,7 @@ export function MemberDetail({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>회차</TableHead>
+                  <TableHead>수업권</TableHead>
                   <TableHead>잔여</TableHead>
                   <TableHead>금액</TableHead>
                   <TableHead>결제일</TableHead>
@@ -457,19 +472,25 @@ export function MemberDetail({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessionPackages.map((pkg) => (
+                {groupedSessionPackages.map(
+                  ({
+                    primary: pkg,
+                    latestPurchaseTotalSessions,
+                    cumulativeTotalSessions,
+                  }) => (
                   <TableRow key={pkg.id}>
                     <TableCell>
-                      {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
+                      {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
                     </TableCell>
-                    <TableCell
-                      className={getPackageRemainingColorClass(
-                        pkg.remaining_sessions,
-                        pkg.note,
-                        pkg.is_active,
-                      )}
-                    >
-                      {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}
+                    <TableCell>
+                      <GroupedPackageUsageDisplay
+                        remainingSessions={pkg.remaining_sessions}
+                        latestPurchaseTotalSessions={latestPurchaseTotalSessions}
+                        cumulativeTotalSessions={cumulativeTotalSessions}
+                        note={pkg.note}
+                        isActive={pkg.is_active}
+                        expiresAt={pkg.expires_at}
+                      />
                       {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
                         <Badge variant="destructive" className="ml-2 text-[10px]">
                           초과

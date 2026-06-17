@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -36,6 +36,8 @@ import {
   RotateCcw,
   Check,
   Pencil,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { User } from '@/lib/types'
@@ -45,9 +47,12 @@ import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
 import {
   getDefaultSidebarMenuOrder,
   normalizeSidebarMenuOrder,
+  normalizeSidebarMenuHidden,
   orderSidebarMenuItems,
+  readSidebarMenuHidden,
   readSidebarMenuOrder,
   type SidebarMenuItemDef,
+  writeSidebarMenuHidden,
   writeSidebarMenuOrder,
 } from '@/lib/dashboard-menu-order'
 import { Button } from '@/components/ui/button'
@@ -93,16 +98,36 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const [order, setOrder] = useState<string[]>(() =>
     getDefaultSidebarMenuOrder(userRole),
   )
+  const [hiddenIds, setHiddenIds] = useState<string[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
 
   const prefetchedRoutesRef = useRef(new Set<string>())
 
   useEffect(() => {
     setOrder(readSidebarMenuOrder(userRole))
+    setHiddenIds(readSidebarMenuHidden(userRole))
   }, [userRole])
 
-  const menuItems = orderSidebarMenuItems(userRole, order)
-  const canEditMenu = menuItems.length > 1
+  const menuItems = orderSidebarMenuItems(userRole, order, hiddenIds)
+  const editMenuItems = orderSidebarMenuItems(userRole, order)
+  const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds])
+  const visibleCount = editMenuItems.filter((item) => !hiddenSet.has(item.id)).length
+  const canEditMenu = editMenuItems.length > 1
+
+  function persistHidden(next: string[]) {
+    const normalized = normalizeSidebarMenuHidden(userRole, next)
+    setHiddenIds(normalized)
+    writeSidebarMenuHidden(userRole, normalized)
+  }
+
+  function toggleMenuHidden(id: string) {
+    if (hiddenSet.has(id)) {
+      persistHidden(hiddenIds.filter((itemId) => itemId !== id))
+      return
+    }
+    if (visibleCount <= 1) return
+    persistHidden([...hiddenIds, id])
+  }
 
   function persist(next: string[]) {
     const normalized = normalizeSidebarMenuOrder(userRole, next)
@@ -135,6 +160,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
 
   function resetOrder() {
     persist(getDefaultSidebarMenuOrder(userRole))
+    persistHidden([])
   }
 
   function prefetchMenuRoute(href: string) {
@@ -154,11 +180,12 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, pathname, editMode, menuItems])
 
-  function renderMenuItem(item: SidebarMenuItemDef, index: number) {
+  function renderMenuItem(item: SidebarMenuItemDef, index: number, inEditMode: boolean) {
     const Icon = MENU_ICONS[item.id] ?? LayoutDashboard
     const isActive = isMenuItemActive(pathname, item.url)
+    const isVisible = !hiddenSet.has(item.id)
 
-    if (!editMode) {
+    if (!inEditMode) {
       return (
         <SidebarMenuItem key={item.id}>
           <SidebarMenuButton
@@ -197,12 +224,34 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           className={cn(
             'flex items-center gap-1 rounded-md border border-dashed border-sidebar-border px-2 py-1.5',
             draggingId === item.id && 'opacity-50',
+            !isVisible && 'opacity-45',
           )}
         >
           <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" />
           <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {item.title}
+            {!isVisible ? (
+              <span className="ml-1 text-[10px] text-muted-foreground">(숨김)</span>
+            ) : null}
+          </span>
           <div className="flex shrink-0 items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              aria-label={isVisible ? `${item.title} 메뉴 숨기기` : `${item.title} 메뉴 표시`}
+              title={isVisible ? '메뉴 숨기기' : '메뉴 표시'}
+              disabled={isVisible && visibleCount <= 1}
+              onClick={() => toggleMenuHidden(item.id)}
+            >
+              {isVisible ? (
+                <Eye className="h-3.5 w-3.5" />
+              ) : (
+                <EyeOff className="h-3.5 w-3.5" />
+              )}
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -219,7 +268,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              disabled={index === menuItems.length - 1}
+              disabled={index === editMenuItems.length - 1}
               aria-label={`${item.title} 아래로`}
               onClick={() => moveItem(item.id, 1)}
             >
@@ -293,11 +342,15 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           </div>
           {editMode ? (
             <p className="px-2 pb-2 text-xs text-muted-foreground">
-              드래그하거나 화살표로 순서를 바꿀 수 있습니다.
+              드래그·화살표로 순서 변경 · 눈 아이콘으로 메뉴 숨김/표시
             </p>
           ) : null}
           <SidebarGroupContent>
-            <SidebarMenu>{menuItems.map(renderMenuItem)}</SidebarMenu>
+            <SidebarMenu>
+              {(editMode ? editMenuItems : menuItems).map((item, index) =>
+                renderMenuItem(item, index, editMode),
+              )}
+            </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -51,13 +51,12 @@ import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import {
   adjustPriceForPaymentMethod,
   formatPackagePlanLabel,
-  formatPackageRemainingDisplay,
-  getPackageRemainingColorClass,
   getPresetPrice,
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
   isSessionPackageOverage,
 } from '@/lib/session-package-utils'
+import { GroupedPackageUsageDisplay } from '@/components/sessions/grouped-package-usage-display'
 import {
   deleteSessionPackage,
   getSessionPackagesPage,
@@ -65,6 +64,10 @@ import {
   type SessionPackageListOrderBy,
 } from '@/lib/actions/sessions'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+import {
+  flattenGroupedSessionPackages,
+  groupSessionPackagesForDisplay,
+} from '@/lib/session-package-grouping'
 import { cn } from '@/lib/utils'
 import { RecentLessonSortIcon } from '@/components/dashboard/recent-lesson-sort-icon'
 
@@ -217,9 +220,19 @@ export function SessionsList({
     return matchesSearch && matchesStatus
   })
 
+  const groupedFilteredPackages = useMemo(
+    () => groupSessionPackagesForDisplay(filteredPackages),
+    [filteredPackages],
+  )
+
+  const primaryPackages = useMemo(
+    () => flattenGroupedSessionPackages(groupSessionPackagesForDisplay(packages)),
+    [packages],
+  )
+
   // Stats
-  const totalActivePackages = packages.filter((p) => isPackageUsableForLesson(p)).length
-  const lowSessionPackages = packages.filter(
+  const totalActivePackages = primaryPackages.filter((p) => isPackageUsableForLesson(p)).length
+  const lowSessionPackages = primaryPackages.filter(
     (p) =>
       p.is_active &&
       !isMonthlyPlanPackage(p.note) &&
@@ -598,7 +611,7 @@ export function SessionsList({
                 </div>
               </TableHead>
               <TableHead>수업권</TableHead>
-              <TableHead className="hidden sm:table-cell">잔여/전체</TableHead>
+              <TableHead className="hidden sm:table-cell">잔여/최근/누적</TableHead>
               <TableHead className="hidden md:table-cell">결제액</TableHead>
               <TableHead className="hidden lg:table-cell">만료일</TableHead>
               <TableHead>상태</TableHead>
@@ -606,14 +619,19 @@ export function SessionsList({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredPackages.length === 0 ? (
+            {groupedFilteredPackages.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                   등록된 수업권이 없습니다.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredPackages.map((pkg) => (
+              groupedFilteredPackages.map(
+                ({
+                  primary: pkg,
+                  latestPurchaseTotalSessions,
+                  cumulativeTotalSessions,
+                }) => (
                 <TableRow key={pkg.id}>
                   <TableCell>
                     <div>
@@ -642,21 +660,14 @@ export function SessionsList({
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">
                     <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          'font-bold',
-                          getPackageRemainingColorClass(
-                            pkg.remaining_sessions,
-                            pkg.note,
-                            pkg.is_active,
-                          ),
-                        )}
-                      >
-                        {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}
-                      </span>
-                      {!isMonthlyPlanPackage(pkg.note) ? (
-                        <span className="text-muted-foreground">/ {pkg.total_sessions}</span>
-                      ) : null}
+                      <GroupedPackageUsageDisplay
+                        remainingSessions={pkg.remaining_sessions}
+                        latestPurchaseTotalSessions={latestPurchaseTotalSessions}
+                        cumulativeTotalSessions={cumulativeTotalSessions}
+                        note={pkg.note}
+                        isActive={pkg.is_active}
+                        expiresAt={pkg.expires_at}
+                      />
                       {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
                         <Badge variant="destructive" className="text-[10px]">
                           초과

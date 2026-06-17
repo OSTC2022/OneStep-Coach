@@ -78,11 +78,25 @@ export function isLessonCalendarVisible(
   return true
 }
 
+/** 수업현황 — 출석 취소(취소)도 표시, Google 일정 삭제(event_status)만 제외 */
+export function isLessonStatusPageVisible(
+  lesson: Pick<Lesson, 'attendance_status' | 'event_status'>,
+): boolean {
+  if (lesson.event_status === 'cancelled') return false
+  return true
+}
+
 /** 캘린더에 표시할 가치가 있는 수업만 (「일정」 placeholder 제외) */
-export function filterDisplayableCalendarLessons<T extends Lesson>(lessons: T[]): T[] {
+export function filterDisplayableCalendarLessons<T extends Lesson>(
+  lessons: T[],
+  options?: { forStatusPage?: boolean },
+): T[] {
+  const isVisible = options?.forStatusPage
+    ? isLessonStatusPageVisible
+    : isLessonCalendarVisible
   return lessons.filter(
     (lesson) =>
-      isLessonCalendarVisible(lesson) && getLessonCalendarLabel(lesson) !== '일정',
+      isVisible(lesson) && getLessonCalendarLabel(lesson) !== '일정',
   )
 }
 

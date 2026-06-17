@@ -91,9 +91,14 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
 ]
 
 const STORAGE_PREFIX = 'one-step-coach:sidebar-menu-order'
+const HIDDEN_STORAGE_PREFIX = 'one-step-coach:sidebar-menu-hidden'
 
 function storageKey(role: SidebarMenuRole) {
   return `${STORAGE_PREFIX}:${role}`
+}
+
+function hiddenStorageKey(role: SidebarMenuRole) {
+  return `${HIDDEN_STORAGE_PREFIX}:${role}`
 }
 
 export function getDefaultSidebarMenuOrder(role: SidebarMenuRole): string[] {
@@ -152,10 +157,57 @@ export function writeSidebarMenuOrder(role: SidebarMenuRole, order: string[]) {
   }
 }
 
+export function normalizeSidebarMenuHidden(
+  role: SidebarMenuRole,
+  hidden: string[] | null | undefined,
+): string[] {
+  const allowed = new Set(getDefaultSidebarMenuOrder(role))
+  const seen = new Set<string>()
+  const next: string[] = []
+
+  for (const id of hidden ?? []) {
+    if (!allowed.has(id) || seen.has(id)) continue
+    seen.add(id)
+    next.push(id)
+  }
+
+  return next
+}
+
+export function readSidebarMenuHidden(role: SidebarMenuRole): string[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    const raw = window.localStorage.getItem(hiddenStorageKey(role))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return normalizeSidebarMenuHidden(role, parsed.map(String))
+  } catch {
+    return []
+  }
+}
+
+export function writeSidebarMenuHidden(role: SidebarMenuRole, hidden: string[]) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(
+      hiddenStorageKey(role),
+      JSON.stringify(normalizeSidebarMenuHidden(role, hidden)),
+    )
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 export function orderSidebarMenuItems(
   role: SidebarMenuRole,
   order: string[],
+  hidden?: string[] | null,
 ): SidebarMenuItemDef[] {
+  const hiddenSet = new Set(normalizeSidebarMenuHidden(role, hidden))
   const byId = new Map(
     SIDEBAR_MENU_ITEMS.filter((item) => item.roles.includes(role)).map(
       (item) => [item.id, item],
@@ -163,6 +215,7 @@ export function orderSidebarMenuItems(
   )
 
   return normalizeSidebarMenuOrder(role, order)
+    .filter((id) => !hiddenSet.has(id))
     .map((id) => byId.get(id))
     .filter((item): item is SidebarMenuItemDef => Boolean(item))
 }

@@ -281,7 +281,13 @@ export function getAttendanceDisplay(
   }
 
   const status = lesson.attendance_status
-  if (status === 'present') return { label: '출석', variant: 'default' }
+  if (status === 'present') {
+    const checkedInAt = formatSignedAtTime(lesson.lesson_sessions?.[0]?.checked_in_at)
+    return {
+      label: checkedInAt ? `출석 ${checkedInAt}` : '출석',
+      variant: 'default',
+    }
+  }
   if (status === 'absent') return { label: '결석', variant: 'destructive' }
   if (status === 'makeup') return { label: '보강', variant: 'secondary' }
   return { label: '취소', variant: 'secondary' }

@@ -9,7 +9,7 @@ import {
 } from '@/lib/supabase-selects'
 import type { Lesson } from '@/lib/types'
 import { enrichLessonRecurrenceFields } from '@/lib/lesson-recurrence-legacy'
-import { resolveLessonTitle, isLessonCalendarVisible } from '@/lib/calendar-utils'
+import { resolveLessonTitle, isLessonCalendarVisible, isLessonStatusPageVisible } from '@/lib/calendar-utils'
 import { isLessonIdentifiable } from '@/lib/calendar-recurrence/expand-lessons'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -88,9 +88,12 @@ export async function fetchExpandedCalendarLessons(
   dateFrom: string,
   dateTo: string,
   limit = 300,
+  options?: { forStatusPage?: boolean },
 ): Promise<{ lessons: Lesson[]; supportsExpansion: boolean }> {
   await purgeUnnamedRecurringMasters()
-  await purgeCancelledRecurrenceExceptions()
+  if (!options?.forStatusPage) {
+    await purgeCancelledRecurrenceExceptions()
+  }
 
   const supabase = await createStaffDataClient()
 
@@ -121,11 +124,15 @@ export async function fetchExpandedCalendarLessons(
     stored = retry.data
     storedError = retry.error
     if (!storedError) {
+      const isVisible = options?.forStatusPage
+        ? isLessonStatusPageVisible
+        : isLessonCalendarVisible
       return {
         lessons: normalizeCalendarLessonsForDisplay(
           ((stored ?? []) as Lesson[])
-            .filter((row) => isLessonIdentifiable(row) && isLessonCalendarVisible(row))
+            .filter((row) => isLessonIdentifiable(row) && isVisible(row))
             .map(normalizeCalendarLesson),
+          options,
         ),
         supportsExpansion: false,
       }
@@ -165,6 +172,7 @@ export async function fetchExpandedCalendarLessons(
     (exceptionsResult.data ?? []) as RecurrenceCapableLesson[],
     dateFrom,
     dateTo,
+    options,
   ).map(normalizeCalendarLesson)
 
   return {

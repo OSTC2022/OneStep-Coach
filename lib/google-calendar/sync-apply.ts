@@ -22,14 +22,59 @@ export const MAX_EVENTS_PER_SYNC = 100
 const BULK_UPSERT_SIZE = 50
 const APPLY_BATCH_SIZE = 100
 
+const GOOGLE_PENDING_MEMBER_NOTE =
+  '[구글 캘린더] 회원 자동 연결 실패 — 캘린더에서 회원을 지정해 주세요.'
+
+export function preserveLinkedMemberOnGoogleSync(
+  payload: Record<string, unknown>,
+  existingMemberId?: string | null,
+): Record<string, unknown> {
+  if (!existingMemberId) return payload
+
+  const next: Record<string, unknown> = {
+    ...payload,
+    member_id: existingMemberId,
+    title: null,
+    google_sync_status: null,
+  }
+
+  if (next.special_note === GOOGLE_PENDING_MEMBER_NOTE) {
+    next.special_note = null
+  }
+
+  return next
+}
+
 async function bulkUpsertLessonRows(
   supabase: ReturnType<typeof createAdminClient>,
   rows: Record<string, unknown>[],
+  options?: {
+    googleAccountId?: string
+    googleCalendarId?: string
+  },
 ): Promise<void> {
   if (rows.length === 0) return
 
-  for (let offset = 0; offset < rows.length; offset += BULK_UPSERT_SIZE) {
-    const chunk = rows.slice(offset, offset + BULK_UPSERT_SIZE)
+  let rowsToWrite = rows
+  if (options?.googleAccountId && options.googleCalendarId) {
+    const eventIds = rows
+      .map((row) => row.google_event_id as string | undefined)
+      .filter(Boolean) as string[]
+    if (eventIds.length) {
+      const linked = await loadExistingByGoogleEventId(supabase, eventIds, {
+        googleAccountId: options.googleAccountId,
+        googleCalendarId: options.googleCalendarId,
+      })
+      rowsToWrite = rows.map((row) => {
+        const googleEventId = row.google_event_id as string | undefined
+        if (!googleEventId) return row
+        return preserveLinkedMemberOnGoogleSync(row, linked.get(googleEventId)?.member_id)
+      })
+    }
+  }
+
+  for (let offset = 0; offset < rowsToWrite.length; offset += BULK_UPSERT_SIZE) {
+    const chunk = rowsToWrite.slice(offset, offset + BULK_UPSERT_SIZE)
     const { error } = await supabase.from('lessons').upsert(chunk, {
       onConflict: 'google_account_id,google_calendar_id,google_event_id',
     })
@@ -75,6 +120,7 @@ type ExistingLesson = {
   session_deducted: boolean
   google_event_id?: string | null
   event_type?: string | null
+  member_id?: string | null
 }
 
 export async function loadExistingByGoogleEventId(
@@ -93,7 +139,7 @@ export async function loadExistingByGoogleEventId(
     const chunk = googleEventIds.slice(offset, offset + chunkSize)
     let query = supabase
       .from('lessons')
-      .select('id, google_event_id, google_calendar_id, google_account_id, session_deducted, event_type')
+      .select('id, google_event_id, google_calendar_id, google_account_id, session_deducted, event_type, member_id')
       .in('google_event_id', chunk)
 
     if (options?.googleAccountId) {
@@ -118,6 +164,7 @@ export async function loadExistingByGoogleEventId(
           session_deducted: Boolean(row.session_deducted),
           google_event_id: row.google_event_id,
           event_type: row.event_type,
+          member_id: row.member_id,
         })
       }
     }
@@ -134,7 +181,7 @@ async function findExistingByGoogleKey(
 ): Promise<ExistingLesson | null> {
   const { data, error } = await supabase
     .from('lessons')
-    .select('id, google_event_id, session_deducted, event_type')
+    .select('id, google_event_id, session_deducted, event_type, member_id')
     .eq('google_account_id', googleAccountId)
     .eq('google_calendar_id', googleCalendarId)
     .eq('google_event_id', googleEventId)
@@ -147,7 +194,7 @@ async function findExistingByGoogleKey(
     ) {
       const { data: legacy } = await supabase
         .from('lessons')
-        .select('id, google_event_id, session_deducted, event_type')
+        .select('id, google_event_id, session_deducted, event_type, member_id')
         .eq('google_event_id', googleEventId)
         .maybeSingle()
       return legacy
@@ -156,6 +203,7 @@ async function findExistingByGoogleKey(
             session_deducted: Boolean(legacy.session_deducted),
             google_event_id: legacy.google_event_id,
             event_type: legacy.event_type,
+            member_id: legacy.member_id,
           }
         : null
     }
@@ -168,6 +216,7 @@ async function findExistingByGoogleKey(
     session_deducted: Boolean(data.session_deducted),
     google_event_id: data.google_event_id,
     event_type: data.event_type,
+    member_id: data.member_id,
   }
 }
 
@@ -196,9 +245,13 @@ async function upsertGoogleLessonRow(
     (await findExistingByGoogleKey(supabase, googleAccountId, calendarId, googleEventId))
 
   if (resolvedExisting) {
+    const mergedPayload = preserveLinkedMemberOnGoogleSync(
+      rowPayload,
+      resolvedExisting.member_id,
+    )
     const { error } = await supabase
       .from('lessons')
-      .update(rowPayload)
+      .update(mergedPayload)
       .eq('id', resolvedExisting.id)
     if (error) throw new Error(error.message)
     return { id: resolvedExisting.id, google_event_id: googleEventId, created: false }
@@ -219,9 +272,10 @@ async function upsertGoogleLessonRow(
         googleEventId,
       )
       if (dupe) {
+        const mergedPayload = preserveLinkedMemberOnGoogleSync(rowPayload, dupe.member_id)
         const { error: updateError } = await supabase
           .from('lessons')
-          .update(rowPayload)
+          .update(mergedPayload)
           .eq('id', dupe.id)
         if (updateError) throw new Error(updateError.message)
         return { id: dupe.id, google_event_id: googleEventId, created: false }
@@ -312,7 +366,7 @@ function buildGoogleLessonBase(
     event_timezone: event.start?.timeZone ?? 'Asia/Seoul',
     special_note: memberId
       ? null
-      : '[구글 캘린더] 회원 자동 연결 실패 — 캘린더에서 회원을 지정해 주세요.',
+      : GOOGLE_PENDING_MEMBER_NOTE,
   }
 }
 
@@ -649,13 +703,17 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
+      const updatePayload = preserveLinkedMemberOnGoogleSync(
+        withGoogleSyncKeys(payload, googleAccountId, calendarId),
+        existing.member_id,
+      )
       const { error } = await supabase
         .from('lessons')
-        .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+        .update(updatePayload)
         .eq('id', existing.id)
       if (error) throw new Error(error.message)
       result.updated += 1
-      if (!memberId) result.pendingMember += 1
+      if (!memberId && !existing.member_id) result.pendingMember += 1
       await consolidateGoogleRecurringSeriesRows(supabase, {
         masterGoogleEventId: event.id,
         masterDbId: existing.id,
@@ -752,9 +810,13 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
+      const updatePayload = preserveLinkedMemberOnGoogleSync(
+        withGoogleSyncKeys(payload, googleAccountId, calendarId),
+        existing.member_id,
+      )
       const { error } = await supabase
         .from('lessons')
-        .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+        .update(updatePayload)
         .eq('id', existing.id)
       if (error) throw new Error(error.message)
       result.updated += 1
@@ -765,14 +827,18 @@ async function applyGoogleEventsChunk(
     if (originalStart) {
       const { data: dupe } = await supabase
         .from('lessons')
-        .select('id')
+        .select('id, member_id')
         .eq('google_recurring_event_id', event.recurringEventId)
         .eq('original_start_time', originalStart)
         .maybeSingle()
       if (dupe?.id) {
+        const updatePayload = preserveLinkedMemberOnGoogleSync(
+          withGoogleSyncKeys(payload, googleAccountId, calendarId),
+          dupe.member_id,
+        )
         await supabase
           .from('lessons')
-          .update(withGoogleSyncKeys(payload, googleAccountId, calendarId))
+          .update(updatePayload)
           .eq('id', dupe.id)
         result.updated += 1
         continue
@@ -868,7 +934,10 @@ async function applyGoogleEventsChunk(
 
   await bulkCancelLessonIds(supabase, singleCancelIds)
   result.cancelled += singleCancelIds.length
-  await bulkUpsertLessonRows(supabase, singleUpsertRows)
+  await bulkUpsertLessonRows(supabase, singleUpsertRows, {
+    googleAccountId,
+    googleCalendarId: calendarId,
+  })
 
   return result
 }
