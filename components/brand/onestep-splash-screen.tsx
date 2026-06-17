@@ -127,12 +127,9 @@ export function OnestepSplashScreen({
         className,
       )}
     >
-      <div
-        className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-35"
-        style={{ backgroundImage: "url('/images/onestep-splash-bg.png')" }}
-      />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_88%_0%,rgba(170,255,0,0.12),transparent_52%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_100%,rgba(13,27,42,0.95),transparent_65%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_88%_0%,rgba(170,255,0,0.1),transparent_52%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_92%,rgba(13,27,42,0.85),transparent_48%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(165deg,rgba(7,13,24,0.2)_0%,rgba(7,13,24,0.95)_55%)]" />
 
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6">
         <div className="flex w-full max-w-md items-center justify-center gap-1 sm:gap-3">
