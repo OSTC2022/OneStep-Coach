@@ -233,6 +233,10 @@ a[href] {
   transition: opacity 500ms ease;
 }
 
+html.onestep-app-ready #onestep-app-splash {
+  display: none !important;
+}
+
 html.onestep-splash-active .onestep-app-root {
   visibility: hidden;
   pointer-events: none;

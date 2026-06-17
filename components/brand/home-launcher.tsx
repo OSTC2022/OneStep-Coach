@@ -2,8 +2,10 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-
-const MIN_VISIBLE_MS = 2500
+import {
+  shouldSkipSplashBoot,
+  SPLASH_MIN_VISIBLE_MS,
+} from '@/lib/splash-boot'
 
 type HomeLauncherProps = {
   redirectTo: string
@@ -21,10 +23,14 @@ export function HomeLauncher({ redirectTo }: HomeLauncherProps) {
       router.replace(redirectTo)
     }
 
+    if (shouldSkipSplashBoot()) {
+      navigate()
+      return
+    }
+
     function scheduleNavigate() {
       const startedAt = window.__onestepSplashStart ?? Date.now()
-      const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt))
-
+      const wait = Math.max(0, SPLASH_MIN_VISIBLE_MS - (Date.now() - startedAt))
       window.setTimeout(navigate, wait)
     }
 
@@ -42,10 +48,4 @@ export function HomeLauncher({ redirectTo }: HomeLauncherProps) {
   }, [redirectTo, router])
 
   return null
-}
-
-declare global {
-  interface Window {
-    __onestepSplashStart?: number
-  }
 }

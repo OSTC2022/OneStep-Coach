@@ -1,11 +1,12 @@
 /** HTML 파싱 직후 즉시 표시 — React hydration 전 커스텀 스플래시 */
+import { SPLASH_BOOT_SCRIPT } from '@/lib/splash-boot'
+
 export function OnestepSplashStatic() {
   return (
     <>
       <script
         dangerouslySetInnerHTML={{
-          __html:
-            'window.__onestepSplashStart=Date.now();document.documentElement.classList.add("onestep-splash-active");',
+          __html: SPLASH_BOOT_SCRIPT,
         }}
       />
       <div
