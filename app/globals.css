@@ -203,3 +203,43 @@ a[href] {
 .onestep-heartbeat {
   animation: onestep-heartbeat-pulse 1.2s ease-in-out infinite;
 }
+
+.onestep-spinner {
+  animation: onestep-spinner-rotate 1.1s linear infinite;
+}
+
+.onestep-loading-label::after {
+  content: '';
+  animation: onestep-loading-dots 1.6s steps(4, end) infinite;
+}
+
+.onestep-app-splash.onestep-splash-fade-out {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+
+body:has(#onestep-app-splash) {
+  overflow: hidden;
+}
+
+@keyframes onestep-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes onestep-loading-dots {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
+}

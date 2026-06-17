@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { AppInitialLoader } from '@/components/brand/app-initial-loader'
+import { OnestepSplashStatic } from '@/components/brand/onestep-splash-static'
 import './globals.css'
 
 const geistSans = Geist({
@@ -41,7 +42,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0a1628',
+  themeColor: '#070d18',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -56,11 +57,25 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
-      className={`dark bg-background ${geistSans.variable} ${geistMono.variable}`}
+      className={`dark bg-[#070d18] ${geistSans.variable} ${geistMono.variable}`}
     >
+      <head>
+        <style
+          dangerouslySetInnerHTML={{
+            __html:
+              'html,body{background:#070d18!important}#onestep-app-splash{opacity:1}',
+          }}
+        />
+        <link
+          rel="apple-touch-startup-image"
+          href="/images/onestep-splash-startup.png"
+          media="(orientation: portrait)"
+        />
+      </head>
       <body
-        className={`${geistSans.className} antialiased bg-background text-foreground min-h-screen`}
+        className={`${geistSans.className} antialiased bg-[#070d18] text-foreground min-h-screen`}
       >
+        <OnestepSplashStatic />
         <AppInitialLoader />
         {children}
         <Toaster richColors position="top-center" />

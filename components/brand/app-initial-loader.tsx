@@ -1,46 +1,45 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { OnestepSplashScreen } from '@/components/brand/onestep-splash-screen'
+import { useEffect } from 'react'
 
-const MIN_VISIBLE_MS = 900
+const MIN_VISIBLE_MS = 2500
+const FADE_MS = 500
+
+declare global {
+  interface Window {
+    __onestepSplashStart?: number
+  }
+}
 
 export function AppInitialLoader() {
-  const [phase, setPhase] = useState<'visible' | 'fade' | 'hidden'>('visible')
-
   useEffect(() => {
-    let minElapsed = false
-    let pageLoaded = document.readyState === 'complete'
+    const splash = document.getElementById('onestep-app-splash')
+    if (!splash) return
+
+    const startedAt = window.__onestepSplashStart ?? Date.now()
     let hideTimer: number | undefined
 
     function hideSplash() {
-      if (!minElapsed || !pageLoaded) return
-      setPhase('fade')
-      hideTimer = window.setTimeout(() => setPhase('hidden'), 520)
+      const elapsed = Date.now() - startedAt
+      const wait = Math.max(0, MIN_VISIBLE_MS - elapsed)
+
+      hideTimer = window.setTimeout(() => {
+        splash.classList.add('onestep-splash-fade-out')
+        window.setTimeout(() => splash.remove(), FADE_MS)
+      }, wait)
     }
 
-    const minTimer = window.setTimeout(() => {
-      minElapsed = true
+    if (document.readyState === 'complete') {
       hideSplash()
-    }, MIN_VISIBLE_MS)
-
-    function onLoad() {
-      pageLoaded = true
-      hideSplash()
-    }
-
-    if (!pageLoaded) {
-      window.addEventListener('load', onLoad, { once: true })
+    } else {
+      window.addEventListener('load', hideSplash, { once: true })
     }
 
     return () => {
-      window.clearTimeout(minTimer)
       if (hideTimer) window.clearTimeout(hideTimer)
-      window.removeEventListener('load', onLoad)
+      window.removeEventListener('load', hideSplash)
     }
   }, [])
 
-  if (phase === 'hidden') return null
-
-  return <OnestepSplashScreen fixed fading={phase === 'fade'} />
+  return null
 }
