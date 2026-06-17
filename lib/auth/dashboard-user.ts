@@ -1,6 +1,7 @@
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getSafeSessionUser } from '@/lib/supabase/auth-session'
 import { PROFILE_SELECT, USER_LEGACY_SELECT } from '@/lib/supabase-selects'
 import {
   ensureProtectedAdminRole,
@@ -29,9 +30,7 @@ function resolveAppRole(
 /** 레이아웃·페이지가 같은 요청 안에서 프로필을 한 번만 조회 */
 export const getDashboardProfile = cache(async (): Promise<User | null> => {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { user } = await getSafeSessionUser(supabase)
 
   if (!user) return null
 

@@ -13,6 +13,9 @@ export const MONTHLY_PLAN_PRESETS = [
   { months: 6, label: '6개월' },
 ] as const
 
+export const MONTHLY_RECURRING_PLAN_LABEL = '매월'
+export const MONTHLY_RECURRING_NOTE = '월정액 매월'
+
 export type MonthlyPlanMonths = (typeof MONTHLY_PLAN_PRESETS)[number]['months']
 
 /** 8회 카드 기준 88만원 → 회당 11만원 (부가세 10% 포함) */
@@ -86,11 +89,34 @@ export function clearMonthlyPlanNote(currentNote: string) {
   return stripMonthlyPlanNoteParts(currentNote).join(' · ')
 }
 
+export function formatMonthlyRecurringPlanNote() {
+  return MONTHLY_RECURRING_NOTE
+}
+
+export function mergeMonthlyRecurringPlanNote(currentNote: string) {
+  const label = formatMonthlyRecurringPlanNote()
+  const parts = stripMonthlyPlanNoteParts(currentNote)
+  return [...parts, label].join(' · ')
+}
+
+export function isMonthlyRecurringPlan(note?: string | null): boolean {
+  if (!note) return false
+  return note
+    .split('·')
+    .map((part) => part.trim())
+    .includes(MONTHLY_RECURRING_NOTE)
+}
+
 function stripMonthlyPlanNoteParts(currentNote: string) {
   return currentNote
     .split('·')
     .map((part) => part.trim())
-    .filter((part) => part && !/^월정액\s*\d+개월$/.test(part))
+    .filter(
+      (part) =>
+        part &&
+        !/^월정액\s*\d+개월$/.test(part) &&
+        part !== MONTHLY_RECURRING_NOTE,
+    )
 }
 
 export function calculateMonthlyPlanExpiryDate(
@@ -107,6 +133,24 @@ export function addMonthsToDate(dateStr: string, months: number): string {
   return date.toISOString().split('T')[0]
 }
 
+/** 해당 월 1일 (YYYY-MM-01) */
+export function toMonthStartDate(dateStr?: string | null): string {
+  const base = dateStr?.split('T')[0] || new Date().toISOString().split('T')[0]
+  const [year, month] = base.split('-')
+  if (!year || !month) return base
+  return `${year}-${month}-01`
+}
+
+/** 매월 정액 기본 결제일 — 당월 1일 */
+export function getDefaultMonthlyRecurringPaidAt(): string {
+  return toMonthStartDate()
+}
+
+/** 매월 정액 만료일 — 결제일 기준 1개월 */
+export function calculateMonthlyRecurringExpiryDate(paidAt: string): string {
+  return calculateMonthlyPlanExpiryDate(paidAt, 1)
+}
+
 export function parseMonthlyPlanMonthsFromNote(note?: string | null): number | null {
   if (!note) return null
   const match = note.match(/월정액\s*(\d+)개월/)
@@ -115,7 +159,9 @@ export function parseMonthlyPlanMonthsFromNote(note?: string | null): number | n
 
 /** 월정액 수업권 — 회차와 무관하게 수업 등록 가능 */
 export function isMonthlyPlanPackage(note?: string | null): boolean {
-  return parseMonthlyPlanMonthsFromNote(note) != null
+  return (
+    parseMonthlyPlanMonthsFromNote(note) != null || isMonthlyRecurringPlan(note)
+  )
 }
 
 /** @deprecated isMonthlyPlanPackage 와 동일 */
@@ -127,6 +173,7 @@ export function isMonthlyUnlimitedSessions(note?: string | null): boolean {
 export const UNLIMITED_SESSIONS_DISPLAY = '-'
 
 export function formatMonthlyPlanSuffix(note?: string | null): string {
+  if (isMonthlyRecurringPlan(note)) return `(${MONTHLY_RECURRING_PLAN_LABEL})`
   const months = parseMonthlyPlanMonthsFromNote(note)
   return months != null ? `(${months}개월)` : ''
 }
@@ -135,6 +182,9 @@ export function formatPackagePlanLabel(
   totalSessions: number,
   note?: string | null,
 ): string {
+  if (isMonthlyRecurringPlan(note)) {
+    return MONTHLY_RECURRING_NOTE
+  }
   const months = parseMonthlyPlanMonthsFromNote(note)
   if (months != null) {
     return `월정액 ${months}개월`
@@ -146,6 +196,9 @@ export function formatPackageSessionsDisplay(
   totalSessions: number,
   note?: string | null,
 ): string {
+  if (isMonthlyRecurringPlan(note)) {
+    return `${UNLIMITED_SESSIONS_DISPLAY} (${MONTHLY_RECURRING_PLAN_LABEL})`
+  }
   const months = parseMonthlyPlanMonthsFromNote(note)
   if (months != null) {
     return `${UNLIMITED_SESSIONS_DISPLAY} (${months}개월)`

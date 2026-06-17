@@ -1,5 +1,11 @@
 import { createServerClient, type SupabaseClient } from '@supabase/ssr'
 import type { User } from '@supabase/supabase-js'
+import {
+  applySupabaseAuthCookieClears,
+  buildSupabaseAuthCookieKey,
+  getSafeSessionUser,
+  shouldSkipAuthLookup,
+} from '@/lib/supabase/auth-session'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import {
@@ -20,6 +26,7 @@ const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 3000
 let sessionAuthCache: {
   cookieKey: string
   user: User | null
+  staleSession: boolean
   expiresAt: number
 } | null = null
 
@@ -28,39 +35,41 @@ function isDevEnvironment() {
 }
 
 function devCookieKey(request: NextRequest) {
-  const authCookies = request.cookies
-    .getAll()
-    .filter((cookie) => cookie.name.startsWith('sb-'))
-  if (authCookies.length === 0) return ''
-  return authCookies
-    .map((cookie) => `${cookie.name}=${cookie.value}`)
-    .sort()
-    .join('|')
+  return buildSupabaseAuthCookieKey(request)
 }
 
 async function getSessionUser(
   supabase: SupabaseClient,
   request: NextRequest,
-): Promise<User | null> {
+): Promise<{ user: User | null; staleSession: boolean }> {
   const cookieKey = devCookieKey(request)
   const now = Date.now()
+  if (!cookieKey) {
+    return { user: null, staleSession: false }
+  }
   if (
     sessionAuthCache &&
     sessionAuthCache.cookieKey === cookieKey &&
     sessionAuthCache.expiresAt > now
   ) {
-    return sessionAuthCache.user
+    return {
+      user: sessionAuthCache.user,
+      staleSession: sessionAuthCache.staleSession,
+    }
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const skipLookup = shouldSkipAuthLookup(request)
+  const { user, staleSession } = await getSafeSessionUser(supabase, {
+    cookieKey,
+    skipLookup,
+  })
   sessionAuthCache = {
     cookieKey,
     user,
+    staleSession,
     expiresAt: now + AUTH_CACHE_TTL_MS,
   }
-  return user
+  return { user, staleSession }
 }
 
 function resolveRoleFromMetadata(
@@ -203,6 +212,14 @@ function missingSupabaseEnvResponse() {
   )
 }
 
+function finalizeProxyResponse(
+  request: NextRequest,
+  response: NextResponse,
+  staleSession: boolean,
+) {
+  return applySupabaseAuthCookieClears(request, response, staleSession)
+}
+
 export async function updateSession(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith('/_next')) {
     return NextResponse.next({ request })
@@ -242,7 +259,17 @@ export async function updateSession(request: NextRequest) {
       },
     })
 
-    const user = await getSessionUser(supabase, request)
+    const { user, staleSession } = await getSessionUser(supabase, request)
+
+    if (request.nextUrl.pathname === '/' && !user) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/auth/login'
+      return finalizeProxyResponse(
+        request,
+        NextResponse.redirect(url),
+        staleSession || shouldSkipAuthLookup(request),
+      )
+    }
 
     if (
       request.nextUrl.pathname.startsWith('/dashboard') &&
@@ -250,7 +277,11 @@ export async function updateSession(request: NextRequest) {
     ) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
-      return NextResponse.redirect(url)
+      return finalizeProxyResponse(
+        request,
+        NextResponse.redirect(url),
+        staleSession || shouldSkipAuthLookup(request),
+      )
     }
 
     if (
@@ -259,7 +290,11 @@ export async function updateSession(request: NextRequest) {
     ) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
-      return NextResponse.redirect(url)
+      return finalizeProxyResponse(
+        request,
+        NextResponse.redirect(url),
+        staleSession || shouldSkipAuthLookup(request),
+      )
     }
 
     if (user) {
@@ -276,7 +311,7 @@ export async function updateSession(request: NextRequest) {
           request.nextUrl.pathname.startsWith('/dashboard') &&
           isProfileAccessAllowed(fastApproval, user.email))
       ) {
-        return supabaseResponse
+        return finalizeProxyResponse(request, supabaseResponse, staleSession)
       }
 
       const approvalStatus = await getProfileApprovalStatus(
@@ -294,7 +329,11 @@ export async function updateSession(request: NextRequest) {
         const url = request.nextUrl.clone()
         url.pathname =
           approvalStatus === 'rejected' ? '/auth/rejected' : '/auth/pending'
-        return NextResponse.redirect(url)
+        return finalizeProxyResponse(
+          request,
+          NextResponse.redirect(url),
+          staleSession,
+        )
       }
 
       if (
@@ -304,7 +343,11 @@ export async function updateSession(request: NextRequest) {
         const role = await resolveUserSessionRole(supabase, user)
         const url = request.nextUrl.clone()
         url.pathname = getDefaultDashboardPath(role)
-        return NextResponse.redirect(url)
+        return finalizeProxyResponse(
+          request,
+          NextResponse.redirect(url),
+          staleSession,
+        )
       }
     }
 
@@ -314,7 +357,11 @@ export async function updateSession(request: NextRequest) {
       if (!canAccessPath(role, request.nextUrl.pathname)) {
         const url = request.nextUrl.clone()
         url.pathname = getDefaultDashboardPath(role)
-        return NextResponse.redirect(url)
+        return finalizeProxyResponse(
+          request,
+          NextResponse.redirect(url),
+          staleSession,
+        )
       }
     }
 
@@ -325,10 +372,14 @@ export async function updateSession(request: NextRequest) {
       const role = await resolveUserSessionRole(supabase, user)
       const url = request.nextUrl.clone()
       url.pathname = getDefaultDashboardPath(role)
-      return NextResponse.redirect(url)
+      return finalizeProxyResponse(
+        request,
+        NextResponse.redirect(url),
+        staleSession,
+      )
     }
 
-    return supabaseResponse
+    return finalizeProxyResponse(request, supabaseResponse, staleSession)
   } catch (error) {
     console.error('[proxy] updateSession failed:', error)
     return supabaseResponse

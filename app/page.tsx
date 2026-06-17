@@ -1,13 +1,24 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import {
+  buildSupabaseAuthCookieKeyFromPairs,
+  getSafeSessionUser,
+} from '@/lib/supabase/auth-session'
+import { cookies } from 'next/headers'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { getDefaultDashboardPath, profileRoleToAppRole } from '@/lib/roles'
 
 export default async function Home() {
+  const cookieStore = await cookies()
+  const authCookies = cookieStore.getAll().filter((cookie) => cookie.name.startsWith('sb-'))
+  if (authCookies.length === 0) {
+    redirect('/auth/login')
+  }
+
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { user } = await getSafeSessionUser(supabase, {
+    cookieKey: buildSupabaseAuthCookieKeyFromPairs(authCookies),
+  })
 
   if (!user) {
     redirect('/auth/login')

@@ -23,17 +23,23 @@ import { Textarea } from '@/components/ui/textarea'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import {
   MONTHLY_PLAN_PRESETS,
+  MONTHLY_RECURRING_PLAN_LABEL,
   PACKAGE_PRESETS,
   UNLIMITED_SESSIONS_DISPLAY,
   addMonthsToDate,
   adjustPriceForPaymentMethod,
   calculateMonthlyPlanExpiryDate,
+  calculateMonthlyRecurringExpiryDate,
   clearMonthlyPlanNote,
   formatPackageRemainingDisplay,
   formatPackageSessionsDisplay,
+  getDefaultMonthlyRecurringPaidAt,
   getPresetPrice,
+  isMonthlyRecurringPlan,
   mergeMonthlyPlanNote,
+  mergeMonthlyRecurringPlanNote,
   parseMonthlyPlanMonthsFromNote,
+  toMonthStartDate,
   type MonthlyPlanMonths,
 } from '@/lib/session-package-utils'
 import {
@@ -101,15 +107,20 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   const [isDeleting, setIsDeleting] = useState(false)
   const [formData, setFormData] = useState(() => buildInitialFormData(sessionPackage))
   const initialMonthlyMonths = parseMonthlyPlanMonthsFromNote(sessionPackage?.note)
+  const initialMonthlyRecurring = isMonthlyRecurringPlan(sessionPackage?.note)
   const [activeMonthlyMonths, setActiveMonthlyMonths] = useState<MonthlyPlanMonths | null>(
     () => {
+      if (initialMonthlyRecurring) return null
       if (initialMonthlyMonths === 1 || initialMonthlyMonths === 3 || initialMonthlyMonths === 6) {
         return initialMonthlyMonths
       }
       return null
     },
   )
-  const [periodMonths, setPeriodMonths] = useState<number | null>(initialMonthlyMonths)
+  const [isMonthlyRecurring, setIsMonthlyRecurring] = useState(initialMonthlyRecurring)
+  const [periodMonths, setPeriodMonths] = useState<number | null>(
+    initialMonthlyRecurring ? null : initialMonthlyMonths,
+  )
   const [expiresAtManual, setExpiresAtManual] = useState(false)
 
   async function handleDelete() {
@@ -135,6 +146,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   function handlePresetSelect(sessions: number) {
     const price = applyPresetPrice(sessions, formData.payment_method)
     setActiveMonthlyMonths(null)
+    setIsMonthlyRecurring(false)
     setPeriodMonths(null)
     setExpiresAtManual(false)
     setFormData({
@@ -162,6 +174,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
 
     setPeriodMonths(months)
     setActiveMonthlyMonths(presetMatch ? presetMatch.months : null)
+    setIsMonthlyRecurring(false)
     setFormData({
       ...formData,
       total_sessions: 0,
@@ -175,6 +188,22 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   function handleMonthlyPlanSelect(months: MonthlyPlanMonths) {
     setExpiresAtManual(false)
     applyMonthlyPeriod(months, { autoExpiry: true })
+  }
+
+  function handleMonthlyRecurringSelect() {
+    setExpiresAtManual(false)
+    const paidAt = toMonthStartDate(formData.paid_at || getDefaultMonthlyRecurringPaidAt())
+    setIsMonthlyRecurring(true)
+    setActiveMonthlyMonths(null)
+    setPeriodMonths(null)
+    setFormData({
+      ...formData,
+      total_sessions: 0,
+      ...(isEditing ? {} : { remaining_sessions: 0 }),
+      paid_at: paidAt,
+      expires_at: calculateMonthlyRecurringExpiryDate(paidAt),
+      note: mergeMonthlyRecurringPlanNote(formData.note),
+    })
   }
 
   function handlePeriodMonthsChange(rawMonths: number) {
@@ -199,6 +228,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   function handleSessionsChange(sessions: number) {
     const price = applyPresetPrice(sessions, formData.payment_method)
     setActiveMonthlyMonths(null)
+    setIsMonthlyRecurring(false)
     setPeriodMonths(null)
     setExpiresAtManual(false)
     setFormData({
@@ -213,7 +243,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
 
   function handlePaymentMethodChange(paymentMethod: string) {
     const currentPrice = Number(formData.price) || 0
-    const isMonthly = periodMonths != null
+    const isMonthly = periodMonths != null || isMonthlyRecurring
     const nextPrice =
       currentPrice > 0
         ? adjustPriceForPaymentMethod(
@@ -239,6 +269,9 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
       ...(periodMonths && !expiresAtManual
         ? { expires_at: calculateMonthlyPlanExpiryDate(paidAt, periodMonths) }
         : {}),
+      ...(isMonthlyRecurring && !expiresAtManual
+        ? { expires_at: calculateMonthlyRecurringExpiryDate(paidAt) }
+        : {}),
     }))
   }
 
@@ -252,7 +285,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     return Number(value).toLocaleString('en-US')
   }
 
-  const isMonthlyPlanMode = periodMonths != null
+  const isMonthlyPlanMode = periodMonths != null || isMonthlyRecurring
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -384,6 +417,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     variant={
                       !isMonthlyPlanMode &&
                       activeMonthlyMonths == null &&
+                      !isMonthlyRecurring &&
                       formData.total_sessions === preset.sessions
                         ? 'default'
                         : 'outline'
@@ -413,6 +447,14 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     {preset.label}
                   </Button>
                 ))}
+                <Button
+                  type="button"
+                  variant={isMonthlyRecurring ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={handleMonthlyRecurringSelect}
+                >
+                  {MONTHLY_RECURRING_PLAN_LABEL}
+                </Button>
                 <div className="flex flex-wrap items-center gap-2 border-l border-border pl-2">
                   <Label htmlFor="period_months" className="text-sm font-normal text-muted-foreground">
                     기간
@@ -423,7 +465,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     min={1}
                     value={periodMonths ?? ''}
                     onChange={(e) => handlePeriodMonthsChange(Number(e.target.value))}
-                    disabled={!isMonthlyPlanMode}
+                    disabled={!isMonthlyPlanMode || isMonthlyRecurring}
                     placeholder="-"
                     className="h-8 w-16 px-2 text-center"
                   />
@@ -432,7 +474,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!isMonthlyPlanMode}
+                    disabled={!isMonthlyPlanMode || isMonthlyRecurring}
                     onClick={handleExtendPeriod}
                   >
                     +1개월 연장
@@ -440,7 +482,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                월정액은 횟수 제한 없음 · 금액 직접 입력 · 기간 수정·연장 가능
+                월정액은 횟수 제한 없음 · 금액 직접 입력 · 매월은 당월 1일 기준(결제일 변경 가능) · 기간형은 수정·연장 가능
               </p>
             </div>
 
@@ -448,7 +490,9 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
               <div className="space-y-2">
                 <Label htmlFor="total_sessions">
                   총 회차
-                  {periodMonths != null ? (
+                  {isMonthlyRecurring ? (
+                    <span className="ml-1 text-primary">({MONTHLY_RECURRING_PLAN_LABEL})</span>
+                  ) : periodMonths != null ? (
                     <span className="ml-1 text-primary">({periodMonths}개월)</span>
                   ) : null}
                 </Label>
@@ -551,6 +595,11 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                   onChange={handlePaidAtChange}
                   placeholder="결제일 선택"
                 />
+                {isMonthlyRecurring ? (
+                  <p className="text-xs text-muted-foreground">
+                    매월 정액은 기본 당월 1일부터 계산됩니다. 필요하면 결제일을 변경할 수 있습니다.
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="expires_at">만료일</Label>
@@ -561,7 +610,9 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                   placeholder="미지정"
                 />
                 <p className="text-xs text-muted-foreground">
-                  기본은 미지정입니다. 월 정액 선택 시에만 기간에 맞춰 자동 설정됩니다.
+                  {isMonthlyRecurring
+                    ? '결제일 기준 1개월 후로 자동 설정됩니다. 직접 변경할 수도 있습니다.'
+                    : '기본은 미지정입니다. 월 정액(기간형) 선택 시에만 기간에 맞춰 자동 설정됩니다.'}
                 </p>
               </div>
             </div>
