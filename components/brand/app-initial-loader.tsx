@@ -19,14 +19,20 @@ export function AppInitialLoader() {
     const startedAt = window.__onestepSplashStart ?? Date.now()
     let hideTimer: number | undefined
 
+    function finishSplash() {
+      splash.classList.add('onestep-splash-fade-out')
+      window.setTimeout(() => {
+        splash.remove()
+        document.documentElement.classList.remove('onestep-splash-active')
+        document.documentElement.classList.add('onestep-app-ready')
+      }, FADE_MS)
+    }
+
     function hideSplash() {
       const elapsed = Date.now() - startedAt
       const wait = Math.max(0, MIN_VISIBLE_MS - elapsed)
 
-      hideTimer = window.setTimeout(() => {
-        splash.classList.add('onestep-splash-fade-out')
-        window.setTimeout(() => splash.remove(), FADE_MS)
-      }, wait)
+      hideTimer = window.setTimeout(finishSplash, wait)
     }
 
     if (document.readyState === 'complete') {

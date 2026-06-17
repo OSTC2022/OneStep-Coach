@@ -4,7 +4,8 @@ export function OnestepSplashStatic() {
     <>
       <script
         dangerouslySetInnerHTML={{
-          __html: 'window.__onestepSplashStart=Date.now();',
+          __html:
+            'window.__onestepSplashStart=Date.now();document.documentElement.classList.add("onestep-splash-active");',
         }}
       />
       <div
@@ -12,7 +13,7 @@ export function OnestepSplashStatic() {
         role="status"
         aria-live="polite"
         aria-label="로딩 중"
-        className="onestep-app-splash fixed inset-0 z-[9999] flex min-h-svh w-full flex-col overflow-hidden bg-[#070d18] text-foreground"
+        className="onestep-app-splash fixed inset-0 z-[9999] flex w-full flex-col overflow-hidden bg-[#070d18] text-foreground"
       >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_88%_0%,rgba(170,255,0,0.1),transparent_52%)]" />
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_92%,rgba(13,27,42,0.85),transparent_48%)]" />

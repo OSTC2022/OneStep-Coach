@@ -213,14 +213,48 @@ a[href] {
   animation: onestep-loading-dots 1.6s steps(4, end) infinite;
 }
 
+.onestep-app-splash {
+  height: 100dvh;
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@supports (-webkit-touch-callout: none) {
+  .onestep-app-splash {
+    min-height: -webkit-fill-available;
+    height: -webkit-fill-available;
+  }
+}
+
 .onestep-app-splash.onestep-splash-fade-out {
   pointer-events: none;
   opacity: 0;
   transition: opacity 500ms ease;
 }
 
-body:has(#onestep-app-splash) {
+html.onestep-splash-active .onestep-app-root {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+html.onestep-app-ready .onestep-app-root {
+  animation: onestep-app-reveal 320ms ease forwards;
+}
+
+@keyframes onestep-app-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+html.onestep-splash-active,
+html.onestep-splash-active body {
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 @keyframes onestep-spinner-rotate {

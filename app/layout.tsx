@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { AppInitialLoader } from '@/components/brand/app-initial-loader'
 import { OnestepSplashStatic } from '@/components/brand/onestep-splash-static'
+import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
 import './globals.css'
 
 const geistSans = Geist({
@@ -18,7 +19,10 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: '원스텝 트레이닝 센터',
+  title: {
+    default: '원스텝',
+    template: '%s · 원스텝',
+  },
   description: '회원, 수업, 출석 관리를 위한 OneStep Training Center',
   applicationName: '원스텝',
   appleWebApp: {
@@ -47,6 +51,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: 'cover',
 }
 
 export default function RootLayout({
@@ -60,16 +65,14 @@ export default function RootLayout({
       className={`dark bg-[#070d18] ${geistSans.variable} ${geistMono.variable}`}
     >
       <head>
+        <PwaSplashHeadLinks />
         <style
           dangerouslySetInnerHTML={{
             __html:
-              'html,body{background:#070d18!important}#onestep-app-splash{opacity:1}',
+              'html,body{background:#070d18!important;margin:0;padding:0}' +
+              'html.onestep-splash-active,html.onestep-splash-active body{overflow:hidden;position:fixed;inset:0;width:100%;height:100%;height:100dvh;overscroll-behavior:none}' +
+              '#onestep-app-splash{position:fixed;inset:0;z-index:9999;width:100%;height:100%;height:100dvh;min-height:100dvh;min-height:-webkit-fill-available;opacity:1}',
           }}
-        />
-        <link
-          rel="apple-touch-startup-image"
-          href="/images/onestep-splash-startup.png"
-          media="(orientation: portrait)"
         />
       </head>
       <body
@@ -77,9 +80,11 @@ export default function RootLayout({
       >
         <OnestepSplashStatic />
         <AppInitialLoader />
-        {children}
-        <Toaster richColors position="top-center" />
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        <div id="app-root" className="onestep-app-root">
+          {children}
+          <Toaster richColors position="top-center" />
+          {process.env.NODE_ENV === 'production' && <Analytics />}
+        </div>
       </body>
     </html>
   )
