@@ -33,14 +33,14 @@ export const metadata: Metadata = {
   formatDetection: {
     telephone: false,
   },
-  icons: {
+    icons: {
     icon: [
-      { url: '/icons/icon-32.png?v=3', sizes: '32x32', type: 'image/png' },
-      { url: '/icons/icon-192.png?v=3', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png?v=3', sizes: '512x512', type: 'image/png' },
+      { url: '/icons/icon-32.png?v=4', sizes: '32x32', type: 'image/png' },
+      { url: '/icons/icon-192.png?v=4', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png?v=4', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-icon.png?v=3', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-icon.png?v=4', sizes: '180x180', type: 'image/png' },
     ],
   },
 }

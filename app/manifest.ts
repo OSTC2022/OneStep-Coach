@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
 
   return {
     id: `/?pwa=v${PWA_ASSET_VERSION}`,
-    name: '원스텝',
+    name: ' ',
     short_name: '원스텝',
     description: 'OneStep Training Center',
     start_url: `/?pwa=v${PWA_ASSET_VERSION}`,
