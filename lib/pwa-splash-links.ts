@@ -1,4 +1,6 @@
 /** iOS PWA — 픽셀 크기·media 쿼리가 정확해야 기본 스플래시 대신 커스텀 이미지 사용 */
+export const PWA_ASSET_VERSION = 3
+
 export const IOS_PWA_SPLASH_SCREENS = [
   {
     href: '/images/splash/iphone5_splash.png',
@@ -61,3 +63,6 @@ export const IOS_PWA_SPLASH_SCREENS = [
       'screen and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)',
   },
 ] as const
+
+/** 기기별 media가 맞지 않을 때 iOS 기본(아이콘+제목) 스플래시 대신 사용 */
+export const IOS_PWA_SPLASH_FALLBACK = `/images/splash/iphone14promax_splash.png?v=${PWA_ASSET_VERSION}`

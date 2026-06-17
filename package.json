@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:turbo": "next dev",
-    "build": "next build",
+    "build": "npm run generate:splash && npm run generate:icons && next build",
     "start": "next start",
     "lint": "eslint .",
     "generate:icons": "node scripts/generate-pwa-icons.mjs",
