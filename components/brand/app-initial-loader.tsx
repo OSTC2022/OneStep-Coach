@@ -25,6 +25,7 @@ export function AppInitialLoader() {
         splash.remove()
         document.documentElement.classList.remove('onestep-splash-active')
         document.documentElement.classList.add('onestep-app-ready')
+        window.dispatchEvent(new Event('onestep-splash-finished'))
       }, FADE_MS)
     }
 

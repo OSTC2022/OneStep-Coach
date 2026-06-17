@@ -5,11 +5,11 @@ export default function manifest(): MetadataRoute.Manifest {
   const iconQuery = `v=${PWA_ASSET_VERSION}`
 
   return {
-    id: `/?pwa=v${PWA_ASSET_VERSION}`,
-    name: ' ',
+    id: 'onestep-coach-pwa',
+    name: '원스텝',
     short_name: '원스텝',
     description: 'OneStep Training Center',
-    start_url: `/?pwa=v${PWA_ASSET_VERSION}`,
+    start_url: '/',
     display: 'standalone',
     display_override: ['standalone', 'fullscreen'],
     background_color: '#070d18',
