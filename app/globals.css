@@ -235,6 +235,7 @@ a[href] {
 
 html.onestep-app-ready #onestep-app-splash {
   display: none !important;
+  pointer-events: none;
 }
 
 html.onestep-splash-active .onestep-app-root {

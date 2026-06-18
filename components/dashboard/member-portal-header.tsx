@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Dumbbell, LogOut, User as UserIcon } from 'lucide-react'
+import { LogOut, User as UserIcon } from 'lucide-react'
+import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -62,9 +63,7 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="mx-auto flex h-14 max-w-[1120px] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <Link href="/dashboard/my" className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15">
-            <Dumbbell className="h-4 w-4 text-primary" />
-          </div>
+          <BrandPulseAppIcon className="h-10 w-10" />
           <div className="min-w-0 leading-tight">
             <p className="truncate text-sm font-bold text-foreground">OneStep Athlete</p>
             <p className="truncate text-[11px] text-muted-foreground">{title}</p>

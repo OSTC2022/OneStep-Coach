@@ -200,8 +200,8 @@ export async function updateMyProfile(input: {
     /* service role 없으면 profiles만 갱신 */
   }
 
+  revalidatePath('/dashboard/profile', 'page')
+  revalidatePath('/dashboard/my/profile', 'page')
   revalidatePath('/dashboard', 'layout')
-  revalidatePath('/dashboard/profile')
-  revalidatePath('/dashboard/my/profile')
-  return {}
+  return { success: true as const }
 }

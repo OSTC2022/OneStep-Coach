@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
-import { Loader2, Dumbbell } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 
 export default function SetPasswordPage() {
   const [state, formAction, isPending] = useActionState(setPasswordAfterInvite, null)
@@ -24,9 +25,7 @@ export default function SetPasswordPage() {
 
       <Card className="w-full max-w-md relative z-10 border-border/50 bg-card/80 backdrop-blur-sm">
         <CardHeader className="space-y-4 text-center">
-          <div className="mx-auto w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
-            <Dumbbell className="w-8 h-8 text-primary" />
-          </div>
+          <BrandPulseAppIcon className="mx-auto h-20 w-20 translate-y-2" />
           <div>
             <CardTitle className="text-2xl font-bold">비밀번호 설정</CardTitle>
             <CardDescription className="text-muted-foreground">

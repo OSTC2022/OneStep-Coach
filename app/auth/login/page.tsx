@@ -16,11 +16,12 @@ import {
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { Loader2, Dumbbell } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
+import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import type { PublicSignUpMemberType } from '@/lib/auth/public-signup'
 
 type SignUpResult = {
@@ -199,9 +200,7 @@ export default function LoginPage() {
 
       <Card className="w-full max-w-md relative z-10 border-border/50 bg-card/80 backdrop-blur-sm">
         <CardHeader className="space-y-4 text-center">
-          <div className="mx-auto w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
-            <Dumbbell className="w-8 h-8 text-primary" />
-          </div>
+          <BrandPulseAppIcon className="mx-auto h-20 w-20 translate-y-2" />
           <div>
             <CardTitle className="text-2xl font-bold">OneStep Coach</CardTitle>
             <CardDescription className="text-muted-foreground">

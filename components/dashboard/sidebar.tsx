@@ -25,7 +25,6 @@ import {
   BarChart3,
   Settings,
   MessageCircle,
-  Dumbbell,
   CreditCard,
   UserPlus,
   CalendarDays,
@@ -58,6 +57,7 @@ import {
 } from '@/lib/dashboard-menu-order'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
+import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import { cn } from '@/lib/utils'
 
 const MENU_ICONS: Record<string, LucideIcon> = {
@@ -288,9 +288,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     <Sidebar className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <Link href="/dashboard" prefetch={false} className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sidebar-primary/10">
-            <Dumbbell className="h-5 w-5 text-sidebar-primary" />
-          </div>
+          <BrandPulseAppIcon className="h-11 w-11" />
           <div>
             <h1 className="font-bold text-sidebar-foreground">OneStep Coach</h1>
             <p className="text-xs text-muted-foreground">트레이닝 관리</p>

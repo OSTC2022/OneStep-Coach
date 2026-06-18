@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
-import { AppInitialLoader } from '@/components/brand/app-initial-loader'
-import { OnestepSplashStatic } from '@/components/brand/onestep-splash-static'
+import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
+import { SPLASH_BOOT_SCRIPT } from '@/lib/splash-boot'
 import './globals.css'
 
 const geistSans = Geist({
@@ -36,12 +36,13 @@ export const metadata: Metadata = {
   },
     icons: {
     icon: [
-      { url: '/icons/icon-32.png?v=4', sizes: '32x32', type: 'image/png' },
-      { url: '/icons/icon-192.png?v=4', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png?v=4', sizes: '512x512', type: 'image/png' },
+      { url: '/icons/icon-32.png?v=12', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=12', sizes: '48x48' },
+      { url: '/icons/icon-192.png?v=12', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png?v=12', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-icon.png?v=4', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-icon.png?v=12', sizes: '180x180', type: 'image/png' },
     ],
   },
 }
@@ -63,10 +64,14 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
+      suppressHydrationWarning
       className={`dark bg-[#070d18] ${geistSans.variable} ${geistMono.variable}`}
     >
       <head>
         <PwaSplashHeadLinks />
+        <script
+          dangerouslySetInnerHTML={{ __html: SPLASH_BOOT_SCRIPT }}
+        />
         <style
           dangerouslySetInnerHTML={{
             __html:
@@ -79,8 +84,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.className} antialiased bg-[#070d18] text-foreground min-h-screen`}
       >
-        <OnestepSplashStatic />
-        <AppInitialLoader />
+        <OnestepSplashLayer />
         <PwaBootstrap />
         <div id="app-root" className="onestep-app-root">
           {children}

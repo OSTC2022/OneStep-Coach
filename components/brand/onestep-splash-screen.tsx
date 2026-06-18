@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useState } from 'react'
+import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import { cn } from '@/lib/utils'
 
 function PulseLine({ mirrored }: { mirrored?: boolean }) {
@@ -35,19 +36,7 @@ function PulseLine({ mirrored }: { mirrored?: boolean }) {
 function LogoMark() {
   return (
     <div className="flex shrink-0 flex-col items-center">
-      <div className="relative flex h-[72px] w-[72px] items-center justify-center rounded-full border-2 border-primary/90 bg-[#0a1220]/80 shadow-[0_0_24px_rgba(170,255,0,0.25)]">
-        <svg viewBox="0 0 24 24" className="h-9 w-9 text-primary" aria-hidden>
-          <path
-            d="M3 12h4l2.5-5 3.5 10 2.5-5H21"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="onestep-heartbeat"
-          />
-        </svg>
-      </div>
+      <BrandPulseAppIcon glow className="h-20 w-20 translate-y-2" />
       <p className="mt-3 text-2xl font-bold tracking-tight text-foreground">원스텝</p>
       <p className="mt-1 text-[11px] font-medium tracking-wide text-foreground/75">
         One-Step Training Center

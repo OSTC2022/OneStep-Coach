@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import { Camera, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
@@ -9,10 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PhoneInput } from '@/components/ui/phone-input'
-import {
-  getMyProfileSettings,
-  updateMyProfile,
-} from '@/lib/actions/profile-settings'
+import { updateMyProfile } from '@/lib/actions/profile-settings'
 import {
   PROFILE_AVATAR_ACCEPT,
   removeProfileAvatar,
@@ -28,44 +24,39 @@ interface ProfileSettingsFormProps {
   onSaved?: () => void
 }
 
+function settingsFromUser(user: User) {
+  return {
+    fullName: user.full_name ?? '',
+    phone: user.phone ?? '',
+    kakaoId: user.kakao_id ?? '',
+    instagramId: user.instagram_id ?? '',
+    avatarUrl: user.avatar_url ?? null,
+  }
+}
+
 export function ProfileSettingsForm({
   user,
   idPrefix = 'profile',
   onCancel,
   onSaved,
 }: ProfileSettingsFormProps) {
-  const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPending, startTransition] = useTransition()
   const [isUploading, setIsUploading] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [fullName, setFullName] = useState(user.full_name ?? '')
-  const [phone, setPhone] = useState('')
-  const [kakaoId, setKakaoId] = useState('')
-  const [instagramId, setInstagramId] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(user.avatar_url ?? null)
+  const [fullName, setFullName] = useState(() => settingsFromUser(user).fullName)
+  const [phone, setPhone] = useState(() => settingsFromUser(user).phone)
+  const [kakaoId, setKakaoId] = useState(() => settingsFromUser(user).kakaoId)
+  const [instagramId, setInstagramId] = useState(() => settingsFromUser(user).instagramId)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(() => settingsFromUser(user).avatarUrl)
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-
-    void getMyProfileSettings()
-      .then((settings) => {
-        if (cancelled || !settings) return
-        setFullName(settings.full_name)
-        setPhone(settings.phone)
-        setKakaoId(settings.kakao_id)
-        setInstagramId(settings.instagram_id)
-        setAvatarUrl(settings.avatar_url)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [user.id])
+    const next = settingsFromUser(user)
+    setFullName(next.fullName)
+    setPhone(next.phone)
+    setKakaoId(next.kakaoId)
+    setInstagramId(next.instagramId)
+    setAvatarUrl(next.avatarUrl)
+  }, [user])
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -116,7 +107,6 @@ export function ProfileSettingsForm({
       }
       toast.success('프로필이 저장되었습니다.')
       onSaved?.()
-      router.refresh()
     })
   }
 
@@ -126,7 +116,7 @@ export function ProfileSettingsForm({
     avatar_url: avatarUrl,
   }
 
-  const disabled = loading || isUploading || isPending
+  const disabled = isUploading || isPending
 
   return (
     <div className="space-y-6">
@@ -184,7 +174,6 @@ export function ProfileSettingsForm({
             onChange={(e) => setFullName(e.target.value)}
             placeholder="표시 이름"
             maxLength={40}
-            disabled={loading}
           />
         </div>
 
@@ -195,7 +184,6 @@ export function ProfileSettingsForm({
             value={phone}
             onChange={setPhone}
             placeholder="010-0000-0000"
-            disabled={loading}
           />
         </div>
 
@@ -207,7 +195,6 @@ export function ProfileSettingsForm({
             onChange={(e) => setKakaoId(e.target.value)}
             placeholder="카카오톡 검색 아이디"
             maxLength={80}
-            disabled={loading}
           />
         </div>
 
@@ -219,7 +206,6 @@ export function ProfileSettingsForm({
             onChange={(e) => setInstagramId(e.target.value)}
             placeholder="@username"
             maxLength={80}
-            disabled={loading}
           />
         </div>
 

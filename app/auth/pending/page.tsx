@@ -1,4 +1,5 @@
-import { Clock, Dumbbell } from 'lucide-react'
+import { Clock } from 'lucide-react'
+import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import { signOut } from '@/lib/actions/auth'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,9 +20,7 @@ export default function PendingApprovalPage() {
           <div className="mx-auto w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center">
             <Clock className="w-8 h-8 text-amber-600" />
           </div>
-          <div className="mx-auto w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center -mt-2">
-            <Dumbbell className="w-6 h-6 text-primary" />
-          </div>
+          <BrandPulseAppIcon className="mx-auto h-16 w-16 translate-y-2" />
           <div>
             <CardTitle className="text-2xl font-bold">승인 대기 중</CardTitle>
             <CardDescription className="text-muted-foreground mt-2">

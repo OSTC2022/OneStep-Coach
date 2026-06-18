@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import Link from 'next/link'
 import { listPendingAccounts } from '@/lib/actions/auth-registration'
 import { useRouter } from 'next/navigation'
 import { Loader2, Search, Shield, Trash2, UserMinus, Ban } from 'lucide-react'
@@ -80,6 +81,58 @@ function formatDate(iso: string) {
   } catch {
     return iso
   }
+}
+
+function LinkedMemberName({
+  memberId,
+  name,
+  className,
+  onClick,
+}: {
+  memberId: string | null | undefined
+  name: string
+  className?: string
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
+}) {
+  if (!memberId) {
+    return <span className={className}>{name}</span>
+  }
+
+  return (
+    <Link
+      href={`/dashboard/members/${memberId}`}
+      className={`text-primary hover:underline ${className ?? ''}`}
+      onClick={onClick}
+    >
+      {name}
+    </Link>
+  )
+}
+
+function AccountDisplayName({
+  account,
+  className,
+  onClick,
+  fallback = '—',
+}: {
+  account: RegisteredAccount
+  className?: string
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
+  fallback?: string
+}) {
+  const label = account.full_name || fallback
+  if (!account.linkedMemberId) {
+    return <span className={className}>{label}</span>
+  }
+
+  return (
+    <LinkedMemberName
+      memberId={account.linkedMemberId}
+      name={label}
+      className={className}
+      onClick={onClick}
+    />
+  )
 }
 
 function appRoleToAssignable(account: RegisteredAccount): SettingsAssignableRole | null {
@@ -357,7 +410,12 @@ export function AccountRoleManagement({
                       onClick={() => selectAccount(account)}
                     >
                       <TableCell className="font-medium">
-                        {account.full_name || '—'}
+                        <AccountDisplayName
+                          account={account}
+                          className="font-medium"
+                          onClick={(event) => event.stopPropagation()}
+                          fallback="—"
+                        />
                         {account.linkedInstructorName && (
                           <span className="block text-[11px] font-normal text-muted-foreground">
                             강사: {account.linkedInstructorName}
@@ -365,7 +423,12 @@ export function AccountRoleManagement({
                         )}
                         {account.linkedMemberName && (
                           <span className="block text-[11px] font-normal text-muted-foreground">
-                            회원: {account.linkedMemberName}
+                            회원:{' '}
+                            <LinkedMemberName
+                              memberId={account.linkedMemberId}
+                              name={account.linkedMemberName}
+                              onClick={(event) => event.stopPropagation()}
+                            />
                           </span>
                         )}
                       </TableCell>
@@ -444,7 +507,13 @@ export function AccountRoleManagement({
           ) : selected.approvalStatus !== 'approved' ? (
             <div className="space-y-3">
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                <p className="font-medium">{selected.full_name || '이름 없음'}</p>
+                <p className="font-medium">
+                  <AccountDisplayName
+                    account={selected}
+                    className="font-medium"
+                    fallback="이름 없음"
+                  />
+                </p>
                 <p className="text-muted-foreground truncate">
                   {selected.email || selected.loginEmail}
                 </p>
@@ -465,15 +534,28 @@ export function AccountRoleManagement({
           ) : (
             <>
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                <p className="font-medium">{selected.full_name || '이름 없음'}</p>
+                <p className="font-medium">
+                  <AccountDisplayName
+                    account={selected}
+                    className="font-medium"
+                    fallback="이름 없음"
+                  />
+                </p>
                 <p className="text-muted-foreground truncate">
                   {selected.email || selected.loginEmail}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
                   현재: {selected.roleLabel} · {selected.approvalLabel}
-                  {selected.linkedMemberName
-                    ? ` · 회원: ${selected.linkedMemberName}`
-                    : ''}
+                  {selected.linkedMemberName ? (
+                    <>
+                      {' · 회원: '}
+                      <LinkedMemberName
+                        memberId={selected.linkedMemberId}
+                        name={selected.linkedMemberName}
+                        className="text-xs"
+                      />
+                    </>
+                  ) : null}
                 </p>
               </div>
 

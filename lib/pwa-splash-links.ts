@@ -1,5 +1,5 @@
 /** iOS PWA — 픽셀 크기·media 쿼리가 정확해야 기본 스플래시 대신 커스텀 이미지 사용 */
-export const PWA_ASSET_VERSION = 4
+export const PWA_ASSET_VERSION = 12
 
 export const IOS_PWA_SPLASH_SCREENS = [
   {

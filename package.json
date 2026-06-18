@@ -8,7 +8,7 @@
     "build": "npm run generate:splash && npm run generate:icons && next build",
     "start": "next start",
     "lint": "eslint .",
-    "generate:icons": "node scripts/generate-pwa-icons.mjs",
+    "generate:icons": "node scripts/clean-brand-icon.mjs",
     "generate:splash": "node scripts/generate-pwa-splash.mjs"
   },
   "dependencies": {
