@@ -1,7 +1,10 @@
 import { updateSession } from '@/lib/supabase/update-session'
-import { type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith('/api/auth/')) {
+    return NextResponse.next()
+  }
   return await updateSession(request)
 }
 

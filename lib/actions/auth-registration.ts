@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/actions/auth'
 import { assignCoachRoleToInstructor } from '@/lib/actions/settings-accounts'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
@@ -23,7 +22,10 @@ import {
   parseBirthDateSlash,
   resolveMemberAgeAndBirthDate,
 } from '@/lib/member-utils'
+import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import type { SettingsAssignableRole } from '@/lib/settings-accounts-types'
+
+export type PublicSignUpMemberType = 'student' | 'adult'
 
 export type PublicSignUpRole = 'member'
 
@@ -52,7 +54,7 @@ function normalizeSignupPhone(value: string, label: string): string | { error: s
   if (digits.length < 9 || digits.length > 11) {
     return { error: `${label} 형식이 올바르지 않습니다.` }
   }
-  return trimmed
+  return formatKoreanPhoneInput(trimmed)
 }
 
 async function createSignupMemberProfile(
@@ -64,9 +66,11 @@ async function createSignupMemberProfile(
     birth_date: string
     phone: string
     parent_phone: string
+    member_type: PublicSignUpMemberType
   },
 ): Promise<{ memberId?: string; error?: string }> {
   const { birth_date, age } = resolveMemberAgeAndBirthDate(payload.birth_date)
+  const typeLabel = payload.member_type === 'student' ? '학생' : '성인'
 
   const { data, error } = await admin
     .from('members')
@@ -75,11 +79,11 @@ async function createSignupMemberProfile(
       birth_date,
       age,
       phone: payload.phone,
-      parent_phone: payload.parent_phone,
+      parent_phone: payload.parent_phone || null,
       auth_user_id: userId,
       invite_email: payload.email,
       is_active: true,
-      memo: '로그인 화면 가입 신청 (승인 대기)',
+      memo: `로그인 화면 가입 신청 (${typeLabel}, 승인 대기)`,
     })
     .select('id')
     .single()
@@ -108,10 +112,10 @@ export async function signUpPublic(
     (formData.get('phone') as string) ?? '',
     '개인 연락처',
   )
-  const parentPhoneResult = normalizeSignupPhone(
-    (formData.get('parent_phone') as string) ?? '',
-    '보호자 연락처',
-  )
+  const memberType =
+    (formData.get('member_type') as PublicSignUpMemberType) || 'student'
+  const isStudent = memberType === 'student'
+  const parentPhoneRaw = (formData.get('parent_phone') as string) ?? ''
 
   if (!fullName || fullName.length < 2) {
     return { error: '이름을 2자 이상 입력해주세요.' }
@@ -122,9 +126,29 @@ export async function signUpPublic(
   }
 
   if ('error' in phoneResult) return { error: phoneResult.error }
-  if ('error' in parentPhoneResult) return { error: parentPhoneResult.error }
+
+  let parent_phone = ''
+  if (isStudent) {
+    const parentPhoneResult = normalizeSignupPhone(
+      parentPhoneRaw,
+      '보호자 연락처',
+    )
+    if ('error' in parentPhoneResult) return { error: parentPhoneResult.error }
+    parent_phone = parentPhoneResult
+  } else if (parentPhoneRaw.trim()) {
+    const parentPhoneResult = normalizeSignupPhone(
+      parentPhoneRaw,
+      '보호자 연락처',
+    )
+    if ('error' in parentPhoneResult) return { error: parentPhoneResult.error }
+    parent_phone = parentPhoneResult
+  }
+
+  if (memberType !== 'student' && memberType !== 'adult') {
+    return { error: '회원 유형을 선택해주세요.' }
+  }
+
   const phone = phoneResult
-  const parent_phone = parentPhoneResult
 
   const emailResult = parseRequiredEmail(formData.get('email') as string)
   if (emailResult.error || !emailResult.email) {
@@ -165,6 +189,7 @@ export async function signUpPublic(
         birth_date,
         phone,
         parent_phone,
+        member_type: memberType,
       },
     })
 
@@ -202,6 +227,7 @@ export async function signUpPublic(
     birth_date,
     phone,
     parent_phone,
+    member_type: memberType,
   })
   if (memberResult.error) {
     return { error: memberResult.error }
@@ -217,6 +243,7 @@ export async function signUpPublic(
           birth_date,
           phone,
           parent_phone,
+          member_type: memberType,
           signup_member_id: memberResult.memberId,
         },
       })
@@ -234,13 +261,6 @@ export async function signUpPublic(
     },
     { onConflict: 'id' },
   )
-
-  try {
-    const supabase = await createClient()
-    await supabase.auth.signOut()
-  } catch {
-    /* 로그인 화면 — 세션 없을 수 있음 */
-  }
 
   return { success: true, loginIdentifier: authEmail }
 }

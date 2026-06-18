@@ -1,8 +1,7 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { requestPasswordReset, signIn } from '@/lib/actions/auth'
-import { signUpPublic } from '@/lib/actions/auth-registration'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,37 +16,133 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import { Loader2, Dumbbell } from 'lucide-react'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { InstallAppButton } from '@/components/pwa/install-app-button'
+import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
+import type { PublicSignUpMemberType } from '@/lib/actions/auth-registration'
+
+type SignUpResult = {
+  error?: string
+  success?: boolean
+  loginIdentifier?: string
+}
 
 export default function LoginPage() {
   const [tab, setTab] = useState('login')
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [signUpBirthDate, setSignUpBirthDate] = useState('')
-  const [loginState, loginAction, loginPending] = useActionState(signIn, null)
-  const [signUpState, signUpAction, signUpPending] = useActionState(signUpPublic, null)
-  const [resetState, resetAction, resetPending] = useActionState(requestPasswordReset, null)
+  const [signUpMemberType, setSignUpMemberType] =
+    useState<PublicSignUpMemberType>('student')
+  const [signUpPhone, setSignUpPhone] = useState('')
+  const [signUpParentPhone, setSignUpParentPhone] = useState('')
+  const [loginState, setLoginState] = useState<{ error?: string } | null>(null)
+  const [loginPending, setLoginPending] = useState(false)
+  const [signUpPending, setSignUpPending] = useState(false)
+  const [resetState, setResetState] = useState<{
+    error?: string
+    success?: boolean
+    message?: string
+  } | null>(null)
+  const [resetPending, setResetPending] = useState(false)
+
+  async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (loginPending) return
+    setLoginPending(true)
+    setLoginState(null)
+    try {
+      const formData = new FormData(event.currentTarget)
+      const result = await signIn(null, formData)
+      if (result?.error) {
+        setLoginState(result)
+      }
+    } catch {
+      setLoginState({ error: '로그인 처리 중 오류가 발생했습니다.' })
+    } finally {
+      setLoginPending(false)
+    }
+  }
+
+  async function handleSignUpSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (signUpPending) return
+    setSignUpPending(true)
+    try {
+      const formData = new FormData(event.currentTarget)
+      formData.set('phone', signUpPhone)
+      formData.set('parent_phone', signUpParentPhone)
+      formData.set('member_type', signUpMemberType)
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+      })
+
+      let result: SignUpResult | null = null
+      try {
+        result = (await response.json()) as SignUpResult
+      } catch {
+        result = null
+      }
+
+      if (!response.ok || !result) {
+        toast.error('회원가입 실패', {
+          description:
+            result?.error ?? '요청에 실패했습니다. 잠시 후 다시 시도해주세요.',
+        })
+        return
+      }
+
+      if (result.error) {
+        toast.error('회원가입 실패', { description: result.error })
+        return
+      }
+
+      if (result.success) {
+        toast.success('가입 신청이 완료되었습니다.', {
+          description: result.loginIdentifier
+            ? `관리자 승인 후 로그인하세요. 로그인 ID: ${result.loginIdentifier}`
+            : '관리자 승인 후 로그인할 수 있습니다.',
+          duration: 10000,
+        })
+        setTab('login')
+        setSignUpBirthDate('')
+        setSignUpPhone('')
+        setSignUpParentPhone('')
+        setSignUpMemberType('student')
+        event.currentTarget.reset()
+      }
+    } catch {
+      toast.error('회원가입 실패', {
+        description: '네트워크 오류가 발생했습니다. Wi-Fi 연결을 확인해주세요.',
+      })
+    } finally {
+      setSignUpPending(false)
+    }
+  }
+
+  async function handleResetSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (resetPending) return
+    setResetPending(true)
+    setResetState(null)
+    try {
+      const formData = new FormData(event.currentTarget)
+      const result = await requestPasswordReset(null, formData)
+      setResetState(result)
+    } catch {
+      setResetState({ error: '요청 처리 중 오류가 발생했습니다.' })
+    } finally {
+      setResetPending(false)
+    }
+  }
 
   useEffect(() => {
     if (loginState?.error) {
       toast.error('로그인 실패', { description: loginState.error })
     }
   }, [loginState])
-
-  useEffect(() => {
-    if (signUpState?.error) {
-      toast.error('회원가입 실패', { description: signUpState.error })
-    }
-    if (signUpState?.success) {
-      const id = signUpState.loginIdentifier
-      toast.success('가입 신청이 완료되었습니다.', {
-        description: id
-          ? `관리자 승인 후 로그인하세요. 로그인 ID: ${id}`
-          : '관리자 승인 후 로그인할 수 있습니다.',
-        duration: 10000,
-      })
-      setTab('login')
-      setSignUpBirthDate('')
-    }
-  }, [signUpState])
 
   useEffect(() => {
     if (resetState?.error) {
@@ -63,7 +158,11 @@ export default function LoginPage() {
   }, [resetState])
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+    <div className="relative min-h-screen flex items-center justify-center p-4 bg-background">
+      <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
+        <ShareWebsiteButton />
+        <InstallAppButton />
+      </div>
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
 
       <Card className="w-full max-w-md relative z-10 border-border/50 bg-card/80 backdrop-blur-sm">
@@ -84,7 +183,12 @@ export default function LoginPage() {
             onValueChange={(value) => {
               setTab(value)
               setShowForgotPassword(false)
-              if (value !== 'signup') setSignUpBirthDate('')
+              if (value !== 'signup') {
+                setSignUpBirthDate('')
+                setSignUpPhone('')
+                setSignUpParentPhone('')
+                setSignUpMemberType('student')
+              }
             }}
             className="w-full"
           >
@@ -95,7 +199,7 @@ export default function LoginPage() {
 
             <TabsContent value="login">
               {showForgotPassword ? (
-                <form action={resetAction} className="space-y-4">
+                <form onSubmit={handleResetSubmit} className="space-y-4">
                   <p className="text-sm text-muted-foreground">
                     가입 시 등록한 이메일 또는 로그인 ID를 입력하면 비밀번호 재설정
                     링크를 보내드립니다.
@@ -137,7 +241,7 @@ export default function LoginPage() {
                   </button>
                 </form>
               ) : (
-                <form action={loginAction} className="space-y-4">
+                <form onSubmit={handleLoginSubmit} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="email">이메일 또는 로그인 ID</Label>
                     <Input
@@ -192,7 +296,7 @@ export default function LoginPage() {
             </TabsContent>
 
             <TabsContent value="signup">
-              <form action={signUpAction} className="space-y-4">
+              <form onSubmit={handleSignUpSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="full_name">이름</Label>
                   <Input
@@ -211,34 +315,64 @@ export default function LoginPage() {
                   onChange={setSignUpBirthDate}
                 />
                 <input type="hidden" name="birth_date" value={signUpBirthDate} />
+                <input type="hidden" name="member_type" value={signUpMemberType} />
+                <div className="space-y-2">
+                  <Label>회원 유형</Label>
+                  <RadioGroup
+                    value={signUpMemberType}
+                    onValueChange={(value) =>
+                      setSignUpMemberType(value as PublicSignUpMemberType)
+                    }
+                    className="grid grid-cols-2 gap-2"
+                    disabled={signUpPending}
+                  >
+                    <label
+                      htmlFor="signup-type-student"
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/10"
+                    >
+                      <RadioGroupItem value="student" id="signup-type-student" />
+                      학생
+                    </label>
+                    <label
+                      htmlFor="signup-type-adult"
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/10"
+                    >
+                      <RadioGroupItem value="adult" id="signup-type-adult" />
+                      성인
+                    </label>
+                  </RadioGroup>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="signup-phone">
                     개인 연락처 <span className="text-destructive">*</span>
                   </Label>
-                  <Input
+                  <PhoneInput
                     id="signup-phone"
-                    name="phone"
-                    type="tel"
+                    value={signUpPhone}
+                    onChange={setSignUpPhone}
                     placeholder="010-1234-5678"
                     required
                     disabled={signUpPending}
                     className="bg-input border-border"
-                    autoComplete="tel"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="signup-parent-phone">
-                    보호자 연락처 <span className="text-destructive">*</span>
+                    보호자 연락처{' '}
+                    {signUpMemberType === 'student' ? (
+                      <span className="text-destructive">*</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">(선택)</span>
+                    )}
                   </Label>
-                  <Input
+                  <PhoneInput
                     id="signup-parent-phone"
-                    name="parent_phone"
-                    type="tel"
+                    value={signUpParentPhone}
+                    onChange={setSignUpParentPhone}
                     placeholder="010-9876-5432"
-                    required
+                    required={signUpMemberType === 'student'}
                     disabled={signUpPending}
                     className="bg-input border-border"
-                    autoComplete="tel"
                   />
                 </div>
                 <div className="space-y-2">

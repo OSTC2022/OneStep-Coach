@@ -8,6 +8,8 @@ import { Member } from '@/types/database'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
@@ -37,8 +39,10 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
     age: getMemberAge(member) ?? undefined,
     grade: member.grade || '',
     school: member.school || '',
-    phone: member.phone || '',
-    parent_phone: member.parent_phone || '',
+    phone: member.phone ? formatKoreanPhoneInput(member.phone) : '',
+    parent_phone: member.parent_phone
+      ? formatKoreanPhoneInput(member.parent_phone)
+      : '',
     sport: member.sport || '',
     height_cm: member.height_cm || '',
     weight_kg: member.weight_kg || '',
@@ -214,20 +218,22 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="phone">본인 연락처</Label>
-              <Input
+              <PhoneInput
                 id="phone"
                 value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                onChange={(phone) => setFormData({ ...formData, phone })}
                 placeholder="010-1234-5678"
               />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="parent_phone">보호자</Label>
-              <Input
+              <PhoneInput
                 id="parent_phone"
                 value={formData.parent_phone}
-                onChange={(e) => setFormData({ ...formData, parent_phone: e.target.value })}
+                onChange={(parent_phone) =>
+                  setFormData({ ...formData, parent_phone })
+                }
                 placeholder="010-9876-5432"
               />
             </div>

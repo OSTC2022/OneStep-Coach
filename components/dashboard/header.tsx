@@ -18,6 +18,8 @@ import { toast } from 'sonner'
 import type { User } from '@/lib/types'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
 import { ProfileSettingsDialog } from '@/components/dashboard/profile-settings-dialog'
+import { InstallAppButton } from '@/components/pwa/install-app-button'
+import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
 
 interface DashboardHeaderProps {
   user: User | null
@@ -43,6 +45,9 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
         <div className="flex-1" />
 
         {user ? <NotificationBell userId={user.id} /> : null}
+
+        <ShareWebsiteButton />
+        <InstallAppButton />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

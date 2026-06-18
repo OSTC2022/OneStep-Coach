@@ -8,6 +8,8 @@ import { updateMemberContactInfo } from '@/lib/actions/members'
 import type { VisibleSnsAccount } from '@/lib/sns-account'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SnsIdLink } from '@/components/members/sns-id-link'
 import { SnsIconLinks } from '@/components/members/sns-icon-links'
@@ -84,8 +86,8 @@ export function MemberContactEditor({
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [formData, setFormData] = useState({
-    phone: phone || '',
-    parent_phone: parentPhone || '',
+    phone: phone ? formatKoreanPhoneInput(phone) : '',
+    parent_phone: parentPhone ? formatKoreanPhoneInput(parentPhone) : '',
     kakao_id: kakaoId || '',
     instagram_id: instagramId || '',
   })
@@ -93,8 +95,8 @@ export function MemberContactEditor({
   useEffect(() => {
     if (!isEditing) {
       setFormData({
-        phone: phone || '',
-        parent_phone: parentPhone || '',
+        phone: phone ? formatKoreanPhoneInput(phone) : '',
+        parent_phone: parentPhone ? formatKoreanPhoneInput(parentPhone) : '',
         kakao_id: kakaoId || '',
         instagram_id: instagramId || '',
       })
@@ -103,8 +105,8 @@ export function MemberContactEditor({
 
   function handleCancel() {
     setFormData({
-      phone: phone || '',
-      parent_phone: parentPhone || '',
+      phone: phone ? formatKoreanPhoneInput(phone) : '',
+      parent_phone: parentPhone ? formatKoreanPhoneInput(parentPhone) : '',
       kakao_id: kakaoId || '',
       instagram_id: instagramId || '',
     })
@@ -177,10 +179,10 @@ export function MemberContactEditor({
         <label htmlFor={`member-phone-${memberId}`} className="text-sm text-muted-foreground">
           본인 연락처
         </label>
-        <Input
+        <PhoneInput
           id={`member-phone-${memberId}`}
           value={formData.phone}
-          onChange={(e) => setFormData((prev) => ({ ...prev, phone: e.target.value }))}
+          onChange={(phone) => setFormData((prev) => ({ ...prev, phone }))}
           placeholder="010-1234-5678"
         />
       </div>
@@ -188,10 +190,12 @@ export function MemberContactEditor({
         <label htmlFor={`member-parent-phone-${memberId}`} className="text-sm text-muted-foreground">
           보호자
         </label>
-        <Input
+        <PhoneInput
           id={`member-parent-phone-${memberId}`}
           value={formData.parent_phone}
-          onChange={(e) => setFormData((prev) => ({ ...prev, parent_phone: e.target.value }))}
+          onChange={(parent_phone) =>
+            setFormData((prev) => ({ ...prev, parent_phone }))
+          }
           placeholder="010-9876-5432"
         />
       </div>

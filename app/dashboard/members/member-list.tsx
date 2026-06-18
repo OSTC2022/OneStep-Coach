@@ -23,6 +23,7 @@ import { InstructorSelectField } from '@/components/members/instructor-select-fi
 import { Member, Instructor, MemberFormData } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
@@ -465,19 +466,21 @@ export function MemberList({
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="phone">본인 연락처</Label>
-                  <Input
+                  <PhoneInput
                     id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    value={formData.phone ?? ''}
+                    onChange={(phone) => setFormData({ ...formData, phone })}
                     placeholder="010-1234-5678"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="parent_phone">보호자</Label>
-                  <Input
+                  <PhoneInput
                     id="parent_phone"
-                    value={formData.parent_phone}
-                    onChange={(e) => setFormData({ ...formData, parent_phone: e.target.value })}
+                    value={formData.parent_phone ?? ''}
+                    onChange={(parent_phone) =>
+                      setFormData({ ...formData, parent_phone })
+                    }
                     placeholder="010-9876-5432"
                   />
                 </div>

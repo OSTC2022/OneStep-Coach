@@ -15,6 +15,8 @@ import {
   AUTO_INSTRUCTOR_ID,
 } from '@/lib/member-utils'
 import { BirthDateInput } from '@/components/members/birth-date-input'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import { toast } from 'sonner'
@@ -34,8 +36,10 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
     birth_date: member?.birth_date || '',
     age: member ? (getMemberAge(member) ?? undefined) : undefined,
     grade: member?.grade || '',
-    phone: member?.phone || '',
-    parent_phone: member?.parent_phone || '',
+    phone: member?.phone ? formatKoreanPhoneInput(member.phone) : '',
+    parent_phone: member?.parent_phone
+      ? formatKoreanPhoneInput(member.parent_phone)
+      : '',
     sport: member?.sport || '',
     height_cm: member?.height_cm || undefined,
     weight_kg: member?.weight_kg || undefined,
@@ -157,22 +161,22 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="phone">연락처</Label>
-                <Input
+                <PhoneInput
                   id="phone"
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  value={formData.phone ?? ''}
+                  onChange={(phone) => setFormData({ ...formData, phone })}
                   placeholder="010-1234-5678"
                   className="bg-input border-border"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="parent_phone">보호자 연락처</Label>
-                <Input
+                <PhoneInput
                   id="parent_phone"
-                  type="tel"
-                  value={formData.parent_phone}
-                  onChange={(e) => setFormData({ ...formData, parent_phone: e.target.value })}
+                  value={formData.parent_phone ?? ''}
+                  onChange={(parent_phone) =>
+                    setFormData({ ...formData, parent_phone })
+                  }
                   placeholder="010-1234-5678"
                   className="bg-input border-border"
                 />

@@ -16,6 +16,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
+import { InstallAppButton } from '@/components/pwa/install-app-button'
+import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
 import type { User } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -82,6 +84,9 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
         <div className="flex-1" />
 
         <NotificationBell userId={user.id} />
+
+        <ShareWebsiteButton />
+        <InstallAppButton />
 
         <Button
           type="button"
