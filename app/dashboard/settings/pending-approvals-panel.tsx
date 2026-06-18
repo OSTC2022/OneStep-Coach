@@ -311,7 +311,8 @@ export function PendingApprovalsPanel({
                 )}
                 {selected.signupMemberId ? (
                   <p className="mt-2 text-[11px] text-primary">
-                    가입 시 입력한 회원 프로필이 자동 연결됩니다.
+                    가입 시 자동 생성된 회원 프로필이 있습니다. 센터에 먼저 등록한
+                    회원을 선택하면 하나로 통합됩니다.
                   </p>
                 ) : null}
               </div>

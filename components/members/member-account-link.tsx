@@ -103,9 +103,8 @@ export function MemberAccountLink({
       <CardHeader>
         <CardTitle className="text-base">회원 로그인 활성화</CardTitle>
         <CardDescription>
-          회원 또는 보호자 이메일로 계정을 연결합니다. 초대 메일 발송 후 비밀번호를
-          설정하면 /dashboard/my 에서 본인 리포트를 볼 수 있습니다. 전화번호로 가입한
-          경우 로그인 ID로도 로그인할 수 있습니다.
+          회원 또는 보호자 이메일로 계정을 연결합니다. 가입 시 자동 생성된
+          중복 회원 프로필은 연결 시 센터 등록 회원으로 통합됩니다.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

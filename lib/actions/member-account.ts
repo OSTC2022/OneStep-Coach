@@ -13,6 +13,9 @@ import {
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { getCurrentUser, requireRole } from './auth'
 import { upsertUserProfile } from '@/lib/profiles-admin'
+import {
+  mergeAuthDuplicateMembersIntoTarget,
+} from '@/lib/member-merge'
 import type { MemberPickerOption } from '@/lib/actions/members'
 
 const INVITE_SUCCESS =
@@ -355,21 +358,6 @@ async function sendMemberInviteEmail(
   }
 }
 
-async function isAuthUserLinkedToOtherMember(
-  authUserId: string,
-  memberId: string,
-): Promise<boolean> {
-  const admin = createAdminClient()
-  const { data } = await admin
-    .from('members')
-    .select('id')
-    .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
-    .neq('id', memberId)
-    .maybeSingle()
-
-  return Boolean(data)
-}
-
 async function ensureMemberProfile(
   authUserId: string,
   email: string,
@@ -589,11 +577,6 @@ export async function linkAuthUserToMemberRecord(
     return { error: '관리자 계정은 회원과 연결할 수 없습니다.' }
   }
 
-  const linkedElsewhere = await isAuthUserLinkedToOtherMember(authUserId, memberId)
-  if (linkedElsewhere) {
-    return { error: '이 계정은 이미 다른 회원에 연결되어 있습니다.' }
-  }
-
   const { data: member, error: memberError } = await admin
     .from('members')
     .select('id, name, auth_user_id, user_id')
@@ -608,6 +591,14 @@ export async function linkAuthUserToMemberRecord(
   if (memberLinkedId && memberLinkedId !== authUserId) {
     return { error: '선택한 회원은 이미 다른 계정에 연결되어 있습니다.' }
   }
+
+  const mergeResult = await mergeAuthDuplicateMembersIntoTarget(
+    admin,
+    authUserId,
+    memberId,
+    email,
+  )
+  if (mergeResult.error) return { error: mergeResult.error }
 
   const fullName =
     (authUser.user.user_metadata?.full_name as string | undefined)?.trim() ||
@@ -645,6 +636,10 @@ export async function linkAuthUserToMemberRecord(
     email || undefined,
   )
   if (linkResult.error) return linkResult
+
+  if (mergeResult.mergedCount > 0) {
+    revalidatePath('/dashboard/members')
+  }
 
   try {
     await admin.auth.admin.updateUserById(authUserId, {
@@ -709,6 +704,14 @@ export async function linkExistingAuthUserToMember(
     }
   }
 
+  const mergeResult = await mergeAuthDuplicateMembersIntoTarget(
+    admin,
+    authUserId,
+    memberId,
+    authUser.user.email ?? '',
+  )
+  if (mergeResult.error) return { error: mergeResult.error }
+
   const linkResult = await linkInvitedUser(
     memberId,
     authUserId,
@@ -769,16 +772,13 @@ export async function inviteMemberLogin(
     const existingUserId = await findAuthUserIdByEmail(normalizedEmail)
 
     if (existingUserId) {
-      const linkedElsewhere = await isAuthUserLinkedToOtherMember(
+      const mergeResult = await mergeAuthDuplicateMembersIntoTarget(
+        admin,
         existingUserId,
         memberId,
+        normalizedEmail,
       )
-      if (linkedElsewhere) {
-        return {
-          error:
-            '이 이메일은 다른 회원에 연결된 계정입니다. Supabase Authentication에서 해당 사용자를 확인하거나 다른 이메일을 사용해주세요.',
-        }
-      }
+      if (mergeResult.error) return { error: mergeResult.error }
     }
 
     const sendResult = await sendMemberInviteEmail(
@@ -831,6 +831,14 @@ export async function inviteMemberLogin(
     if (!authUserId) {
       return { error: '계정을 찾을 수 없습니다. 잠시 후 다시 시도해주세요.' }
     }
+
+    const mergeBeforeLink = await mergeAuthDuplicateMembersIntoTarget(
+      admin,
+      authUserId,
+      memberId,
+      normalizedEmail,
+    )
+    if (mergeBeforeLink.error) return { error: mergeBeforeLink.error }
 
     const linkResult = await linkInvitedUser(
       memberId,

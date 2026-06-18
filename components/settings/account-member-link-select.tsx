@@ -120,7 +120,8 @@ export function AccountMemberLinkSelect({
       )}
       <p className="text-[11px] text-muted-foreground">
         가입 계정을 센터에 등록된 회원과 연결하면 마이페이지·리포트 접근이
-        활성화됩니다. 이미 다른 계정에 연결된 회원은 검색되지 않습니다.
+        활성화됩니다. 가입 시 자동 생성된 중복 프로필은 연결 시 하나로
+        통합됩니다.
       </p>
     </div>
   )
