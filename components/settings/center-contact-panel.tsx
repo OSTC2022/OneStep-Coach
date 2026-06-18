@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Check, Pencil, X } from 'lucide-react'
+import { Building2, Check, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateCenterSettings } from '@/lib/actions/center-settings'
+import {
+  formatCenterPhonesForStorage,
+  parseCenterPhones,
+} from '@/lib/center-contact'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -31,9 +35,10 @@ function isContactEmpty(settings: CenterSettings): boolean {
 }
 
 function toFormState(settings: CenterSettings) {
+  const phones = parseCenterPhones(settings.center_phone)
   return {
     name: settings.name || '',
-    center_phone: settings.center_phone || '',
+    center_phones: phones.length > 0 ? phones : [''],
     kakao_id: settings.kakao_id || '',
     instagram_id: settings.instagram_id || '',
     blog_url: settings.blog_url || '',
@@ -66,7 +71,17 @@ export function CenterContactPanel({
 
   async function handleSave() {
     setIsSaving(true)
-    const result = await updateCenterSettings(formData)
+    const result = await updateCenterSettings({
+      name: formData.name,
+      kakao_id: formData.kakao_id,
+      instagram_id: formData.instagram_id,
+      blog_url: formData.blog_url,
+      center_phone: formatCenterPhonesForStorage(formData.center_phones),
+      naver_place_url: formData.naver_place_url,
+      center_address: formData.center_address,
+      business_hours: formData.business_hours,
+      show_instructor_contact: formData.show_instructor_contact,
+    })
     setIsSaving(false)
 
     if (result.error) {
@@ -95,7 +110,10 @@ export function CenterContactPanel({
       </Button>
       <div className="grid gap-3 sm:grid-cols-2">
         <InfoRow label="센터명" value={centerSettings.name} />
-        <InfoRow label="대표 전화" value={centerSettings.center_phone} />
+        <InfoRow
+          label="대표 전화"
+          value={parseCenterPhones(centerSettings.center_phone).join(' · ') || null}
+        />
         <InfoRow label="카카오톡 채널" value={centerSettings.kakao_id} />
         <InfoRow label="인스타그램" value={centerSettings.instagram_id} />
         <InfoRow label="블로그" value={centerSettings.blog_url} />
@@ -121,14 +139,66 @@ export function CenterContactPanel({
           onChange={(value) => setFormData((prev) => ({ ...prev, name: value }))}
           placeholder="OneStep 트레이닝"
         />
-        <Field
-          label="대표 전화"
-          value={formData.center_phone}
-          onChange={(value) =>
-            setFormData((prev) => ({ ...prev, center_phone: value }))
+      </div>
+      <div className="space-y-2">
+        <Label>대표 전화</Label>
+        <p className="text-xs text-muted-foreground">
+          여러 번호를 추가할 수 있습니다. 첫 번째 번호가 회원 포털 기본 연락처로
+          사용됩니다.
+        </p>
+        <div className="space-y-2">
+          {formData.center_phones.map((phone, index) => (
+            <div key={`center-phone-${index}`} className="flex gap-2">
+              <Input
+                value={phone}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    center_phones: prev.center_phones.map((value, phoneIndex) =>
+                      phoneIndex === index ? e.target.value : value,
+                    ),
+                  }))
+                }
+                placeholder={index === 0 ? '031-375-6163' : '추가 대표 번호'}
+              />
+              {formData.center_phones.length > 1 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      center_phones: prev.center_phones.filter(
+                        (_, phoneIndex) => phoneIndex !== index,
+                      ),
+                    }))
+                  }
+                  aria-label="대표 번호 삭제"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            setFormData((prev) => ({
+              ...prev,
+              center_phones: [...prev.center_phones, ''],
+            }))
           }
-          placeholder="02-1234-5678"
-        />
+        >
+          <Plus className="mr-1.5 h-4 w-4" />
+          대표 번호 추가
+        </Button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="카카오톡 채널"
           value={formData.kakao_id}

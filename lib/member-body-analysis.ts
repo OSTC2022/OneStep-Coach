@@ -213,7 +213,74 @@ export function getBodyWarningSignals(
   return { label: '주의', description: notes.join(' · '), hasWarning: true }
 }
 
-/** 최근 체중 변화 부가 설명 */
+/** 최근 체중 비교 기준 — 이 일수 이내의 직전 기록만 비교 */
+export const RECENT_WEIGHT_COMPARE_MAX_DAYS = 30
+
+export type RecentWeightChange = {
+  delta: number | null
+  daysAgo: number | null
+  description: string
+}
+
+/** N일 전 · N주 전 표기 */
+export function formatWeightCompareDaysAgo(daysAgo: number): string {
+  if (daysAgo <= 0) return '직전 기록'
+  if (daysAgo < 7) return `${daysAgo}일 전`
+  const weeks = Math.round(daysAgo / 7)
+  if (daysAgo <= 30) {
+    return weeks <= 1 ? '1주 전' : `${weeks}주 전`
+  }
+  return `${daysAgo}일 전`
+}
+
+/** 최신 체중과 30일 이내 직전 기록 비교 */
+export function buildRecentWeightChange(
+  records: MemberBodyRecord[],
+): RecentWeightChange {
+  const sorted = [...records].sort((a, b) =>
+    a.recorded_at.localeCompare(b.recorded_at),
+  )
+
+  if (sorted.length < 2) {
+    return {
+      delta: null,
+      daysAgo: null,
+      description: '비교할 최근 기록이 없습니다',
+    }
+  }
+
+  const latest = sorted.at(-1)!
+  const previous = sorted.at(-2)!
+  const latestDate = parseISO(latest.recorded_at)
+  const previousDate = parseISO(previous.recorded_at)
+  const daysAgo = differenceInDays(latestDate, previousDate)
+
+  if (daysAgo > RECENT_WEIGHT_COMPARE_MAX_DAYS) {
+    return {
+      delta: null,
+      daysAgo: null,
+      description: `최근 ${RECENT_WEIGHT_COMPARE_MAX_DAYS}일 이내 비교 기록이 없습니다`,
+    }
+  }
+
+  const latestWeight = roundBodyMetric(latest.weight_kg) ?? latest.weight_kg
+  const previousWeight =
+    roundBodyMetric(previous.weight_kg) ?? previous.weight_kg
+  const delta = Number((latestWeight - previousWeight).toFixed(1))
+  const timeLabel = formatWeightCompareDaysAgo(daysAgo)
+
+  let changeLabel = '동일'
+  if (delta > 0) changeLabel = '증가'
+  else if (delta < 0) changeLabel = '감소'
+
+  return {
+    delta,
+    daysAgo,
+    description: `${timeLabel} 기록 대비 ${changeLabel}`,
+  }
+}
+
+/** @deprecated buildRecentWeightChange 사용 */
 export function getRecentWeightChangeDescription(delta: number | null): string {
   if (delta == null) return '비교할 기록이 없습니다'
   if (delta > 0) return '최근 기록 대비 증가'

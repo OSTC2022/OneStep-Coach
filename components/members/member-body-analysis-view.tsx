@@ -33,6 +33,7 @@ import {
   buildCoachCheckReport,
   buildConditionChartPoints,
   buildPainChartPoints,
+  buildRecentWeightChange,
   buildSleepChartPoints,
   CHART_TREND_INITIAL_NOTICE,
   chartSpanYears,
@@ -44,7 +45,6 @@ import {
   filterRecordsByPeriod,
   getGrowthStatus,
   getLatestConditionStatus,
-  getRecentWeightChangeDescription,
   prepareRecordsForChart,
   resolveBodyChartGranularity,
   resolveRecordHeight,
@@ -243,6 +243,11 @@ export function MemberBodyAnalysisView({
         periodSettings.mode === 'all' ? member.weight_kg : null,
       ),
     [filteredRecords, member.height_cm, member.weight_kg, periodSettings.mode],
+  )
+
+  const recentWeightChange = useMemo(
+    () => buildRecentWeightChange(records),
+    [records],
   )
 
   const chartPoints = useMemo(
@@ -677,21 +682,21 @@ export function MemberBodyAnalysisView({
             <p
               className={cn(
                 'text-2xl font-bold tabular-nums',
-                stats.delta == null
+                recentWeightChange.delta == null
                   ? ''
-                  : stats.delta > 0
+                  : recentWeightChange.delta > 0
                     ? 'text-amber-300'
-                    : stats.delta < 0
+                    : recentWeightChange.delta < 0
                       ? 'text-sky-300'
                       : '',
               )}
             >
-              {stats.delta == null
+              {recentWeightChange.delta == null
                 ? '-'
-                : `${stats.delta > 0 ? '+' : ''}${formatBodyMetric(stats.delta)}kg`}
+                : `${recentWeightChange.delta > 0 ? '+' : ''}${formatBodyMetric(recentWeightChange.delta)}kg`}
             </p>
             <p className="text-[11px] text-foreground/70">
-              {getRecentWeightChangeDescription(stats.delta)}
+              {recentWeightChange.description}
             </p>
           </CardContent>
         </Card>

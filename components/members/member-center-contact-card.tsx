@@ -150,7 +150,13 @@ export function MemberCenterContactCard({
 
   const kakaoChannel = center.kakaoChannel?.trim() || KAKAO_CHANNEL_DEFAULT_ID
   const kakaoReady = Boolean(kakaoChannel)
-  const phoneReady = hasTelLink(center.centerPhone)
+  const centerPhones =
+    center.centerPhones.length > 0
+      ? center.centerPhones
+      : center.centerPhone
+        ? [center.centerPhone]
+        : []
+  const phoneReady = centerPhones.some((phone) => hasTelLink(phone))
   const instagramReady = hasExternalUrl(center.instagram)
   const blogReady = hasExternalUrl(center.blogUrl)
   const placeReady = hasExternalUrl(center.naverPlaceUrl)
@@ -171,7 +177,7 @@ export function MemberCenterContactCard({
   )
 
   const hasCenterInfo =
-    center.centerPhone || center.centerAddress || center.businessHours
+    centerPhones.length > 0 || center.centerAddress || center.businessHours
 
   return (
     <Card className="border-border/70">
@@ -214,11 +220,21 @@ export function MemberCenterContactCard({
 
         {hasCenterInfo ? (
           <div className="space-y-1 rounded-lg border border-border/50 bg-muted/5 px-3.5 py-2.5 text-sm">
-            {center.centerPhone ? (
-              <p className="text-foreground/90">
+            {centerPhones.length > 0 ? (
+              <div className="text-foreground/90">
                 <span className="text-muted-foreground">대표 전화 </span>
-                {center.centerPhone}
-              </p>
+                <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                  {centerPhones.map((phone, index) => (
+                    <a
+                      key={`${phone}-${index}`}
+                      href={buildTelHref(phone)}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {phone}
+                    </a>
+                  ))}
+                </span>
+              </div>
             ) : null}
             {center.centerAddress ? (
               <p className="text-foreground/90">{center.centerAddress}</p>
@@ -243,7 +259,7 @@ export function MemberCenterContactCard({
               icon={<Phone className="h-4 w-4" />}
               ready={phoneReady}
               primary
-              href={phoneReady ? buildTelHref(center.centerPhone!) : undefined}
+              href={phoneReady ? buildTelHref(centerPhones[0]!) : undefined}
             />
           </ButtonGroup>
 

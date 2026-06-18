@@ -36,6 +36,7 @@ export function formatCoachDisplayName(coachName: string): string {
 export type MemberCenterContactView = {
   centerName: string
   centerPhone: string | null
+  centerPhones: string[]
   kakaoChannel: string | null
   instagram: string | null
   blogUrl: string | null
@@ -43,6 +44,25 @@ export type MemberCenterContactView = {
   centerAddress: string | null
   businessHours: string | null
   showInstructorContact: boolean
+}
+
+/** 대표 전화 — 줄바꿈·쉼표로 여러 번호 저장 */
+export function parseCenterPhones(centerPhone: string | null | undefined): string[] {
+  if (!centerPhone?.trim()) return []
+  const phones = centerPhone
+    .split(/[\n,;|]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+  return [...new Set(phones)]
+}
+
+export function formatCenterPhonesForStorage(phones: string[]): string {
+  return phones.map((value) => value.trim()).filter(Boolean).join('\n')
+}
+
+export function primaryCenterPhone(centerPhone: string | null | undefined): string | null {
+  const phones = parseCenterPhones(centerPhone)
+  return phones[0] ?? null
 }
 
 export type MemberCoachContactView = {
@@ -72,9 +92,11 @@ export function hasKakaoChannelLink(kakao: string | null | undefined): boolean {
 export function buildCenterContactView(
   settings: CenterSettings,
 ): MemberCenterContactView {
+  const centerPhones = parseCenterPhones(settings.center_phone)
   return {
     centerName: settings.name,
-    centerPhone: settings.center_phone,
+    centerPhone: centerPhones[0] ?? settings.center_phone ?? null,
+    centerPhones,
     kakaoChannel: settings.kakao_id,
     instagram: settings.instagram_id,
     blogUrl: settings.blog_url,
