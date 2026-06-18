@@ -37,6 +37,8 @@ export default function LoginPage() {
     useState<PublicSignUpMemberType>('student')
   const [signUpPhone, setSignUpPhone] = useState('')
   const [signUpParentPhone, setSignUpParentPhone] = useState('')
+  const [loginEmail, setLoginEmail] = useState('')
+  const [resetEmail, setResetEmail] = useState('')
   const [loginState, setLoginState] = useState<{ error?: string } | null>(null)
   const [loginPending, setLoginPending] = useState(false)
   const [signUpPending, setSignUpPending] = useState(false)
@@ -213,6 +215,7 @@ export default function LoginPage() {
             onValueChange={(value) => {
               setTab(value)
               setShowForgotPassword(false)
+              setResetEmail('')
               if (value !== 'signup') {
                 setSignUpBirthDate('')
                 setSignUpPhone('')
@@ -229,7 +232,12 @@ export default function LoginPage() {
 
             <TabsContent value="login">
               {showForgotPassword ? (
-                <form onSubmit={handleResetSubmit} className="space-y-4">
+                <form
+                  key="password-reset-form"
+                  onSubmit={handleResetSubmit}
+                  className="space-y-4"
+                  autoComplete="off"
+                >
                   <p className="text-sm text-muted-foreground">
                     가입 시 등록한 이메일 또는 로그인 ID를 입력하면 비밀번호 재설정
                     링크를 보내드립니다.
@@ -238,13 +246,16 @@ export default function LoginPage() {
                     <Label htmlFor="reset-email">이메일 또는 로그인 ID</Label>
                     <Input
                       id="reset-email"
-                      name="email"
+                      name="identifier"
                       type="text"
+                      inputMode="email"
                       placeholder="example@email.com"
+                      value={resetEmail}
+                      onChange={(event) => setResetEmail(event.target.value)}
                       required
                       disabled={resetPending}
                       className="bg-input border-border"
-                      autoComplete="username"
+                      autoComplete="email"
                     />
                   </div>
                   <Button
@@ -264,21 +275,27 @@ export default function LoginPage() {
                   </Button>
                   <button
                     type="button"
-                    onClick={() => setShowForgotPassword(false)}
+                    onClick={() => {
+                      setResetEmail('')
+                      setShowForgotPassword(false)
+                    }}
                     className="w-full text-center text-xs text-muted-foreground hover:text-foreground hover:underline"
                   >
                     로그인으로 돌아가기
                   </button>
                 </form>
               ) : (
-                <form onSubmit={handleLoginSubmit} className="space-y-4">
+                <form key="login-form" onSubmit={handleLoginSubmit} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email">이메일 또는 로그인 ID</Label>
+                    <Label htmlFor="login-email">이메일 또는 로그인 ID</Label>
                     <Input
-                      id="email"
+                      id="login-email"
                       name="email"
                       type="text"
+                      inputMode="email"
                       placeholder="admin@example.com"
+                      value={loginEmail}
+                      onChange={(event) => setLoginEmail(event.target.value)}
                       required
                       disabled={loginPending}
                       className="bg-input border-border"
@@ -287,17 +304,20 @@ export default function LoginPage() {
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <Label htmlFor="password">비밀번호</Label>
+                      <Label htmlFor="login-password">비밀번호</Label>
                       <button
                         type="button"
-                        onClick={() => setShowForgotPassword(true)}
+                        onClick={() => {
+                          setResetEmail(loginEmail)
+                          setShowForgotPassword(true)
+                        }}
                         className="text-[11px] text-muted-foreground hover:text-primary hover:underline"
                       >
                         비밀번호를 잊으셨나요?
                       </button>
                     </div>
                     <Input
-                      id="password"
+                      id="login-password"
                       name="password"
                       type="password"
                       placeholder="••••••••"
@@ -328,7 +348,9 @@ export default function LoginPage() {
             <TabsContent value="signup">
               <form onSubmit={handleSignUpSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="full_name">이름</Label>
+                  <Label htmlFor="full_name">
+                    이름 <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="full_name"
                     name="full_name"
@@ -343,6 +365,7 @@ export default function LoginPage() {
                   id="signup-birth_date"
                   value={signUpBirthDate}
                   onChange={setSignUpBirthDate}
+                  required
                 />
                 <input type="hidden" name="birth_date" value={signUpBirthDate} />
                 <input type="hidden" name="member_type" value={signUpMemberType} />

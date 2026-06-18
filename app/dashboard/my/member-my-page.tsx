@@ -120,6 +120,19 @@ export function MemberMyPage({ data }: MemberMyPageProps) {
                 {profileAside.value}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
+              {(member.remaining_sessions ?? 0) <= 0 ? (
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
+                >
+                  <Link href="/dashboard/my/sessions#lesson-records">
+                    수업권 확인하러 가기
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Link>
+                </Button>
+              ) : null}
             </div>
           </div>
         </CardContent>

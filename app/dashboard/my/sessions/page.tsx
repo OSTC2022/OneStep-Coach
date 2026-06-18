@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getMemberPortalData } from '@/lib/actions/member-portal'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { MemberPortalUnavailable } from '@/components/dashboard/member-portal-unavailable'
+import { loadMemberLessonRecords } from '@/lib/member-portal-lessons'
 import { MemberSessionsPage } from '../member-sessions-page'
 
 export default async function MySessionsPage() {
@@ -17,5 +18,7 @@ export default async function MySessionsPage() {
     redirect('/auth/login')
   }
 
-  return <MemberSessionsPage data={data} />
+  const lessonRecords = await loadMemberLessonRecords(data.member.id)
+
+  return <MemberSessionsPage data={data} lessonRecords={lessonRecords} />
 }

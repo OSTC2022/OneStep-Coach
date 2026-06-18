@@ -11,6 +11,10 @@ export interface User {
   role: UserRole
   approval_status: ProfileApprovalStatus
   created_at: string
+  avatar_url?: string | null
+  phone?: string | null
+  kakao_id?: string | null
+  instagram_id?: string | null
 }
 
 export interface Profile {
@@ -21,6 +25,10 @@ export interface Profile {
   approval_status: ProfileApprovalStatus
   created_at: string
   updated_at?: string
+  avatar_url?: string | null
+  phone?: string | null
+  kakao_id?: string | null
+  instagram_id?: string | null
 }
 
 export interface Instructor {

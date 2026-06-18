@@ -247,7 +247,7 @@ export function InstructorRolePanel({
             강사를 클릭하면 오른쪽에 권한 설정이 열립니다.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="min-w-0 space-y-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -258,7 +258,7 @@ export function InstructorRolePanel({
             />
           </div>
 
-          <div className="rounded-md border overflow-x-auto max-h-[min(60vh,480px)] overflow-y-auto">
+          <div className="rounded-md border max-h-[min(60vh,480px)] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>

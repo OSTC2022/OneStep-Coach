@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import type { User } from '@/lib/types'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
 import { ProfileSettingsDialog } from '@/components/dashboard/profile-settings-dialog'
+import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
 
@@ -51,10 +52,8 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-9 w-9 rounded-full">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 font-medium text-primary">
-                {user?.full_name?.charAt(0) || user?.email?.charAt(0) || '?'}
-              </div>
+            <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
+              <UserAvatar user={user ?? {}} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="w-56" align="end" forceMount>

@@ -12,8 +12,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { KakaoChannelInquiryDialog } from '@/components/members/kakao-channel-inquiry-dialog'
+import { PhoneContactDialog } from '@/components/members/phone-contact-dialog'
 import {
-  buildTelHref,
   CENTER_CONTACT_TOPICS,
   KAKAO_CHANNEL_DEFAULT_ID,
   COACH_INQUIRY_HINT,
@@ -146,6 +146,9 @@ export function MemberCenterContactCard({
   center,
 }: MemberCenterContactCardProps) {
   const [kakaoDialogOpen, setKakaoDialogOpen] = useState(false)
+  const [phoneDialogOpen, setPhoneDialogOpen] = useState(false)
+  const [phoneDialogPhones, setPhoneDialogPhones] = useState<string[]>([])
+  const [phoneDialogTitle, setPhoneDialogTitle] = useState('연락처')
   const unassigned = isUnassignedCoach(coach.name)
 
   const kakaoChannel = center.kakaoChannel?.trim() || KAKAO_CHANNEL_DEFAULT_ID
@@ -179,6 +182,14 @@ export function MemberCenterContactCard({
   const hasCenterInfo =
     centerPhones.length > 0 || center.centerAddress || center.businessHours
 
+  function openPhoneDialog(phones: string[], title: string) {
+    const valid = phones.filter((phone) => hasTelLink(phone))
+    if (valid.length === 0) return
+    setPhoneDialogPhones(valid)
+    setPhoneDialogTitle(title)
+    setPhoneDialogOpen(true)
+  }
+
   return (
     <Card className="border-border/70">
       <CardHeader className="pb-2 sm:px-6">
@@ -207,15 +218,18 @@ export function MemberCenterContactCard({
         </div>
 
         {!unassigned && coach.phone ? (
-          <a
-            href={buildTelHref(coach.phone)}
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3.5 py-2 text-sm text-primary transition-colors hover:bg-primary/10"
+          <button
+            type="button"
+            onClick={() =>
+              openPhoneDialog([coach.phone!], '담당 코치 연락')
+            }
+            className="inline-flex min-h-11 w-full items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3.5 py-2 text-left text-sm text-primary transition-colors hover:bg-primary/10"
           >
             <Phone className="h-4 w-4 shrink-0" />
             <span>
               담당 코치 연락 · <span className="font-medium">{coach.phone}</span>
             </span>
-          </a>
+          </button>
         ) : null}
 
         {hasCenterInfo ? (
@@ -225,13 +239,16 @@ export function MemberCenterContactCard({
                 <span className="text-muted-foreground">대표 전화 </span>
                 <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
                   {centerPhones.map((phone, index) => (
-                    <a
+                    <button
                       key={`${phone}-${index}`}
-                      href={buildTelHref(phone)}
+                      type="button"
+                      onClick={() =>
+                        openPhoneDialog([phone], '센터 대표 전화')
+                      }
                       className="font-medium text-primary hover:underline"
                     >
                       {phone}
-                    </a>
+                    </button>
                   ))}
                 </span>
               </div>
@@ -259,7 +276,9 @@ export function MemberCenterContactCard({
               icon={<Phone className="h-4 w-4" />}
               ready={phoneReady}
               primary
-              href={phoneReady ? buildTelHref(centerPhones[0]!) : undefined}
+              onClick={() =>
+                openPhoneDialog(centerPhones, '센터 대표 전화')
+              }
             />
           </ButtonGroup>
 
@@ -302,6 +321,13 @@ export function MemberCenterContactCard({
         channelId={kakaoChannel}
         open={kakaoDialogOpen}
         onOpenChange={setKakaoDialogOpen}
+      />
+
+      <PhoneContactDialog
+        phones={phoneDialogPhones}
+        title={phoneDialogTitle}
+        open={phoneDialogOpen}
+        onOpenChange={setPhoneDialogOpen}
       />
     </Card>
   )

@@ -178,7 +178,7 @@ export function PendingApprovalsPanel({
             계정입니다. 승인해야 로그인할 수 있습니다.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="min-w-0 space-y-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -189,7 +189,7 @@ export function PendingApprovalsPanel({
             />
           </div>
 
-          <div className="rounded-md border overflow-x-auto">
+          <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>

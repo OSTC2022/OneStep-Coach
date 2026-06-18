@@ -60,6 +60,10 @@ export const getDashboardProfile = cache(async (): Promise<User | null> => {
         user.user_metadata?.approval_status as ProfileApprovalStatus | undefined,
       ),
       created_at: dbProfile.created_at,
+      avatar_url: dbProfile.avatar_url ?? null,
+      phone: dbProfile.phone ?? null,
+      kakao_id: dbProfile.kakao_id ?? null,
+      instagram_id: dbProfile.instagram_id ?? null,
     }
   }
 

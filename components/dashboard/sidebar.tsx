@@ -46,6 +46,7 @@ import { preloadRouteChunk } from '@/lib/chunk-preload'
 import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
 import {
   getDefaultSidebarMenuOrder,
+  getDefaultSidebarMenuHidden,
   normalizeSidebarMenuOrder,
   normalizeSidebarMenuHidden,
   orderSidebarMenuItems,
@@ -56,6 +57,7 @@ import {
   writeSidebarMenuOrder,
 } from '@/lib/dashboard-menu-order'
 import { Button } from '@/components/ui/button'
+import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { cn } from '@/lib/utils'
 
 const MENU_ICONS: Record<string, LucideIcon> = {
@@ -98,7 +100,9 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   const [order, setOrder] = useState<string[]>(() =>
     getDefaultSidebarMenuOrder(userRole),
   )
-  const [hiddenIds, setHiddenIds] = useState<string[]>([])
+  const [hiddenIds, setHiddenIds] = useState<string[]>(() =>
+    getDefaultSidebarMenuHidden(userRole),
+  )
   const [draggingId, setDraggingId] = useState<string | null>(null)
 
   const prefetchedRoutesRef = useRef(new Set<string>())
@@ -160,7 +164,7 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
 
   function resetOrder() {
     persist(getDefaultSidebarMenuOrder(userRole))
-    persistHidden([])
+    persistHidden(getDefaultSidebarMenuHidden(userRole))
   }
 
   function prefetchMenuRoute(href: string) {
@@ -357,9 +361,11 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary/20 text-sm font-medium text-sidebar-primary">
-            {user?.full_name?.charAt(0) || user?.email?.charAt(0) || '?'}
-          </div>
+          <UserAvatar
+            user={user ?? {}}
+            className="h-8 w-8"
+            fallbackClassName="bg-sidebar-primary/20 text-sidebar-primary"
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-sidebar-foreground">
               {user?.full_name || '사용자'}

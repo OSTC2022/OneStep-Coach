@@ -366,7 +366,7 @@ export function LessonsList({
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-border">
+      <div className="min-w-0 rounded-lg border border-border">
         <Table>
           <TableHeader>
             <TableRow>

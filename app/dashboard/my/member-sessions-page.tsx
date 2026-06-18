@@ -4,30 +4,20 @@ import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { ArrowLeft, CalendarDays, CreditCard } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { MemberLessonRecordsTable } from '@/components/members/member-lesson-records-table'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import type { MemberLessonRecordsData } from '@/lib/member-portal-lessons'
 import type { MemberPortalData } from '@/lib/member-portal-types'
-
-const STATUS_LABEL: Record<string, string> = {
-  present: '출석',
-  absent: '결석',
-  makeup: '보강',
-  cancelled: '취소',
-  scheduled: '예정',
-}
 
 interface MemberSessionsPageProps {
   data: MemberPortalData
+  lessonRecords: MemberLessonRecordsData
 }
 
-export function MemberSessionsPage({ data }: MemberSessionsPageProps) {
-  const { member, nextLesson, recentSessions, recentLessons } = data
+export function MemberSessionsPage({ data, lessonRecords }: MemberSessionsPageProps) {
+  const { member, nextLesson } = data
   const instructorName = member.primary_instructor?.name ?? '자율배정'
-  const attendanceItems =
-    recentSessions.length > 0
-      ? recentSessions
-      : recentLessons.filter((lesson) => lesson.attendance_status !== 'scheduled')
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-6">
@@ -38,8 +28,10 @@ export function MemberSessionsPage({ data }: MemberSessionsPageProps) {
           </Link>
         </Button>
         <div>
-          <h1 className="text-xl font-bold lg:text-2xl">수업</h1>
-          <p className="text-sm text-muted-foreground">남은 수업과 출석 일정을 확인합니다.</p>
+          <h1 className="text-xl font-bold lg:text-2xl">수업권 · 수업 기록</h1>
+          <p className="text-sm text-muted-foreground">
+            남은 수업과 최근 수업 기록을 확인합니다. (조회 전용)
+          </p>
         </div>
       </div>
 
@@ -77,35 +69,11 @@ export function MemberSessionsPage({ data }: MemberSessionsPageProps) {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">최근 출석</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {attendanceItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">출석 기록이 없습니다.</p>
-          ) : (
-            attendanceItems.slice(0, 8).map((item) => {
-              const date =
-                'session_date' in item ? item.session_date : item.lesson_date
-              const status =
-                'status' in item ? item.status : item.attendance_status
-
-              return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-2 border-b border-border pb-2 last:border-0 last:pb-0"
-                >
-                  <p className="text-sm font-medium">
-                    {format(parseISO(date), 'M/d (EEE)', { locale: ko })}
-                  </p>
-                  <Badge variant="secondary">{STATUS_LABEL[status] ?? status}</Badge>
-                </div>
-              )
-            })
-          )}
-        </CardContent>
-      </Card>
+      <MemberLessonRecordsTable
+        lessons={lessonRecords.lessons}
+        sessionNumberByLessonId={lessonRecords.sessionNumberByLessonId}
+        packageTally={lessonRecords.packageTally}
+      />
     </div>
   )
 }

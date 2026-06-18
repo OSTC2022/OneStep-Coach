@@ -3,9 +3,13 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { getCurrentUser, requireAuth } from '@/lib/actions/auth'
+import { getCurrentUser, getMemberForCurrentUser, requireAuth } from '@/lib/actions/auth'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
+import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import type { UserRole } from '@/lib/types'
+
+const PROFILE_SETTINGS_SELECT =
+  'full_name, avatar_url, phone, kakao_id, instagram_id, email, role'
 
 function toLegacyUsersRole(role: UserRole) {
   if (role === 'admin') return 'admin'
@@ -13,11 +17,108 @@ function toLegacyUsersRole(role: UserRole) {
   return 'member'
 }
 
+function normalizeOptionalText(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? ''
+  return trimmed || null
+}
+
+async function syncContactToLinkedRecords(
+  userId: string,
+  contact: {
+    phone: string | null
+    kakao_id: string | null
+    instagram_id: string | null
+  },
+) {
+  const supabase = await createClient()
+
+  await supabase
+    .from('members')
+    .update({
+      phone: contact.phone,
+      kakao_id: contact.kakao_id,
+      instagram_id: contact.instagram_id,
+    })
+    .or(`auth_user_id.eq.${userId},user_id.eq.${userId}`)
+
+  try {
+    const admin = createAdminClient()
+    await admin
+      .from('instructors')
+      .update({
+        phone: contact.phone,
+        kakao_id: contact.kakao_id,
+        instagram_id: contact.instagram_id,
+      })
+      .eq('user_id', userId)
+  } catch {
+    /* service role 없으면 instructors 동기화 생략 */
+  }
+}
+
+export type MyProfileSettings = {
+  full_name: string
+  email: string | null
+  role: UserRole
+  avatar_url: string | null
+  phone: string
+  kakao_id: string
+  instagram_id: string
+}
+
+export async function getMyProfileSettings(): Promise<MyProfileSettings | null> {
+  const user = await getCurrentUser()
+  if (!user) return null
+
+  const supabase = await createClient()
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select(PROFILE_SETTINGS_SELECT)
+    .eq('id', user.id)
+    .maybeSingle()
+
+  let phone = profile?.phone ?? user.phone ?? ''
+  let kakaoId = profile?.kakao_id ?? user.kakao_id ?? ''
+  let instagramId = profile?.instagram_id ?? user.instagram_id ?? ''
+
+  if (!phone || !kakaoId || !instagramId) {
+    const member = await getMemberForCurrentUser()
+    if (member) {
+      phone = phone || member.phone || ''
+      kakaoId = kakaoId || member.kakao_id || ''
+      instagramId = instagramId || member.instagram_id || ''
+    }
+  }
+
+  return {
+    full_name: profile?.full_name ?? user.full_name ?? '',
+    email: user.email,
+    role: user.role,
+    avatar_url: profile?.avatar_url ?? user.avatar_url ?? null,
+    phone,
+    kakao_id: kakaoId,
+    instagram_id: instagramId,
+  }
+}
+
 export async function updateMyProfile(input: {
   full_name: string
+  avatar_url?: string | null
+  phone?: string
+  kakao_id?: string
+  instagram_id?: string
 }): Promise<{ error?: string }> {
   const user = await requireAuth()
   const fullName = input.full_name.trim()
+  const phone = normalizeOptionalText(
+    input.phone ? formatKoreanPhoneInput(input.phone) : null,
+  )
+  const kakaoId = normalizeOptionalText(input.kakao_id)
+  const instagramId = normalizeOptionalText(input.instagram_id)
+  const avatarUrl =
+    input.avatar_url === undefined
+      ? undefined
+      : normalizeOptionalText(input.avatar_url ?? null)
 
   if (!fullName) {
     return { error: '이름을 입력해주세요.' }
@@ -27,18 +128,41 @@ export async function updateMyProfile(input: {
     return { error: '이름은 40자 이내로 입력해주세요.' }
   }
 
+  if (kakaoId && kakaoId.length > 80) {
+    return { error: '카카오톡 아이디는 80자 이내로 입력해주세요.' }
+  }
+
+  if (instagramId && instagramId.length > 80) {
+    return { error: '인스타그램 아이디는 80자 이내로 입력해주세요.' }
+  }
+
   const supabase = await createClient()
+  const updatePayload: Record<string, string | null> = {
+    full_name: fullName,
+    phone,
+    kakao_id: kakaoId,
+    instagram_id: instagramId,
+    updated_at: new Date().toISOString(),
+  }
+
+  if (avatarUrl !== undefined) {
+    updatePayload.avatar_url = avatarUrl
+  }
+
   const { error: profileError } = await supabase
     .from('profiles')
-    .update({
-      full_name: fullName,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq('id', user.id)
 
   if (profileError) {
     return { error: profileError.message }
   }
+
+  await syncContactToLinkedRecords(user.id, {
+    phone,
+    kakao_id: kakaoId,
+    instagram_id: instagramId,
+  })
 
   await supabase.from('users').upsert(
     {
@@ -56,6 +180,7 @@ export async function updateMyProfile(input: {
       user_metadata: {
         full_name: fullName,
         role: user.role,
+        ...(avatarUrl !== undefined ? { avatar_url: avatarUrl } : {}),
       },
     })
 
@@ -77,14 +202,4 @@ export async function updateMyProfile(input: {
 
   revalidatePath('/dashboard', 'layout')
   return {}
-}
-
-export async function getMyProfileSettings() {
-  const user = await getCurrentUser()
-  if (!user) return null
-  return {
-    full_name: user.full_name ?? '',
-    email: user.email,
-    role: user.role,
-  }
 }

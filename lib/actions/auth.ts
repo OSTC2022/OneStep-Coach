@@ -135,7 +135,10 @@ export async function requestPasswordReset(
   _prev: { error?: string; success?: boolean; message?: string } | null,
   formData: FormData,
 ): Promise<{ error?: string; success?: boolean; message?: string }> {
-  const loginInput = (formData.get('email') as string)?.trim() ?? ''
+  const loginInput =
+    (formData.get('identifier') as string)?.trim() ||
+    (formData.get('email') as string)?.trim() ||
+    ''
 
   if (!loginInput) {
     return { error: '이메일 또는 로그인 ID를 입력해주세요.' }

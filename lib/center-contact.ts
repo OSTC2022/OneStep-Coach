@@ -75,6 +75,11 @@ export function buildTelHref(phone: string): string {
   return digits ? `tel:${digits}` : '#'
 }
 
+export function buildSmsHref(phone: string): string {
+  const digits = phone.replace(/[^\d+]/g, '')
+  return digits ? `sms:${digits}` : '#'
+}
+
 export function hasTelLink(phone: string | null | undefined): boolean {
   return Boolean(phone?.replace(/\D/g, ''))
 }

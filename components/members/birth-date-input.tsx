@@ -17,6 +17,7 @@ interface BirthDateInputProps {
   onChange: (value: string) => void
   className?: string
   showLabel?: boolean
+  required?: boolean
 }
 
 export function BirthDateInput({
@@ -26,6 +27,7 @@ export function BirthDateInput({
   onChange,
   className,
   showLabel = true,
+  required = false,
 }: BirthDateInputProps) {
   const [text, setText] = useState(() => toBirthDateSlashValue(value))
 
@@ -41,7 +43,17 @@ export function BirthDateInput({
 
   return (
     <div className={cn('space-y-2', className)}>
-      {showLabel && <Label htmlFor={id}>{label}</Label>}
+      {showLabel && (
+        <Label htmlFor={id}>
+          {label}
+          {required ? (
+            <>
+              {' '}
+              <span className="text-destructive">*</span>
+            </>
+          ) : null}
+        </Label>
+      )}
       <Input
         id={id}
         inputMode="numeric"

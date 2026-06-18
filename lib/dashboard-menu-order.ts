@@ -29,6 +29,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin', 'instructor'],
   },
   {
+    id: '/dashboard/calendar',
+    title: '캘린더',
+    url: '/dashboard/calendar',
+    roles: ['admin', 'instructor'],
+  },
+  {
     id: '/dashboard/members',
     title: '회원 관리',
     url: '/dashboard/members',
@@ -50,12 +56,6 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     id: '/dashboard/lessons',
     title: '수업 등록',
     url: '/dashboard/lessons',
-    roles: ['admin', 'instructor'],
-  },
-  {
-    id: '/dashboard/calendar',
-    title: '캘린더',
-    url: '/dashboard/calendar',
     roles: ['admin', 'instructor'],
   },
   {
@@ -105,6 +105,14 @@ export function getDefaultSidebarMenuOrder(role: SidebarMenuRole): string[] {
   return SIDEBAR_MENU_ITEMS.filter((item) => item.roles.includes(role)).map(
     (item) => item.id,
   )
+}
+
+/** 기본으로 숨길 메뉴 (저장값 없을 때·초기화 시 적용) */
+export function getDefaultSidebarMenuHidden(role: SidebarMenuRole): string[] {
+  if (role === 'admin' || role === 'instructor') {
+    return ['/dashboard/attendance']
+  }
+  return []
 }
 
 export function normalizeSidebarMenuOrder(
@@ -176,17 +184,17 @@ export function normalizeSidebarMenuHidden(
 
 export function readSidebarMenuHidden(role: SidebarMenuRole): string[] {
   if (typeof window === 'undefined') {
-    return []
+    return getDefaultSidebarMenuHidden(role)
   }
 
   try {
     const raw = window.localStorage.getItem(hiddenStorageKey(role))
-    if (!raw) return []
+    if (!raw) return getDefaultSidebarMenuHidden(role)
     const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
+    if (!Array.isArray(parsed)) return getDefaultSidebarMenuHidden(role)
     return normalizeSidebarMenuHidden(role, parsed.map(String))
   } catch {
-    return []
+    return getDefaultSidebarMenuHidden(role)
   }
 }
 

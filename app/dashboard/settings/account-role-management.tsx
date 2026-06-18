@@ -310,7 +310,7 @@ export function AccountRoleManagement({
   ) : null
 
   const accountsPanel = (
-    <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <div className="grid min-w-0 gap-6 lg:grid-cols-[1fr_320px]">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg">가입 계정</CardTitle>
@@ -319,7 +319,7 @@ export function AccountRoleManagement({
             처리하세요.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="min-w-0 space-y-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -330,7 +330,7 @@ export function AccountRoleManagement({
             />
           </div>
 
-          <div className="rounded-md border overflow-x-auto">
+          <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -560,7 +560,7 @@ export function AccountRoleManagement({
   const pendingCount = pending.length
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full min-w-0">
       <TabsList className="w-full max-w-2xl grid grid-cols-2 sm:grid-cols-4 h-auto">
         <TabsTrigger value="pending" className="text-xs sm:text-sm">
           가입 승인
