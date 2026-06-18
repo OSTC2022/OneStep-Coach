@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
+import { isRedirectError } from 'next/dist/client/components/redirect-error'
 import { requestPasswordReset, signIn } from '@/lib/actions/auth'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { Button } from '@/components/ui/button'
@@ -57,7 +58,8 @@ export default function LoginPage() {
       if (result?.error) {
         setLoginState(result)
       }
-    } catch {
+    } catch (error) {
+      if (isRedirectError(error)) throw error
       setLoginState({ error: '로그인 처리 중 오류가 발생했습니다.' })
     } finally {
       setLoginPending(false)
