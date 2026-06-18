@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { AppInitialLoader } from '@/components/brand/app-initial-loader'
 import { OnestepSplashStatic } from '@/components/brand/onestep-splash-static'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
+import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
 import './globals.css'
 
 const geistSans = Geist({
@@ -80,6 +81,7 @@ export default function RootLayout({
       >
         <OnestepSplashStatic />
         <AppInitialLoader />
+        <PwaBootstrap />
         <div id="app-root" className="onestep-app-root">
           {children}
           <Toaster richColors position="top-center" />

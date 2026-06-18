@@ -9,6 +9,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: '원스텝',
     short_name: '원스텝',
     description: 'OneStep Training Center',
+    scope: '/',
     start_url: '/',
     display: 'standalone',
     display_override: ['standalone', 'fullscreen'],
