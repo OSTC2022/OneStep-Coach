@@ -201,5 +201,7 @@ export async function updateMyProfile(input: {
   }
 
   revalidatePath('/dashboard', 'layout')
+  revalidatePath('/dashboard/profile')
+  revalidatePath('/dashboard/my/profile')
   return {}
 }

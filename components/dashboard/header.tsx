@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { SidebarTrigger } from '@/components/ui/sidebar'
@@ -17,7 +17,6 @@ import { LogOut, User as UserIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import type { User } from '@/lib/types'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
-import { ProfileSettingsDialog } from '@/components/dashboard/profile-settings-dialog'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
@@ -28,7 +27,6 @@ interface DashboardHeaderProps {
 
 export function DashboardHeader({ user }: DashboardHeaderProps) {
   const router = useRouter()
-  const [profileOpen, setProfileOpen] = useState(false)
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -68,9 +66,11 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setProfileOpen(true)}>
-              <UserIcon className="mr-2 h-4 w-4" />
-              <span>프로필</span>
+            <DropdownMenuItem asChild>
+              <Link href="/dashboard/profile">
+                <UserIcon className="mr-2 h-4 w-4" />
+                <span>프로필 수정</span>
+              </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -83,14 +83,6 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
-
-      {user ? (
-        <ProfileSettingsDialog
-          user={user}
-          open={profileOpen}
-          onOpenChange={setProfileOpen}
-        />
-      ) : null}
     </>
   )
 }
