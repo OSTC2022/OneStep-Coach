@@ -10,17 +10,36 @@ import {
 } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import {
-  getShareLoginUrl,
-  SITE_BRAND_NAME,
-  SITE_SHARE_TEXT,
-} from '@/lib/site-brand'
+import { getShareLoginUrl } from '@/lib/site-brand'
 
 type ShareWebsiteButtonProps = {
   className?: string
   variant?: React.ComponentProps<typeof Button>['variant']
   size?: React.ComponentProps<typeof Button>['size']
   showLabel?: boolean
+}
+
+async function copyLoginUrl(url: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(url)
+    return true
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = url
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      const ok = document.execCommand('copy')
+      document.body.removeChild(textarea)
+      return ok
+    } catch {
+      document.body.removeChild(textarea)
+      return false
+    }
+  }
 }
 
 export function ShareWebsiteButton({
@@ -32,25 +51,22 @@ export function ShareWebsiteButton({
   async function handleShare() {
     const url = getShareLoginUrl()
 
+    const copied = await copyLoginUrl(url)
+    if (copied) {
+      toast.success('로그인 주소가 복사되었습니다.')
+      return
+    }
+
     if (navigator.share) {
       try {
-        await navigator.share({
-          title: SITE_BRAND_NAME,
-          text: SITE_SHARE_TEXT,
-          url,
-        })
+        await navigator.share({ url })
         return
       } catch (error) {
         if ((error as Error).name === 'AbortError') return
       }
     }
 
-    try {
-      await navigator.clipboard.writeText(url)
-      toast.success('원스텝 웹사이트 링크가 복사되었습니다.')
-    } catch {
-      toast.error('링크 복사에 실패했습니다.')
-    }
+    toast.error('링크 복사에 실패했습니다.')
   }
 
   const button = (
@@ -60,10 +76,10 @@ export function ShareWebsiteButton({
       size={showLabel ? size : 'icon'}
       className={cn(showLabel ? undefined : 'h-9 w-9', className)}
       onClick={() => void handleShare()}
-      aria-label="원스텝 웹사이트 링크 공유"
+      aria-label="로그인 주소 복사"
     >
       <Share2 className={cn('h-4 w-4', showLabel && 'sm:mr-1.5')} />
-      {showLabel ? <span className="hidden sm:inline">링크 공유</span> : null}
+      {showLabel ? <span className="hidden sm:inline">링크 복사</span> : null}
     </Button>
   )
 
@@ -73,7 +89,7 @@ export function ShareWebsiteButton({
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side="bottom">웹사이트 링크 공유</TooltipContent>
+        <TooltipContent side="bottom">로그인 주소 복사</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
