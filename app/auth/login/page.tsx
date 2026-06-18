@@ -20,7 +20,7 @@ import { PhoneInput } from '@/components/ui/phone-input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
-import type { PublicSignUpMemberType } from '@/lib/actions/auth-registration'
+import type { PublicSignUpMemberType } from '@/lib/auth/public-signup'
 
 type SignUpResult = {
   error?: string
@@ -67,9 +67,37 @@ export default function LoginPage() {
   async function handleSignUpSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (signUpPending) return
+
+    const form = event.currentTarget
+    const password = (form.elements.namedItem('password') as HTMLInputElement)
+      ?.value
+    const passwordConfirm = (
+      form.elements.namedItem('password_confirm') as HTMLInputElement
+    )?.value
+
+    if (!signUpBirthDate) {
+      toast.error('회원가입 실패', {
+        description: '생년월일을 yymmdd 형식(6자리)으로 입력해주세요.',
+      })
+      return
+    }
+    if (!password || password.length < 8) {
+      toast.error('회원가입 실패', {
+        description: '비밀번호는 8자 이상이어야 합니다.',
+      })
+      return
+    }
+    if (password !== passwordConfirm) {
+      toast.error('회원가입 실패', {
+        description: '비밀번호가 일치하지 않습니다.',
+      })
+      return
+    }
+
     setSignUpPending(true)
     try {
-      const formData = new FormData(event.currentTarget)
+      const formData = new FormData(form)
+      formData.set('birth_date', signUpBirthDate)
       formData.set('phone', signUpPhone)
       formData.set('parent_phone', signUpParentPhone)
       formData.set('member_type', signUpMemberType)
