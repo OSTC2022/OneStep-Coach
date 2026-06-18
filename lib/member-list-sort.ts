@@ -81,6 +81,29 @@ function memberCreatedSortKey(member: Member): string {
   return member.created_at ?? member.registered_at ?? ''
 }
 
+function parseRegisteredAtMs(member: Member): number {
+  const raw = memberCreatedSortKey(member)
+  if (!raw) return 0
+  const ms = new Date(raw).getTime()
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function parseLessonSortKeyMs(sortKey: string): number {
+  if (!sortKey) return 0
+  const normalized =
+    sortKey.length === 16 && sortKey.includes('T') ? `${sortKey}:00` : sortKey
+  const ms = new Date(normalized).getTime()
+  return Number.isFinite(ms) ? ms : 0
+}
+
+/** 가입·최근 수업 중 더 최근 시각 — 목록 상단 정렬용 */
+export function memberLastActivityMs(
+  member: Member,
+  lastLessonKey?: string,
+): number {
+  return Math.max(parseRegisteredAtMs(member), parseLessonSortKeyMs(lastLessonKey ?? ''))
+}
+
 export async function sortMembersForList<
   T extends Member & { primary_instructor?: { id: string; name: string } | null },
 >(
@@ -94,21 +117,10 @@ export async function sortMembersForList<
   return [...members].sort((a, b) => {
     switch (orderBy) {
       case 'recent_lesson': {
-        const da = lastLessonByMember.get(a.id) ?? ''
-        const db = lastLessonByMember.get(b.id) ?? ''
-        const hasA = Boolean(da)
-        const hasB = Boolean(db)
-
-        // 수업 이력 없음(신규) → 최근 등록 순으로 목록 상단
-        if (!hasA && !hasB) {
-          const cmp = memberCreatedSortKey(b).localeCompare(memberCreatedSortKey(a))
-          return cmp !== 0 ? cmp * dir : a.name.localeCompare(b.name, 'ko')
-        }
-        if (!hasA && hasB) return -1 * dir
-        if (hasA && !hasB) return 1 * dir
-
-        const cmp = da.localeCompare(db)
-        return cmp !== 0 ? cmp * dir : a.name.localeCompare(b.name, 'ko')
+        const actA = memberLastActivityMs(a, lastLessonByMember.get(a.id))
+        const actB = memberLastActivityMs(b, lastLessonByMember.get(b.id))
+        if (actA !== actB) return (actA - actB) * dir
+        return a.name.localeCompare(b.name, 'ko')
       }
       case 'age': {
         const ageA = getMemberAge(a) ?? -1
