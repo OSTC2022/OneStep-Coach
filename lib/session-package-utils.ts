@@ -181,6 +181,10 @@ export function formatMonthlyPlanSuffix(note?: string | null): string {
 export function formatPackagePlanLabel(
   totalSessions: number,
   note?: string | null,
+  options?: {
+    duplicateCount?: number
+    cumulativeTotalSessions?: number
+  },
 ): string {
   if (isMonthlyRecurringPlan(note)) {
     return MONTHLY_RECURRING_NOTE
@@ -189,7 +193,15 @@ export function formatPackagePlanLabel(
   if (months != null) {
     return `월정액 ${months}개월`
   }
-  return '횟수권'
+  const base = `${totalSessions}회`
+  if (
+    options?.duplicateCount != null &&
+    options.duplicateCount > 1 &&
+    options.cumulativeTotalSessions != null
+  ) {
+    return `${base} · 누적 ${options.cumulativeTotalSessions}회`
+  }
+  return base
 }
 
 /** 회원권 만료 여부 (기간·비활성·잔여 소진) */

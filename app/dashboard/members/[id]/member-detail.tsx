@@ -67,7 +67,6 @@ import {
 } from '@/lib/session-package-utils'
 import { GroupedPackageUsageDisplay } from '@/components/sessions/grouped-package-usage-display'
 import {
-  flattenGroupedSessionPackages,
   groupSessionPackagesForDisplay,
 } from '@/lib/session-package-grouping'
 
@@ -166,22 +165,18 @@ export function MemberDetail({
     () => groupSessionPackagesForDisplay(sessionPackages),
     [sessionPackages],
   )
-  const packagesForTally = useMemo(
-    () => flattenGroupedSessionPackages(groupedSessionPackages),
-    [groupedSessionPackages],
-  )
 
   const packageTally = useMemo(
-    () => linkPackageTallyToSessions(packagesForTally, sessionNumberByLessonId),
-    [packagesForTally, sessionNumberByLessonId],
+    () => linkPackageTallyToSessions(sessionPackages, sessionNumberByLessonId),
+    [sessionPackages, sessionNumberByLessonId],
   )
   const tallyTotalDisplay = useMemo(
-    () => formatPackageTallyTotalDisplay(packagesForTally),
-    [packagesForTally],
+    () => formatPackageTallyTotalDisplay(sessionPackages),
+    [sessionPackages],
   )
   const tallyRemainingDisplay = useMemo(
-    () => formatPackageTallyRemainingDisplay(packagesForTally),
-    [packagesForTally],
+    () => formatPackageTallyRemainingDisplay(sessionPackages),
+    [sessionPackages],
   )
   const isTallyUnlimited =
     tallyTotalDisplay === UNLIMITED_SESSIONS_DISPLAY ||
@@ -341,11 +336,14 @@ export function MemberDetail({
             {activePackage && activePackageGroup && (
               <div className="text-sm text-muted-foreground space-y-1 border-t border-border pt-3 mt-3">
                 <p>
-                  {formatPackagePlanLabel(activePackage.total_sessions, activePackage.note)}{' '}
+                  {formatPackagePlanLabel(activePackage.total_sessions, activePackage.note, {
+                    duplicateCount: activePackageGroup.duplicateCount,
+                    cumulativeTotalSessions: activePackageGroup.cumulativeTotalSessions,
+                  })}{' '}
                   ·{' '}
                   <span>
                     <GroupedPackageUsageDisplay
-                      remainingSessions={activePackage.remaining_sessions}
+                      remainingSessions={activePackageGroup.cumulativeRemainingSessions}
                       latestPurchaseTotalSessions={
                         activePackageGroup.latestPurchaseTotalSessions
                       }
@@ -457,6 +455,95 @@ export function MemberDetail({
                 {isTallyUnlimited ? '' : '회'}
               </span>
             </div>
+            <div className="space-y-3 md:hidden">
+              {groupedSessionPackages.map(
+                ({
+                  primary: pkg,
+                  duplicateCount,
+                  latestPurchaseTotalSessions,
+                  cumulativeTotalSessions,
+                  cumulativeRemainingSessions,
+                }) => (
+                  <div
+                    key={pkg.id}
+                    className="rounded-lg border border-border bg-card p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold">
+                          {formatPackagePlanLabel(pkg.total_sessions, pkg.note, {
+                            duplicateCount,
+                            cumulativeTotalSessions,
+                          })}
+                        </p>
+                        {duplicateCount > 1 ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {duplicateCount}건 등록
+                          </p>
+                        ) : null}
+                      </div>
+                      <Badge variant={pkg.is_active ? 'default' : 'secondary'}>
+                        {pkg.is_active ? '사용중' : '종료'}
+                      </Badge>
+                    </div>
+                    <div className="text-sm">
+                      <p className="text-xs text-muted-foreground">잔여 / 최근 구매 / 누적</p>
+                      <GroupedPackageUsageDisplay
+                        remainingSessions={cumulativeRemainingSessions}
+                        latestPurchaseTotalSessions={latestPurchaseTotalSessions}
+                        cumulativeTotalSessions={cumulativeTotalSessions}
+                        note={pkg.note}
+                        isActive={pkg.is_active}
+                        expiresAt={pkg.expires_at}
+                      />
+                      {isSessionPackageOverage(cumulativeRemainingSessions, pkg.note) ? (
+                        <Badge variant="destructive" className="ml-2 text-[10px]">
+                          초과
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                      <div>
+                        <dt className="text-xs text-muted-foreground">금액</dt>
+                        <dd>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">결제일</dt>
+                        <dd>{formatPackageDate(pkg.paid_at)}</dd>
+                      </div>
+                      <div className="col-span-2">
+                        <dt className="text-xs text-muted-foreground">만료일</dt>
+                        <dd>{formatPackageDate(pkg.expires_at)}</dd>
+                      </div>
+                    </dl>
+                    {canManage ? (
+                      <div className="flex gap-2 pt-1">
+                        <Link
+                          href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}
+                          className="flex-1"
+                        >
+                          <Button variant="outline" size="sm" className="h-10 w-full">
+                            <Edit className="mr-1.5 h-4 w-4" />
+                            수정
+                          </Button>
+                        </Link>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-10 flex-1 text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(pkg)}
+                        >
+                          <Trash2 className="mr-1.5 h-4 w-4" />
+                          삭제
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ),
+              )}
+            </div>
+            <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -475,23 +562,28 @@ export function MemberDetail({
                 {groupedSessionPackages.map(
                   ({
                     primary: pkg,
+                    duplicateCount,
                     latestPurchaseTotalSessions,
                     cumulativeTotalSessions,
+                    cumulativeRemainingSessions,
                   }) => (
                   <TableRow key={pkg.id}>
                     <TableCell>
-                      {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
+                      {formatPackagePlanLabel(pkg.total_sessions, pkg.note, {
+                        duplicateCount,
+                        cumulativeTotalSessions,
+                      })}
                     </TableCell>
                     <TableCell>
                       <GroupedPackageUsageDisplay
-                        remainingSessions={pkg.remaining_sessions}
+                        remainingSessions={cumulativeRemainingSessions}
                         latestPurchaseTotalSessions={latestPurchaseTotalSessions}
                         cumulativeTotalSessions={cumulativeTotalSessions}
                         note={pkg.note}
                         isActive={pkg.is_active}
                         expiresAt={pkg.expires_at}
                       />
-                      {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
+                      {isSessionPackageOverage(cumulativeRemainingSessions, pkg.note) ? (
                         <Badge variant="destructive" className="ml-2 text-[10px]">
                           초과
                         </Badge>
@@ -531,6 +623,7 @@ export function MemberDetail({
                 ))}
               </TableBody>
             </Table>
+            </div>
             </>
           )}
         </CardContent>

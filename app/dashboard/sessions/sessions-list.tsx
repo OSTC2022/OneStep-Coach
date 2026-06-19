@@ -629,8 +629,10 @@ export function SessionsList({
               groupedFilteredPackages.map(
                 ({
                   primary: pkg,
+                  duplicateCount,
                   latestPurchaseTotalSessions,
                   cumulativeTotalSessions,
+                  cumulativeRemainingSessions,
                 }) => (
                 <TableRow key={pkg.id}>
                   <TableCell>
@@ -656,19 +658,22 @@ export function SessionsList({
                     </div>
                   </TableCell>
                   <TableCell>
-                    {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
+                    {formatPackagePlanLabel(pkg.total_sessions, pkg.note, {
+                      duplicateCount,
+                      cumulativeTotalSessions,
+                    })}
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">
                     <div className="flex items-center gap-2">
                       <GroupedPackageUsageDisplay
-                        remainingSessions={pkg.remaining_sessions}
+                        remainingSessions={cumulativeRemainingSessions}
                         latestPurchaseTotalSessions={latestPurchaseTotalSessions}
                         cumulativeTotalSessions={cumulativeTotalSessions}
                         note={pkg.note}
                         isActive={pkg.is_active}
                         expiresAt={pkg.expires_at}
                       />
-                      {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
+                      {isSessionPackageOverage(cumulativeRemainingSessions, pkg.note) ? (
                         <Badge variant="destructive" className="text-[10px]">
                           초과
                         </Badge>

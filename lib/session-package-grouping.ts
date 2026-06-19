@@ -10,6 +10,7 @@ export type SessionPackageGroupRow<T> = {
   groupIds: string[]
   latestPurchaseTotalSessions: number
   cumulativeTotalSessions: number
+  cumulativeRemainingSessions: number
 }
 
 type GroupablePackage = {
@@ -91,6 +92,10 @@ export function groupSessionPackagesForDisplay<T extends GroupablePackage>(
         groupIds: group.map((item) => item.id),
         latestPurchaseTotalSessions: latest.total_sessions,
         cumulativeTotalSessions: sumGroupTotalSessions(group),
+        cumulativeRemainingSessions: group.reduce(
+          (sum, pkg) => sum + pkg.remaining_sessions,
+          0,
+        ),
       }
     })
     .sort(
