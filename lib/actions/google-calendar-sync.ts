@@ -188,6 +188,36 @@ export async function listGoogleCalendarPendingLessons() {
   return listPendingGoogleSyncLessons()
 }
 
+export async function syncGoogleCalendarOnCalendarOpen(): Promise<{
+  started?: boolean
+}> {
+  await requireRole(['admin', 'instructor'])
+
+  const row = await getGoogleCalendarSyncRow()
+  if (!row?.sync_enabled || !row.refresh_token || isGoogleCalendarSyncInProgress(row)) {
+    return { started: false }
+  }
+
+  after(async () => {
+    try {
+      await syncGoogleCalendarLessons({
+        reason: 'calendar-open',
+        skipDedupe: true,
+      })
+    } catch (error) {
+      console.error(
+        '[google-calendar] calendar-open sync failed:',
+        error instanceof Error ? error.message : error,
+      )
+    } finally {
+      revalidatePath('/dashboard/calendar')
+      revalidatePath('/dashboard/lesson-status')
+    }
+  })
+
+  return { started: true }
+}
+
 export async function refreshGoogleCalendarWatchAction(): Promise<{ error?: string }> {
   await requireRole(['admin'])
   try {

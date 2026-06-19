@@ -39,6 +39,11 @@ import {
 import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import {
+  scheduleGoogleLessonDeletes,
+  scheduleGoogleLessonPush,
+  touchAppModifiedAt,
+} from '@/lib/google-calendar/push-scheduler'
+import {
   findExistingLessonsByDates,
   findMemberSlotRowIds,
   type LessonSlotIdentity,
@@ -457,6 +462,7 @@ function buildInsertPayload(
     session_deducted: false,
     lesson_no: lessonNo,
     created_by: userId,
+    app_modified_at: touchAppModifiedAt(),
   }
 
   if (options?.recurrenceGroupId !== undefined) {
@@ -882,6 +888,8 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   const lesson = normalizeLessonRecord(data as Lesson)
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
+  scheduleGoogleLessonPush(lesson.id)
+
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
@@ -993,6 +1001,8 @@ async function createRecurringMasterLesson(
 
   const lesson = normalizeLessonRecord(data as Lesson)
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
+
+  scheduleGoogleLessonPush(lesson.id)
 
   if (!options.silent) {
     revalidatePath('/dashboard/lessons')
@@ -1246,6 +1256,8 @@ export async function createRecurringLessons(
     await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
   }
 
+  scheduleGoogleLessonPush(savedLessons.map((lesson) => lesson.id))
+
   if (!options.silent) {
     revalidatePath('/dashboard/lessons')
     revalidatePath('/dashboard/attendance')
@@ -1291,6 +1303,8 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
 
   const payload: Record<string, unknown> = { ...updates }
   let titleForFallback: string | null = null
+
+  payload.app_modified_at = touchAppModifiedAt()
 
   if ('member_id' in updates || 'title' in updates) {
     const enriched = await enrichLessonIdentity(supabase, {
@@ -1377,6 +1391,8 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   const user = await getCurrentUser()
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
+  scheduleGoogleLessonPush(lesson.id)
+
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
@@ -1415,6 +1431,7 @@ export async function markAttendance(
 
 function buildLessonUpdatePayload(updates: Partial<LessonFormData>) {
   const payload: Record<string, unknown> = { ...updates }
+  payload.app_modified_at = touchAppModifiedAt()
 
   if ('instructor_id' in updates) {
     payload.instructor_id = updates.instructor_id?.trim() || null
@@ -1738,6 +1755,8 @@ export async function updateLessonSeries(
   revalidatePath('/dashboard/instructors')
   revalidatePath('/dashboard/reports')
 
+  scheduleGoogleLessonPush(updatedLessons.map((lesson) => lesson.id))
+
   return { data: updatedLessons, warning }
 }
 
@@ -1811,6 +1830,13 @@ export async function deleteLessonsInSeries(
     return { error: '삭제할 수업을 찾을 수 없습니다.' }
   }
 
+  const { data: googleDeleteSnapshots } = await supabase
+    .from('lessons')
+    .select(
+      'id, google_event_id, google_calendar_id, google_account_id, event_type, session_deducted',
+    )
+    .in('id', uniqueTargetIds)
+
   const deletedIds: string[] = []
   const chunkSize = 40
 
@@ -1848,6 +1874,12 @@ export async function deleteLessonsInSeries(
   revalidatePath('/dashboard/attendance')
   revalidatePath('/dashboard/calendar')
   revalidatePath('/dashboard/lesson-status')
+
+  const deletedSet = new Set(uniqueDeletedIds)
+  scheduleGoogleLessonDeletes(
+    (googleDeleteSnapshots ?? []).filter((row) => deletedSet.has(row.id)),
+  )
+
   return { deletedIds: uniqueDeletedIds }
 }
 

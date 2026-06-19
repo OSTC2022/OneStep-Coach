@@ -86,6 +86,15 @@ export type CalendarFetchOptions = {
   force?: boolean
 }
 
+export function invalidateCalendarCacheKey(cacheKey: string) {
+  memoryCache.delete(cacheKey)
+  abortByKey.get(cacheKey)?.abort()
+  abortByKey.delete(cacheKey)
+  inFlightRequests.delete(cacheKey)
+  if (activeFetchKey === cacheKey) activeFetchKey = null
+}
+
+/** @deprecated Prefer invalidateCalendarCacheKey — full clear causes empty calendar on fetch failure */
 export function invalidateAllCalendarCache() {
   memoryCache.clear()
   for (const controller of abortByKey.values()) {

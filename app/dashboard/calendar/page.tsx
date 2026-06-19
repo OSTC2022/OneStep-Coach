@@ -1,23 +1,24 @@
-import { getLessonsForRange } from '@/lib/actions/lessons'
+import { getLessonsForMonth } from '@/lib/actions/lessons'
 import { getInstructorForCurrentUser, getInstructors } from '@/lib/actions/instructors'
-import { getRangeForView } from '@/lib/calendar-utils'
 import { CalendarView } from './calendar-view'
 
 export default async function CalendarPage() {
   const now = new Date()
-  const { dateFrom, dateTo } = getRangeForView(now, 'week')
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
 
   if (process.env.NODE_ENV === 'development') {
     console.log('[calendar] fetch start', {
-      rangeStart: dateFrom,
-      rangeEnd: dateTo,
+      year,
+      month,
       coachId: 'all',
       source: 'server-page',
+      view: 'month',
     })
   }
 
   const [lessons, instructors, currentInstructor] = await Promise.all([
-    getLessonsForRange(dateFrom, dateTo),
+    getLessonsForMonth(year, month),
     getInstructors({ isActive: true, calendar: true, limit: 80 }),
     getInstructorForCurrentUser(),
   ])

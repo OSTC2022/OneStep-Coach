@@ -1467,73 +1467,61 @@ export function LessonCreateDialog({
         </AlertDialogContent>
       </AlertDialog>
 
-      {deleteScopeOpen ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-scope-title"
-          className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget && !isLoading) {
-              setDeleteScopeOpen(false)
-            }
-          }}
-        >
-          <div
-            className="w-full max-w-sm rounded-t-2xl border border-border bg-card p-5 shadow-2xl sm:rounded-lg"
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <h3 id="delete-scope-title" className="text-base font-semibold">
-              수업 삭제 범위
-            </h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{editLabel}</span>{' '}
-              반복 일정입니다. 어떻게 삭제할까요?
-            </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              전체·이후 삭제는 이 회원의 같은 요일·같은 시작 시간 일정만 대상입니다.
-            </p>
-            <div className="mt-4 flex flex-col gap-2">
-              <Button
-                type="button"
-                variant="destructive"
-                className="w-full"
-                disabled={isLoading}
-                onClick={() => void executeDelete('all')}
-              >
-                반복 전체 지우기
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                disabled={isLoading}
-                onClick={() => void executeDelete('single')}
-              >
-                이것만 지우기
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                disabled={isLoading}
-                onClick={() => void executeDelete('future')}
-              >
-                이후 모두 지우기
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                disabled={isLoading}
-                onClick={() => setDeleteScopeOpen(false)}
-              >
-                취소
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AlertDialog
+        open={deleteScopeOpen}
+        onOpenChange={(next) => {
+          if (!isLoading) setDeleteScopeOpen(next)
+        }}
+      >
+        <AlertDialogContent mobileSheet>
+          <AlertDialogHeader>
+            <AlertDialogTitle>수업 삭제 범위</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-1 text-sm text-muted-foreground">
+                <p>
+                  <span className="font-medium text-foreground">{editLabel}</span>{' '}
+                  반복 일정입니다. 어떻게 삭제할까요?
+                </p>
+                <p className="text-[11px]">
+                  전체·이후 삭제는 이 회원의 같은 요일·같은 시작 시간 일정만 대상입니다.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isLoading}
+              onClick={() => void executeDelete('all')}
+            >
+              반복 전체 지우기
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={isLoading}
+              onClick={() => void executeDelete('single')}
+            >
+              이것만 지우기
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={isLoading}
+              onClick={() => void executeDelete('future')}
+            >
+              이후 모두 지우기
+            </Button>
+            <AlertDialogCancel disabled={isLoading} className="w-full">
+              취소
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 

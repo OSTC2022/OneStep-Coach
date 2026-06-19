@@ -191,11 +191,20 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Google Calendar의 <strong className="text-foreground">「수업」</strong>,{' '}
-            <strong className="text-foreground">「수업2」</strong> 캘린더에 등록한 일정이
-            원스텝 코치 캘린더에 자동으로 반영됩니다. 회원 이름을 찾지 못하면 임시 등록 후
-            알림을 보냅니다.
+            <strong className="text-foreground">양방향 동기화</strong> — 센터 캘린더에서
+            추가·수정·삭제한 일정이 Google(폰/PC)의{' '}
+            <strong className="text-foreground">「수업」</strong>,{' '}
+            <strong className="text-foreground">「수업2」</strong> 캘린더에 반영되고, Google에서
+            변경한 내용도 센터 캘린더에 반영됩니다.{' '}
+            <strong className="text-foreground">가장 최근에 수정한 쪽</strong>이 우선합니다.
+            회원 이름을 찾지 못하면 임시 등록 후 알림을 보냅니다.
           </p>
+          {status.connected ? (
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              쓰기 권한이 필요합니다. 예전에 연결했다면 한 번 연결 해제 후 Google 계정을 다시
+              연결해 주세요.
+            </p>
+          ) : null}
 
           <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
             <div className="flex flex-wrap items-center gap-2">
@@ -364,7 +373,12 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             <strong className="text-foreground">장지용</strong> 강사·색상으로 자동 반영됩니다.
           </p>
           <p>
-            5. 「지금 동기화」는 Google 캘린더 변경분을 가져와 일정·강사·회원 연결을 갱신합니다.
+            5. 센터에서 일정을 바꾸면 Google에 자동 반영됩니다. 폰에서 바꾼 내용은 웹훅·캘린더
+            열기·「지금 동기화」·새로고침으로 가져옵니다.
+          </p>
+          <p>
+            6. 같은 일정을 양쪽에서 수정하면 <strong className="text-foreground">더 최근에 저장한 쪽</strong>이
+            적용됩니다.
           </p>
         </CardContent>
       </Card>

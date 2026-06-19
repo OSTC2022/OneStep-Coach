@@ -29,7 +29,7 @@ export const GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME: Record<string, string>
 }
 
 export const GOOGLE_OAUTH_SCOPES = [
-  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ')
 

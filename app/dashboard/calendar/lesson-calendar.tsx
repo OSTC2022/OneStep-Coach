@@ -55,12 +55,12 @@ import {
   fetchCalendarLessons,
   filterLessonsByCoach,
   getCachedLessons,
-  invalidateAllCalendarCache,
   prefetchAdjacentCalendarRanges,
   resolveRangeKey,
   seedCalendarCache,
   setCachedLessons,
 } from '@/lib/calendar-data-store'
+import { syncGoogleCalendarOnCalendarOpen } from '@/lib/actions/google-calendar-sync'
 import {
   logCalendarFetch,
   withCalendarFetchTimeout,
@@ -92,7 +92,12 @@ const LessonCreateDialog = dynamic(
   { ssr: false },
 )
 
-interface MemberOption extends CalendarMemberSearchItem {}
+function isFetchAbort(error: unknown): boolean {
+  return (
+    (error instanceof DOMException || error instanceof Error) &&
+    error.name === 'AbortError'
+  )
+}
 
 interface CalendarHighlight {
   memberId: string
@@ -112,7 +117,7 @@ export function LessonCalendar({
   members,
   defaultInstructorId = null,
 }: LessonCalendarProps) {
-  const [view, setView] = useState<CalendarView>('week')
+  const [view, setView] = useState<CalendarView>('month')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [lessons, setLessons] = useState(initialLessons)
   const lessonHistory = useCalendarLessonHistory(setLessons)
@@ -137,6 +142,9 @@ export function LessonCalendar({
   const monthPoolInFlightRef = useRef(false)
   const calendarRootRef = useRef<HTMLDivElement>(null)
   const hasSeededCacheRef = useRef(false)
+  const googleInboundSyncedRef = useRef(false)
+  const lessonsRef = useRef(lessons)
+  lessonsRef.current = lessons
   const {
     selectedIds: selectedLessonIds,
     count: selectionCount,
@@ -215,10 +223,10 @@ export function LessonCalendar({
     const cached = getCachedLessons(cacheKey)
     if (cached) {
       setLessons(cached)
-      setLoadState((prev) => ({ ...prev, hasRangeCache: true }))
+      setLoadState((prev) => ({ ...prev, hasRangeCache: true, error: null }))
       return true
     }
-    setLessons([])
+    // Keep showing previous lessons while the new range loads (avoid blank calendar).
     setLoadState((prev) => ({ ...prev, hasRangeCache: false }))
     return false
   }, [])
@@ -241,13 +249,11 @@ export function LessonCalendar({
         error: null,
       }))
 
-      try {
-        const shouldReplacePool = Boolean(options?.force || options?.refreshing)
-        if (shouldReplacePool) {
-          invalidateAllCalendarCache()
-        }
+      const shouldReplacePool = Boolean(options?.force || options?.refreshing)
+      const lessonsBeforeFetch = lessonsRef.current
 
-        const data = await fetchCalendarLessons({
+      const fetchOnce = () =>
+        fetchCalendarLessons({
           date,
           view: nextView,
           coachId: 'all',
@@ -258,6 +264,24 @@ export function LessonCalendar({
               : 'initial',
           force: options?.force,
         })
+
+      try {
+        let data: Lesson[]
+        try {
+          data = await fetchOnce()
+        } catch (firstError) {
+          if (isFetchAbort(firstError)) {
+            setLoadState((prev) => ({
+              ...prev,
+              initialLoading: false,
+              backgroundLoading: false,
+              refreshing: false,
+            }))
+            return
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 600))
+          data = await fetchOnce()
+        }
 
         setLessons(data)
         setCachedLessons(cacheKey, data)
@@ -282,21 +306,41 @@ export function LessonCalendar({
           hasRangeCache: true,
         })
       } catch (error) {
+        if (isFetchAbort(error)) {
+          setLoadState((prev) => ({
+            ...prev,
+            initialLoading: false,
+            backgroundLoading: false,
+            refreshing: false,
+          }))
+          return
+        }
+
         const message =
           error instanceof Error ? error.message : '일정 로드 실패'
+        const cachedAfterFailure = getCachedLessons(cacheKey)
+        if (cachedAfterFailure) {
+          setLessons(cachedAfterFailure)
+        } else if (lessonsBeforeFetch.length > 0) {
+          setLessons(lessonsBeforeFetch)
+        }
+
         setLoadState((prev) => ({
           ...prev,
           initialLoading: false,
           backgroundLoading: false,
           refreshing: false,
           error: message,
-          hasRangeCache: hadCache,
+          hasRangeCache:
+            cachedAfterFailure != null || lessonsBeforeFetch.length > 0,
         }))
-        if (!hadCache) {
+        const hasFallback =
+          cachedAfterFailure != null || lessonsBeforeFetch.length > 0
+        if (!hasFallback) {
           toast.error('일정을 불러오지 못했습니다.', {
             description: message.includes('timeout')
-              ? '7초 이상 응답이 없습니다.'
-              : undefined,
+              ? '15초 이상 응답이 없습니다. 다시 시도해 주세요.'
+              : '새로고침 버튼으로 다시 시도해 주세요.',
           })
         }
       }
@@ -322,8 +366,41 @@ export function LessonCalendar({
     if (hasSeededCacheRef.current) return
     hasSeededCacheRef.current = true
     seedCalendarCache(currentDate, view, initialLessons, 'all')
+
+    const { dateFrom, dateTo, cacheKey } = resolveRangeKey(
+      currentDate,
+      'month',
+      'all',
+    )
+    if (!getCachedLessons(cacheKey)) {
+      const monthSubset = initialLessons.filter(
+        (lesson) =>
+          lesson.lesson_date >= dateFrom && lesson.lesson_date <= dateTo,
+      )
+      if (monthSubset.length > 0) {
+        setCachedLessons(cacheKey, monthSubset)
+      }
+    }
+
     prefetchAdjacentCalendarRanges(currentDate, view, 'all')
+    void fetchCalendarLessons({
+      date: currentDate,
+      view: 'month',
+      coachId: 'all',
+      mode: 'prefetch',
+    }).catch(() => {})
   }, [currentDate, view, initialLessons])
+
+  useEffect(() => {
+    if (googleInboundSyncedRef.current) return
+    googleInboundSyncedRef.current = true
+    void syncGoogleCalendarOnCalendarOpen().then((result) => {
+      if (!result.started) return
+      window.setTimeout(() => {
+        void syncRange(currentDate, view, { force: true, refreshing: true })
+      }, 2000)
+    })
+  }, [currentDate, syncRange, view])
 
   useEffect(() => {
     setLessons((prev) => {
@@ -393,6 +470,7 @@ export function LessonCalendar({
 
   function handleRefresh() {
     if (loadState.refreshing) return
+    void syncGoogleCalendarOnCalendarOpen()
     void syncRange(currentDate, view, { force: true, refreshing: true })
   }
 
@@ -913,100 +991,103 @@ export function LessonCalendar({
       }}
     >
       <div
-        className="flex shrink-0 flex-col gap-2 overflow-x-clip sm:flex-row sm:items-center sm:justify-between"
+        className="flex shrink-0 flex-col gap-1 overflow-x-clip"
         data-calendar-toolbar
       >
-        <div className="flex min-w-0 items-center gap-2">
-          <CalendarInstructorList
-            instructors={instructors}
-            lessons={searchLessons}
-            currentDate={currentDate}
-            view={view}
-            highlightedLessonIds={highlight?.lessonIds}
-            onLoadMonthPool={loadSearchPool}
-            onSelectLesson={handleListSelectLesson}
-            onEditLesson={handleListEditLesson}
-            className="shrink-0"
-          />
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => handleNavigate(-1)}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={goToToday}
-            title="오늘 (Ctrl+Space, Ctrl+Shift+Space)"
-          >
-            오늘
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => handleNavigate(1)}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={handleRefresh}
-            disabled={loadState.refreshing}
-            title="일정 새로고침"
-            aria-label="일정 새로고침"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${loadState.refreshing ? 'animate-spin' : ''}`}
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <CalendarInstructorList
+              instructors={instructors}
+              lessons={searchLessons}
+              currentDate={currentDate}
+              view={view}
+              highlightedLessonIds={highlight?.lessonIds}
+              onLoadMonthPool={loadSearchPool}
+              onSelectLesson={handleListSelectLesson}
+              onEditLesson={handleListEditLesson}
+              className="shrink-0"
             />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={!lessonHistory.canUndo}
-            onClick={() => void lessonHistory.undo()}
-            title={
-              lessonHistory.canUndo
-                ? `실행 취소 (${lessonHistory.undoCount}단계 · Ctrl+Z)`
-                : '실행 취소'
-            }
-            aria-label={
-              lessonHistory.canUndo
-                ? `실행 취소 ${lessonHistory.undoCount}단계`
-                : '실행 취소'
-            }
-          >
-            <Undo2 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={!lessonHistory.canRedo}
-            onClick={() => void lessonHistory.redo()}
-            title={
-              lessonHistory.canRedo
-                ? `다시 실행 (${lessonHistory.redoCount}단계 · Ctrl+Y)`
-                : '다시 실행'
-            }
-            aria-label={
-              lessonHistory.canRedo
-                ? `다시 실행 ${lessonHistory.redoCount}단계`
-                : '다시 실행'
-            }
-          >
-            <Redo2 className="h-4 w-4" />
-          </Button>
-          <h2 className="ml-1 flex items-center gap-2 text-base font-semibold sm:text-lg">
-            {title}
-            {showToolbarSpinner && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-          </h2>
-        </div>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => handleNavigate(-1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2.5"
+                onClick={goToToday}
+                title="오늘 (Ctrl+Space, Ctrl+Shift+Space)"
+              >
+                오늘
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => handleNavigate(1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={handleRefresh}
+                disabled={loadState.refreshing}
+                title="일정 새로고침"
+                aria-label="일정 새로고침"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${loadState.refreshing ? 'animate-spin' : ''}`}
+                />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!lessonHistory.canUndo}
+                onClick={() => void lessonHistory.undo()}
+                title={
+                  lessonHistory.canUndo
+                    ? `실행 취소 (${lessonHistory.undoCount}단계 · Ctrl+Z)`
+                    : '실행 취소'
+                }
+                aria-label={
+                  lessonHistory.canUndo
+                    ? `실행 취소 ${lessonHistory.undoCount}단계`
+                    : '실행 취소'
+                }
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!lessonHistory.canRedo}
+                onClick={() => void lessonHistory.redo()}
+                title={
+                  lessonHistory.canRedo
+                    ? `다시 실행 (${lessonHistory.redoCount}단계 · Ctrl+Y)`
+                    : '다시 실행'
+                }
+                aria-label={
+                  lessonHistory.canRedo
+                    ? `다시 실행 ${lessonHistory.redoCount}단계`
+                    : '다시 실행'
+                }
+              >
+                <Redo2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
           <Select value={instructorFilter} onValueChange={setInstructorFilter}>
             <SelectTrigger className="w-[130px]">
               {instructorFilter !== 'all' ? (
@@ -1067,13 +1148,41 @@ export function LessonCalendar({
               실행 취소 {lessonHistory.undoCount}단계
             </span>
           ) : null}
+          </div>
         </div>
+        <h2 className="min-w-0 truncate whitespace-nowrap text-sm font-semibold">
+          {title}
+          {showToolbarSpinner && (
+            <Loader2 className="ml-1.5 inline h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
+        </h2>
       </div>
 
       <div
         data-calendar-panel
         className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
       >
+        {loadState.error && (
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <span className="min-w-0 truncate">
+              일정을 불러오지 못했습니다.{' '}
+              {loadState.error.includes('timeout')
+                ? '응답 시간이 초과되었습니다.'
+                : '네트워크 또는 서버 오류일 수 있습니다.'}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10"
+              disabled={loadState.refreshing}
+              onClick={handleRefresh}
+            >
+              다시 시도
+            </Button>
+          </div>
+        )}
+
         {view === 'month' && (
           <MonthView
             currentDate={currentDate}

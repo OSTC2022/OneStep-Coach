@@ -17,9 +17,14 @@ import { parseLessonRecurrencePattern } from '@/lib/lesson-recurrence'
 import { parseGoogleOriginalStartIso } from '@/lib/calendar-recurrence/google-sync-mapper'
 import type { LessonSeriesScope } from '@/lib/actions/lessons'
 import { requireRole } from '@/lib/actions/auth'
+import {
+  scheduleGoogleLessonDeletes,
+  scheduleGoogleLessonPush,
+  touchAppModifiedAt,
+} from '@/lib/google-calendar/push-scheduler'
 
 const MASTER_SELECT =
-  'id, lesson_date, start_time, end_time, member_id, title, instructor_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, event_status'
+  'id, lesson_date, start_time, end_time, member_id, title, instructor_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, event_status, google_event_id, google_calendar_id, google_account_id, session_deducted'
 
 async function bulkDeleteByIds(
   supabase: ReturnType<typeof createAdminClient>,
@@ -129,6 +134,18 @@ export async function deleteRecurringMasterSeries(
     const ids = [masterId, ...(exceptions ?? []).map((item) => item.id)]
     const { error: deleteError } = await supabase.from('lessons').delete().in('id', ids)
     if (deleteError) return { error: deleteError.message }
+    scheduleGoogleLessonDeletes([
+      {
+        id: row.id,
+        google_event_id: (row as { google_event_id?: string | null }).google_event_id ?? null,
+        google_calendar_id:
+          (row as { google_calendar_id?: string | null }).google_calendar_id ?? null,
+        google_account_id:
+          (row as { google_account_id?: string | null }).google_account_id ?? null,
+        event_type: row.event_type,
+        session_deducted: (row as { session_deducted?: boolean }).session_deducted,
+      },
+    ])
     revalidateCalendarPaths()
     return { deletedIds: ids }
   }
@@ -141,8 +158,11 @@ export async function deleteRecurringMasterSeries(
       .from('lessons')
       .update({
         recurrence: addExdateToRecurrence(row.recurrence, occurrenceDate, row.start_time),
+        app_modified_at: touchAppModifiedAt(),
       })
       .eq('id', masterId)
+
+    scheduleGoogleLessonPush(masterId)
 
     revalidateCalendarPaths()
     return {
@@ -167,10 +187,15 @@ export async function deleteRecurringMasterSeries(
   const nextRecurrence = truncateRecurrenceUntil(recurrenceLines, untilDate)
   const { error: truncateError } = await supabase
     .from('lessons')
-    .update({ recurrence: nextRecurrence })
+    .update({
+      recurrence: nextRecurrence,
+      app_modified_at: touchAppModifiedAt(),
+    })
     .eq('id', masterId)
 
   if (truncateError) return { error: truncateError.message }
+
+  scheduleGoogleLessonPush(masterId)
 
   deletedIds.push(buildVirtualLessonId(masterId, occurrenceDate))
 

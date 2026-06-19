@@ -17,7 +17,7 @@ import {
 } from '@/lib/profile-approval'
 import { resolveLoginAuthEmail } from '@/lib/auth/login-resolve'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
-import { appRoleToProfileRole, getDefaultDashboardPath, type AppRole } from '@/lib/roles'
+import { appRoleToProfileRole, getDefaultDashboardPath, profileRoleToAppRole, type AppRole } from '@/lib/roles'
 import {
   findAuthUserByEmail,
   formatRecoveryEmailError,
@@ -25,9 +25,9 @@ import {
 } from '@/lib/auth-recovery-link'
 
 export async function signIn(
-  _prevState: { error?: string } | null,
+  _prevState: { error?: string; redirectTo?: string } | null,
   formData: FormData,
-) {
+): Promise<{ error?: string; redirectTo?: string }> {
   const supabase = await createClient()
 
   const loginInput = (formData.get('email') as string)?.trim() ?? ''
@@ -76,7 +76,9 @@ export async function signIn(
     !isProtectedAdminAccount(accountEmail) &&
     !isProfileAccessAllowed(approvalStatus, accountEmail)
   ) {
-    if (approvalStatus === 'pending') redirect('/auth/pending')
+    if (approvalStatus === 'pending') {
+      return { redirectTo: '/auth/pending' }
+    }
     if (approvalStatus === 'rejected') {
       await supabase.auth.signOut()
       return { error: '가입 승인이 거절되었습니다. 관리자에게 문의해주세요.' }
@@ -96,19 +98,23 @@ export async function signIn(
     | undefined
 
   if (metaRole !== profileRole || metaApproval !== approvalStatus) {
-    await supabase.auth.updateUser({
-      data: {
-        role: profileRole,
-        approval_status: approvalStatus,
-        ...(profileRow?.full_name
-          ? { full_name: profileRow.full_name }
-          : {}),
-      },
-    })
+    try {
+      await supabase.auth.updateUser({
+        data: {
+          role: profileRole,
+          approval_status: approvalStatus,
+          ...(profileRow?.full_name
+            ? { full_name: profileRow.full_name }
+            : {}),
+        },
+      })
+    } catch (error) {
+      console.error('signIn updateUser metadata:', error)
+    }
   }
 
-  const user = await getDashboardProfile()
-  if (user?.role === 'member' || user?.role === 'guardian') {
+  const appRole = profileRoleToAppRole(profileRole) as AppRole
+  if (appRole === 'member' || appRole === 'guardian') {
     try {
       const { createAdminClient } = await import('@/lib/supabase/admin')
       const admin = createAdminClient()
@@ -121,8 +127,7 @@ export async function signIn(
     }
   }
 
-  const path = getDefaultDashboardPath(user?.role ?? 'member')
-  redirect(path)
+  return { redirectTo: getDefaultDashboardPath(appRole) }
 }
 
 export async function signOut() {

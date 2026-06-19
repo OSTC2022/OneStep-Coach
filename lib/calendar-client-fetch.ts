@@ -1,4 +1,4 @@
-export const CALENDAR_FETCH_TIMEOUT_MS = 7000
+export const CALENDAR_FETCH_TIMEOUT_MS = 15000
 
 export function withCalendarFetchTimeout<T>(
   promise: Promise<T>,

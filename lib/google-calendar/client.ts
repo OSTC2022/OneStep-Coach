@@ -210,6 +210,70 @@ export async function stopGoogleCalendarWatch(
   })
 }
 
+export async function insertGoogleCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  body: Record<string, unknown>,
+): Promise<GoogleCalendarEvent> {
+  const encodedCalendarId = encodeURIComponent(calendarId)
+  return googleFetch<GoogleCalendarEvent>(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  )
+}
+
+export async function updateGoogleCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  body: Record<string, unknown>,
+): Promise<GoogleCalendarEvent> {
+  const encodedCalendarId = encodeURIComponent(calendarId)
+  const encodedEventId = encodeURIComponent(eventId)
+  return googleFetch<GoogleCalendarEvent>(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events/${encodedEventId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
+  )
+}
+
+export async function deleteGoogleCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+): Promise<void> {
+  const encodedCalendarId = encodeURIComponent(calendarId)
+  const encodedEventId = encodeURIComponent(eventId)
+  await googleFetch(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events/${encodedEventId}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function moveGoogleCalendarEvent(
+  accessToken: string,
+  sourceCalendarId: string,
+  eventId: string,
+  destinationCalendarId: string,
+): Promise<GoogleCalendarEvent> {
+  const encodedSource = encodeURIComponent(sourceCalendarId)
+  const encodedEventId = encodeURIComponent(eventId)
+  const encodedDestination = encodeURIComponent(destinationCalendarId)
+  return googleFetch<GoogleCalendarEvent>(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodedSource}/events/${encodedEventId}/move?destination=${encodedDestination}`,
+    { method: 'POST' },
+  )
+}
+
 export async function withGoogleAccessToken<T>(
   refreshToken: string,
   fn: (accessToken: string) => Promise<T>,

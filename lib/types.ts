@@ -144,6 +144,8 @@ export interface Lesson {
   event_status?: 'confirmed' | 'cancelled' | null
   created_at: string
   created_by: string | null
+  app_modified_at?: string | null
+  google_event_updated_at?: string | null
   // Joined fields
   member?: Member
   instructor?: Instructor
