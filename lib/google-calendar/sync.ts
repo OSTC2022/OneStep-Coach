@@ -29,6 +29,7 @@ import { buildGoogleCalendarInstructorResolver, backfillGoogleCalendarInstructor
 import { buildMemberLookup } from '@/lib/google-calendar/member-matcher'
 import {
   applyGoogleEventsBatch,
+  enrichExistingMapFromGoogleLessonIds,
   loadExistingByGoogleEventId,
 } from '@/lib/google-calendar/sync-apply'
 import { dedupeGoogleCalendarLessons } from '@/lib/google-calendar/sync-dedupe'
@@ -459,6 +460,11 @@ export async function syncGoogleCalendarLessons(options?: {
               googleAccountId,
               googleCalendarId: calendar.calendarId,
             })
+            await enrichExistingMapFromGoogleLessonIds(
+              supabase,
+              events,
+              existingMap,
+            )
 
             const calendarInstructorId = instructorResolver.resolveInstructorId(
               calendar.calendarId,

@@ -2,7 +2,7 @@ import 'server-only'
 
 import { getSiteUrl } from '@/lib/site-url'
 
-export const GOOGLE_CALENDAR_SYNC_ID = 'default'
+export const GOOGLE_LESSON_ID_PROPERTY = 'onestepLessonId'
 export const GOOGLE_LESSON_CALENDAR_NAME = '수업'
 export const GOOGLE_LESSON_CALENDAR_NAME_ALT = '수업1'
 export const GOOGLE_LESSON_CALENDAR_NAME_2 = '수업2'

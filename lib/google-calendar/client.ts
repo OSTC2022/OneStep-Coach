@@ -4,6 +4,7 @@ import {
   getGoogleOAuthClientId,
   getGoogleOAuthClientSecret,
   getGoogleOAuthRedirectUri,
+  GOOGLE_LESSON_ID_PROPERTY,
 } from '@/lib/google-calendar/config'
 import { GoogleCalendarApiError } from '@/lib/google-calendar/errors'
 import type {
@@ -210,6 +211,36 @@ export async function stopGoogleCalendarWatch(
   })
 }
 
+export async function getGoogleCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+): Promise<GoogleCalendarEvent> {
+  const encodedCalendarId = encodeURIComponent(calendarId)
+  const encodedEventId = encodeURIComponent(eventId)
+  return googleFetch<GoogleCalendarEvent>(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events/${encodedEventId}`,
+  )
+}
+
+export async function findGoogleEventsByLessonId(
+  accessToken: string,
+  calendarId: string,
+  lessonId: string,
+): Promise<GoogleCalendarEvent[]> {
+  const params = new URLSearchParams({
+    privateExtendedProperty: `${GOOGLE_LESSON_ID_PROPERTY}=${lessonId}`,
+    maxResults: '10',
+  })
+  const encodedCalendarId = encodeURIComponent(calendarId)
+  const data = await googleFetch<GoogleEventsListResponse>(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events?${params}`,
+  )
+  return data.items ?? []
+}
+
 export async function insertGoogleCalendarEvent(
   accessToken: string,
   calendarId: string,
@@ -274,10 +305,30 @@ export async function moveGoogleCalendarEvent(
   )
 }
 
+let cachedAccessToken: {
+  refreshToken: string
+  accessToken: string
+  expiresAt: number
+} | null = null
+
 export async function withGoogleAccessToken<T>(
   refreshToken: string,
   fn: (accessToken: string) => Promise<T>,
 ): Promise<T> {
+  const now = Date.now()
+  if (
+    cachedAccessToken &&
+    cachedAccessToken.refreshToken === refreshToken &&
+    cachedAccessToken.expiresAt > now + 30_000
+  ) {
+    return fn(cachedAccessToken.accessToken)
+  }
+
   const token = await refreshGoogleAccessToken(refreshToken)
+  cachedAccessToken = {
+    refreshToken,
+    accessToken: token.access_token,
+    expiresAt: now + Math.max((token.expires_in - 60) * 1000, 60_000),
+  }
   return fn(token.access_token)
 }

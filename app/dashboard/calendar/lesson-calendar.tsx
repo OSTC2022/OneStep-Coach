@@ -60,7 +60,7 @@ import {
   seedCalendarCache,
   setCachedLessons,
 } from '@/lib/calendar-data-store'
-import { syncGoogleCalendarOnCalendarOpen } from '@/lib/actions/google-calendar-sync'
+import { pullGoogleCalendarChanges } from '@/lib/actions/google-calendar-sync'
 import {
   logCalendarFetch,
   withCalendarFetchTimeout,
@@ -70,6 +70,8 @@ import {
   isPersistedRecurringLesson,
   parseVirtualLessonId,
 } from '@/lib/calendar-recurrence/types'
+
+const GOOGLE_SYNC_POLL_MS = 1500
 
 function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   const map = new Map<string, Lesson>()
@@ -143,6 +145,7 @@ export function LessonCalendar({
   const calendarRootRef = useRef<HTMLDivElement>(null)
   const hasSeededCacheRef = useRef(false)
   const googleInboundSyncedRef = useRef(false)
+  const googlePollInFlightRef = useRef(false)
   const lessonsRef = useRef(lessons)
   lessonsRef.current = lessons
   const {
@@ -279,7 +282,7 @@ export function LessonCalendar({
             }))
             return
           }
-          await new Promise((resolve) => window.setTimeout(resolve, 600))
+          await new Promise((resolve) => window.setTimeout(resolve, 300))
           data = await fetchOnce()
         }
 
@@ -391,16 +394,54 @@ export function LessonCalendar({
     }).catch(() => {})
   }, [currentDate, view, initialLessons])
 
+  const refreshWithGoogleSync = useCallback(
+    async (options?: { force?: boolean; refreshing?: boolean }) => {
+      const pull = await pullGoogleCalendarChanges()
+      if (pull.synced || options?.force) {
+        await syncRange(currentDate, view, {
+          force: true,
+          refreshing: options?.refreshing ?? pull.synced,
+        })
+      }
+    },
+    [currentDate, syncRange, view],
+  )
+
   useEffect(() => {
     if (googleInboundSyncedRef.current) return
     googleInboundSyncedRef.current = true
-    void syncGoogleCalendarOnCalendarOpen().then((result) => {
-      if (!result.started) return
-      window.setTimeout(() => {
-        void syncRange(currentDate, view, { force: true, refreshing: true })
-      }, 2000)
-    })
-  }, [currentDate, syncRange, view])
+    void refreshWithGoogleSync({ force: true, refreshing: true })
+  }, [refreshWithGoogleSync])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const tick = () => {
+      if (document.hidden || googlePollInFlightRef.current || loadState.refreshing) {
+        return
+      }
+      googlePollInFlightRef.current = true
+      void pullGoogleCalendarChanges()
+        .then((result) => {
+          if (!result.synced) return
+          return syncRange(currentDate, view, { force: true, refreshing: true })
+        })
+        .finally(() => {
+          googlePollInFlightRef.current = false
+        })
+    }
+
+    const intervalId = window.setInterval(tick, GOOGLE_SYNC_POLL_MS)
+    const onVisibility = () => {
+      if (!document.hidden) tick()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [currentDate, loadState.refreshing, syncRange, view])
 
   useEffect(() => {
     setLessons((prev) => {
@@ -468,10 +509,9 @@ export function LessonCalendar({
     instructorFilter,
   ])
 
-  function handleRefresh() {
+  async function handleRefresh() {
     if (loadState.refreshing) return
-    void syncGoogleCalendarOnCalendarOpen()
-    void syncRange(currentDate, view, { force: true, refreshing: true })
+    await refreshWithGoogleSync({ force: true, refreshing: true })
   }
 
   function handleViewChange(nextView: CalendarView) {

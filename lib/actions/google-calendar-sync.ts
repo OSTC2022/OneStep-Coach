@@ -189,33 +189,62 @@ export async function listGoogleCalendarPendingLessons() {
 }
 
 export async function syncGoogleCalendarOnCalendarOpen(): Promise<{
-  started?: boolean
+  synced?: boolean
 }> {
   await requireRole(['admin', 'instructor'])
 
   const row = await getGoogleCalendarSyncRow()
   if (!row?.sync_enabled || !row.refresh_token || isGoogleCalendarSyncInProgress(row)) {
-    return { started: false }
+    return { synced: false }
   }
 
-  after(async () => {
-    try {
-      await syncGoogleCalendarLessons({
-        reason: 'calendar-open',
-        skipDedupe: true,
-      })
-    } catch (error) {
-      console.error(
-        '[google-calendar] calendar-open sync failed:',
-        error instanceof Error ? error.message : error,
-      )
-    } finally {
-      revalidatePath('/dashboard/calendar')
-      revalidatePath('/dashboard/lesson-status')
-    }
-  })
+  try {
+    await syncGoogleCalendarLessons({
+      reason: 'calendar-open',
+      skipDedupe: true,
+    })
+    revalidatePath('/dashboard/calendar')
+    revalidatePath('/dashboard/lesson-status')
+    return { synced: true }
+  } catch (error) {
+    console.error(
+      '[google-calendar] calendar-open sync failed:',
+      error instanceof Error ? error.message : error,
+    )
+    return { synced: false }
+  }
+}
 
-  return { started: true }
+/** Google → 센터 빠른 증분 동기화 (캘린더 폴링용) */
+export async function pullGoogleCalendarChanges(): Promise<{
+  synced: boolean
+  skipped?: boolean
+}> {
+  await requireRole(['admin', 'instructor'])
+
+  const row = await getGoogleCalendarSyncRow()
+  if (!row?.sync_enabled || !row.refresh_token) {
+    return { synced: false, skipped: true }
+  }
+  if (isGoogleCalendarSyncInProgress(row)) {
+    return { synced: false, skipped: true }
+  }
+
+  try {
+    await syncGoogleCalendarLessons({
+      reason: 'poll',
+      skipDedupe: true,
+    })
+    revalidatePath('/dashboard/calendar')
+    revalidatePath('/dashboard/lesson-status')
+    return { synced: true }
+  } catch (error) {
+    console.error(
+      '[google-calendar] poll sync failed:',
+      error instanceof Error ? error.message : error,
+    )
+    return { synced: false }
+  }
 }
 
 export async function refreshGoogleCalendarWatchAction(): Promise<{ error?: string }> {

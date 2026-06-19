@@ -18,8 +18,8 @@ import { parseGoogleOriginalStartIso } from '@/lib/calendar-recurrence/google-sy
 import type { LessonSeriesScope } from '@/lib/actions/lessons'
 import { requireRole } from '@/lib/actions/auth'
 import {
-  scheduleGoogleLessonDeletes,
-  scheduleGoogleLessonPush,
+  runGoogleLessonDeletes,
+  runGoogleLessonPush,
   touchAppModifiedAt,
 } from '@/lib/google-calendar/push-scheduler'
 
@@ -134,7 +134,7 @@ export async function deleteRecurringMasterSeries(
     const ids = [masterId, ...(exceptions ?? []).map((item) => item.id)]
     const { error: deleteError } = await supabase.from('lessons').delete().in('id', ids)
     if (deleteError) return { error: deleteError.message }
-    scheduleGoogleLessonDeletes([
+    await runGoogleLessonDeletes([
       {
         id: row.id,
         google_event_id: (row as { google_event_id?: string | null }).google_event_id ?? null,
@@ -162,7 +162,7 @@ export async function deleteRecurringMasterSeries(
       })
       .eq('id', masterId)
 
-    scheduleGoogleLessonPush(masterId)
+    await runGoogleLessonPush(masterId)
 
     revalidateCalendarPaths()
     return {

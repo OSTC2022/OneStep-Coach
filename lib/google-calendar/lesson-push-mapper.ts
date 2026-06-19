@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { getLessonCalendarLabel } from '@/lib/calendar-utils'
+import { GOOGLE_LESSON_ID_PROPERTY } from '@/lib/google-calendar/config'
 import type { Lesson } from '@/lib/types'
 
 const KST = 'Asia/Seoul'
@@ -75,6 +76,12 @@ export function lessonToGoogleEventBody(lesson: LessonPushRow): Record<string, u
 
   if (lesson.event_type === 'recurring_master' && lesson.recurrence?.length) {
     body.recurrence = lesson.recurrence
+  }
+
+  body.extendedProperties = {
+    private: {
+      [GOOGLE_LESSON_ID_PROPERTY]: lesson.id,
+    },
   }
 
   return body

@@ -6,6 +6,8 @@ import {
 } from '@/lib/google-calendar/config'
 import {
   deleteGoogleCalendarEvent,
+  findGoogleEventsByLessonId,
+  getGoogleCalendarEvent,
   insertGoogleCalendarEvent,
   moveGoogleCalendarEvent,
   updateGoogleCalendarEvent,
@@ -54,6 +56,8 @@ export type GoogleLessonDeleteSnapshot = {
   session_deducted?: boolean
 }
 
+const pushInFlight = new Map<string, Promise<void>>()
+
 function isMissingSyncColumn(error: { message?: string } | null): boolean {
   if (!error?.message) return false
   const msg = error.message
@@ -62,6 +66,27 @@ function isMissingSyncColumn(error: { message?: string } | null): boolean {
     msg.includes('google_event_updated_at') ||
     msg.includes('google_calendar_id')
   )
+}
+
+function parseTs(value: string | null | undefined): number {
+  if (!value) return 0
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function resolveSyncedAt(
+  appModifiedAt: string | null | undefined,
+  googleUpdated: string | null,
+): string {
+  const appMs = parseTs(appModifiedAt)
+  const googleMs = parseTs(googleUpdated)
+  return new Date(Math.max(Date.now(), appMs, googleMs)).toISOString()
+}
+
+function uniqueCalendarIds(
+  ...ids: Array<string | null | undefined>
+): string[] {
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))]
 }
 
 export async function isGoogleCalendarPushEnabled(): Promise<boolean> {
@@ -118,7 +143,7 @@ async function persistGoogleLink(
     google_event_id: string
     google_calendar_id: string
     google_account_id: string
-    google_event_updated_at: string | null
+    google_event_updated_at: string
     google_ical_uid?: string | null
   },
 ) {
@@ -129,10 +154,7 @@ async function persistGoogleLink(
   }
 }
 
-export async function pushLessonToGoogle(lessonId: string): Promise<void> {
-  const row = await getGoogleCalendarSyncRow()
-  if (!row?.sync_enabled || !row.refresh_token || !row.calendar_id) return
-
+async function loadLessonForPush(lessonId: string): Promise<Lesson | null> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('lessons')
@@ -141,13 +163,87 @@ export async function pushLessonToGoogle(lessonId: string): Promise<void> {
     .maybeSingle()
 
   if (error) {
-    if (isMissingSyncColumn(error)) return
+    if (isMissingSyncColumn(error)) return null
     throw new Error(error.message)
   }
-  if (!data) return
+  return data ? (data as Lesson) : null
+}
 
-  const lesson = data as Lesson
-  if (!shouldPushAppLesson(lesson)) return
+async function resolveLinkedGoogleEvent(
+  accessToken: string,
+  row: GoogleCalendarSyncRow,
+  lesson: Lesson,
+  targetCalendarId: string,
+): Promise<{ eventId: string; calendarId: string } | null> {
+  const calendarCandidates = uniqueCalendarIds(
+    lesson.google_calendar_id,
+    targetCalendarId,
+    row.calendar_id,
+    row.calendar_id_2,
+  )
+
+  if (lesson.google_event_id) {
+    for (const calendarId of calendarCandidates) {
+      try {
+        await getGoogleCalendarEvent(
+          accessToken,
+          calendarId,
+          lesson.google_event_id,
+        )
+        return { eventId: lesson.google_event_id, calendarId }
+      } catch (error) {
+        if (error instanceof GoogleCalendarApiError && error.status === 404) {
+          continue
+        }
+        throw error
+      }
+    }
+  }
+
+  for (const calendarId of calendarCandidates) {
+    const matches = await findGoogleEventsByLessonId(
+      accessToken,
+      calendarId,
+      lesson.id,
+    )
+    if (matches[0]?.id) {
+      return { eventId: matches[0].id, calendarId }
+    }
+  }
+
+  return null
+}
+
+async function removeDuplicateGoogleEvents(
+  accessToken: string,
+  calendarId: string,
+  lessonId: string,
+  keepEventId: string,
+) {
+  const matches = await findGoogleEventsByLessonId(
+    accessToken,
+    calendarId,
+    lessonId,
+  )
+  for (const event of matches) {
+    if (!event.id || event.id === keepEventId) continue
+    try {
+      await deleteGoogleCalendarEvent(accessToken, calendarId, event.id)
+    } catch (error) {
+      if (error instanceof GoogleCalendarApiError && error.status === 404) {
+        continue
+      }
+      console.warn('[google-calendar] duplicate cleanup failed', event.id, error)
+    }
+  }
+}
+
+async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
+  const row = await getGoogleCalendarSyncRow()
+  if (!row?.sync_enabled || !row.refresh_token || !row.calendar_id) return
+
+  const lesson = await loadLessonForPush(lessonId)
+  if (!lesson || !shouldPushAppLesson(lesson)) return
 
   const body = lessonToGoogleEventBody(lesson)
   if (!body) {
@@ -169,59 +265,47 @@ export async function pushLessonToGoogle(lessonId: string): Promise<void> {
   const googleAccountId = row.connected_email ?? 'default'
 
   await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
-    let googleEventId = lesson.google_event_id
-    let googleCalendarId = lesson.google_calendar_id ?? target.calendarId
+    const linked = await resolveLinkedGoogleEvent(
+      accessToken,
+      row,
+      lesson,
+      target.calendarId,
+    )
+
+    let googleEventId = linked?.eventId ?? null
+    let googleCalendarId = linked?.calendarId ?? target.calendarId
     let responseUpdated: string | null = null
     let icalUid: string | null = null
 
-    if (
-      googleEventId &&
-      lesson.google_calendar_id &&
-      lesson.google_calendar_id !== target.calendarId
-    ) {
-      const moved = await moveGoogleCalendarEvent(
-        accessToken,
-        lesson.google_calendar_id,
-        googleEventId,
-        target.calendarId,
-      )
-      googleEventId = moved.id
-      googleCalendarId = target.calendarId
-      responseUpdated = googleEventUpdatedAt(moved)
-      icalUid = moved.iCalUID ?? null
-      const updated = await updateGoogleCalendarEvent(
-        accessToken,
-        target.calendarId,
-        googleEventId,
-        body,
-      )
-      responseUpdated = googleEventUpdatedAt(updated) ?? responseUpdated
-      icalUid = updated.iCalUID ?? icalUid
-    } else if (googleEventId) {
-      try {
-        const updated = await updateGoogleCalendarEvent(
+    if (googleEventId) {
+      if (googleCalendarId !== target.calendarId) {
+        const moved = await moveGoogleCalendarEvent(
           accessToken,
           googleCalendarId,
           googleEventId,
-          body,
+          target.calendarId,
         )
-        responseUpdated = googleEventUpdatedAt(updated)
-        icalUid = updated.iCalUID ?? null
-      } catch (error) {
-        if (error instanceof GoogleCalendarApiError && error.status === 404) {
-          const created = await insertGoogleCalendarEvent(
-            accessToken,
-            target.calendarId,
-            body,
-          )
-          googleEventId = created.id
-          googleCalendarId = target.calendarId
-          responseUpdated = googleEventUpdatedAt(created)
-          icalUid = created.iCalUID ?? null
-        } else {
-          throw error
-        }
+        googleEventId = moved.id
+        googleCalendarId = target.calendarId
+        responseUpdated = googleEventUpdatedAt(moved)
+        icalUid = moved.iCalUID ?? null
       }
+
+      const updated = await updateGoogleCalendarEvent(
+        accessToken,
+        googleCalendarId,
+        googleEventId,
+        body,
+      )
+      responseUpdated = googleEventUpdatedAt(updated)
+      icalUid = updated.iCalUID ?? null
+
+      await removeDuplicateGoogleEvents(
+        accessToken,
+        googleCalendarId,
+        lesson.id,
+        googleEventId,
+      )
     } else {
       const created = await insertGoogleCalendarEvent(
         accessToken,
@@ -232,6 +316,13 @@ export async function pushLessonToGoogle(lessonId: string): Promise<void> {
       googleCalendarId = target.calendarId
       responseUpdated = googleEventUpdatedAt(created)
       icalUid = created.iCalUID ?? null
+
+      await removeDuplicateGoogleEvents(
+        accessToken,
+        googleCalendarId,
+        lesson.id,
+        googleEventId,
+      )
     }
 
     if (!googleEventId) return
@@ -240,10 +331,28 @@ export async function pushLessonToGoogle(lessonId: string): Promise<void> {
       google_event_id: googleEventId,
       google_calendar_id: googleCalendarId,
       google_account_id: googleAccountId,
-      google_event_updated_at: responseUpdated,
+      google_event_updated_at: resolveSyncedAt(
+        lesson.app_modified_at,
+        responseUpdated,
+      ),
       google_ical_uid: icalUid,
     })
   })
+}
+
+export async function pushLessonToGoogle(lessonId: string): Promise<void> {
+  let existing = pushInFlight.get(lessonId)
+  if (!existing) {
+    existing = (async () => {
+      try {
+        await pushLessonToGoogleInternal(lessonId)
+      } finally {
+        pushInFlight.delete(lessonId)
+      }
+    })()
+    pushInFlight.set(lessonId, existing)
+  }
+  await existing
 }
 
 export async function deleteLessonFromGoogleSnapshot(

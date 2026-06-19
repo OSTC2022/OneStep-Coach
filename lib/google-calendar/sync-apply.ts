@@ -20,6 +20,7 @@ import {
   googleEventUpdatedAt,
   shouldApplyGoogleEvent,
 } from '@/lib/google-calendar/sync-conflict'
+import { GOOGLE_LESSON_ID_PROPERTY } from '@/lib/google-calendar/config'
 import type { GoogleCalendarEvent, GoogleCalendarSyncResult } from '@/lib/google-calendar/types'
 
 export const MAX_EVENTS_PER_SYNC = 100
@@ -179,6 +180,39 @@ export async function loadExistingByGoogleEventId(
   }
 
   return map
+}
+
+/** Google 이벤트에 센터 lesson ID가 있으면 기존 행과 연결 (푸시 직후 웹훅 중복 방지) */
+export async function enrichExistingMapFromGoogleLessonIds(
+  supabase: ReturnType<typeof createAdminClient>,
+  events: GoogleCalendarEvent[],
+  existingMap: Map<string, ExistingLesson>,
+): Promise<void> {
+  for (const event of events) {
+    if (!event.id || existingMap.has(event.id)) continue
+    const lessonId = event.extendedProperties?.private?.[GOOGLE_LESSON_ID_PROPERTY]
+    if (!lessonId) continue
+
+    const { data, error } = await supabase
+      .from('lessons')
+      .select(
+        'id, google_event_id, session_deducted, event_type, member_id, app_modified_at, google_event_updated_at',
+      )
+      .eq('id', lessonId)
+      .maybeSingle()
+
+    if (error || !data?.id) continue
+
+    existingMap.set(event.id, {
+      id: data.id,
+      session_deducted: Boolean(data.session_deducted),
+      google_event_id: event.id,
+      event_type: data.event_type,
+      member_id: data.member_id,
+      app_modified_at: data.app_modified_at as string | null | undefined,
+      google_event_updated_at: data.google_event_updated_at as string | null | undefined,
+    })
+  }
 }
 
 async function findExistingByGoogleKey(

@@ -39,8 +39,8 @@ import {
 import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import {
-  scheduleGoogleLessonDeletes,
-  scheduleGoogleLessonPush,
+  runGoogleLessonDeletes,
+  runGoogleLessonPush,
   touchAppModifiedAt,
 } from '@/lib/google-calendar/push-scheduler'
 import {
@@ -888,7 +888,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   const lesson = normalizeLessonRecord(data as Lesson)
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
-  scheduleGoogleLessonPush(lesson.id)
+  await runGoogleLessonPush(lesson.id)
 
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
@@ -1002,7 +1002,7 @@ async function createRecurringMasterLesson(
   const lesson = normalizeLessonRecord(data as Lesson)
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
-  scheduleGoogleLessonPush(lesson.id)
+  await runGoogleLessonPush(lesson.id)
 
   if (!options.silent) {
     revalidatePath('/dashboard/lessons')
@@ -1256,7 +1256,7 @@ export async function createRecurringLessons(
     await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
   }
 
-  scheduleGoogleLessonPush(savedLessons.map((lesson) => lesson.id))
+  await runGoogleLessonPush(savedLessons.map((lesson) => lesson.id))
 
   if (!options.silent) {
     revalidatePath('/dashboard/lessons')
@@ -1391,7 +1391,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   const user = await getCurrentUser()
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
-  scheduleGoogleLessonPush(lesson.id)
+  await runGoogleLessonPush(lesson.id)
 
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
@@ -1755,7 +1755,7 @@ export async function updateLessonSeries(
   revalidatePath('/dashboard/instructors')
   revalidatePath('/dashboard/reports')
 
-  scheduleGoogleLessonPush(updatedLessons.map((lesson) => lesson.id))
+  await runGoogleLessonPush(updatedLessons.map((lesson) => lesson.id))
 
   return { data: updatedLessons, warning }
 }
@@ -1876,7 +1876,7 @@ export async function deleteLessonsInSeries(
   revalidatePath('/dashboard/lesson-status')
 
   const deletedSet = new Set(uniqueDeletedIds)
-  scheduleGoogleLessonDeletes(
+  await runGoogleLessonDeletes(
     (googleDeleteSnapshots ?? []).filter((row) => deletedSet.has(row.id)),
   )
 
