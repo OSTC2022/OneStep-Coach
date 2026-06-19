@@ -9,6 +9,7 @@ import {
   isPackageUsableForLesson,
   shouldDeductSessionOnLesson,
 } from '@/lib/session-package-utils'
+import { pickSessionPackageForDeduction } from '@/lib/session-package-deduction'
 import { Lesson, SessionPackage } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -58,7 +59,14 @@ interface MemberWithPackages {
   sport: string | null
   session_packages: Pick<
     SessionPackage,
-    'id' | 'total_sessions' | 'remaining_sessions' | 'is_active' | 'note' | 'expires_at'
+    | 'id'
+    | 'total_sessions'
+    | 'remaining_sessions'
+    | 'is_active'
+    | 'note'
+    | 'expires_at'
+    | 'created_at'
+    | 'paid_at'
   >[]
 }
 
@@ -153,7 +161,7 @@ export function LessonRegistration({
   )
 
   const getActivePackage = (member: MemberWithPackages) => {
-    return member.session_packages.find((p) => isPackageUsableForLesson(p))
+    return pickSessionPackageForDeduction(member.session_packages)
   }
 
   const getRemainingSession = (member: MemberWithPackages) => {

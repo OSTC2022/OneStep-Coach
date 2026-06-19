@@ -16,6 +16,10 @@ import {
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
 } from '@/lib/session-package-utils'
+import {
+  pickSessionPackageIdForDeduction,
+  type SessionPackageDeductionCandidate,
+} from '@/lib/session-package-deduction'
 import { fetchLastLessonDateByMember } from '@/lib/member-list-sort'
 
 export type SessionPackageListOrderBy = 'created_at' | 'recent_lesson'
@@ -80,14 +84,19 @@ export async function isSessionPackageTrashEnabled(): Promise<boolean> {
   }
 }
 
-export async function getDeletedSessionPackagesCount(memberId: string): Promise<number> {
+export async function getDeletedSessionPackagesCount(memberId?: string): Promise<number> {
   try {
     const supabase = await createStaffDataClient()
-    const { count, error } = await supabase
+    let query = supabase
       .from('session_packages')
       .select('id', { count: 'exact', head: true })
-      .eq('member_id', memberId)
       .not('deleted_at', 'is', null)
+
+    if (memberId) {
+      query = query.eq('member_id', memberId)
+    }
+
+    const { count, error } = await query
 
     if (error) return 0
     return count ?? 0
@@ -580,9 +589,10 @@ export async function queryActiveSessionPackageId(
 
   let query = supabase
     .from('session_packages')
-    .select('id, remaining_sessions, note, expires_at, is_active, created_at')
+    .select(
+      'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at',
+    )
     .eq('member_id', memberId)
-    .eq('is_active', true)
     .order('created_at', { ascending: true })
 
   if (trashEnabled) {
@@ -592,34 +602,15 @@ export async function queryActiveSessionPackageId(
   const { data, error } = await query
   if (error || !data?.length) return null
 
-  const usable = data.find((pkg) => isPackageUsableForLesson(pkg))
-  return usable?.id ?? null
+  return pickSessionPackageIdForDeduction(data as SessionPackageDeductionCandidate[])
 }
 
-/** 차감 대상 수업권 — 활성·잔여 없음·만료 포함 최근 수업권까지 조회 */
+/** 차감 대상 수업권 — 등록 순(FIFO)으로 선택 */
 export async function querySessionPackageIdForDeduction(
   supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
   memberId: string,
 ): Promise<string | null> {
-  const activeId = await queryActiveSessionPackageId(supabase, memberId)
-  if (activeId) return activeId
-
-  const trashEnabled = await isSessionPackageTrashEnabled()
-
-  let query = supabase
-    .from('session_packages')
-    .select('id')
-    .eq('member_id', memberId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  if (trashEnabled) {
-    query = query.is('deleted_at', null)
-  }
-
-  const { data, error } = await query
-  if (error || !data?.length) return null
-  return data[0].id
+  return queryActiveSessionPackageId(supabase, memberId)
 }
 
 export async function getActivePackageForMember(memberId: string): Promise<SessionPackage | null> {
@@ -630,8 +621,7 @@ export async function getActivePackageForMember(memberId: string): Promise<Sessi
     .from('session_packages')
     .select(SESSION_PACKAGE_DETAIL_SELECT)
     .eq('member_id', memberId)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: true })
 
   if (trashEnabled) {
     query = query.is('deleted_at', null)
@@ -644,8 +634,12 @@ export async function getActivePackageForMember(memberId: string): Promise<Sessi
     return null
   }
 
-  const usable = (data ?? []).find((pkg) => isPackageUsableForLesson(pkg))
-  return (usable as SessionPackage | undefined) ?? null
+  const packageId = pickSessionPackageIdForDeduction(
+    (data ?? []) as SessionPackageDeductionCandidate[],
+  )
+  if (!packageId) return null
+
+  return ((data ?? []).find((pkg) => pkg.id === packageId) as SessionPackage | undefined) ?? null
 }
 
 function normalizeOptionalDate(value?: string | null): string | null {

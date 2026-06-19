@@ -9,15 +9,19 @@ import {
   isStandaloneDisplay,
   triggerPwaInstall,
 } from '@/lib/pwa/install-prompt'
+import { cn } from '@/lib/utils'
 
 export function InstallAppButton({
   className,
   variant = 'outline',
   size = 'sm',
+  showLabel = true,
 }: {
   className?: string
   variant?: React.ComponentProps<typeof Button>['variant']
   size?: React.ComponentProps<typeof Button>['size']
+  /** false면 작은 화면에서 아이콘만 표시 */
+  showLabel?: boolean
 }) {
   const [mounted, setMounted] = useState(false)
   const [hidden, setHidden] = useState(false)
@@ -74,8 +78,8 @@ export function InstallAppButton({
       aria-label="홈 화면에 추가"
       title="홈 화면에 추가"
     >
-      <Download className="h-4 w-4 sm:mr-1.5" />
-      <span className="hidden sm:inline">
+      <Download className={cn('h-4 w-4 shrink-0', showLabel && 'mr-1.5')} />
+      <span className={showLabel ? 'inline' : 'hidden sm:inline'}>
         {canPrompt ? '홈 화면 추가' : '앱 설치'}
       </span>
     </Button>

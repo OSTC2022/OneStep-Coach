@@ -8,7 +8,7 @@ export default async function SessionsPage({
   searchParams: Promise<{ member?: string; sort?: string }>
 }) {
   const params = await searchParams
-  const { packages, totalCount, monthlyRevenue, members, orderBy } =
+  const { packages, totalCount, monthlyRevenue, members, orderBy, initialTrashCount } =
     await getSessionsPageData(params.member, params.sort)
 
   return (
@@ -28,6 +28,7 @@ export default async function SessionsPage({
         members={members}
         selectedMemberId={params.member}
         initialOrderBy={orderBy}
+        initialTrashCount={initialTrashCount}
       />
     </div>
   )

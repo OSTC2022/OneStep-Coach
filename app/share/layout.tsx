@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { InstallAppButton } from '@/components/pwa/install-app-button'
 
 export const metadata: Metadata = {
   title: '컨디션 & 신체변화 리포트',
@@ -9,9 +8,6 @@ export const metadata: Metadata = {
 export default function ShareLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex max-w-[1120px] justify-end px-4 pt-4 sm:px-6">
-        <InstallAppButton />
-      </div>
       <div className="mx-auto w-full max-w-[1120px] px-4 py-2 sm:px-6">{children}</div>
     </div>
   )

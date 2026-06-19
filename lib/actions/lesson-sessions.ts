@@ -174,7 +174,6 @@ export async function checkInLesson(
         userId: user.id,
         reason: 'lesson_check_in',
         lessonSessionId: sessionId,
-        existingSessionPackageId: lesson.session_package_id,
       })
 
       if (deduct.error) {
@@ -188,7 +187,7 @@ export async function checkInLesson(
       attendance_status: status,
       session_deducted: true,
     }
-    if (sessionPackageId && !lesson.session_package_id) {
+    if (sessionPackageId) {
       lessonUpdatePayload.session_package_id = sessionPackageId
     }
 
@@ -335,7 +334,7 @@ export async function updateLessonAttendanceStatus(
   const lessonUpdatePayload: Record<string, unknown> = {
     attendance_status: status,
   }
-  if (sessionPackageId && !lesson.session_package_id) {
+  if (sessionPackageId) {
     lessonUpdatePayload.session_package_id = sessionPackageId
   }
 
@@ -562,10 +561,8 @@ async function resolveSessionPackageId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   lesson: {
     member_id: string
-    session_package_id: string | null
   },
 ) {
-  if (lesson.session_package_id) return lesson.session_package_id
   return querySessionPackageIdForDeduction(supabase, lesson.member_id)
 }
 
@@ -578,7 +575,6 @@ async function tryDeductLessonSessionOnce(
     userId: string
     reason: 'lesson_check_in' | 'lesson_complete'
     lessonSessionId?: string
-    existingSessionPackageId?: string | null
   },
 ): Promise<{
   deducted: boolean
@@ -595,7 +591,6 @@ async function tryDeductLessonSessionOnce(
     userId,
     reason,
     lessonSessionId,
-    existingSessionPackageId,
   } = params
 
   const { data: pkg, error: pkgError } = await supabase
@@ -610,9 +605,9 @@ async function tryDeductLessonSessionOnce(
 
   const unlimited = isMonthlyUnlimitedSessions(pkg.note)
 
-  const claimPayload: Record<string, unknown> = { session_deducted: true }
-  if (!existingSessionPackageId) {
-    claimPayload.session_package_id = sessionPackageId
+  const claimPayload: Record<string, unknown> = {
+    session_deducted: true,
+    session_package_id: sessionPackageId,
   }
 
   const { data: claimed, error: claimError } = await supabase
@@ -848,7 +843,6 @@ export async function completeLessonWithSignature(
         userId: user.id,
         reason: 'lesson_complete',
         lessonSessionId: sessionId,
-        existingSessionPackageId: lesson.session_package_id,
       })
 
       if (deduct.error) {
@@ -874,7 +868,7 @@ export async function completeLessonWithSignature(
     lessonUpdate.signature_id = signatureId
   }
 
-  if (sessionPackageId && !lesson.session_package_id) {
+  if (sessionPackageId) {
     lessonUpdate.session_package_id = sessionPackageId
   }
 

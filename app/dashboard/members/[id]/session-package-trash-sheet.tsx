@@ -31,11 +31,15 @@ import { toast } from 'sonner'
 import { Trash2, RotateCcw, X } from 'lucide-react'
 
 interface SessionPackageTrashSheetProps {
-  memberId: string
+  memberId?: string
   initialCount: number
   recentTrashItems?: SessionPackage[]
   onTrashCountChange?: (count: number) => void
   onRestore?: (pkg: SessionPackage) => void
+  /** 목록 헤더 등 좁은 자리용 */
+  compact?: boolean
+  /** 툴바 등 — 아이콘 + 휴지통 라벨 */
+  showLabel?: boolean
 }
 
 function formatDeletedAt(value: string | null | undefined) {
@@ -59,6 +63,8 @@ export function SessionPackageTrashSheet({
   recentTrashItems = [],
   onTrashCountChange,
   onRestore,
+  compact = false,
+  showLabel = false,
 }: SessionPackageTrashSheetProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -85,7 +91,7 @@ export function SessionPackageTrashSheet({
     setLoading(true)
     try {
       const { data, count, trashEnabled: enabled } = await getSessionPackages({
-        memberId,
+        ...(memberId ? { memberId } : {}),
         trash: true,
         orderBy: 'deleted_at',
         orderAsc: false,
@@ -155,14 +161,38 @@ export function SessionPackageTrashSheet({
         <SheetTrigger asChild>
           <Button
             type="button"
-            variant="outline"
-            size="icon"
-            className="relative shrink-0"
+            variant={showLabel ? 'outline' : compact ? 'ghost' : 'outline'}
+            size={showLabel ? 'default' : 'icon'}
+            className={
+              showLabel
+                ? 'relative shrink-0'
+                : compact
+                  ? 'relative h-6 w-6 shrink-0'
+                  : 'relative shrink-0'
+            }
             title="수업권 휴지통"
+            aria-label="수업권 휴지통"
           >
-            <Trash2 className="h-4 w-4 text-muted-foreground" />
+            <Trash2
+              className={
+                showLabel
+                  ? 'mr-2 h-4 w-4 text-muted-foreground'
+                  : compact
+                    ? 'h-3.5 w-3.5 text-muted-foreground'
+                    : 'h-4 w-4 text-muted-foreground'
+              }
+            />
+            {showLabel ? '휴지통' : null}
             {trashCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+              <span
+                className={
+                  showLabel
+                    ? 'ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground'
+                    : compact
+                      ? 'absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 text-[9px] font-medium text-destructive-foreground'
+                      : 'absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground'
+                }
+              >
                 {trashCount > 99 ? '99+' : trashCount}
               </span>
             )}
@@ -175,7 +205,9 @@ export function SessionPackageTrashSheet({
               수업권 휴지통
             </SheetTitle>
             <SheetDescription>
-              삭제한 수업권이 여기에 보관됩니다. 복구하거나 영구 삭제할 수 있습니다.
+              {memberId
+                ? '삭제한 수업권이 여기에 보관됩니다. 복구하거나 영구 삭제할 수 있습니다.'
+                : '삭제된 수업권을 확인하고 복구하거나 영구 삭제할 수 있습니다.'}
             </SheetDescription>
           </SheetHeader>
 
@@ -209,7 +241,9 @@ export function SessionPackageTrashSheet({
                     <div className="min-w-0 flex-1">
                       <p className="font-medium truncate">{formatPackageLabel(pkg)}</p>
                       <p className="text-xs text-muted-foreground">
-                        잔여 {pkg.remaining_sessions}회 · 삭제: {formatDeletedAt(pkg.deleted_at)}
+                        {!memberId && pkg.member?.name ? `${pkg.member.name} · ` : ''}
+                        잔여 {pkg.remaining_sessions}회 · 삭제:{' '}
+                        {formatDeletedAt(pkg.deleted_at)}
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1">

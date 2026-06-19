@@ -189,8 +189,8 @@ export function PendingApprovalsPanel({
             />
           </div>
 
-          <div className="rounded-md border">
-            <Table>
+          <div className="min-w-0 overflow-hidden rounded-md border">
+            <Table fitContainer>
               <TableHeader>
                 <TableRow>
                   <TableHead>이름</TableHead>
@@ -227,10 +227,10 @@ export function PendingApprovalsPanel({
                         )
                       }}
                     >
-                      <TableCell className="font-medium">
+                      <TableCell className="max-w-0 truncate font-medium">
                         {row.full_name || '—'}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[160px] truncate">
+                      <TableCell className="max-w-0 truncate text-sm text-muted-foreground">
                         {row.email ||
                           (row.loginEmail ? `로그인 ID: ${row.loginEmail}` : '(이메일 없음)')}
                       </TableCell>

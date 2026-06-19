@@ -19,8 +19,6 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { InstallAppButton } from '@/components/pwa/install-app-button'
-import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import type { PublicSignUpMemberType } from '@/lib/auth/public-signup'
 
@@ -192,10 +190,6 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
-        <ShareWebsiteButton />
-        <InstallAppButton />
-      </div>
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
 
       <Card className="w-full max-w-md relative z-10 border-border/50 bg-card/80 backdrop-blur-sm">

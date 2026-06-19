@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   format,
   addDays,
@@ -34,7 +34,7 @@ import {
   type GuestLessonAction,
 } from '@/lib/actions/lesson-sessions'
 import { isAttendanceMarked } from '@/lib/lesson-record-utils'
-import { isAthleticsClubLessonType } from '@/lib/lesson-types'
+import { isAthleticsClubLessonType, normalizeLessonType } from '@/lib/lesson-types'
 import {
   isGroupLessonAttendanceMarked,
   parseGroupAttendanceCheckedInAt,
@@ -68,6 +68,7 @@ import {
 import { AUTO_INSTRUCTOR_ID } from '@/lib/member-utils'
 import {
   buildLessonStatusTimeSlots,
+  findLessonStatusScrollSlotStart,
   getLessonCalendarDisplayParts,
   getRangeForView,
   getWeekDates,
@@ -81,6 +82,7 @@ import { cn } from '@/lib/utils'
 import {
   AUTO_INSTRUCTOR_BORDER_COLOR,
   getInstructorCalendarColor,
+  isAutoAssignedLesson,
   resolveLessonDisplayColor,
 } from '@/lib/instructor-colors'
 import {
@@ -257,7 +259,9 @@ const AthleteTile = memo(function AthleteTile({
       : false
   const isCancelled = lesson.attendance_status === 'cancelled'
   const completed = isLessonCompleted(lesson)
+  const isInstructorUnassigned = isAutoAssignedLesson(lesson)
   const instructorBorderColor = resolveLessonInstructorColor(lesson, instructorLookup)
+  const lessonTypeLabel = normalizeLessonType(lesson.lesson_type)
   const canEndLesson = isPresentMarked && !completed && !isCancelled
   const isGuestTrialMarked = lesson.lesson_type === '체험레슨' && !isCancelled
   const instructorName =
@@ -383,11 +387,16 @@ const AthleteTile = memo(function AthleteTile({
           : cn(
               'border',
               isMemberLinked ? 'border-2' : 'border-border',
+              isInstructorUnassigned && 'border-border',
             ),
       )}
       style={
         !inInstructorGroup
-          ? { borderColor: instructorBorderColor }
+          ? {
+              borderColor: isInstructorUnassigned
+                ? AUTO_INSTRUCTOR_BORDER_COLOR
+                : instructorBorderColor,
+            }
           : undefined
       }
     >
@@ -414,11 +423,30 @@ const AthleteTile = memo(function AthleteTile({
         </p>
       )}
 
+      <p
+        className={cn(
+          'mt-0.5 truncate text-muted-foreground',
+          expanded ? 'text-xs' : 'text-[10px]',
+        )}
+        title={`수업유형 ${lessonTypeLabel}`}
+      >
+        {lessonTypeLabel}
+      </p>
+
       {compact ? (
         <>
-          <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-            담당: {instructorName}
-          </p>
+          {isInstructorUnassigned ? (
+            <p
+              className="mt-0.5 rounded border bg-muted/20 px-1 py-0.5 text-center text-[9px] font-medium text-muted-foreground"
+              style={{ borderColor: AUTO_INSTRUCTOR_BORDER_COLOR }}
+            >
+              강사 미지정
+            </p>
+          ) : (
+            <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+              담당: {instructorName}
+            </p>
+          )}
           <p className="mt-0.5 text-[10px] font-medium text-primary/90">{statusLabel}</p>
         </>
       ) : null}
@@ -648,6 +676,15 @@ const AthleteTile = memo(function AthleteTile({
       ) : compact ? (
         <p className="mt-0.5 text-[10px] font-medium text-primary/90">{statusLabel}</p>
       ) : null}
+
+      {showActions && !inInstructorGroup && isInstructorUnassigned ? (
+        <p
+          className="mt-1 rounded border bg-muted/20 px-1 py-0.5 text-center text-[9px] font-medium text-muted-foreground"
+          style={{ borderColor: AUTO_INSTRUCTOR_BORDER_COLOR }}
+        >
+          강사 미지정
+        </p>
+      ) : null}
     </div>
 
     {signatureOpen && (
@@ -724,6 +761,7 @@ interface TimeSlotsPanelProps {
   bodyWeightByKey: Record<string, number>
   onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
   emptyMessage?: string
+  autoScrollToNow?: boolean
 }
 
 function getMobileAthleteFlexClass(
@@ -757,12 +795,28 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   onGuestStatusChange,
   onLessonCompleted,
   emptyMessage = '등록된 수업이 없습니다.',
+  autoScrollToNow = false,
 }: TimeSlotsPanelProps) {
   const [expandedAthleteId, setExpandedAthleteId] = useState<string | null>(null)
   const timeSlots = useMemo(
     () => buildLessonStatusTimeSlots(lessons, instructors),
     [lessons, instructors],
   )
+  const scrollTargetStart = useMemo(
+    () => findLessonStatusScrollSlotStart(timeSlots),
+    [timeSlots],
+  )
+
+  useEffect(() => {
+    if (!autoScrollToNow || !scrollTargetStart) return
+    const timer = window.setTimeout(() => {
+      const el = document.querySelector(
+        `[data-lesson-status-slot="${scrollTargetStart}"]`,
+      ) as HTMLElement | null
+      el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [autoScrollToNow, scrollTargetStart, lessons])
 
   function resolveInstructorColor(instructorId: string) {
     if (instructorId === AUTO_INSTRUCTOR_ID) return AUTO_INSTRUCTOR_BORDER_COLOR
@@ -792,6 +846,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
           return (
             <div
               key={slot.start || 'none'}
+              data-lesson-status-slot={slot.start || 'none'}
               className="rounded-md border border-border bg-muted/20 p-3"
               onClick={(event) => {
                 if (event.target === event.currentTarget) {
@@ -879,6 +934,9 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
         slot.rows.map((rowChunks, rowIndex) => (
           <div
             key={`${slot.start || 'none'}-${rowIndex}`}
+            data-lesson-status-slot={
+              rowIndex === 0 ? slot.start || 'none' : undefined
+            }
             className="flex items-start gap-2 rounded-md border border-border bg-muted/20 px-2 py-1.5"
           >
             <div className="w-11 shrink-0 pt-1 text-center">
@@ -953,6 +1011,7 @@ export function LessonStatusView({
   initialBodyWeightByKey = EMPTY_BODY_WEIGHT_BY_KEY,
 }: LessonStatusViewProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [currentDate, setCurrentDate] = useState(selectedDate)
   const [viewMode, setViewMode] = useState<LessonStatusViewMode>(initialViewMode)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -1131,6 +1190,15 @@ export function LessonStatusView({
     },
     [instructors],
   )
+
+  useEffect(() => {
+    if (searchParams.has('date')) return
+    const localToday = format(new Date(), 'yyyy-MM-dd')
+    syncUrl(localToday, initialViewMode)
+    if (selectedDate === localToday) return
+    setCurrentDate(localToday)
+    void loadLessons(localToday, initialViewMode)
+  }, [searchParams, selectedDate, initialViewMode, loadLessons, syncUrl])
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing || isLoadingDate) return
@@ -1534,6 +1602,7 @@ export function LessonStatusView({
     onClearAttendanceCheck: handleClearAttendanceCheck,
     onGuestStatusChange: handleGuestStatusChange,
     onLessonCompleted: handleLessonCompleted,
+    autoScrollToNow: viewMode === 'day' && currentDate === today && !isLoadingDate,
   }
 
   const weekDates = getWeekDates(dateObj).map((d) => toDateKey(d))
@@ -1861,7 +1930,7 @@ export function LessonStatusView({
             <p>등록된 수업이 없습니다.</p>
           </div>
         ) : (
-          <TimeSlotsPanel lessons={lessons} {...panelProps} />
+          <TimeSlotsPanel key={currentDate} lessons={lessons} {...panelProps} />
         )
       ) : null}
 

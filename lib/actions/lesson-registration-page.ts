@@ -23,6 +23,8 @@ type MemberPackageRow = {
   is_active: boolean
   note: string | null
   expires_at: string | null
+  created_at: string
+  paid_at: string | null
 }
 
 async function fetchMemberPackages(
@@ -33,17 +35,23 @@ async function fetchMemberPackages(
 
   let query = supabase
     .from('session_packages')
-    .select('id, member_id, total_sessions, remaining_sessions, is_active, note, expires_at')
+    .select(
+      'id, member_id, total_sessions, remaining_sessions, is_active, note, expires_at, created_at, paid_at',
+    )
     .in('member_id', memberIds)
     .is('deleted_at', null)
+    .order('created_at', { ascending: true })
 
   let { data, error } = await query
 
   if (error?.code === '42703' || error?.message?.includes('deleted_at')) {
     const legacy = await supabase
       .from('session_packages')
-      .select('id, member_id, total_sessions, remaining_sessions, is_active, note, expires_at')
+      .select(
+        'id, member_id, total_sessions, remaining_sessions, is_active, note, expires_at, created_at, paid_at',
+      )
       .in('member_id', memberIds)
+      .order('created_at', { ascending: true })
     data = legacy.data
     error = legacy.error
   }
@@ -123,6 +131,8 @@ export async function getLessonRegistrationPageData() {
       is_active: pkg.is_active,
       note: pkg.note,
       expires_at: pkg.expires_at,
+      created_at: pkg.created_at,
+      paid_at: pkg.paid_at,
     })),
   }))
 

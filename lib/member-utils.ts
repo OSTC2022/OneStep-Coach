@@ -256,6 +256,19 @@ export function formatMemberContactDisplay(
   return '-'
 }
 
+/** 목록용 짧은 연락처 — 보호자 번호는 툴팁으로만 표시 */
+export function formatMemberContactDisplayCompact(
+  member: Pick<Member, 'phone' | 'parent_phone'>,
+): string {
+  const phone = member.phone?.trim()
+  const parentPhone = member.parent_phone?.trim()
+
+  if (phone && parentPhone) return `${phone} (+보호자)`
+  if (phone) return phone
+  if (parentPhone) return `보호자 ${parentPhone}`
+  return '-'
+}
+
 export function suggestAgeFromBirthDate(birthDate?: string | null): number | null {
   if (!birthDate?.trim()) return null
   return calculateAgeFromBirthDate(birthDate)

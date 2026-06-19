@@ -109,11 +109,14 @@ export function MonthDayPanel({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-card">
-      <div className="shrink-0 border-b border-border px-4 py-3">
-        <h3 className="text-base font-semibold">{dateLabel}</h3>
-        <p className="text-xs text-muted-foreground">
-          {dayLessons.length > 0 ? `${dayLessons.length}개 일정` : '일정 없음'}
-          {onLessonLineUpdate && dayLessons.length > 0 && ' · 더블클릭으로 이름·시간 수정'}
+      <div className="shrink-0 border-b border-border px-4 py-2">
+        <p className="truncate text-sm font-semibold leading-tight">
+          <span>{dateLabel}</span>
+          <span className="font-normal text-muted-foreground">
+            {' · '}
+            {dayLessons.length > 0 ? `${dayLessons.length}개 일정` : '일정 없음'}
+            {onLessonLineUpdate && dayLessons.length > 0 && ' · 더블클릭으로 이름·시간 수정'}
+          </span>
         </p>
       </div>
 

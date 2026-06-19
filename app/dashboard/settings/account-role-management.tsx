@@ -383,8 +383,8 @@ export function AccountRoleManagement({
             />
           </div>
 
-          <div className="rounded-md border">
-            <Table>
+          <div className="min-w-0 overflow-hidden rounded-md border">
+            <Table fitContainer>
               <TableHeader>
                 <TableRow>
                   <TableHead>이름</TableHead>
@@ -409,7 +409,7 @@ export function AccountRoleManagement({
                       className="cursor-pointer"
                       onClick={() => selectAccount(account)}
                     >
-                      <TableCell className="font-medium">
+                      <TableCell className="max-w-0 truncate font-medium">
                         <AccountDisplayName
                           account={account}
                           className="font-medium"
@@ -432,7 +432,7 @@ export function AccountRoleManagement({
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate">
+                      <TableCell className="max-w-0 truncate text-sm text-muted-foreground">
                         {account.email || account.loginEmail || '—'}
                       </TableCell>
                       <TableCell>

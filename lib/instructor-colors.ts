@@ -51,7 +51,8 @@ export function getInstructorCalendarColor(
 export function isAutoAssignedLesson(
   lesson: Pick<Lesson, 'instructor_id'>,
 ): boolean {
-  return !lesson.instructor_id
+  const id = lesson.instructor_id?.trim()
+  return !id || id === 'auto'
 }
 
 /** 자율배정 — 어두운 배경 + 밝은 테두리 (수업현황·출석 타일과 동일) */

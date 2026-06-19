@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { deleteSessionPackage } from '@/lib/actions/sessions'
 import { MemberPhysicalInfoEditor } from '@/components/members/member-physical-info-editor'
 import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
@@ -117,13 +116,13 @@ export function MemberDetail({
   instructorAccount = null,
   centerAccount = null,
 }: MemberDetailProps) {
-  const router = useRouter()
   const [memberState, setMemberState] = useState(member)
   const [sessionPackages, setSessionPackages] = useState(initialPackages)
   const [deleteTarget, setDeleteTarget] = useState<SessionPackage | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [trashCount, setTrashCount] = useState(initialTrashCount)
   const [recentTrashItems, setRecentTrashItems] = useState<SessionPackage[]>([])
+  const removedPackageIdsRef = useRef(new Set<string>())
   const [detailLesson, setDetailLesson] = useState<MemberLessonRecord | null>(null)
   const [lessonPage, setLessonPage] = useState(1)
 
@@ -157,7 +156,9 @@ export function MemberDetail({
   }, [lessonPage, lessonTotalPages])
 
   useEffect(() => {
-    setSessionPackages(initialPackages)
+    setSessionPackages(
+      initialPackages.filter((pkg) => !removedPackageIdsRef.current.has(pkg.id)),
+    )
   }, [initialPackages])
 
   useEffect(() => {
@@ -208,6 +209,8 @@ export function MemberDetail({
       return
     }
 
+    removedPackageIdsRef.current.add(deleteTarget.id)
+
     const trashedPackage: SessionPackage = {
       ...deleteTarget,
       deleted_at: new Date().toISOString(),
@@ -220,7 +223,6 @@ export function MemberDetail({
     setTrashCount((c) => c + 1)
     setDeleteTarget(null)
     toast.success('수업권이 휴지통으로 이동했습니다.')
-    router.refresh()
   }
 
   return (
@@ -414,35 +416,19 @@ export function MemberDetail({
       )}
 
       {/* Session Packages */}
-      <Card>
+      <Card className="min-w-0 overflow-hidden">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Calendar className="h-5 w-5 text-primary" />
             수업권 내역
           </CardTitle>
           {canManage ? (
-            <div className="flex items-center gap-2">
-              <SessionPackageTrashSheet
-                memberId={member.id}
-                initialCount={trashCount}
-                recentTrashItems={recentTrashItems}
-                onTrashCountChange={setTrashCount}
-                onRestore={(pkg) => {
-                  setSessionPackages((prev) => {
-                    const ids = new Set(prev.map((p) => p.id))
-                    if (ids.has(pkg.id)) return prev
-                    return [pkg, ...prev]
-                  })
-                  setRecentTrashItems((prev) => prev.filter((p) => p.id !== pkg.id))
-                }}
-              />
-              <Link href={`/dashboard/members/${member.id}/packages/new`}>
-                <Button size="sm">수업권 추가</Button>
-              </Link>
-            </div>
+            <Link href={`/dashboard/members/${member.id}/packages/new`}>
+              <Button size="sm">수업권 추가</Button>
+            </Link>
           ) : null}
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-w-0 overflow-hidden">
           {sessionPackages.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">등록된 수업권이 없습니다.</p>
           ) : (
@@ -462,79 +448,101 @@ export function MemberDetail({
                 {isTallyUnlimited ? '' : '회'}
               </span>
             </div>
-            <div className="flex w-full flex-col gap-3">
-              {sortedSessionPackages.map((pkg) => (
-                <div
-                  key={pkg.id}
-                  className="w-full rounded-lg border border-border bg-card p-4 space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold break-words">
-                        {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
-                      </p>
-                      <p
-                        className={cn(
-                          'mt-1 text-sm font-bold tabular-nums',
-                          getPackageRemainingColorClass(
-                            pkg.remaining_sessions,
-                            pkg.note,
-                            pkg.is_active,
-                          ),
-                        )}
-                      >
-                        잔여 {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}{' '}
-                        / {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
-                      </p>
-                    </div>
-                    <Badge variant={pkg.is_active ? 'default' : 'secondary'} className="shrink-0">
-                      {pkg.is_active ? '사용중' : '종료'}
-                    </Badge>
-                  </div>
-                  {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
-                    <Badge variant="destructive" className="text-[10px]">
-                      초과
-                    </Badge>
-                  ) : null}
-                  <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                    <div>
-                      <dt className="text-xs text-muted-foreground">금액</dt>
-                      <dd>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-muted-foreground">결제일</dt>
-                      <dd>{formatPackageDate(pkg.paid_at)}</dd>
-                    </div>
-                    <div className="col-span-2">
-                      <dt className="text-xs text-muted-foreground">만료일</dt>
-                      <dd>{formatPackageDate(pkg.expires_at)}</dd>
-                    </div>
-                  </dl>
+            <div className="w-full min-w-0 overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-border px-0.5 py-2 text-xs font-medium text-muted-foreground">
+                <span className="flex w-[4.25rem] shrink-0 items-center gap-0.5">
+                  <span>수업권</span>
                   {canManage ? (
-                    <div className="flex flex-col gap-2 pt-1 sm:flex-row">
-                      <Link
-                        href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}
-                        className="flex-1"
-                      >
-                        <Button variant="outline" size="sm" className="h-10 w-full">
-                          <Edit className="mr-1.5 h-4 w-4" />
-                          수정
-                        </Button>
-                      </Link>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-10 flex-1 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(pkg)}
-                      >
-                        <Trash2 className="mr-1.5 h-4 w-4" />
-                        삭제
-                      </Button>
-                    </div>
+                    <SessionPackageTrashSheet
+                      memberId={member.id}
+                      initialCount={trashCount}
+                      recentTrashItems={recentTrashItems}
+                      compact
+                      onTrashCountChange={setTrashCount}
+                      onRestore={(pkg) => {
+                        removedPackageIdsRef.current.delete(pkg.id)
+                        setSessionPackages((prev) => {
+                          const ids = new Set(prev.map((p) => p.id))
+                          if (ids.has(pkg.id)) return prev
+                          return [pkg, ...prev]
+                        })
+                        setRecentTrashItems((prev) => prev.filter((p) => p.id !== pkg.id))
+                      }}
+                    />
                   ) : null}
-                </div>
-              ))}
+                </span>
+                <span className="min-w-0 flex-1">잔여</span>
+                <span className="hidden w-[4.5rem] shrink-0 sm:block">금액</span>
+                <span className="hidden w-[4.75rem] shrink-0 md:block">결제일</span>
+                <span className="w-[3.25rem] shrink-0 text-center">상태</span>
+                {canManage ? <span className="w-[4.25rem] shrink-0" aria-hidden /> : null}
+              </div>
+              <ul className="divide-y divide-border">
+                {sortedSessionPackages.map((pkg) => (
+                  <li
+                    key={pkg.id}
+                    className="flex min-w-0 items-center gap-2 px-0.5 py-2.5 text-sm"
+                  >
+                    <span className="w-[4.25rem] shrink-0 font-medium">
+                      {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
+                    </span>
+                    <span
+                      className={cn(
+                        'min-w-0 flex-1 truncate tabular-nums font-semibold',
+                        getPackageRemainingColorClass(
+                          pkg.remaining_sessions,
+                          pkg.note,
+                          pkg.is_active,
+                        ),
+                      )}
+                    >
+                      {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)} /{' '}
+                      {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
+                      {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
+                        <span className="ml-1 text-[10px] text-destructive">초과</span>
+                      ) : null}
+                    </span>
+                    <span className="hidden w-[4.5rem] shrink-0 truncate text-xs text-muted-foreground sm:block">
+                      {pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}
+                    </span>
+                    <span className="hidden w-[4.75rem] shrink-0 text-xs text-muted-foreground md:block">
+                      {formatPackageDate(pkg.paid_at)}
+                    </span>
+                    <span className="flex w-[3.25rem] shrink-0 justify-center">
+                      <Badge
+                        variant={pkg.is_active ? 'default' : 'secondary'}
+                        className="px-1.5 text-[10px]"
+                      >
+                        {pkg.is_active ? '사용중' : '종료'}
+                      </Badge>
+                    </span>
+                    {canManage ? (
+                      <div className="flex w-[4.25rem] shrink-0 justify-end gap-0">
+                        <Link href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="수업권 수정"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </Link>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          aria-label="수업권 삭제"
+                          onClick={() => setDeleteTarget(pkg)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             </div>
             </>
           )}

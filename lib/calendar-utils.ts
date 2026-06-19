@@ -409,6 +409,25 @@ export function groupConsecutiveByInstructor(lessons: Lesson[]) {
   return chunks
 }
 
+/** 일별 수업현황 — 현재 시각 기준 스크롤 대상 시간대 */
+export function findLessonStatusScrollSlotStart(
+  slots: { start: string }[],
+  now = new Date(),
+): string {
+  if (slots.length === 0) return ''
+  const nowKey = format(now, 'HH:mm')
+  let target = slots[0]?.start ?? ''
+  for (const slot of slots) {
+    if (!slot.start) continue
+    if (slot.start <= nowKey) {
+      target = slot.start
+      continue
+    }
+    break
+  }
+  return target
+}
+
 export function buildLessonStatusTimeSlots(
   lessons: Lesson[],
   instructors: Instructor[] = [],

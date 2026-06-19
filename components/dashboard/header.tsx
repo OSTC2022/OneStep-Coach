@@ -46,7 +46,7 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
         {user ? <NotificationBell userId={user.id} /> : null}
 
         <ShareWebsiteButton />
-        <InstallAppButton />
+        <InstallAppButton showLabel className="shrink-0" />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

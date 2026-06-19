@@ -3,7 +3,9 @@
 import { getMembers } from '@/lib/actions/members'
 import {
   getMonthlySessionRevenue,
+  getDeletedSessionPackagesCount,
   getSessionPackagesPage,
+  type SessionPackageListOrderBy,
 } from '@/lib/actions/sessions'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 
@@ -18,6 +20,7 @@ export async function getSessionsPageData(
     { data: packages, count: totalCount },
     monthlyRevenue,
     { data: memberRows },
+    initialTrashCount,
   ] = await Promise.all([
     getSessionPackagesPage({
       memberId,
@@ -27,6 +30,7 @@ export async function getSessionsPageData(
     }),
     getMonthlySessionRevenue(),
     getMembers({ isActive: true, orderBy: 'name', orderAsc: true, limit: 50 }),
+    getDeletedSessionPackagesCount(),
   ])
 
   return {
@@ -35,5 +39,6 @@ export async function getSessionsPageData(
     monthlyRevenue,
     members: memberRows.map((m) => ({ id: m.id, name: m.name })),
     orderBy,
+    initialTrashCount,
   }
 }

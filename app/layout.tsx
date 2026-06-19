@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
+import { PwaInstallAffordance } from '@/components/pwa/pwa-install-affordance'
 import { SPLASH_BOOT_SCRIPT } from '@/lib/splash-boot'
 import './globals.css'
 
@@ -86,6 +87,7 @@ export default function RootLayout({
       >
         <OnestepSplashLayer />
         <PwaBootstrap />
+        <PwaInstallAffordance />
         <div id="app-root" className="onestep-app-root">
           {children}
           <Toaster richColors position="top-center" />

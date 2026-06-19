@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -70,6 +70,7 @@ import {
 } from '@/lib/session-package-grouping'
 import { cn } from '@/lib/utils'
 import { RecentLessonSortIcon } from '@/components/dashboard/recent-lesson-sort-icon'
+import { SessionPackageTrashSheet } from '@/app/dashboard/members/[id]/session-package-trash-sheet'
 
 function formatPackageDate(value: string | null | undefined) {
   if (!value) return '-'
@@ -88,6 +89,7 @@ interface SessionPackage {
   note: string | null
   is_active: boolean
   created_at: string
+  deleted_at?: string | null
   member: {
     id: string
     name: string
@@ -108,6 +110,7 @@ interface SessionsListProps {
   members: { id: string; name: string }[]
   selectedMemberId?: string
   initialOrderBy?: SessionPackageListOrderBy
+  initialTrashCount?: number
 }
 
 function formatRevenueMan(value: number) {
@@ -125,9 +128,13 @@ export function SessionsList({
   members,
   selectedMemberId,
   initialOrderBy = 'created_at',
+  initialTrashCount = 0,
 }: SessionsListProps) {
   const router = useRouter()
   const [packages, setPackages] = useState(initialPackages)
+  const removedPackageIdsRef = useRef(new Set<string>())
+  const [trashCount, setTrashCount] = useState(initialTrashCount)
+  const [recentTrashItems, setRecentTrashItems] = useState<SessionPackage[]>([])
   const [listOrderBy, setListOrderBy] =
     useState<SessionPackageListOrderBy>(initialOrderBy)
   const [loadedCount, setLoadedCount] = useState(initialPackages.length)
@@ -151,10 +158,18 @@ export function SessionsList({
   const hasMore = loadedCount < totalCount
 
   useEffect(() => {
-    setPackages(initialPackages)
-    setLoadedCount(initialPackages.length)
+    setPackages(
+      initialPackages.filter((pkg) => !removedPackageIdsRef.current.has(pkg.id)),
+    )
+    setLoadedCount(
+      initialPackages.filter((pkg) => !removedPackageIdsRef.current.has(pkg.id)).length,
+    )
     setListOrderBy(initialOrderBy)
   }, [initialPackages, initialOrderBy])
+
+  useEffect(() => {
+    setTrashCount(initialTrashCount)
+  }, [initialTrashCount])
 
   async function handleRecentLessonSort() {
     if (listOrderBy === 'recent_lesson') return
@@ -376,10 +391,20 @@ export function SessionsList({
       return
     }
 
+    removedPackageIdsRef.current.add(deleteTarget.id)
+    const trashedPackage: SessionPackage = {
+      ...deleteTarget,
+      deleted_at: new Date().toISOString(),
+    }
     setPackages((prev) => prev.filter((item) => item.id !== deleteTarget.id))
+    setLoadedCount((count) => Math.max(0, count - 1))
+    setRecentTrashItems((prev) => [
+      trashedPackage,
+      ...prev.filter((item) => item.id !== trashedPackage.id),
+    ])
+    setTrashCount((count) => count + 1)
     setDeleteTarget(null)
     toast.success('수업권이 휴지통으로 이동했습니다.')
-    router.refresh()
   }
 
   return (
@@ -444,7 +469,24 @@ export function SessionsList({
           </Select>
         </div>
 
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <div className="flex flex-wrap items-center gap-2">
+          <SessionPackageTrashSheet
+            initialCount={trashCount}
+            recentTrashItems={recentTrashItems}
+            showLabel
+            onTrashCountChange={setTrashCount}
+            onRestore={(pkg) => {
+              removedPackageIdsRef.current.delete(pkg.id)
+              setPackages((prev) => {
+                const ids = new Set(prev.map((item) => item.id))
+                if (ids.has(pkg.id)) return prev
+                return [pkg as SessionPackage, ...prev]
+              })
+              setLoadedCount((count) => count + 1)
+              setRecentTrashItems((prev) => prev.filter((item) => item.id !== pkg.id))
+            }}
+          />
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
@@ -594,6 +636,7 @@ export function SessionsList({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Table */}

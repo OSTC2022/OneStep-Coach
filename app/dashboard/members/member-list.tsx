@@ -613,8 +613,11 @@ export function MemberList({
       </div>
 
       {/* Table */}
-      <div className="min-w-0 rounded-lg border border-border">
-        <Table>
+      <div className="min-w-0 overflow-hidden rounded-lg border border-border">
+        <Table
+          fitContainer
+          className="[&_th]:px-2 [&_td]:px-2 [&_td]:align-middle"
+        >
           <TableHeader>
             <TableRow>
               <SortableMemberHead
@@ -623,6 +626,7 @@ export function MemberList({
                 sortField={sortField}
                 sortAsc={sortAsc}
                 recentLesson
+                className="pr-8 lg:w-[6.5rem]"
                 onSort={handleSortClick}
               />
               <SortableMemberHead
@@ -630,7 +634,7 @@ export function MemberList({
                 field="age"
                 sortField={sortField}
                 sortAsc={sortAsc}
-                className="hidden sm:table-cell"
+                className="hidden w-[7rem] pl-0 pr-1 sm:table-cell"
                 onSort={handleSortClick}
               />
               <SortableMemberHead
@@ -638,7 +642,7 @@ export function MemberList({
                 field="sport"
                 sortField={sortField}
                 sortAsc={sortAsc}
-                className="hidden lg:table-cell"
+                className="hidden w-[4rem] lg:table-cell"
                 onSort={handleSortClick}
               />
               <SortableMemberHead
@@ -646,17 +650,15 @@ export function MemberList({
                 field="instructor"
                 sortField={sortField}
                 sortAsc={sortAsc}
-                className="hidden lg:table-cell lg:pr-2"
+                className="hidden w-[5rem] lg:table-cell"
                 onSort={handleSortClick}
               />
-              <TableHead className="hidden md:table-cell lg:pl-10 xl:pl-16">
-                연락처
-              </TableHead>
-              <TableHead className="w-[1%] whitespace-nowrap text-right pr-4 md:pr-6">
+              <TableHead className="hidden lg:table-cell">연락처</TableHead>
+              <TableHead className="w-[3.5rem] whitespace-nowrap text-center">
                 상태
               </TableHead>
               {canManage ? (
-                <TableHead className="w-[1%] whitespace-nowrap text-right pr-2 md:pr-4">
+                <TableHead className="w-[4.75rem] whitespace-nowrap text-center">
                   관리
                 </TableHead>
               ) : null}
@@ -686,58 +688,60 @@ export function MemberList({
             ) : (
               members.map((member) => (
                 <TableRow key={member.id}>
-                  <TableCell className="font-medium">
+                  <TableCell className="pr-8 font-medium lg:w-[6.5rem]">
                     <Link
                       href={`/dashboard/members/${member.id}`}
                       prefetch={LIST_ROW_LINK_PREFETCH}
-                      className="hover:text-primary hover:underline underline-offset-4"
+                      className="block truncate hover:text-primary hover:underline underline-offset-4"
+                      title={member.name}
                     >
                       {member.name}
                     </Link>
                   </TableCell>
-                  <TableCell className="hidden sm:table-cell">
+                  <TableCell className="hidden w-[7rem] pl-0 pr-1 font-medium sm:table-cell whitespace-nowrap">
                     {formatMemberAge(member)}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell">
+                  <TableCell className="hidden w-[4rem] lg:table-cell text-xs whitespace-nowrap">
                     {member.sport || '-'}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell lg:pr-2">
+                  <TableCell className="hidden w-[5rem] lg:table-cell text-xs whitespace-nowrap">
                     {formatPrimaryInstructorName(member.primary_instructor)}
                   </TableCell>
-                  <TableCell className="hidden md:table-cell lg:pl-10 xl:pl-16">
+                  <TableCell className="hidden lg:table-cell text-xs text-muted-foreground whitespace-nowrap">
                     {formatMemberContactDisplay(member)}
                   </TableCell>
-                  <TableCell className="w-[1%] whitespace-nowrap text-right pr-4 md:pr-6">
-                    <div className="flex justify-end">
+                  <TableCell className="whitespace-nowrap">
+                    <div className="flex justify-center">
                       {canManage ? (
                         <Switch
                           checked={member.is_active}
                           onCheckedChange={() => void handleToggleMemberStatus(member)}
                         />
                       ) : (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-[10px] text-muted-foreground">
                           {member.is_active ? '활성' : '비활성'}
                         </span>
                       )}
                     </div>
                   </TableCell>
                   {canManage ? (
-                    <TableCell className="w-[1%] whitespace-nowrap text-right pr-2 md:pr-4">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" asChild>
+                    <TableCell className="whitespace-nowrap">
+                      <div className="flex justify-center gap-0.5">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
                           <Link
                             href={`/dashboard/members/${member.id}/edit`}
                             prefetch={LIST_ROW_LINK_PREFETCH}
                           >
-                            <Edit className="h-4 w-4" />
+                            <Edit className="h-3.5 w-3.5" />
                           </Link>
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="h-8 w-8"
                           onClick={() => setDeleteTarget(member)}
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
                         </Button>
                       </div>
                     </TableCell>

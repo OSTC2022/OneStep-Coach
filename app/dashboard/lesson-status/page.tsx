@@ -4,7 +4,7 @@ import { getLessonsForStatusView } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
 import { getMemberBodyWeightsForLessons } from '@/lib/actions/member-body-records'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
-import { getRangeForView, type CalendarView } from '@/lib/calendar-utils'
+import { getRangeForView, toDateKey, type CalendarView } from '@/lib/calendar-utils'
 import { profileRoleToAppRole } from '@/lib/roles'
 import { redirect } from 'next/navigation'
 import { TimeSlotsSkeleton } from '@/components/dashboard/page-skeletons'
@@ -35,7 +35,7 @@ export default async function LessonStatusPage({
   }
 
   const params = await searchParams
-  const selectedDate = params.date ?? new Date().toISOString().split('T')[0]
+  const selectedDate = params.date ?? toDateKey(new Date())
   const viewParam = params.view
   const viewMode: LessonStatusViewMode =
     viewParam === 'week' ||

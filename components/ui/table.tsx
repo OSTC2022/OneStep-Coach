@@ -4,18 +4,32 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-function Table({ className, ...props }: React.ComponentProps<'table'>) {
+function Table({
+  className,
+  fitContainer = false,
+  ...props
+}: React.ComponentProps<'table'> & {
+  /** true면 가로 스크롤 없이 컨테이너 너비에 맞춤 */
+  fitContainer?: boolean
+}) {
   return (
     <div
       data-slot="table-container"
       className={cn(
-        'relative w-full max-w-full overflow-x-auto overscroll-x-contain',
-        'touch-pan-x [-webkit-overflow-scrolling:touch]',
+        'relative w-full max-w-full',
+        fitContainer
+          ? 'min-w-0 overflow-hidden'
+          : 'overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]',
       )}
     >
       <table
         data-slot="table"
-        className={cn('w-full min-w-max caption-bottom text-sm', className)}
+        data-fit-container={fitContainer ? '' : undefined}
+        className={cn(
+          'w-full caption-bottom text-sm',
+          fitContainer ? 'min-w-0 table-fixed' : 'min-w-max',
+          className,
+        )}
         {...props}
       />
     </div>

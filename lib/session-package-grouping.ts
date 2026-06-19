@@ -45,13 +45,10 @@ export function getSessionPackageGroupKey(pkg: {
 
 function pickPrimaryPackage<T extends GroupablePackage>(group: T[]): T {
   return [...group].sort((a, b) => {
-    const aUsable = isPackageUsableForLesson(a) ? 1 : 0
-    const bUsable = isPackageUsableForLesson(b) ? 1 : 0
-    if (bUsable !== aUsable) return bUsable - aUsable
-    if (b.remaining_sessions !== a.remaining_sessions) {
-      return b.remaining_sessions - a.remaining_sessions
-    }
-    return b.created_at.localeCompare(a.created_at)
+    const aUsable = isPackageUsableForLesson(a) ? 0 : 1
+    const bUsable = isPackageUsableForLesson(b) ? 0 : 1
+    if (aUsable !== bUsable) return aUsable - bUsable
+    return a.created_at.localeCompare(b.created_at)
   })[0]
 }
 
