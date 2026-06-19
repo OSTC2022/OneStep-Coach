@@ -68,6 +68,46 @@ export async function buildGoogleCalendarInstructorResolver(
   }
 }
 
+/** 강사 ID → Google 캘린더 (수업/수업2) — 인바운드 동기화와 동일한 매핑 */
+export async function resolveGoogleCalendarTarget(
+  supabase: ReturnType<typeof createAdminClient>,
+  row: Pick<
+    GoogleCalendarSyncRow,
+    'calendar_id' | 'calendar_name' | 'calendar_id_2' | 'calendar_name_2'
+  >,
+  instructorId: string | null,
+): Promise<{ calendarId: string; calendarName: string } | null> {
+  const resolver = await buildGoogleCalendarInstructorResolver(supabase, row)
+
+  const calendars: { id: string; name: string }[] = []
+  if (row.calendar_id) {
+    calendars.push({ id: row.calendar_id, name: row.calendar_name ?? '수업' })
+  }
+  if (row.calendar_id_2) {
+    calendars.push({
+      id: row.calendar_id_2,
+      name: row.calendar_name_2 ?? '수업2',
+    })
+  }
+
+  if (instructorId) {
+    for (const calendar of calendars) {
+      if (resolver.resolveInstructorId(calendar.id) === instructorId) {
+        return { calendarId: calendar.id, calendarName: calendar.name }
+      }
+    }
+  }
+
+  if (row.calendar_id) {
+    return {
+      calendarId: row.calendar_id,
+      calendarName: row.calendar_name ?? '수업',
+    }
+  }
+
+  return null
+}
+
 /** Google에서 가져온 기존 일정에 캘린더별 담당 강사 일괄 반영 */
 export async function backfillGoogleCalendarInstructor(
   supabase: ReturnType<typeof createAdminClient>,

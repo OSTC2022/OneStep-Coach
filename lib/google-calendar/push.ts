@@ -2,8 +2,8 @@ import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME,
-} from '@/lib/google-calendar/config'
+  resolveGoogleCalendarTarget,
+} from '@/lib/google-calendar/calendar-instructor'
 import {
   deleteGoogleCalendarEvent,
   findGoogleEventsByLessonId,
@@ -116,62 +116,85 @@ export async function isGoogleCalendarPushEnabled(): Promise<boolean> {
   return Boolean(row?.sync_enabled && row.refresh_token && row.calendar_id)
 }
 
-const INSTRUCTOR_NAME_CACHE_MS = 60_000
-const instructorNameCache = new Map<
-  string,
-  { name: string | null; expiresAt: number }
->()
-
-async function resolveInstructorName(
-  instructorId: string | null,
-): Promise<string | null> {
-  if (!instructorId) return null
-  const cached = instructorNameCache.get(instructorId)
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.name
-  }
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('instructors')
-    .select('name')
-    .eq('id', instructorId)
-    .maybeSingle()
-  const name = data?.name?.trim() ?? null
-  instructorNameCache.set(instructorId, {
-    name,
-    expiresAt: Date.now() + INSTRUCTOR_NAME_CACHE_MS,
-  })
-  return name
-}
-
-export function resolveGoogleCalendarForLesson(
-  row: GoogleCalendarSyncRow,
-  instructorName: string | null,
-): { calendarId: string; calendarName: string } | null {
-  const secondaryName = row.calendar_name_2?.trim()
-  const secondaryInstructor =
-    secondaryName && GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME[secondaryName]
-
-  if (
-    instructorName &&
-    secondaryInstructor &&
-    instructorName === secondaryInstructor &&
-    row.calendar_id_2
-  ) {
+async function moveLessonEventToCalendar(
+  accessToken: string,
+  sourceCalendarId: string,
+  eventId: string,
+  destinationCalendarId: string,
+  body: Record<string, unknown>,
+): Promise<{
+  eventId: string
+  calendarId: string
+  responseUpdated: string | null
+  icalUid: string | null
+}> {
+  if (sourceCalendarId === destinationCalendarId) {
+    const updated = await updateGoogleCalendarEvent(
+      accessToken,
+      destinationCalendarId,
+      eventId,
+      body,
+    )
     return {
-      calendarId: row.calendar_id_2,
-      calendarName: row.calendar_name_2 ?? '수업2',
+      eventId,
+      calendarId: destinationCalendarId,
+      responseUpdated: googleEventUpdatedAt(updated),
+      icalUid: updated.iCalUID ?? null,
     }
   }
 
-  if (row.calendar_id) {
+  try {
+    const moved = await moveGoogleCalendarEvent(
+      accessToken,
+      sourceCalendarId,
+      eventId,
+      destinationCalendarId,
+    )
+    const movedId = moved.id!
+    const updated = await updateGoogleCalendarEvent(
+      accessToken,
+      destinationCalendarId,
+      movedId,
+      body,
+    )
     return {
-      calendarId: row.calendar_id,
-      calendarName: row.calendar_name ?? '수업',
+      eventId: movedId,
+      calendarId: destinationCalendarId,
+      responseUpdated: googleEventUpdatedAt(updated),
+      icalUid: updated.iCalUID ?? null,
+    }
+  } catch (error) {
+    console.warn(
+      '[google-calendar] calendar move failed, recreating event:',
+      error instanceof Error ? error.message : error,
+    )
+    const created = await insertGoogleCalendarEvent(
+      accessToken,
+      destinationCalendarId,
+      body,
+    )
+    try {
+      await deleteGoogleCalendarEvent(accessToken, sourceCalendarId, eventId)
+    } catch (deleteError) {
+      if (
+        !(
+          deleteError instanceof GoogleCalendarApiError &&
+          deleteError.status === 404
+        )
+      ) {
+        console.warn(
+          '[google-calendar] stale calendar event delete failed:',
+          deleteError,
+        )
+      }
+    }
+    return {
+      eventId: created.id!,
+      calendarId: destinationCalendarId,
+      responseUpdated: googleEventUpdatedAt(created),
+      icalUid: created.iCalUID ?? null,
     }
   }
-
-  return null
 }
 
 async function persistGoogleLink(
@@ -323,8 +346,12 @@ async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
     return
   }
 
-  const instructorName = await resolveInstructorName(lesson.instructor_id)
-  const target = resolveGoogleCalendarForLesson(row, instructorName)
+  const supabase = createAdminClient()
+  const target = await resolveGoogleCalendarTarget(
+    supabase,
+    row,
+    lesson.instructor_id,
+  )
   if (!target) return
 
   const googleAccountId = row.connected_email ?? 'default'
@@ -343,66 +370,26 @@ async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
     let icalUid: string | null = null
 
     if (googleEventId) {
-      if (googleCalendarId !== target.calendarId) {
-        const moved = await moveGoogleCalendarEvent(
-          accessToken,
-          googleCalendarId,
-          googleEventId,
-          target.calendarId,
-        )
-        googleEventId = moved.id
-        googleCalendarId = target.calendarId
-        responseUpdated = googleEventUpdatedAt(moved)
-        icalUid = moved.iCalUID ?? null
-      }
+      const previousCalendarId = googleCalendarId
+      const moved = await moveLessonEventToCalendar(
+        accessToken,
+        googleCalendarId,
+        googleEventId,
+        target.calendarId,
+        body,
+      )
+      googleEventId = moved.eventId
+      googleCalendarId = moved.calendarId
+      responseUpdated = moved.responseUpdated
+      icalUid = moved.icalUid
 
-      try {
-        const updated = await updateGoogleCalendarEvent(
+      if (previousCalendarId !== googleCalendarId) {
+        await removeDuplicateGoogleEvents(
           accessToken,
-          googleCalendarId,
-          googleEventId,
-          body,
+          previousCalendarId,
+          lesson.id,
+          '__none__',
         )
-        responseUpdated = googleEventUpdatedAt(updated)
-        icalUid = updated.iCalUID ?? null
-      } catch (error) {
-        if (!(error instanceof GoogleCalendarApiError && error.status === 404)) {
-          throw error
-        }
-        const relinked = await resolveLinkedGoogleEvent(
-          accessToken,
-          row,
-          { ...lesson, google_event_id: null, google_calendar_id: null },
-          target.calendarId,
-        )
-        if (!relinked?.eventId) {
-          const created = await insertGoogleCalendarEvent(
-            accessToken,
-            target.calendarId,
-            body,
-          )
-          googleEventId = created.id
-          googleCalendarId = target.calendarId
-          responseUpdated = googleEventUpdatedAt(created)
-          icalUid = created.iCalUID ?? null
-          await removeDuplicateGoogleEvents(
-            accessToken,
-            googleCalendarId,
-            lesson.id,
-            googleEventId,
-          )
-        } else {
-          googleEventId = relinked.eventId
-          googleCalendarId = relinked.calendarId
-          const updated = await updateGoogleCalendarEvent(
-            accessToken,
-            googleCalendarId,
-            googleEventId,
-            body,
-          )
-          responseUpdated = googleEventUpdatedAt(updated)
-          icalUid = updated.iCalUID ?? null
-        }
       }
     } else {
       const created = await insertGoogleCalendarEvent(
