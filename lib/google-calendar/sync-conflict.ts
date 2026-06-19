@@ -48,6 +48,10 @@ export function shouldPushAppLesson(lesson: {
 
   const appMs = parseTs(lesson.app_modified_at)
   const googleMs = parseTs(lesson.google_event_updated_at)
+
+  // app_modified_at 컬럼 없거나 미기록 시에도 저장 직후 푸시 허용
+  if (!lesson.app_modified_at || !lesson.google_event_updated_at) return true
+
   return appMs > googleMs
 }
 

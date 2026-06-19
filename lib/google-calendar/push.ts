@@ -47,6 +47,28 @@ const LESSON_PUSH_SELECT = `
   member:members(id, name, sport, age, birth_date)
 `
 
+const LESSON_PUSH_SELECT_LEGACY = `
+  id,
+  lesson_date,
+  start_time,
+  end_time,
+  title,
+  content,
+  member_id,
+  instructor_id,
+  event_type,
+  recurrence,
+  attendance_status,
+  event_status,
+  event_timezone,
+  google_event_id,
+  google_calendar_id,
+  google_account_id,
+  google_recurring_event_id,
+  session_deducted,
+  member:members(id, name, sport, age, birth_date)
+`
+
 export type GoogleLessonDeleteSnapshot = {
   id: string
   google_event_id: string | null
@@ -162,11 +184,24 @@ async function loadLessonForPush(lessonId: string): Promise<Lesson | null> {
     .eq('id', lessonId)
     .maybeSingle()
 
-  if (error) {
-    if (isMissingSyncColumn(error)) return null
-    throw new Error(error.message)
+  if (!error) {
+    return data ? (data as unknown as Lesson) : null
   }
-  return data ? (data as Lesson) : null
+
+  if (isMissingSyncColumn(error)) {
+    const legacy = await supabase
+      .from('lessons')
+      .select(LESSON_PUSH_SELECT_LEGACY)
+      .eq('id', lessonId)
+      .maybeSingle()
+    if (legacy.error) {
+      console.error('[google-calendar] load lesson for push failed:', legacy.error.message)
+      return null
+    }
+    return legacy.data ? (legacy.data as unknown as Lesson) : null
+  }
+
+  throw new Error(error.message)
 }
 
 async function resolveLinkedGoogleEvent(

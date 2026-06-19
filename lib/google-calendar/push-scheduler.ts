@@ -13,10 +13,18 @@ export async function runGoogleLessonPush(lessonIds: string | string[]) {
   try {
     await pushLessonsToGoogle(ids)
   } catch (error) {
-    console.error(
-      '[google-calendar] push failed:',
-      error instanceof Error ? error.message : error,
-    )
+    const message =
+      error instanceof Error ? error.message : String(error)
+    console.error('[google-calendar] push failed:', message)
+    if (
+      message.includes('쓰기 권한') ||
+      message.includes('403') ||
+      message.includes('insufficient')
+    ) {
+      console.error(
+        '[google-calendar] Google 계정을 설정에서 다시 연결해 주세요 (calendar 쓰기 권한 필요).',
+      )
+    }
   }
 }
 

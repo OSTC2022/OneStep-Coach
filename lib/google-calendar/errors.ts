@@ -29,8 +29,15 @@ export function isGoogleCalendarInvalidSyncQuery(error: unknown): boolean {
   return false
 }
 
+export function isGoogleCalendarInsufficientScope(error: unknown): boolean {
+  return error instanceof GoogleCalendarApiError && error.status === 403
+}
+
 export function formatGoogleCalendarSyncError(error: unknown): string {
   if (error instanceof GoogleCalendarApiError) {
+    if (error.status === 403) {
+      return 'Google 캘린더 쓰기 권한이 없습니다. 설정에서 Google 계정을 연결 해제 후 다시 연결해 주세요.'
+    }
     if (error.status === 410) {
       return 'Google 캘린더 동기화 조건이 맞지 않아 다시 전체 동기화를 시도합니다.'
     }

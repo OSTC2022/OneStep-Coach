@@ -584,8 +584,15 @@ export async function syncGoogleCalendarLessons(options?: {
   }
 }
 
+const STALE_SYNC_LOCK_MS = 90_000
+
 export function isGoogleCalendarSyncInProgress(row: GoogleCalendarSyncRow | null): boolean {
-  return row?.sync_status === 'syncing'
+  if (row?.sync_status !== 'syncing') return false
+  const attemptAt = row.last_sync_attempt_at
+  if (!attemptAt) return true
+  const startedMs = Date.parse(attemptAt)
+  if (!Number.isFinite(startedMs)) return false
+  return Date.now() - startedMs < STALE_SYNC_LOCK_MS
 }
 
 type WatchChannelFields = {
