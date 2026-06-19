@@ -71,7 +71,7 @@ import {
   parseVirtualLessonId,
 } from '@/lib/calendar-recurrence/types'
 
-const GOOGLE_SYNC_POLL_MS = 1500
+const GOOGLE_SYNC_POLL_MS = 400
 
 function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   const map = new Map<string, Lesson>()
@@ -397,10 +397,10 @@ export function LessonCalendar({
   const refreshWithGoogleSync = useCallback(
     async (options?: { force?: boolean; refreshing?: boolean }) => {
       const pull = await pullGoogleCalendarChanges()
-      if (pull.synced || options?.force) {
+      if (options?.force || (pull.synced && pull.changed > 0)) {
         await syncRange(currentDate, view, {
           force: true,
-          refreshing: options?.refreshing ?? pull.synced,
+          refreshing: options?.refreshing ?? pull.changed > 0,
         })
       }
     },
@@ -417,13 +417,13 @@ export function LessonCalendar({
     if (typeof document === 'undefined') return
 
     const tick = () => {
-      if (document.hidden || googlePollInFlightRef.current || loadState.refreshing) {
+      if (document.hidden || googlePollInFlightRef.current) {
         return
       }
       googlePollInFlightRef.current = true
       void pullGoogleCalendarChanges()
         .then((result) => {
-          if (!result.synced) return
+          if (!result.synced || result.changed <= 0) return
           return syncRange(currentDate, view, { force: true, refreshing: true })
         })
         .finally(() => {
@@ -435,13 +435,16 @@ export function LessonCalendar({
     const onVisibility = () => {
       if (!document.hidden) tick()
     }
+    const onFocus = () => tick()
     document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onFocus)
 
     return () => {
       window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onFocus)
     }
-  }, [currentDate, loadState.refreshing, syncRange, view])
+  }, [currentDate, syncRange, view])
 
   useEffect(() => {
     setLessons((prev) => {

@@ -25,8 +25,8 @@ import {
 import {
   getGoogleSyncTimeBounds,
 } from '@/lib/google-calendar/event-mapper'
-import { buildGoogleCalendarInstructorResolver, backfillGoogleCalendarInstructor } from '@/lib/google-calendar/calendar-instructor'
-import { buildMemberLookup } from '@/lib/google-calendar/member-matcher'
+import { buildGoogleCalendarInstructorResolver, backfillGoogleCalendarInstructor, type GoogleCalendarInstructorResolver } from '@/lib/google-calendar/calendar-instructor'
+import { buildMemberLookup, type MemberLookup } from '@/lib/google-calendar/member-matcher'
 import {
   applyGoogleEventsBatch,
   enrichExistingMapFromGoogleLessonIds,
@@ -77,6 +77,66 @@ type SyncCalendarOutcome = {
   ok: boolean
   error?: string
   fetched?: number
+}
+
+const LOOKUP_CACHE_MS = 60_000
+let memberLookupCache: { lookup: MemberLookup; expiresAt: number } | null = null
+let instructorResolverCache: {
+  key: string
+  resolver: GoogleCalendarInstructorResolver
+  expiresAt: number
+} | null = null
+
+async function getMemberLookupCached(
+  supabase: ReturnType<typeof createAdminClient>,
+  lightweight: boolean,
+): Promise<MemberLookup> {
+  if (
+    lightweight &&
+    memberLookupCache &&
+    memberLookupCache.expiresAt > Date.now()
+  ) {
+    return memberLookupCache.lookup
+  }
+  const lookup = await buildMemberLookup(supabase)
+  if (lightweight) {
+    memberLookupCache = { lookup, expiresAt: Date.now() + LOOKUP_CACHE_MS }
+  }
+  return lookup
+}
+
+async function getInstructorResolverCached(
+  supabase: ReturnType<typeof createAdminClient>,
+  row: GoogleCalendarSyncRow,
+  lightweight: boolean,
+): Promise<GoogleCalendarInstructorResolver> {
+  const key = [
+    row.calendar_id,
+    row.calendar_id_2,
+    row.calendar_name,
+    row.calendar_name_2,
+  ].join('|')
+  if (
+    lightweight &&
+    instructorResolverCache &&
+    instructorResolverCache.key === key &&
+    instructorResolverCache.expiresAt > Date.now()
+  ) {
+    return instructorResolverCache.resolver
+  }
+  const resolver = await buildGoogleCalendarInstructorResolver(supabase, row)
+  if (lightweight) {
+    instructorResolverCache = {
+      key,
+      resolver,
+      expiresAt: Date.now() + LOOKUP_CACHE_MS,
+    }
+  }
+  return resolver
+}
+
+export function countGoogleSyncChanges(result: GoogleCalendarSyncResult): number {
+  return result.created + result.updated + result.cancelled + result.linked
 }
 
 const MAX_FETCH_PAGES = 100
@@ -365,21 +425,25 @@ export async function syncGoogleCalendarLessons(options?: {
   reason?: string
   forceFull?: boolean
   skipDedupe?: boolean
+  lightweight?: boolean
 }): Promise<GoogleCalendarSyncResult> {
   let row = await getGoogleCalendarSyncRow()
   if (!row?.refresh_token || !row.calendar_id || !row.sync_enabled) {
     return { created: 0, updated: 0, linked: 0, cancelled: 0, pendingMember: 0, skipped: 0 }
   }
 
+  const lightweight = Boolean(options?.lightweight)
   const supabase = createAdminClient()
   const attemptAt = new Date().toISOString()
   const runStats = emptyRunStats()
 
-  await upsertGoogleCalendarSyncRow({
-    sync_status: 'syncing',
-    last_sync_attempt_at: attemptAt,
-    sync_status_detail: buildGoogleCalendarSyncDetail({ run: runStats }),
-  })
+  if (!lightweight) {
+    await upsertGoogleCalendarSyncRow({
+      sync_status: 'syncing',
+      last_sync_attempt_at: attemptAt,
+      sync_status_detail: buildGoogleCalendarSyncDetail({ run: runStats }),
+    })
+  }
 
   const aggregated: GoogleCalendarSyncResult = {
     created: 0,
@@ -394,7 +458,7 @@ export async function syncGoogleCalendarLessons(options?: {
   const calendarOutcomes: SyncCalendarOutcome[] = []
   let deduped = 0
 
-  if (!options?.skipDedupe && (options?.forceFull || !row.sync_token)) {
+  if (!options?.skipDedupe && !lightweight && (options?.forceFull || !row.sync_token)) {
     try {
       deduped = await dedupeGoogleCalendarLessons()
       runStats.deduped = deduped
@@ -409,11 +473,17 @@ export async function syncGoogleCalendarLessons(options?: {
   const googleAccountId = row.connected_email ?? 'default'
 
   try {
-    const memberLookup = await buildMemberLookup(supabase)
+    const memberLookup = await getMemberLookupCached(supabase, lightweight)
 
     await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
-      row = await refreshLessonCalendarIds(row!, accessToken)
-      const instructorResolver = await buildGoogleCalendarInstructorResolver(supabase, row!)
+      if (!lightweight) {
+        row = await refreshLessonCalendarIds(row!, accessToken)
+      }
+      const instructorResolver = await getInstructorResolverCached(
+        supabase,
+        row!,
+        lightweight,
+      )
 
       const calendarsToSync: {
         calendarId: string
@@ -452,6 +522,20 @@ export async function syncGoogleCalendarLessons(options?: {
 
             runStats.processed += events.length
 
+            if (nextSyncToken) {
+              syncTokenPatch[calendar.syncTokenKey] = nextSyncToken
+            }
+
+            if (events.length === 0) {
+              calendarOutcomes.push({
+                calendarName: calendar.calendarName,
+                calendarId: calendar.calendarId,
+                ok: true,
+                fetched: 0,
+              })
+              return
+            }
+
             const googleEventIds = events
               .map((event) => event.id)
               .filter((id): id is string => Boolean(id))
@@ -480,11 +564,13 @@ export async function syncGoogleCalendarLessons(options?: {
               calendarInstructorId,
             )
 
-            await backfillGoogleCalendarInstructor(
-              supabase,
-              calendar.calendarId,
-              calendarInstructorId,
-            )
+            if (!lightweight) {
+              await backfillGoogleCalendarInstructor(
+                supabase,
+                calendar.calendarId,
+                calendarInstructorId,
+              )
+            }
 
             aggregated.created += result.created
             aggregated.updated += result.updated
@@ -498,10 +584,6 @@ export async function syncGoogleCalendarLessons(options?: {
             runStats.cancelled += result.cancelled
             runStats.pendingMember += result.pendingMember
             runStats.skipped += result.skipped
-
-            if (nextSyncToken) {
-              syncTokenPatch[calendar.syncTokenKey] = nextSyncToken
-            }
 
             calendarOutcomes.push({
               calendarName: calendar.calendarName,
@@ -536,24 +618,45 @@ export async function syncGoogleCalendarLessons(options?: {
 
     const syncStatus = resolveSyncStatus(calendarOutcomes)
     const allSucceeded = syncStatus === 'success'
-    const pendingCount = await countPendingMemberLessons(supabase)
-    runStats.pendingMember = pendingCount
 
-    await upsertGoogleCalendarSyncRow({
-      ...syncTokenPatch,
-      ...(allSucceeded
-        ? { last_synced_at: new Date().toISOString(), last_sync_error: null }
-        : { last_sync_error: buildSyncStatusMessage(calendarOutcomes) }),
-      sync_status: syncStatus,
-      sync_status_detail: buildGoogleCalendarSyncDetail({
-        run: runStats,
-        succeeded: calendarOutcomes.filter((item) => item.ok).map((item) => item.calendarName),
-        failed: calendarOutcomes
-          .filter((item) => !item.ok)
-          .map((item) => ({ name: item.calendarName, error: item.error })),
-      }),
-      pending_member_count: pendingCount,
-    })
+    if (lightweight) {
+      const hasTokenUpdate = Object.keys(syncTokenPatch).length > 0
+      const hasChanges = countGoogleSyncChanges(aggregated) > 0
+      if (hasTokenUpdate || hasChanges || !allSucceeded) {
+        await upsertGoogleCalendarSyncRow({
+          ...syncTokenPatch,
+          ...(allSucceeded
+            ? {
+                last_synced_at: new Date().toISOString(),
+                last_sync_error: null,
+                sync_status: 'success' as const,
+              }
+            : {
+                last_sync_error: buildSyncStatusMessage(calendarOutcomes),
+                sync_status: syncStatus,
+              }),
+        })
+      }
+    } else {
+      const pendingCount = await countPendingMemberLessons(supabase)
+      runStats.pendingMember = pendingCount
+
+      await upsertGoogleCalendarSyncRow({
+        ...syncTokenPatch,
+        ...(allSucceeded
+          ? { last_synced_at: new Date().toISOString(), last_sync_error: null }
+          : { last_sync_error: buildSyncStatusMessage(calendarOutcomes) }),
+        sync_status: syncStatus,
+        sync_status_detail: buildGoogleCalendarSyncDetail({
+          run: runStats,
+          succeeded: calendarOutcomes.filter((item) => item.ok).map((item) => item.calendarName),
+          failed: calendarOutcomes
+            .filter((item) => !item.ok)
+            .map((item) => ({ name: item.calendarName, error: item.error })),
+        }),
+        pending_member_count: pendingCount,
+      })
+    }
 
     aggregated.syncStatus = syncStatus
     aggregated.deduped = deduped

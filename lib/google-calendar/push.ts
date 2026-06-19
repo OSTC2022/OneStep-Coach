@@ -116,17 +116,32 @@ export async function isGoogleCalendarPushEnabled(): Promise<boolean> {
   return Boolean(row?.sync_enabled && row.refresh_token && row.calendar_id)
 }
 
+const INSTRUCTOR_NAME_CACHE_MS = 60_000
+const instructorNameCache = new Map<
+  string,
+  { name: string | null; expiresAt: number }
+>()
+
 async function resolveInstructorName(
   instructorId: string | null,
 ): Promise<string | null> {
   if (!instructorId) return null
+  const cached = instructorNameCache.get(instructorId)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.name
+  }
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('instructors')
     .select('name')
     .eq('id', instructorId)
     .maybeSingle()
-  return data?.name?.trim() ?? null
+  const name = data?.name?.trim() ?? null
+  instructorNameCache.set(instructorId, {
+    name,
+    expiresAt: Date.now() + INSTRUCTOR_NAME_CACHE_MS,
+  })
+  return name
 }
 
 export function resolveGoogleCalendarForLesson(
@@ -210,6 +225,13 @@ async function resolveLinkedGoogleEvent(
   lesson: Lesson,
   targetCalendarId: string,
 ): Promise<{ eventId: string; calendarId: string } | null> {
+  if (lesson.google_event_id && lesson.google_calendar_id) {
+    return {
+      eventId: lesson.google_event_id,
+      calendarId: lesson.google_calendar_id,
+    }
+  }
+
   const calendarCandidates = uniqueCalendarIds(
     lesson.google_calendar_id,
     targetCalendarId,
@@ -218,7 +240,15 @@ async function resolveLinkedGoogleEvent(
   )
 
   if (lesson.google_event_id) {
-    for (const calendarId of calendarCandidates) {
+    const preferred = uniqueCalendarIds(
+      lesson.google_calendar_id,
+      targetCalendarId,
+    )
+    const rest = uniqueCalendarIds(
+      row.calendar_id,
+      row.calendar_id_2,
+    ).filter((id) => !preferred.includes(id))
+    for (const calendarId of [...preferred, ...rest]) {
       try {
         await getGoogleCalendarEvent(
           accessToken,
@@ -326,21 +356,54 @@ async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
         icalUid = moved.iCalUID ?? null
       }
 
-      const updated = await updateGoogleCalendarEvent(
-        accessToken,
-        googleCalendarId,
-        googleEventId,
-        body,
-      )
-      responseUpdated = googleEventUpdatedAt(updated)
-      icalUid = updated.iCalUID ?? null
-
-      await removeDuplicateGoogleEvents(
-        accessToken,
-        googleCalendarId,
-        lesson.id,
-        googleEventId,
-      )
+      try {
+        const updated = await updateGoogleCalendarEvent(
+          accessToken,
+          googleCalendarId,
+          googleEventId,
+          body,
+        )
+        responseUpdated = googleEventUpdatedAt(updated)
+        icalUid = updated.iCalUID ?? null
+      } catch (error) {
+        if (!(error instanceof GoogleCalendarApiError && error.status === 404)) {
+          throw error
+        }
+        const relinked = await resolveLinkedGoogleEvent(
+          accessToken,
+          row,
+          { ...lesson, google_event_id: null, google_calendar_id: null },
+          target.calendarId,
+        )
+        if (!relinked?.eventId) {
+          const created = await insertGoogleCalendarEvent(
+            accessToken,
+            target.calendarId,
+            body,
+          )
+          googleEventId = created.id
+          googleCalendarId = target.calendarId
+          responseUpdated = googleEventUpdatedAt(created)
+          icalUid = created.iCalUID ?? null
+          await removeDuplicateGoogleEvents(
+            accessToken,
+            googleCalendarId,
+            lesson.id,
+            googleEventId,
+          )
+        } else {
+          googleEventId = relinked.eventId
+          googleCalendarId = relinked.calendarId
+          const updated = await updateGoogleCalendarEvent(
+            accessToken,
+            googleCalendarId,
+            googleEventId,
+            body,
+          )
+          responseUpdated = googleEventUpdatedAt(updated)
+          icalUid = updated.iCalUID ?? null
+        }
+      }
     } else {
       const created = await insertGoogleCalendarEvent(
         accessToken,

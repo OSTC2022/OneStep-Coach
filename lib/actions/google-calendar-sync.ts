@@ -8,6 +8,7 @@ import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import { parseGoogleCalendarSyncDetail, buildGoogleCalendarSyncDetail, emptyRunStats } from '@/lib/google-calendar/sync-status'
 import {
   clearGoogleCalendarSyncRow,
+  countGoogleSyncChanges,
   ensureGoogleCalendarWatch,
   getConnectedCalendarNames,
   getGoogleCalendarSyncRow,
@@ -190,61 +191,77 @@ export async function listGoogleCalendarPendingLessons() {
 
 export async function syncGoogleCalendarOnCalendarOpen(): Promise<{
   synced?: boolean
+  changed?: number
 }> {
   await requireRole(['admin', 'instructor'])
 
   const row = await getGoogleCalendarSyncRow()
   if (!row?.sync_enabled || !row.refresh_token || isGoogleCalendarSyncInProgress(row)) {
-    return { synced: false }
+    return { synced: false, changed: 0 }
   }
 
   try {
-    await syncGoogleCalendarLessons({
+    const result = await syncGoogleCalendarLessons({
       reason: 'calendar-open',
       skipDedupe: true,
+      lightweight: true,
     })
+    const changed = countGoogleSyncChanges(result)
     revalidatePath('/dashboard/calendar')
     revalidatePath('/dashboard/lesson-status')
-    return { synced: true }
+    return { synced: true, changed }
   } catch (error) {
     console.error(
       '[google-calendar] calendar-open sync failed:',
       error instanceof Error ? error.message : error,
     )
-    return { synced: false }
+    return { synced: false, changed: 0 }
   }
 }
 
-/** Google → 센터 빠른 증분 동기화 (캘린더 폴링용) */
-export async function pullGoogleCalendarChanges(): Promise<{
+type PullResult = {
   synced: boolean
+  changed: number
   skipped?: boolean
-}> {
-  await requireRole(['admin', 'instructor'])
+}
 
-  const row = await getGoogleCalendarSyncRow()
-  if (!row?.sync_enabled || !row.refresh_token) {
-    return { synced: false, skipped: true }
-  }
-  if (isGoogleCalendarSyncInProgress(row)) {
-    return { synced: false, skipped: true }
-  }
+let pullInFlight: Promise<PullResult> | null = null
 
-  try {
-    await syncGoogleCalendarLessons({
-      reason: 'poll',
-      skipDedupe: true,
-    })
-    revalidatePath('/dashboard/calendar')
-    revalidatePath('/dashboard/lesson-status')
-    return { synced: true }
-  } catch (error) {
-    console.error(
-      '[google-calendar] poll sync failed:',
-      error instanceof Error ? error.message : error,
-    )
-    return { synced: false }
-  }
+/** Google → 센터 초고속 증분 동기화 (캘린더 폴링용) */
+export async function pullGoogleCalendarChanges(): Promise<PullResult> {
+  if (pullInFlight) return pullInFlight
+
+  pullInFlight = (async () => {
+    await requireRole(['admin', 'instructor'])
+
+    const row = await getGoogleCalendarSyncRow()
+    if (!row?.sync_enabled || !row.refresh_token) {
+      return { synced: false, changed: 0, skipped: true }
+    }
+    if (isGoogleCalendarSyncInProgress(row)) {
+      return { synced: false, changed: 0, skipped: true }
+    }
+
+    try {
+      const result = await syncGoogleCalendarLessons({
+        reason: 'poll',
+        skipDedupe: true,
+        lightweight: true,
+      })
+      const changed = countGoogleSyncChanges(result)
+      return { synced: true, changed }
+    } catch (error) {
+      console.error(
+        '[google-calendar] poll sync failed:',
+        error instanceof Error ? error.message : error,
+      )
+      return { synced: false, changed: 0 }
+    }
+  })().finally(() => {
+    pullInFlight = null
+  })
+
+  return pullInFlight
 }
 
 export async function refreshGoogleCalendarWatchAction(): Promise<{ error?: string }> {
