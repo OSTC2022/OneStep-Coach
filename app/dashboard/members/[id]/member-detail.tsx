@@ -57,6 +57,8 @@ import {
 } from '@/lib/lesson-record-utils'
 import {
   formatPackagePlanLabel,
+  formatPackageRemainingDisplay,
+  formatPackageSessionsDisplay,
   formatPackageTallyRemainingDisplay,
   formatPackageTallyTotalDisplay,
   formatSessionOverageAlert,
@@ -69,6 +71,7 @@ import { GroupedPackageUsageDisplay } from '@/components/sessions/grouped-packag
 import {
   groupSessionPackagesForDisplay,
 } from '@/lib/session-package-grouping'
+import { cn } from '@/lib/utils'
 
 const LESSON_RECORD_PAGE_SIZE = 10
 
@@ -163,6 +166,10 @@ export function MemberDetail({
 
   const groupedSessionPackages = useMemo(
     () => groupSessionPackagesForDisplay(sessionPackages),
+    [sessionPackages],
+  )
+  const sortedSessionPackages = useMemo(
+    () => [...sessionPackages].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [sessionPackages],
   )
 
@@ -455,174 +462,79 @@ export function MemberDetail({
                 {isTallyUnlimited ? '' : '회'}
               </span>
             </div>
-            <div className="space-y-3 md:hidden">
-              {groupedSessionPackages.map(
-                ({
-                  primary: pkg,
-                  duplicateCount,
-                  latestPurchaseTotalSessions,
-                  cumulativeTotalSessions,
-                  cumulativeRemainingSessions,
-                }) => (
-                  <div
-                    key={pkg.id}
-                    className="rounded-lg border border-border bg-card p-4 space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold">
-                          {formatPackagePlanLabel(pkg.total_sessions, pkg.note, {
-                            duplicateCount,
-                            cumulativeTotalSessions,
-                          })}
-                        </p>
-                        {duplicateCount > 1 ? (
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {duplicateCount}건 등록
-                          </p>
-                        ) : null}
-                      </div>
-                      <Badge variant={pkg.is_active ? 'default' : 'secondary'}>
-                        {pkg.is_active ? '사용중' : '종료'}
-                      </Badge>
+            <div className="flex w-full flex-col gap-3">
+              {sortedSessionPackages.map((pkg) => (
+                <div
+                  key={pkg.id}
+                  className="w-full rounded-lg border border-border bg-card p-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold break-words">
+                        {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
+                      </p>
+                      <p
+                        className={cn(
+                          'mt-1 text-sm font-bold tabular-nums',
+                          getPackageRemainingColorClass(
+                            pkg.remaining_sessions,
+                            pkg.note,
+                            pkg.is_active,
+                          ),
+                        )}
+                      >
+                        잔여 {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)}{' '}
+                        / {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
+                      </p>
                     </div>
-                    <div className="text-sm">
-                      <p className="text-xs text-muted-foreground">잔여 / 최근 구매 / 누적</p>
-                      <GroupedPackageUsageDisplay
-                        remainingSessions={cumulativeRemainingSessions}
-                        latestPurchaseTotalSessions={latestPurchaseTotalSessions}
-                        cumulativeTotalSessions={cumulativeTotalSessions}
-                        note={pkg.note}
-                        isActive={pkg.is_active}
-                        expiresAt={pkg.expires_at}
-                      />
-                      {isSessionPackageOverage(cumulativeRemainingSessions, pkg.note) ? (
-                        <Badge variant="destructive" className="ml-2 text-[10px]">
-                          초과
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                      <div>
-                        <dt className="text-xs text-muted-foreground">금액</dt>
-                        <dd>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-muted-foreground">결제일</dt>
-                        <dd>{formatPackageDate(pkg.paid_at)}</dd>
-                      </div>
-                      <div className="col-span-2">
-                        <dt className="text-xs text-muted-foreground">만료일</dt>
-                        <dd>{formatPackageDate(pkg.expires_at)}</dd>
-                      </div>
-                    </dl>
-                    {canManage ? (
-                      <div className="flex gap-2 pt-1">
-                        <Link
-                          href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}
-                          className="flex-1"
-                        >
-                          <Button variant="outline" size="sm" className="h-10 w-full">
-                            <Edit className="mr-1.5 h-4 w-4" />
-                            수정
-                          </Button>
-                        </Link>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-10 flex-1 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(pkg)}
-                        >
-                          <Trash2 className="mr-1.5 h-4 w-4" />
-                          삭제
-                        </Button>
-                      </div>
-                    ) : null}
+                    <Badge variant={pkg.is_active ? 'default' : 'secondary'} className="shrink-0">
+                      {pkg.is_active ? '사용중' : '종료'}
+                    </Badge>
                   </div>
-                ),
-              )}
-            </div>
-            <div className="hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>수업권</TableHead>
-                  <TableHead>잔여</TableHead>
-                  <TableHead>금액</TableHead>
-                  <TableHead>결제일</TableHead>
-                  <TableHead>만료일</TableHead>
-                  <TableHead className="w-[1%] whitespace-nowrap text-center">상태</TableHead>
-                  {canManage ? (
-                    <TableHead className="w-[1%] whitespace-nowrap text-right" />
+                  {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
+                    <Badge variant="destructive" className="text-[10px]">
+                      초과
+                    </Badge>
                   ) : null}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {groupedSessionPackages.map(
-                  ({
-                    primary: pkg,
-                    duplicateCount,
-                    latestPurchaseTotalSessions,
-                    cumulativeTotalSessions,
-                    cumulativeRemainingSessions,
-                  }) => (
-                  <TableRow key={pkg.id}>
-                    <TableCell>
-                      {formatPackagePlanLabel(pkg.total_sessions, pkg.note, {
-                        duplicateCount,
-                        cumulativeTotalSessions,
-                      })}
-                    </TableCell>
-                    <TableCell>
-                      <GroupedPackageUsageDisplay
-                        remainingSessions={cumulativeRemainingSessions}
-                        latestPurchaseTotalSessions={latestPurchaseTotalSessions}
-                        cumulativeTotalSessions={cumulativeTotalSessions}
-                        note={pkg.note}
-                        isActive={pkg.is_active}
-                        expiresAt={pkg.expires_at}
-                      />
-                      {isSessionPackageOverage(cumulativeRemainingSessions, pkg.note) ? (
-                        <Badge variant="destructive" className="ml-2 text-[10px]">
-                          초과
-                        </Badge>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</TableCell>
-                    <TableCell>{formatPackageDate(pkg.paid_at)}</TableCell>
-                    <TableCell>{formatPackageDate(pkg.expires_at)}</TableCell>
-                    <TableCell className="text-center">
-                      <Badge variant={pkg.is_active ? 'default' : 'secondary'}>
-                        {pkg.is_active ? '사용중' : '종료'}
-                      </Badge>
-                    </TableCell>
-                    {canManage ? (
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Link href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}>
-                            <Button variant="ghost" size="sm" className="h-7 px-2">
-                              <Edit className="h-3.5 w-3.5 mr-1" />
-                              수정
-                            </Button>
-                          </Link>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-destructive hover:text-destructive"
-                            onClick={() => setDeleteTarget(pkg)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-1" />
-                            삭제
-                          </Button>
-                        </div>
-                      </TableCell>
-                    ) : null}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                    <div>
+                      <dt className="text-xs text-muted-foreground">금액</dt>
+                      <dd>{pkg.price ? `${pkg.price.toLocaleString()}원` : '-'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">결제일</dt>
+                      <dd>{formatPackageDate(pkg.paid_at)}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-xs text-muted-foreground">만료일</dt>
+                      <dd>{formatPackageDate(pkg.expires_at)}</dd>
+                    </div>
+                  </dl>
+                  {canManage ? (
+                    <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+                      <Link
+                        href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}
+                        className="flex-1"
+                      >
+                        <Button variant="outline" size="sm" className="h-10 w-full">
+                          <Edit className="mr-1.5 h-4 w-4" />
+                          수정
+                        </Button>
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-10 flex-1 text-destructive hover:text-destructive"
+                        onClick={() => setDeleteTarget(pkg)}
+                      >
+                        <Trash2 className="mr-1.5 h-4 w-4" />
+                        삭제
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
             </div>
             </>
           )}
