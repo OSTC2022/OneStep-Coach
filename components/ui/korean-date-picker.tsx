@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { format, parseISO } from 'date-fns'
+import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { ko as dayPickerKo } from 'react-day-picker/locale'
@@ -48,6 +48,15 @@ function startOfDay(date: Date) {
   return next
 }
 
+function parseDateKey(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function formatDateKey(date: Date): string {
+  return format(date, 'yyyy-MM-dd')
+}
+
 function getYearPageStart(year: number) {
   return Math.floor(year / YEARS_PER_PAGE) * YEARS_PER_PAGE
 }
@@ -61,7 +70,7 @@ export function KoreanDatePicker({
   compact = false,
 }: KoreanDatePickerProps) {
   const selected = useMemo(
-    () => (value ? parseISO(value) : undefined),
+    () => (value ? parseDateKey(value) : undefined),
     [value],
   )
   const [open, setOpen] = useState(false)
@@ -97,12 +106,19 @@ export function KoreanDatePicker({
     setOpen(nextOpen)
   }
 
+  function applyPendingDate(next: Date) {
+    const normalized = startOfDay(next)
+    setPending(normalized)
+    setMonth(normalized)
+    setPickerYear(normalized.getFullYear())
+    onChange(formatDateKey(normalized))
+  }
+
   function handleToday() {
     const today = startOfDay(new Date())
-    setMonth(today)
-    setPending(today)
-    setPickerYear(today.getFullYear())
+    applyPendingDate(today)
     setView('days')
+    setOpen(false)
   }
 
   function handleClear() {
@@ -113,10 +129,16 @@ export function KoreanDatePicker({
 
   function handleConfirm() {
     if (pending) {
-      onChange(format(pending, 'yyyy-MM-dd'))
+      onChange(formatDateKey(pending))
     } else {
       onChange('')
     }
+    setOpen(false)
+  }
+
+  function handleDaySelect(day: Date | undefined) {
+    if (!day) return
+    applyPendingDate(day)
     setOpen(false)
   }
 
@@ -134,7 +156,7 @@ export function KoreanDatePicker({
   const yearPageEnd = yearPageStart + YEARS_PER_PAGE - 1
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={handleOpenChange} modal={false}>
       <PopoverTrigger asChild>
         <Button
           id={id}
@@ -170,7 +192,7 @@ export function KoreanDatePicker({
               selected={pending}
               month={month}
               onMonthChange={setMonth}
-              onSelect={setPending}
+              onSelect={handleDaySelect}
               locale={dayPickerKo}
               weekStartsOn={1}
               className="p-0 [--cell-size:2rem]"

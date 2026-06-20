@@ -43,12 +43,15 @@ export type GoogleEventsListQuery =
   | GoogleEventsFullListQuery
   | GoogleEventsIncrementalListQuery
 
-export async function exchangeGoogleOAuthCode(code: string): Promise<GoogleTokenResponse> {
+export async function exchangeGoogleOAuthCode(
+  code: string,
+  redirectUri?: string,
+): Promise<GoogleTokenResponse> {
   const body = new URLSearchParams({
     code,
     client_id: getGoogleOAuthClientId(),
     client_secret: getGoogleOAuthClientSecret(),
-    redirect_uri: getGoogleOAuthRedirectUri(),
+    redirect_uri: redirectUri ?? getGoogleOAuthRedirectUri(),
     grant_type: 'authorization_code',
   })
 
@@ -137,6 +140,21 @@ export async function listGoogleCalendars(
     'https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader',
   )
   return data.items ?? []
+}
+
+export async function createGoogleCalendar(
+  accessToken: string,
+  summary: string,
+  timeZone = 'Asia/Seoul',
+): Promise<GoogleCalendarListEntry> {
+  return googleFetch<GoogleCalendarListEntry>(
+    accessToken,
+    'https://www.googleapis.com/calendar/v3/calendars',
+    {
+      method: 'POST',
+      body: JSON.stringify({ summary, timeZone }),
+    },
+  )
 }
 
 /**

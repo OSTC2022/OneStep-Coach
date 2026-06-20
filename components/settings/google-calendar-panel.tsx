@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
@@ -27,6 +26,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface GoogleCalendarPanelProps {
   initialStatus: GoogleCalendarSyncStatus
+}
+
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  'admin-only': '관리자 계정으로 로그인한 뒤 연결해 주세요.',
+  'invalid-state':
+    '연결 세션이 만료되었거나 도메인이 달라 실패했습니다. 같은 주소에서 다시 시도해 주세요.',
+  'not-configured': 'Google Calendar 환경 변수가 설정되지 않았습니다.',
+  access_denied: 'Google 계정 연결을 취소했습니다.',
+}
+
+function describeOAuthError(raw: string): string {
+  const decoded = decodeURIComponent(raw)
+  return OAUTH_ERROR_MESSAGES[decoded] ?? decoded
 }
 
 function syncStatusClass(
@@ -55,8 +67,14 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
 
   useEffect(() => {
     if (searchParams.get('connected') === '1') {
+      const created = searchParams.get('created')
       toast.success('Google 캘린더 연동 완료', {
-        description: '「수업」「수업2」 캘린더를 찾으면 자동 반영됩니다.',
+        description: created
+          ? `Google에 ${created
+              .split(',')
+              .map((name) => `「${name}」`)
+              .join(', ')} 캘린더를 자동 생성했습니다.`
+          : '「수업」「수업2」 캘린더를 찾으면 자동 반영됩니다.',
       })
       router.replace('/dashboard/settings/google-calendar')
     }
@@ -64,7 +82,7 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
     const error = searchParams.get('error')
     if (error) {
       toast.error('Google 캘린더 연결 실패', {
-        description: decodeURIComponent(error),
+        description: describeOAuthError(error),
       })
       router.replace('/dashboard/settings/google-calendar')
     }
@@ -204,7 +222,14 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
               쓰기 권한이 필요합니다. 예전에 연결했다면 한 번 연결 해제 후 Google 계정을 다시
               연결해 주세요.
             </p>
-          ) : null}
+          ) : (
+            <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">
+              폰에 Google 계정이 여러 개면 연결할 때{' '}
+              <strong className="text-foreground">「수업」「수업2」가 있는 계정</strong>
+              (예: allakj11@gmail.com)을 꼭 선택해 주세요. 다른 계정을 고르면 캘린더를 찾지
+              못합니다.
+            </p>
+          )}
 
           <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
             <div className="flex flex-wrap items-center gap-2">
@@ -309,10 +334,10 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           <div className="flex flex-wrap gap-2">
             {!status.connected ? (
               <Button asChild>
-                <Link href="/auth/google/calendar">
+                <a href="/auth/google/calendar">
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Google 계정 연결
-                </Link>
+                </a>
               </Button>
             ) : (
               <>
@@ -363,8 +388,8 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           <p>
             1. Google Calendar에 캘린더 이름을 정확히{' '}
             <strong className="text-foreground">수업</strong>,{' '}
-            <strong className="text-foreground">수업2</strong>로 만듭니다. (수업은 필수,
-            수업2는 선택)
+            <strong className="text-foreground">수업2</strong>로 만듭니다. (없으면 연결 시
+            자동 생성됩니다)
           </p>
           <p>2. 일정 제목은 <strong className="text-foreground">회원명(나이종목)</strong> 형식을 권장합니다. 예: 윤찬민(14축구)</p>
           <p>3. iPhone 캘린더를 쓰는 경우, iCloud/Google과 「수업」「수업2」 캘린더를 동기화해 두면 같은 일정이 반영됩니다.</p>
@@ -377,7 +402,16 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             열기·「지금 동기화」·새로고침으로 가져옵니다.
           </p>
           <p>
-            6. 같은 일정을 양쪽에서 수정하면 <strong className="text-foreground">더 최근에 저장한 쪽</strong>이
+            6. <strong className="text-foreground">맥·아이폰·안드로이드</strong>에서도 연결할 수
+            있습니다. 홈 화면 앱(PWA)으로 열었다면 Safari/Chrome 주소창에서 같은 사이트로 접속한
+            뒤 연결해 주세요. Google Cloud Console OAuth 리디렉션 URI에는 사용 중인 도메인별{' '}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              /auth/google/calendar/callback
+            </code>
+            을 모두 등록해야 합니다.
+          </p>
+          <p>
+            7. 같은 일정을 양쪽에서 수정하면 <strong className="text-foreground">더 최근에 저장한 쪽</strong>이
             적용됩니다.
           </p>
         </CardContent>

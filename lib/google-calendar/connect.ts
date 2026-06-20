@@ -4,26 +4,24 @@ import { revalidatePath } from 'next/cache'
 import {
   exchangeGoogleOAuthCode,
   fetchGoogleUserEmail,
-  listGoogleCalendars,
 } from '@/lib/google-calendar/client'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
+import { ensureLessonCalendars } from '@/lib/google-calendar/lesson-calendars'
 import {
   ensureGoogleCalendarWatch,
-  findLessonCalendars,
-  syncGoogleCalendarLessons,
   upsertGoogleCalendarSyncRow,
 } from '@/lib/google-calendar/sync'
-import { isPrimaryLessonCalendarName, isSecondaryLessonCalendarName } from '@/lib/google-calendar/config'
 
 export async function connectGoogleCalendarFromOAuthCode(
   code: string,
-): Promise<{ error?: string }> {
+  redirectUri?: string,
+): Promise<{ error?: string; createdCalendars?: string[] }> {
   if (!isGoogleCalendarConfigured()) {
     return { error: 'Google Calendar 연동 환경 변수가 설정되지 않았습니다.' }
   }
 
   try {
-    const token = await exchangeGoogleOAuthCode(code)
+    const token = await exchangeGoogleOAuthCode(code, redirectUri)
     if (!token.refresh_token) {
       return {
         error:
@@ -32,29 +30,18 @@ export async function connectGoogleCalendarFromOAuthCode(
     }
 
     const email = await fetchGoogleUserEmail(token.access_token)
-    const calendars = await listGoogleCalendars(token.access_token)
-    const lessonCalendars = findLessonCalendars(calendars)
-    const primaryCalendar = lessonCalendars.find((calendar) =>
-      isPrimaryLessonCalendarName(calendar.summary),
+    const { primary, secondary, created } = await ensureLessonCalendars(
+      token.access_token,
+      email,
     )
-    const secondaryCalendar = lessonCalendars.find((calendar) =>
-      isSecondaryLessonCalendarName(calendar.summary),
-    )
-
-    if (!primaryCalendar) {
-      return {
-        error:
-          'Google 캘린더에서 "수업" 또는 "수업1" 이름의 캘린더를 찾지 못했습니다. Google Calendar에 해당 캘린더를 만든 뒤 다시 연결해 주세요.',
-      }
-    }
 
     await upsertGoogleCalendarSyncRow({
       connected_email: email,
       refresh_token: token.refresh_token,
-      calendar_id: primaryCalendar.id,
-      calendar_name: primaryCalendar.summary,
-      calendar_id_2: secondaryCalendar?.id ?? null,
-      calendar_name_2: secondaryCalendar?.summary ?? null,
+      calendar_id: primary.id,
+      calendar_name: primary.summary,
+      calendar_id_2: secondary?.id ?? null,
+      calendar_name_2: secondary?.summary ?? null,
       sync_enabled: true,
       sync_token: null,
       sync_token_2: null,
@@ -71,13 +58,12 @@ export async function connectGoogleCalendarFromOAuthCode(
     })
 
     await ensureGoogleCalendarWatch()
-    // 초기 연결 UI는 빠르게 — 동기화는 사용자가 「지금 동기화」로 실행
 
     revalidatePath('/dashboard/settings/google-calendar')
     revalidatePath('/dashboard/calendar')
     revalidatePath('/dashboard')
 
-    return {}
+    return { createdCalendars: created.length > 0 ? created : undefined }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return { error: message }

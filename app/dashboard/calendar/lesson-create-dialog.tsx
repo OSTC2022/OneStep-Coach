@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
 import { Loader2, Trash2, UserPlus, X } from 'lucide-react'
@@ -28,7 +28,19 @@ import {
   type LessonRecurrencePattern,
 } from '@/lib/lesson-recurrence'
 import { AUTO_INSTRUCTOR_ID, normalizePrimaryInstructorId } from '@/lib/member-utils'
-import { getLessonPopupPosition, getLessonCalendarLabel, getDefaultLessonCalendarLabel, resolveLessonTitle, type LessonDraft, type LessonEditAnchor } from '@/lib/calendar-utils'
+import {
+  getLessonPopupPosition,
+  getLessonCalendarLabel,
+  getDefaultLessonCalendarLabel,
+  resolveLessonTitle,
+  isLessonScheduleEnded,
+  resolveLessonDurationMinutes,
+  shiftEndTimeByDuration,
+  parseTimeToMinutes,
+  type LessonDraft,
+  type LessonEditAnchor,
+} from '@/lib/calendar-utils'
+import { parseSingleTimeToken, parseTimeRangeInput } from '@/lib/time-input-parse'
 import {
   extractMemberNameFromCalendarLabel,
   formatMemberCalendarLabel,
@@ -257,6 +269,66 @@ export function LessonCreateDialog({
   const [saveScopeOpen, setSaveScopeOpen] = useState(false)
   const [deleteScopeOpen, setDeleteScopeOpen] = useState(false)
   const recurrenceUserEditedRef = useRef(false)
+  const editDurationMinutesRef = useRef<number | null>(null)
+
+  const shouldPreserveEditDuration = useCallback(() => {
+    if (!lesson) return false
+    const referenceEnd = endTime || lesson.end_time
+    return !isLessonScheduleEnded(date || lesson.lesson_date, referenceEnd)
+  }, [lesson, date, endTime])
+
+  const handleStartTimeChange = useCallback(
+    (value: string) => {
+      setStartTime(value)
+
+      if (!shouldPreserveEditDuration() || editDurationMinutesRef.current == null) {
+        return
+      }
+
+      const range = parseTimeRangeInput(value)
+      if (range?.end) {
+        setEndTime(range.end)
+        const duration =
+          parseTimeToMinutes(range.end) - parseTimeToMinutes(range.start)
+        if (duration >= 15) {
+          editDurationMinutesRef.current = duration
+        }
+        return
+      }
+
+      const normalized = parseSingleTimeToken(value)
+      if (!normalized) return
+
+      const shiftedEnd = shiftEndTimeByDuration(
+        normalized,
+        editDurationMinutesRef.current,
+      )
+      if (shiftedEnd) {
+        setEndTime(shiftedEnd)
+      }
+    },
+    [shouldPreserveEditDuration],
+  )
+
+  const handleEndTimeChange = useCallback(
+    (value: string) => {
+      setEndTime(value)
+
+      if (!lesson || isLessonScheduleEnded(date || lesson.lesson_date, value)) {
+        return
+      }
+
+      const startNorm = parseSingleTimeToken(startTime)
+      const endNorm = parseSingleTimeToken(value)
+      if (!startNorm || !endNorm) return
+
+      const duration = parseTimeToMinutes(endNorm) - parseTimeToMinutes(startNorm)
+      if (duration >= 15) {
+        editDurationMinutesRef.current = duration
+      }
+    },
+    [lesson, date, startTime],
+  )
 
   function getActiveSeriesGroupId(targetLesson?: typeof lesson) {
     return seriesGroupId ?? resolveLessonRecurrence(targetLesson ?? lesson ?? {}).groupId
@@ -419,6 +491,10 @@ export function LessonCreateDialog({
       setDate(lesson.lesson_date)
       setStartTime(toTimeInputValue(lesson.start_time))
       setEndTime(toTimeInputValue(lesson.end_time))
+      editDurationMinutesRef.current = resolveLessonDurationMinutes(
+        lesson.start_time,
+        lesson.end_time,
+      )
       const customTitle = resolveLessonTitle(lesson)
       setCalendarDisplayText(
         customTitle ??
@@ -457,6 +533,7 @@ export function LessonCreateDialog({
       setDate(draft.date)
       setStartTime(draft.startTime)
       setEndTime('')
+      editDurationMinutesRef.current = null
       setRecurrencePattern('none')
       setRecurrenceEndDate(defaultRecurrenceEndDate(draft.date))
     }
@@ -1090,8 +1167,8 @@ export function LessonCreateDialog({
               endId="end-time"
               startValue={startTime}
               endValue={endTime}
-              onStartChange={setStartTime}
-              onEndChange={setEndTime}
+              onStartChange={handleStartTimeChange}
+              onEndChange={handleEndTimeChange}
               calendarStartTime={draft?.startTime ?? null}
               endPlaceholder={draft?.endTime || '19:30'}
               compact={isCompactForm}
@@ -1109,8 +1186,8 @@ export function LessonCreateDialog({
               endId="end-time"
               startValue={startTime}
               endValue={endTime}
-              onStartChange={setStartTime}
-              onEndChange={setEndTime}
+              onStartChange={handleStartTimeChange}
+              onEndChange={handleEndTimeChange}
               calendarStartTime={draft?.startTime ?? null}
               endPlaceholder={draft?.endTime || '19:30'}
               compact={isCompactForm}

@@ -13,13 +13,21 @@ export const GOOGLE_LESSON_CALENDAR_NAMES = [
   GOOGLE_LESSON_CALENDAR_NAME_2,
 ] as const
 
+export function normalizeCalendarSummary(name?: string | null): string {
+  if (!name) return ''
+  return name
+    .normalize('NFC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+}
+
 export function isPrimaryLessonCalendarName(name?: string | null): boolean {
-  const trimmed = name?.trim()
+  const trimmed = normalizeCalendarSummary(name)
   return trimmed === GOOGLE_LESSON_CALENDAR_NAME || trimmed === GOOGLE_LESSON_CALENDAR_NAME_ALT
 }
 
 export function isSecondaryLessonCalendarName(name?: string | null): boolean {
-  return name?.trim() === GOOGLE_LESSON_CALENDAR_NAME_2
+  return normalizeCalendarSummary(name) === GOOGLE_LESSON_CALENDAR_NAME_2
 }
 
 /** Google 캘린더 이름 → 기본 담당 강사 (캘린더 블록 색상은 강사 calendar_color 사용) */

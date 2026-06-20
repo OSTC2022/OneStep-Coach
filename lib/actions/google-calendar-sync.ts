@@ -195,6 +195,10 @@ export async function syncGoogleCalendarOnCalendarOpen(): Promise<{
 }> {
   await requireRole(['admin', 'instructor'])
 
+  if (!isGoogleCalendarConfigured()) {
+    return { synced: false, changed: 0 }
+  }
+
   const row = await getGoogleCalendarSyncRow()
   if (!row?.sync_enabled || !row.refresh_token || isGoogleCalendarSyncInProgress(row)) {
     return { synced: false, changed: 0 }
@@ -227,12 +231,23 @@ type PullResult = {
 
 let pullInFlight: Promise<PullResult> | null = null
 
+/** 캘린더 폴링 활성 여부 (환경 변수 + DB 연결) */
+export async function isGoogleCalendarPollingEnabled(): Promise<boolean> {
+  if (!isGoogleCalendarConfigured()) return false
+  const row = await getGoogleCalendarSyncRow()
+  return Boolean(row?.sync_enabled && row.refresh_token)
+}
+
 /** Google → 센터 초고속 증분 동기화 (캘린더 폴링용) */
 export async function pullGoogleCalendarChanges(): Promise<PullResult> {
   if (pullInFlight) return pullInFlight
 
   pullInFlight = (async () => {
     await requireRole(['admin', 'instructor'])
+
+    if (!isGoogleCalendarConfigured()) {
+      return { synced: false, changed: 0, skipped: true }
+    }
 
     const row = await getGoogleCalendarSyncRow()
     if (!row?.sync_enabled || !row.refresh_token) {
@@ -251,10 +266,12 @@ export async function pullGoogleCalendarChanges(): Promise<PullResult> {
       const changed = countGoogleSyncChanges(result)
       return { synced: true, changed }
     } catch (error) {
-      console.error(
-        '[google-calendar] poll sync failed:',
-        error instanceof Error ? error.message : error,
-      )
+      if (isGoogleCalendarConfigured()) {
+        console.error(
+          '[google-calendar] poll sync failed:',
+          error instanceof Error ? error.message : error,
+        )
+      }
       return { synced: false, changed: 0 }
     }
   })().finally(() => {

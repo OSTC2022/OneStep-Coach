@@ -85,6 +85,10 @@ export function useCalendarPanelSplit(
     return () => observer.disconnect()
   }, [containerRef, clampBottom])
 
+  useEffect(() => {
+    setBottomPx((prev) => clampBottom(prev))
+  }, [minTopPx, clampBottom])
+
   const finishDrag = useCallback(() => {
     if (!draggingRef.current) return
     draggingRef.current = false
@@ -96,6 +100,28 @@ export function useCalendarPanelSplit(
     })
   }, [clampBottom, fullStorageKey])
 
+  const captureTargetRef = useRef<HTMLElement | null>(null)
+  const capturePointerIdRef = useRef<number | null>(null)
+
+  const releaseCapture = useCallback(() => {
+    const target = captureTargetRef.current
+    const pointerId = capturePointerIdRef.current
+    if (target && pointerId !== null) {
+      try {
+        target.releasePointerCapture(pointerId)
+      } catch {
+        /* already released */
+      }
+    }
+    captureTargetRef.current = null
+    capturePointerIdRef.current = null
+  }, [])
+
+  const finishDragWithCapture = useCallback(() => {
+    releaseCapture()
+    finishDrag()
+  }, [releaseCapture, finishDrag])
+
   useEffect(() => {
     if (!isDragging) return
 
@@ -106,7 +132,7 @@ export function useCalendarPanelSplit(
     }
 
     function onPointerUp() {
-      finishDrag()
+      finishDragWithCapture()
     }
 
     document.addEventListener('pointermove', onPointerMove, { passive: false })
@@ -117,13 +143,16 @@ export function useCalendarPanelSplit(
       document.removeEventListener('pointerup', onPointerUp)
       document.removeEventListener('pointercancel', onPointerUp)
     }
-  }, [isDragging, bottomFromPointer, finishDrag])
+  }, [isDragging, bottomFromPointer, finishDragWithCapture])
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
+      captureTargetRef.current = e.currentTarget
+      capturePointerIdRef.current = e.pointerId
+      e.currentTarget.setPointerCapture(e.pointerId)
       draggingRef.current = true
       setIsDragging(true)
       setBottomPx(bottomFromPointer(e.clientY))

@@ -31,6 +31,9 @@ import {
   getWeekDates,
   getDefaultLessonCalendarLabel,
   isSameLessonSlot,
+  isLessonScheduleEnded,
+  resolveLessonDurationMinutes,
+  shiftEndTimeByDuration,
   minutesToTimeString,
   navigateDate,
   parseTimeToMinutes,
@@ -60,7 +63,7 @@ import {
   seedCalendarCache,
   setCachedLessons,
 } from '@/lib/calendar-data-store'
-import { pullGoogleCalendarChanges } from '@/lib/actions/google-calendar-sync'
+import { pullGoogleCalendarChanges, isGoogleCalendarPollingEnabled } from '@/lib/actions/google-calendar-sync'
 import {
   logCalendarFetch,
   withCalendarFetchTimeout,
@@ -146,6 +149,7 @@ export function LessonCalendar({
   const hasSeededCacheRef = useRef(false)
   const googleInboundSyncedRef = useRef(false)
   const googlePollInFlightRef = useRef(false)
+  const googlePollEnabledRef = useRef(false)
   const lessonsRef = useRef(lessons)
   lessonsRef.current = lessons
   const {
@@ -408,7 +412,26 @@ export function LessonCalendar({
   )
 
   useEffect(() => {
+    let cancelled = false
+    void isGoogleCalendarPollingEnabled().then((enabled) => {
+      if (!cancelled) googlePollEnabledRef.current = enabled
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     if (googleInboundSyncedRef.current) return
+    if (!googlePollEnabledRef.current) {
+      void isGoogleCalendarPollingEnabled().then((enabled) => {
+        googlePollEnabledRef.current = enabled
+        if (!enabled || googleInboundSyncedRef.current) return
+        googleInboundSyncedRef.current = true
+        void refreshWithGoogleSync({ force: true, refreshing: true })
+      })
+      return
+    }
     googleInboundSyncedRef.current = true
     void refreshWithGoogleSync({ force: true, refreshing: true })
   }, [refreshWithGoogleSync])
@@ -416,31 +439,52 @@ export function LessonCalendar({
   useEffect(() => {
     if (typeof document === 'undefined') return
 
-    const tick = () => {
-      if (document.hidden || googlePollInFlightRef.current) {
-        return
+    let intervalId: number | null = null
+    let cancelled = false
+
+    const startPolling = (enabled: boolean) => {
+      if (cancelled || !enabled) return
+
+      const tick = () => {
+        if (document.hidden || googlePollInFlightRef.current || !googlePollEnabledRef.current) {
+          return
+        }
+        googlePollInFlightRef.current = true
+        void pullGoogleCalendarChanges()
+          .then((result) => {
+            if (!result.synced || result.changed <= 0) return
+            return syncRange(currentDate, view, { force: true, refreshing: true })
+          })
+          .finally(() => {
+            googlePollInFlightRef.current = false
+          })
       }
-      googlePollInFlightRef.current = true
-      void pullGoogleCalendarChanges()
-        .then((result) => {
-          if (!result.synced || result.changed <= 0) return
-          return syncRange(currentDate, view, { force: true, refreshing: true })
-        })
-        .finally(() => {
-          googlePollInFlightRef.current = false
-        })
+
+      tick()
+      intervalId = window.setInterval(tick, GOOGLE_SYNC_POLL_MS)
     }
 
-    const intervalId = window.setInterval(tick, GOOGLE_SYNC_POLL_MS)
+    void isGoogleCalendarPollingEnabled().then((enabled) => {
+      googlePollEnabledRef.current = enabled
+      startPolling(enabled)
+    })
+
     const onVisibility = () => {
-      if (!document.hidden) tick()
+      if (!document.hidden && googlePollEnabledRef.current) {
+        void pullGoogleCalendarChanges()
+          .then((result) => {
+            if (!result.synced || result.changed <= 0) return
+            return syncRange(currentDate, view, { force: true, refreshing: true })
+          })
+      }
     }
-    const onFocus = () => tick()
+    const onFocus = onVisibility
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onFocus)
 
     return () => {
-      window.clearInterval(intervalId)
+      cancelled = true
+      if (intervalId !== null) window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onFocus)
     }
@@ -830,13 +874,20 @@ export function LessonCalendar({
       }
 
       const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
+      const before = lessonsRef.current.find((item) => item.id === enriched.id)
+
+      if (before && before.lesson_date !== enriched.lesson_date) {
+        setAgendaSelectedDate(
+          new Date(`${enriched.lesson_date}T12:00:00`),
+        )
+      }
 
       setLessons((prev) => {
-        const before = prev.find((item) => item.id === enriched.id)
-        const exists = Boolean(before)
+        const prevBefore = prev.find((item) => item.id === enriched.id)
+        const exists = Boolean(prevBefore)
 
-        if (before) {
-          lessonHistory.pushLessonUpdate(before, enriched)
+        if (prevBefore) {
+          lessonHistory.pushLessonUpdate(prevBefore, enriched)
         } else {
           lessonHistory.pushLessonCreate(enriched)
         }
@@ -977,14 +1028,17 @@ export function LessonCalendar({
     let endTime = lesson.end_time?.slice(0, 5) ?? undefined
 
     if (parsed.startTime) {
-      const oldStart = parseTimeToMinutes(lesson.start_time)
-      const oldEnd = lesson.end_time
-        ? parseTimeToMinutes(lesson.end_time)
-        : oldStart + 60
-      const duration = Math.max(15, oldEnd - oldStart)
-      const newStartMin = parseTimeToMinutes(parsed.startTime)
       startTime = parsed.startTime
-      endTime = minutesToTimeString(newStartMin + duration)
+      if (!isLessonScheduleEnded(lesson.lesson_date, lesson.end_time)) {
+        const duration = resolveLessonDurationMinutes(
+          lesson.start_time,
+          lesson.end_time,
+        )
+        const shiftedEnd = shiftEndTimeByDuration(parsed.startTime, duration)
+        if (shiftedEnd) {
+          endTime = shiftedEnd
+        }
+      }
     }
 
     const result = await updateLesson(lesson.id, {

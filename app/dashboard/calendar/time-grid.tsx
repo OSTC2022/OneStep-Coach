@@ -465,7 +465,7 @@ export function TimeGrid({
       if (available <= 0 || hourCount <= 0) return
       const fitted = available / hourCount
       setHourHeight(
-        Math.max(DEFAULT_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, fitted)),
+        Math.max(MIN_HOUR_HEIGHT, Math.min(MAX_HOUR_HEIGHT, fitted)),
       )
     }
 

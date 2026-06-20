@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { Loader2 } from 'lucide-react'
@@ -47,6 +48,8 @@ export function MonthMemoInput({
   const [selectedMember, setSelectedMember] = useState<MemoMember | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -64,6 +67,10 @@ export function MonthMemoInput({
   const showSuggestions = suggestions.length > 0 && parsed.memberQuery.length > 0
 
   useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
     setActiveIndex(0)
   }, [memo, suggestions.length])
 
@@ -71,6 +78,34 @@ export function MonthMemoInput({
     setMemo('')
     setSelectedMember(null)
   }, [selectedDate])
+
+  useLayoutEffect(() => {
+    if (!showSuggestions) {
+      setAnchorRect(null)
+      return
+    }
+
+    function updateAnchor() {
+      const el = inputRef.current
+      if (!el) return
+      setAnchorRect(el.getBoundingClientRect())
+    }
+
+    updateAnchor()
+
+    const inputEl = inputRef.current
+    const observer = inputEl ? new ResizeObserver(updateAnchor) : null
+    if (inputEl && observer) observer.observe(inputEl)
+
+    window.addEventListener('scroll', updateAnchor, true)
+    window.addEventListener('resize', updateAnchor)
+
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('scroll', updateAnchor, true)
+      window.removeEventListener('resize', updateAnchor)
+    }
+  }, [showSuggestions, suggestions])
 
   function applyMember(member: MemoMember) {
     setSelectedMember(member)
@@ -162,6 +197,58 @@ export function MonthMemoInput({
       ? `${parsed.startTime} – ${parsed.endTime}`
       : null
 
+  const suggestionList =
+    mounted && showSuggestions && anchorRect
+      ? createPortal(
+          <ul
+            role="listbox"
+            aria-label="회원 이름 자동완성"
+            className="fixed z-[300] max-h-48 touch-manipulation overflow-y-auto overscroll-contain rounded-md border border-border bg-popover py-1 shadow-lg"
+            style={{
+              left: anchorRect.left,
+              width: anchorRect.width,
+              top: anchorRect.top - 4,
+              transform: 'translateY(-100%)',
+            }}
+            onPointerDown={(e) => e.preventDefault()}
+          >
+            {suggestions.map((member, index) => {
+              const color = getInstructorCalendarColor(null)
+              const label = formatMemberCalendarLabel(member)
+              return (
+                <li key={member.id} role="option" aria-selected={index === activeIndex}>
+                  <button
+                    type="button"
+                    className={cn(
+                      'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-accent active:bg-accent',
+                      index === activeIndex && 'bg-accent',
+                    )}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      applyMember(member)
+                    }}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                    {parsed.startTime && (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {parsed.startTime}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>,
+          document.body,
+        )
+      : null
+
   return (
     <div ref={containerRef} className="relative shrink-0 border-t border-border p-3">
       <div className="relative">
@@ -178,6 +265,9 @@ export function MonthMemoInput({
           disabled={isSubmitting}
           placeholder={`${dateHint} 메모 · 시간 이름`}
           className="h-11 border-dashed bg-muted/30 pr-10"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
         />
         {isSubmitting && (
           <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
@@ -195,38 +285,7 @@ export function MonthMemoInput({
         </p>
       )}
 
-      {showSuggestions && (
-        <ul className="absolute bottom-full left-3 right-3 z-50 mb-1 max-h-48 overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-lg">
-          {suggestions.map((member, index) => {
-            const color = getInstructorCalendarColor(null)
-            const label = formatMemberCalendarLabel(member)
-            return (
-              <li key={member.id}>
-                <button
-                  type="button"
-                  className={cn(
-                    'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent',
-                    index === activeIndex && 'bg-accent',
-                  )}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => applyMember(member)}
-                >
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-                  {parsed.startTime && (
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {parsed.startTime}
-                    </span>
-                  )}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+      {suggestionList}
 
       {!showSuggestions && parsed.memberQuery && parsed.startTime && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">

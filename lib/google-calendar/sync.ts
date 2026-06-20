@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
   GOOGLE_CALENDAR_SYNC_ID,
+  isGoogleCalendarConfigured,
   isPrimaryLessonCalendarName,
   isSecondaryLessonCalendarName,
   getGoogleCalendarWebhookSecret,
@@ -427,9 +428,22 @@ export async function syncGoogleCalendarLessons(options?: {
   skipDedupe?: boolean
   lightweight?: boolean
 }): Promise<GoogleCalendarSyncResult> {
+  const emptyResult = {
+    created: 0,
+    updated: 0,
+    linked: 0,
+    cancelled: 0,
+    pendingMember: 0,
+    skipped: 0,
+  }
+
+  if (!isGoogleCalendarConfigured()) {
+    return emptyResult
+  }
+
   let row = await getGoogleCalendarSyncRow()
   if (!row?.refresh_token || !row.calendar_id || !row.sync_enabled) {
-    return { created: 0, updated: 0, linked: 0, cancelled: 0, pendingMember: 0, skipped: 0 }
+    return emptyResult
   }
 
   const lightweight = Boolean(options?.lightweight)

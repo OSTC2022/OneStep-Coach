@@ -815,6 +815,41 @@ export function parseTimeToMinutes(time: string | null): number {
   return h * 60 + m
 }
 
+/** 수업 종료 시각이 현재보다 이전이면 true */
+export function isLessonScheduleEnded(
+  lessonDate: string | null | undefined,
+  endTime: string | null | undefined,
+): boolean {
+  if (!lessonDate) return false
+  const end = endTime?.slice(0, 5)
+  if (!end) return false
+  const endAt = new Date(`${lessonDate}T${end}:00`)
+  if (!Number.isFinite(endAt.getTime())) return false
+  return endAt.getTime() <= Date.now()
+}
+
+export function resolveLessonDurationMinutes(
+  startTime: string | null | undefined,
+  endTime: string | null | undefined,
+  fallbackMinutes = 60,
+): number {
+  const startMin = parseTimeToMinutes(startTime ?? null)
+  const endMin = endTime
+    ? parseTimeToMinutes(endTime)
+    : startMin + fallbackMinutes
+  return Math.max(15, endMin - startMin)
+}
+
+export function shiftEndTimeByDuration(
+  startTime: string,
+  durationMinutes: number,
+): string | null {
+  const normalizedStart = startTime.slice(0, 5)
+  const endMin = parseTimeToMinutes(normalizedStart) + durationMinutes
+  if (endMin >= 24 * 60) return null
+  return minutesToTimeString(endMin)
+}
+
 export function minutesToTimeString(minutes: number): string {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60

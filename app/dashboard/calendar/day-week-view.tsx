@@ -1,9 +1,9 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { CalendarMobileWeek } from './calendar-mobile-week'
+import { CalendarMobileDateStrip } from './calendar-mobile-week'
 import { MonthDayPanel } from './month-day-panel'
 import { CalendarPanelResizeHandle } from './calendar-panel-resize-handle'
 import { useIsMobileViewport } from '@/hooks/use-min-md'
@@ -52,9 +52,31 @@ interface DayWeekViewProps {
   hasRangeCache?: boolean
 }
 
-const MIN_BOTTOM_PX = 168
-const MIN_TOP_PX = 160
-const DEFAULT_BOTTOM_PX = 280
+const MIN_BOTTOM_PX = 160
+const DEFAULT_BOTTOM_PX = 420
+const RESIZE_HANDLE_PX = 20
+const COLLAPSE_BAR_PX = 36
+const MOBILE_WEEK_STRIP_PX = 44
+const TIME_GRID_COLLAPSED_PX = 52
+const MIN_EXPANDED_GRID_PX = 140
+
+function computeMinTopPx(
+  isMobile: boolean,
+  isWeekView: boolean,
+  gridExpanded: boolean,
+): number {
+  if (!gridExpanded) return 0
+  let height = COLLAPSE_BAR_PX + RESIZE_HANDLE_PX + MIN_EXPANDED_GRID_PX
+  if (isMobile && isWeekView) height += MOBILE_WEEK_STRIP_PX
+  return height
+}
+
+function showCollapsedTimeGrid(
+  isMobile: boolean,
+  isWeekView: boolean,
+): boolean {
+  return !(isMobile && isWeekView)
+}
 
 export function DayWeekView({
   dates,
@@ -81,7 +103,12 @@ export function DayWeekView({
   const isMobile = useIsMobileViewport()
   const [gridExpanded, setGridExpanded] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
-  const splitKey = isWeekView ? 'week' : 'day'
+  const splitKey = isWeekView ? 'week-v2' : 'day-v2'
+
+  const minTopPx = useMemo(
+    () => computeMinTopPx(isMobile, isWeekView, gridExpanded),
+    [isMobile, isWeekView, gridExpanded],
+  )
 
   const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
     containerRef,
@@ -89,104 +116,154 @@ export function DayWeekView({
       storageKey: splitKey,
       defaultBottomPx: DEFAULT_BOTTOM_PX,
       minBottomPx: MIN_BOTTOM_PX,
-      minTopPx: MIN_TOP_PX,
+      minTopPx,
     },
   )
 
-  if (isMobile) {
-    return (
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-clip">
-        <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-          <CalendarMobileWeek
-            dates={dates}
-            selectedDate={selectedDate}
-            lessons={lessons}
-            onSelectDate={onSelectDate}
-            onLessonActivate={onLessonActivate}
-            highlightedLessonIds={highlightedLessonIds}
-            rangeLoading={rangeLoading}
-            hasCache={hasRangeCache}
-          />
-        </div>
-      </div>
-    )
-  }
+  const showMobileWeekStrip = isMobile && isWeekView
+  const showCollapsedGrid = !gridExpanded && showCollapsedTimeGrid(isMobile, isWeekView)
+
+  const gridDates = useMemo(() => {
+    if (isMobile && isWeekView) return [selectedDate]
+    return dates
+  }, [isMobile, isWeekView, dates, selectedDate])
 
   return (
-      <div
-        ref={containerRef}
-        className={cn(
-          'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
-          isDragging && 'select-none',
-        )}
-      >
-        <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 py-1.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-xs text-muted-foreground"
-            onClick={() => setGridExpanded((prev) => !prev)}
-          >
-            {gridExpanded ? (
-              <>
-                <ChevronUp className="h-3.5 w-3.5" />
-                시간표 접기
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-3.5 w-3.5" />
-                시간표 펼치기
-              </>
-            )}
-          </Button>
-        </div>
-
-        <div
-          className={cn(
-            'min-h-0 w-full overflow-hidden',
-            gridExpanded ? 'flex-1' : 'shrink-0',
+    <div
+      ref={containerRef}
+      className={cn(
+        'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card',
+        isDragging && 'select-none',
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-center border-b border-border bg-muted/20 py-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 text-[11px] text-muted-foreground"
+          onClick={() => setGridExpanded((prev) => !prev)}
+        >
+          {gridExpanded ? (
+            <>
+              <ChevronUp className="h-3.5 w-3.5" />
+              시간표 접기
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3.5 w-3.5" />
+              시간표 펼치기
+            </>
           )}
-        >
-          <TimeGrid
-            dates={dates}
-            lessons={lessons}
-            instructors={instructors}
-            selectedDate={selectedDate}
-            onSelectDate={onSelectDate}
-            onDragCreate={onDragCreate}
-            onLessonMove={onLessonMove}
-            onLessonEdit={onLessonEdit}
-            onLessonActivate={onLessonActivate}
-            isLessonSelected={isLessonSelected}
-            onClearLessonSelection={onClearLessonSelection}
-            compactHeader={compactHeader}
-            collapsed={!gridExpanded}
-            highlightedLessonIds={highlightedLessonIds}
-            selectedLessonIds={selectedLessonIds}
-            rangeLoading={rangeLoading}
-            hasRangeCache={hasRangeCache}
-            className="h-full min-h-0 rounded-none border-0"
-          />
-        </div>
-
-        <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
-
-        <div
-          className="w-full shrink-0 overflow-y-auto"
-          style={{ maxHeight: `${bottomPx}px` }}
-        >
-          <MonthDayPanel
-            selectedDate={selectedDate}
-            lessons={lessons}
-            members={members}
-            onLessonActivate={onLessonActivate}
-            onLessonEdit={onLessonEdit}
-            onLessonLineUpdate={onLessonLineUpdate}
-            onMemoSubmit={onMemoSubmit}
-            isLessonSelected={isLessonSelected}
-          />
-        </div>
+        </Button>
       </div>
+
+      {gridExpanded ? (
+        <>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {showMobileWeekStrip ? (
+              <CalendarMobileDateStrip
+                dates={dates}
+                selectedDate={selectedDate}
+                lessons={lessons}
+                onSelectDate={onSelectDate}
+              />
+            ) : null}
+
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <TimeGrid
+                dates={gridDates}
+                lessons={lessons}
+                instructors={instructors}
+                selectedDate={selectedDate}
+                onSelectDate={onSelectDate}
+                onDragCreate={onDragCreate}
+                onLessonMove={onLessonMove}
+                onLessonEdit={onLessonEdit}
+                onLessonActivate={onLessonActivate}
+                isLessonSelected={isLessonSelected}
+                onClearLessonSelection={onClearLessonSelection}
+                compactHeader={compactHeader}
+                highlightedLessonIds={highlightedLessonIds}
+                selectedLessonIds={selectedLessonIds}
+                rangeLoading={rangeLoading}
+                hasRangeCache={hasRangeCache}
+                className="h-full min-h-0 rounded-none border-0"
+              />
+            </div>
+          </div>
+
+          <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
+
+          <div
+            className="flex shrink-0 flex-col overflow-hidden"
+            style={{ height: bottomPx }}
+          >
+            <MonthDayPanel
+              selectedDate={selectedDate}
+              lessons={lessons}
+              members={members}
+              onLessonActivate={onLessonActivate}
+              onLessonEdit={onLessonEdit}
+              onLessonLineUpdate={onLessonLineUpdate}
+              onMemoSubmit={onMemoSubmit}
+              isLessonSelected={isLessonSelected}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          {showMobileWeekStrip ? (
+            <CalendarMobileDateStrip
+              dates={dates}
+              selectedDate={selectedDate}
+              lessons={lessons}
+              onSelectDate={onSelectDate}
+            />
+          ) : null}
+
+          {showCollapsedGrid ? (
+            <div
+              className="shrink-0 overflow-hidden"
+              style={{ height: TIME_GRID_COLLAPSED_PX }}
+            >
+              <TimeGrid
+                dates={gridDates}
+                lessons={lessons}
+                instructors={instructors}
+                selectedDate={selectedDate}
+                onSelectDate={onSelectDate}
+                onDragCreate={onDragCreate}
+                onLessonMove={onLessonMove}
+                onLessonEdit={onLessonEdit}
+                onLessonActivate={onLessonActivate}
+                isLessonSelected={isLessonSelected}
+                onClearLessonSelection={onClearLessonSelection}
+                compactHeader={compactHeader}
+                collapsed
+                highlightedLessonIds={highlightedLessonIds}
+                selectedLessonIds={selectedLessonIds}
+                rangeLoading={rangeLoading}
+                hasRangeCache={hasRangeCache}
+                className="h-full min-h-0 rounded-none border-0"
+              />
+            </div>
+          ) : null}
+
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <MonthDayPanel
+              selectedDate={selectedDate}
+              lessons={lessons}
+              members={members}
+              onLessonActivate={onLessonActivate}
+              onLessonEdit={onLessonEdit}
+              onLessonLineUpdate={onLessonLineUpdate}
+              onMemoSubmit={onMemoSubmit}
+              isLessonSelected={isLessonSelected}
+            />
+          </div>
+        </>
+      )}
+    </div>
   )
 }

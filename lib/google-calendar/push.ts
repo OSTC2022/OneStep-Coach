@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import {
   resolveGoogleCalendarTarget,
 } from '@/lib/google-calendar/calendar-instructor'
@@ -112,6 +113,7 @@ function uniqueCalendarIds(
 }
 
 export async function isGoogleCalendarPushEnabled(): Promise<boolean> {
+  if (!isGoogleCalendarConfigured()) return false
   const row = await getGoogleCalendarSyncRow()
   return Boolean(row?.sync_enabled && row.refresh_token && row.calendar_id)
 }
