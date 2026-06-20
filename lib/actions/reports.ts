@@ -95,9 +95,11 @@ export async function getReportDashboardData(): Promise<ReportDashboardData> {
       .eq('attendance_status', 'present'),
     supabase
       .from('lessons')
-      .select('lesson_date, start_time, instructor_id, attendance_status')
+      .select(
+        'id, lesson_date, start_time, instructor_id, attendance_status, lesson_type, member_id, session_deducted, end_time, special_note, event_status, event_type, created_at, lesson_sessions(checked_in_at)',
+      )
       .gte('lesson_date', thisMonthStr)
-      .neq('attendance_status', 'cancelled')
+      .neq('event_type', 'recurring_master')
       .not('instructor_id', 'is', null),
     supabase
       .from('instructors')

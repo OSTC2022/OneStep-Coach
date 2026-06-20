@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { Suspense } from 'react'
 import { requireDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getInstructorsPage } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
@@ -30,12 +31,14 @@ export default async function InstructorsPage() {
         </p>
       </div>
 
-      <InstructorManagement
-        initialInstructors={instructors}
-        totalCount={totalCount}
-        pageSize={LIST_PAGE_SIZE}
-        isAdmin={user.role === 'admin'}
-      />
+      <Suspense fallback={<TableSkeleton rows={8} />}>
+        <InstructorManagement
+          initialInstructors={instructors}
+          totalCount={totalCount}
+          pageSize={LIST_PAGE_SIZE}
+          isAdmin={user.role === 'admin'}
+        />
+      </Suspense>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { addDays, format, parseISO } from 'date-fns'
 import { RRule, rrulestr } from 'rrule'
 import type { Lesson } from '@/lib/types'
 import { resolveLessonTitle, filterDisplayableCalendarLessons, isLessonCalendarVisible, isLessonStatusPageVisible } from '@/lib/calendar-utils'
+import { dedupeLessonsBySlot } from '@/lib/lesson-slot-dedupe'
 import {
   buildVirtualLessonId,
   isDisplayStoredLesson,
@@ -112,21 +113,7 @@ function memberSlotIdentityKey(
 }
 
 export function collapseSlotDuplicateLessons(lessons: Lesson[]): Lesson[] {
-  const byKey = new Map<string, Lesson>()
-
-  for (const lesson of lessons) {
-    if (!isLessonIdentifiable(lesson)) continue
-    const memberKey = memberSlotIdentityKey(lesson)
-    if (!memberKey) continue
-
-    const key = `${lesson.lesson_date}|${(lesson.start_time ?? '').slice(0, 5)}|${memberKey}`
-    const existing = byKey.get(key)
-    if (!existing || lessonIdentityScore(lesson) > lessonIdentityScore(existing)) {
-      byKey.set(key, lesson)
-    }
-  }
-
-  return Array.from(byKey.values()).sort((a, b) => {
+  return dedupeLessonsBySlot(lessons).sort((a, b) => {
     const dateCmp = a.lesson_date.localeCompare(b.lesson_date)
     if (dateCmp !== 0) return dateCmp
     return (a.start_time ?? '').localeCompare(b.start_time ?? '')

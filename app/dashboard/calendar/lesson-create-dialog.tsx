@@ -262,6 +262,7 @@ export function LessonCreateDialog({
   const [date, setDate] = useState('')
   const [isAddingToSlot, setIsAddingToSlot] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [recurrencePattern, setRecurrencePattern] =
     useState<LessonRecurrencePattern>('none')
   const [recurrenceEndDate, setRecurrenceEndDate] = useState('')
@@ -611,6 +612,8 @@ export function LessonCreateDialog({
       setRecurrenceEndDate('')
       setSaveScopeOpen(false)
       setDeleteScopeOpen(false)
+      setIsLoading(false)
+      setIsDeleting(false)
       pendingEditUpdatesRef.current = null
     }
     onOpenChange(next)
@@ -739,23 +742,10 @@ export function LessonCreateDialog({
   }
 
   async function handleDeleteRequest() {
-    if (!isEditing || !lesson) return
-
-    setIsLoading(true)
-    const info = await getLessonRecurrenceInfo(lesson.id)
-    setIsLoading(false)
-
-    if (info?.groupId) setSeriesGroupId(info.groupId)
-    if (info?.pattern && info.pattern !== 'none') {
-      setRecurrencePattern(info.pattern)
-    }
-    if (info?.endDate && info.pattern && !isOpenEndedRecurrencePattern(info.pattern)) {
-      setRecurrenceEndDate(info.endDate)
-    }
+    if (!isEditing || !lesson || isDeleting || isLoading) return
 
     const hasSeries =
-      Boolean(info?.groupId) ||
-      (info?.pattern !== undefined && info.pattern !== 'none')
+      Boolean(seriesGroupId) || recurrencePattern !== 'none'
 
     if (hasSeries) {
       setDeleteScopeOpen(true)
@@ -771,7 +761,7 @@ export function LessonCreateDialog({
     if (!lesson) return
 
     setDeleteScopeOpen(false)
-    setIsLoading(true)
+    setIsDeleting(true)
 
     try {
       const result = await deleteLessonsInSeries(
@@ -821,7 +811,7 @@ export function LessonCreateDialog({
         description: '서버 요청 중 오류가 발생했습니다. 새로고침 후 다시 시도해주세요.',
       })
     } finally {
-      setIsLoading(false)
+      setIsDeleting(false)
     }
   }
 
@@ -1395,11 +1385,15 @@ export function LessonCreateDialog({
           variant="ghost"
           size="icon"
           className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-8 sm:w-8"
-          disabled={isLoading}
+          disabled={isLoading || isDeleting}
           title="삭제 (Del)"
           onClick={() => void handleDeleteRequest()}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          {isDeleting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
         </Button>
       )}
       <Button
@@ -1407,11 +1401,17 @@ export function LessonCreateDialog({
         variant="outline"
         size="sm"
         className="h-7 flex-1 text-xs sm:h-8"
+        disabled={isDeleting}
         onClick={() => handleOpenChange(false)}
       >
         취소
       </Button>
-      <Button type="submit" size="sm" className="h-7 flex-1 text-xs sm:h-8" disabled={isLoading}>
+      <Button
+        type="submit"
+        size="sm"
+        className="h-7 flex-1 text-xs sm:h-8"
+        disabled={isLoading || isDeleting}
+      >
         {isLoading ? (
           <>
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -1435,22 +1435,27 @@ export function LessonCreateDialog({
             variant="ghost"
             size="icon"
             className="h-9 w-9 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            disabled={isLoading}
+            disabled={isLoading || isDeleting}
             title="삭제 (Del)"
             onClick={() => void handleDeleteRequest()}
           >
-            <Trash2 className="h-4 w-4" />
+            {isDeleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
           </Button>
         )}
         <div className="ml-auto flex gap-2">
           <Button
             type="button"
             variant="outline"
+            disabled={isDeleting}
             onClick={() => handleOpenChange(false)}
           >
             취소
           </Button>
-          <Button type="submit" disabled={isLoading}>
+          <Button type="submit" disabled={isLoading || isDeleting}>
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1547,7 +1552,7 @@ export function LessonCreateDialog({
       <AlertDialog
         open={deleteScopeOpen}
         onOpenChange={(next) => {
-          if (!isLoading) setDeleteScopeOpen(next)
+          if (!isDeleting) setDeleteScopeOpen(next)
         }}
       >
         <AlertDialogContent mobileSheet>
@@ -1570,16 +1575,23 @@ export function LessonCreateDialog({
               type="button"
               variant="destructive"
               className="w-full"
-              disabled={isLoading}
+              disabled={isDeleting}
               onClick={() => void executeDelete('all')}
             >
-              반복 전체 지우기
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  삭제 중...
+                </>
+              ) : (
+                '반복 전체 지우기'
+              )}
             </Button>
             <Button
               type="button"
               variant="outline"
               className="w-full"
-              disabled={isLoading}
+              disabled={isDeleting}
               onClick={() => void executeDelete('single')}
             >
               이것만 지우기
@@ -1588,12 +1600,12 @@ export function LessonCreateDialog({
               type="button"
               variant="outline"
               className="w-full"
-              disabled={isLoading}
+              disabled={isDeleting}
               onClick={() => void executeDelete('future')}
             >
               이후 모두 지우기
             </Button>
-            <AlertDialogCancel disabled={isLoading} className="w-full">
+            <AlertDialogCancel disabled={isDeleting} className="w-full">
               취소
             </AlertDialogCancel>
           </AlertDialogFooter>

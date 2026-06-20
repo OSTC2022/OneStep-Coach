@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -243,7 +244,14 @@ export function ReportDashboard({
                 <>
                   {instructorPayroll.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="font-medium">{row.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link
+                          href={`/dashboard/instructors?pay=${row.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {row.name}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-center">{row.totalLessons}</TableCell>
                       <TableCell className="text-center hidden sm:table-cell">
                         {row.weekdaySlots}

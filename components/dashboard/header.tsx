@@ -17,6 +17,7 @@ import { LogOut, User as UserIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import type { User } from '@/lib/types'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
+import { MemberBackupHeaderMenu } from '@/components/dashboard/member-backup-header-menu'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
@@ -44,6 +45,8 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
         <div className="flex-1" />
 
         {user ? <NotificationBell userId={user.id} /> : null}
+
+        {user?.role === 'admin' ? <MemberBackupHeaderMenu /> : null}
 
         <ShareWebsiteButton />
         <InstallAppButton showLabel className="shrink-0" />

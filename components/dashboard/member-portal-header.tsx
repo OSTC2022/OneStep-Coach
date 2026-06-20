@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { NotificationBell } from '@/components/dashboard/notification-bell'
+import { MemberBoardPopover } from '@/components/dashboard/member-board-popover'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
@@ -71,6 +72,9 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
         </Link>
 
         <div className="flex-1" />
+
+        <MemberBoardPopover userId={user.id} kind="notice" />
+        <MemberBoardPopover userId={user.id} kind="event" />
 
         <NotificationBell userId={user.id} />
 

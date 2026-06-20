@@ -33,7 +33,7 @@ import {
   updateLessonEndTime,
   type GuestLessonAction,
 } from '@/lib/actions/lesson-sessions'
-import { isAttendanceMarked } from '@/lib/lesson-record-utils'
+import { isAttendanceMarked, isLessonCompletedRecord, isLessonCountedAsMemberAttendance } from '@/lib/lesson-record-utils'
 import { isAthleticsClubLessonType, normalizeLessonType } from '@/lib/lesson-types'
 import {
   isGroupLessonAttendanceMarked,
@@ -51,6 +51,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Popover,
   PopoverContent,
@@ -98,14 +104,24 @@ import {
   Redo2,
   RefreshCw,
   Undo2,
+  UserRound,
 } from 'lucide-react'
 import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
+import { LessonMemberLinkDialog } from '@/components/lesson-status/lesson-member-link-dialog'
 import { LessonStatusWeightInput } from '@/components/lesson-status/lesson-status-weight-input'
 
 const SignaturePadDialog = dynamic(
   () =>
     import('@/components/ui/signature-pad-dialog').then((m) => ({
       default: m.SignaturePadDialog,
+    })),
+  { ssr: false },
+)
+
+const LessonCreateDialog = dynamic(
+  () =>
+    import('@/app/dashboard/calendar/lesson-create-dialog').then((m) => ({
+      default: m.LessonCreateDialog,
     })),
   { ssr: false },
 )
@@ -196,12 +212,13 @@ function formatLocalEndTime(date: Date) {
 }
 
 function isLessonCompleted(lesson: Lesson) {
-  return Boolean(lesson.session_deducted && lesson.end_time)
+  return isLessonCompletedRecord(lesson)
 }
 
 interface AthleteTileProps {
   lesson: Lesson
   isLoading: boolean
+  instructors: Instructor[]
   instructorLookup: Map<string, Instructor>
   inInstructorGroup?: boolean
   compact?: boolean
@@ -213,6 +230,9 @@ interface AthleteTileProps {
   onClearAttendanceCheck: (lessonId: string) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
+  onMemberLinked: (originalLessonId: string, lesson: Lesson, deletedIds?: string[]) => void
+  onLessonEdited: (lesson: Lesson) => void
+  onLessonDeleted: (lessonIds: string[]) => void
 }
 
 function resolveLessonInstructorColor(
@@ -225,6 +245,7 @@ function resolveLessonInstructorColor(
 const AthleteTile = memo(function AthleteTile({
   lesson,
   isLoading,
+  instructors,
   instructorLookup,
   inInstructorGroup = false,
   compact = false,
@@ -236,8 +257,13 @@ const AthleteTile = memo(function AthleteTile({
   onClearAttendanceCheck,
   onGuestStatusChange,
   onLessonCompleted,
+  onMemberLinked,
+  onLessonEdited,
+  onLessonDeleted,
 }: AthleteTileProps) {
   const [signatureOpen, setSignatureOpen] = useState(false)
+  const [memberLinkOpen, setMemberLinkOpen] = useState(false)
+  const [editLessonOpen, setEditLessonOpen] = useState(false)
   const [signatureDefaultEndTime, setSignatureDefaultEndTime] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
   const [endTimeEditOpen, setEndTimeEditOpen] = useState(false)
@@ -252,13 +278,13 @@ const AthleteTile = memo(function AthleteTile({
   const isAthleticsGroup =
     !isMemberLinked && isAthleticsClubLessonType(lesson.lesson_type)
   const isPresent = lesson.attendance_status === 'present'
+  const isCancelled = lesson.attendance_status === 'cancelled'
+  const completed = isLessonCompleted(lesson)
   const isPresentMarked = isMemberLinked
-    ? isPresent && isAttendanceMarked(lesson)
+    ? completed || (isPresent && isAttendanceMarked(lesson))
     : isAthleticsGroup
       ? isGroupLessonAttendanceMarked(lesson)
       : false
-  const isCancelled = lesson.attendance_status === 'cancelled'
-  const completed = isLessonCompleted(lesson)
   const isInstructorUnassigned = isAutoAssignedLesson(lesson)
   const instructorBorderColor = resolveLessonInstructorColor(lesson, instructorLookup)
   const lessonTypeLabel = normalizeLessonType(lesson.lesson_type)
@@ -270,6 +296,21 @@ const AthleteTile = memo(function AthleteTile({
       ? instructorLookup.get(lesson.instructor_id)?.name
       : undefined) ??
     '—'
+  const memberPickerOptions = useMemo(
+    () =>
+      lesson.member
+        ? [
+            {
+              id: lesson.member.id,
+              name: lesson.member.name,
+              sport: lesson.member.sport,
+              age: lesson.member.age,
+              birth_date: lesson.member.birth_date,
+            },
+          ]
+        : [],
+    [lesson.member],
+  )
   const statusLabel = completed
     ? `종료 ${formatTime(lesson.end_time) ?? ''}`.trim()
     : isCancelled
@@ -401,17 +442,33 @@ const AthleteTile = memo(function AthleteTile({
       }
     >
       {isMemberLinked && lesson.member_id ? (
-        <Link
-          href={`/dashboard/members/${lesson.member_id}`}
-          className={cn(
-            'truncate font-semibold leading-tight text-foreground hover:text-primary hover:underline',
-            expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
-          )}
-          title={`${label} 회원 페이지`}
-        >
-          {label}
-        </Link>
-      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'truncate text-left font-semibold leading-tight text-foreground hover:text-primary hover:underline',
+                expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
+              )}
+              title={`${label} — 수업 수정 또는 회원 페이지`}
+            >
+              {label}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[9.5rem]">
+            <DropdownMenuItem onSelect={() => setEditLessonOpen(true)}>
+              <Pencil className="size-4" />
+              수업 수정
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href={`/dashboard/members/${lesson.member_id}`}>
+                <UserRound className="size-4" />
+                회원 페이지
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : isAthleticsGroup ? (
         <p
           className={cn(
             'truncate font-semibold leading-tight',
@@ -421,7 +478,68 @@ const AthleteTile = memo(function AthleteTile({
         >
           {label}
         </p>
+      ) : (
+        <>
+          <p
+            className={cn(
+              'truncate font-semibold leading-tight text-primary',
+              expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
+            )}
+            title={label}
+          >
+            {label}
+          </p>
+          {showActions ? (
+            <div
+              className="mt-1 grid grid-cols-2 gap-0.5"
+              role="group"
+              aria-label={`${label} 회원 연결 및 수정`}
+            >
+              <button
+                type="button"
+                onClick={() => setMemberLinkOpen(true)}
+                className="rounded bg-primary/15 px-0.5 py-1 text-[9px] font-medium leading-tight text-primary transition-colors hover:bg-primary/25"
+              >
+                회원 연결
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditLessonOpen(true)}
+                className="rounded bg-muted/40 px-0.5 py-1 text-[9px] font-medium leading-tight text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                수정
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
+
+      {!isMemberLinked && !isAthleticsGroup ? (
+        <LessonMemberLinkDialog
+          open={memberLinkOpen}
+          onOpenChange={setMemberLinkOpen}
+          lesson={lesson}
+          onLinked={onMemberLinked}
+        />
+      ) : null}
+
+      {!isAthleticsGroup ? (
+        <LessonCreateDialog
+          open={editLessonOpen}
+          onOpenChange={setEditLessonOpen}
+          lesson={lesson}
+          members={memberPickerOptions}
+          instructors={instructors}
+          onSaved={(saved) => {
+            onLessonEdited(saved)
+            setEditLessonOpen(false)
+          }}
+          onDeleted={(lessonIds) => {
+            onLessonDeleted(lessonIds)
+            setEditLessonOpen(false)
+          }}
+        />
+      ) : null}
 
       <p
         className={cn(
@@ -758,6 +876,9 @@ interface TimeSlotsPanelProps {
   onClearAttendanceCheck: (lessonId: string) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
   onLessonCompleted: (lessonId: string, patch: Partial<Lesson>) => void
+  onMemberLinked: (originalLessonId: string, lesson: Lesson, deletedIds?: string[]) => void
+  onLessonEdited: (lesson: Lesson) => void
+  onLessonDeleted: (lessonIds: string[]) => void
   bodyWeightByKey: Record<string, number>
   onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
   emptyMessage?: string
@@ -794,6 +915,9 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   onClearAttendanceCheck,
   onGuestStatusChange,
   onLessonCompleted,
+  onMemberLinked,
+  onLessonEdited,
+  onLessonDeleted,
   emptyMessage = '등록된 수업이 없습니다.',
   autoScrollToNow = false,
 }: TimeSlotsPanelProps) {
@@ -912,6 +1036,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         expanded={expanded}
                         isLoading={isUpdating === lesson.id}
                         canEditEndTime={canEditEndTime}
+                        instructors={instructors}
                         instructorLookup={instructorLookup}
                         bodyWeightByKey={bodyWeightByKey}
                         onBodyWeightChange={onBodyWeightChange}
@@ -919,6 +1044,9 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         onClearAttendanceCheck={onClearAttendanceCheck}
                         onGuestStatusChange={onGuestStatusChange}
                         onLessonCompleted={onLessonCompleted}
+                        onMemberLinked={onMemberLinked}
+                        onLessonEdited={onLessonEdited}
+                        onLessonDeleted={onLessonDeleted}
                       />
                     </div>
                   )
@@ -979,6 +1107,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         lesson={lesson}
                         isLoading={isUpdating === lesson.id}
                         canEditEndTime={canEditEndTime}
+                        instructors={instructors}
                         instructorLookup={instructorLookup}
                         inInstructorGroup
                         bodyWeightByKey={bodyWeightByKey}
@@ -987,6 +1116,9 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         onClearAttendanceCheck={onClearAttendanceCheck}
                         onGuestStatusChange={onGuestStatusChange}
                         onLessonCompleted={onLessonCompleted}
+                        onMemberLinked={onMemberLinked}
+                        onLessonEdited={onLessonEdited}
+                        onLessonDeleted={onLessonDeleted}
                       />
                     ))}
                   </div>
@@ -1100,7 +1232,7 @@ export function LessonStatusView({
           }
           return l.lesson_type === '체험레슨'
         }
-        return l.attendance_status === 'present' && isAttendanceMarked(l)
+        return isLessonCountedAsMemberAttendance(l)
       }).length,
       cancelled: lessons.filter((l) => l.attendance_status === 'cancelled').length,
     }),
@@ -1591,6 +1723,61 @@ export function LessonStatusView({
     [replaceLessonInPlace, updateLessonInPlace],
   )
 
+  const handleMemberLinked = useCallback(
+    (originalId: string, linked: Lesson, deletedIds?: string[]) => {
+      const removed = new Set(deletedIds ?? [])
+      const linkedId = linked.id ?? originalId
+      const seen = new Set<string>()
+      setLessons((prev) =>
+        sortLessonsForStatusDisplay(
+          prev
+            .filter(
+              (lesson) =>
+                !removed.has(lesson.id) &&
+                !(lesson.id === linkedId && lesson.id !== originalId),
+            )
+            .map((lesson) =>
+              lesson.id === originalId
+                ? { ...lesson, ...linked, id: linkedId }
+                : lesson,
+            )
+            .filter((lesson) => {
+              if (seen.has(lesson.id)) return false
+              seen.add(lesson.id)
+              return true
+            }),
+          instructors,
+        ),
+      )
+    },
+    [instructors],
+  )
+
+  const handleLessonEdited = useCallback(
+    (lesson: Lesson) => {
+      setLessons((prev) =>
+        sortLessonsForStatusDisplay(
+          prev.map((item) => (item.id === lesson.id ? { ...item, ...lesson } : item)),
+          instructors,
+        ),
+      )
+    },
+    [instructors],
+  )
+
+  const handleLessonDeleted = useCallback(
+    (lessonIds: string[]) => {
+      const removed = new Set(lessonIds)
+      setLessons((prev) =>
+        sortLessonsForStatusDisplay(
+          prev.filter((item) => !removed.has(item.id)),
+          instructors,
+        ),
+      )
+    },
+    [instructors],
+  )
+
   const panelProps = {
     instructors,
     instructorLookup,
@@ -1602,6 +1789,9 @@ export function LessonStatusView({
     onClearAttendanceCheck: handleClearAttendanceCheck,
     onGuestStatusChange: handleGuestStatusChange,
     onLessonCompleted: handleLessonCompleted,
+    onMemberLinked: handleMemberLinked,
+    onLessonEdited: handleLessonEdited,
+    onLessonDeleted: handleLessonDeleted,
     autoScrollToNow: viewMode === 'day' && currentDate === today && !isLoadingDate,
   }
 
@@ -1700,6 +1890,7 @@ export function LessonStatusView({
                           lesson={lesson}
                           isLoading={isUpdating === lesson.id}
                           canEditEndTime={isAdmin}
+                          instructors={instructors}
                           instructorLookup={instructorLookup}
                           bodyWeightByKey={bodyWeightByKey}
                           onBodyWeightChange={handleBodyWeightChange}
@@ -1707,6 +1898,9 @@ export function LessonStatusView({
                           onClearAttendanceCheck={handleClearAttendanceCheck}
                           onGuestStatusChange={handleGuestStatusChange}
                           onLessonCompleted={updateLessonInPlace}
+                          onMemberLinked={handleMemberLinked}
+                          onLessonEdited={handleLessonEdited}
+                          onLessonDeleted={handleLessonDeleted}
                         />
                       </div>
                     </div>
@@ -1876,18 +2070,18 @@ export function LessonStatusView({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          <LessonQuickRegister
-            lessonDate={currentDate}
-            instructors={instructors}
-            onCreated={handleQuickLessonCreated}
-            panelContainerRef={quickRegisterPanelRef}
-          />
           <Link href="/dashboard/calendar">
             <Button type="button" variant="outline" size="sm" className="h-8 text-xs">
               <CalendarDays className="h-3.5 w-3.5 mr-1" />
               캘린더
             </Button>
           </Link>
+          <LessonQuickRegister
+            lessonDate={currentDate}
+            instructors={instructors}
+            onCreated={handleQuickLessonCreated}
+            panelContainerRef={quickRegisterPanelRef}
+          />
           {showAddSchedule && (
             <Link href="/dashboard/calendar">
               <Button type="button" variant="outline" size="sm" className="h-8 text-xs">

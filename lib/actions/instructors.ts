@@ -527,10 +527,10 @@ export async function getInstructorMonthlyPayDetail(
   const { data: lessons, error } = await supabase
     .from('lessons')
     .select(
-      'id, lesson_date, start_time, attendance_status, lesson_type, title, content, member:members(id, name)',
+      'id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, content, member_id, session_deducted, special_note, event_status, event_type, created_at, member:members(id, name), lesson_sessions(checked_in_at)',
     )
     .eq('instructor_id', instructorId)
-    .neq('attendance_status', 'cancelled')
+    .neq('event_type', 'recurring_master')
     .gte('lesson_date', dateFrom)
     .lte('lesson_date', dateTo)
     .order('lesson_date', { ascending: true })
@@ -591,9 +591,11 @@ export async function getInstructorReport(
 
   const { data: lessons, error } = await supabase
     .from('lessons')
-    .select('id, lesson_date, start_time, attendance_status, lesson_type')
+    .select(
+      'id, lesson_date, start_time, end_time, attendance_status, lesson_type, member_id, session_deducted, special_note, event_status, event_type, created_at, lesson_sessions(checked_in_at)',
+    )
     .eq('instructor_id', instructorId)
-    .neq('attendance_status', 'cancelled')
+    .neq('event_type', 'recurring_master')
     .gte('lesson_date', dateFrom)
     .lte('lesson_date', dateTo)
 

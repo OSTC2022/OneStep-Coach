@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   createInstructor,
   deleteInstructor,
+  getInstructor,
   getInstructorMonthlyPayDetail,
   getInstructorsPage,
   toggleInstructorStatus,
@@ -70,6 +71,7 @@ export function InstructorManagement({
   isAdmin = false,
 }: InstructorManagementProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [instructors, setInstructors] = useState(initialInstructors)
   const [loadedCount, setLoadedCount] = useState(initialInstructors.length)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -393,6 +395,32 @@ export function InstructorManagement({
       },
     )
   }
+
+  useEffect(() => {
+    const payInstructorId = searchParams.get('pay')
+    if (!payInstructorId) return
+
+    let cancelled = false
+
+    async function openPayFromQuery() {
+      const instructor = await getInstructor(payInstructorId)
+      if (cancelled) return
+
+      if (instructor) {
+        openCalcDialog(instructor)
+      } else {
+        toast.error('강사를 찾을 수 없습니다.')
+      }
+
+      router.replace('/dashboard/instructors', { scroll: false })
+    }
+
+    void openPayFromQuery()
+
+    return () => {
+      cancelled = true
+    }
+  }, [searchParams, router])
 
   const manualPaySummary = selectedInstructor
     ? calcManualSlotPay(

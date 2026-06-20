@@ -1,16 +1,19 @@
 import { getLessonCalendarLabel } from '@/lib/calendar-utils'
+import { isGroupLessonAttendanceMarked } from '@/lib/group-lesson-attendance'
+import { dedupeLessonsBySlot } from '@/lib/lesson-slot-dedupe'
 import { isKoreanHoliday } from '@/lib/korean-holidays'
 import {
   filterLessonsUpToNow,
+  isLessonCountedAsMemberAttendance,
   isLessonOccurredBy,
+  type LessonAttendanceRow,
 } from '@/lib/lesson-record-utils'
-import { getTrialLessonPayAmount, isTrialLessonType } from '@/lib/trial-lesson-pay'
-import { getRunningLessonPayAmount } from '@/lib/running-lesson-pay'
-import { isRunningLessonType, isAthleticsClubLessonType } from '@/lib/lesson-types'
+import { isAthleticsClubLessonType, isRunningLessonType } from '@/lib/lesson-types'
 import {
   getAthleticsClubLessonPayAmount,
-  isAthleticsClubPayAmount,
 } from '@/lib/athletics-club-lesson-pay'
+import { getTrialLessonPayAmount, isTrialLessonType } from '@/lib/trial-lesson-pay'
+import { getRunningLessonPayAmount } from '@/lib/running-lesson-pay'
 
 export { filterLessonsUpToNow, isLessonOccurredBy }
 
@@ -20,12 +23,15 @@ export type InstructorRateConfig = {
   extra_member_rate: number
 }
 
-export type LessonPayRecord = {
-  lesson_date: string
-  start_time: string | null
+export type LessonPayRecord = LessonAttendanceRow & {
   instructor_id?: string | null
-  attendance_status?: string | null
   lesson_type?: string | null
+  member_id?: string | null
+  title?: string | null
+  content?: string | null
+  special_note?: string | null
+  event_status?: string | null
+  event_type?: string | null
 }
 
 export type InstructorPaySlot = {
@@ -164,7 +170,7 @@ export function buildInstructorSlotPayMap<
   const instructorMap = new Map(instructors.map((instructor) => [instructor.id, instructor]))
   const groups = new Map<string, T[]>()
 
-  for (const lesson of lessons) {
+  for (const lesson of dedupeLessonsBySlot(lessons)) {
     if (!lesson.instructor_id || !isSlotCountableLesson(lesson)) continue
     const key = getInstructorSlotPayKey(
       lesson.lesson_date,
@@ -255,13 +261,33 @@ export function calcSlotPayForLessons(
   }
 }
 
-/** 캘린더에 보이는 수업(취소 제외) — 타임 인원 집계용 */
+/** 수업현황에서 출석(또는 체험·단체 출석)이 확인된 수업만 강사료 집계 */
+export function isLessonCountedForInstructorPay(lesson: LessonPayRecord): boolean {
+  if (lesson.event_status === 'cancelled') return false
+  if (lesson.event_type === 'recurring_master') return false
+  if (!isLessonOccurredBy(lesson)) return false
+
+  if (!lesson.member_id) {
+    if (lesson.attendance_status === 'cancelled') return false
+    if (isAthleticsClubLessonType(lesson.lesson_type)) {
+      return isGroupLessonAttendanceMarked(lesson)
+    }
+    if (isTrialLessonType(lesson.lesson_type)) {
+      return true
+    }
+    return false
+  }
+
+  return isLessonCountedAsMemberAttendance(lesson)
+}
+
+/** 타임 인원·강사료 집계 대상 (요금 계산식은 기존 설정 그대로) */
 export function isSlotCountableLesson(lesson: LessonPayRecord): boolean {
-  return lesson.attendance_status !== 'cancelled'
+  return isLessonCountedForInstructorPay(lesson)
 }
 
 function isPayableLesson(lesson: LessonPayRecord): boolean {
-  return isSlotCountableLesson(lesson)
+  return isLessonCountedForInstructorPay(lesson)
 }
 
 function getPaySlotKey(lesson: LessonPayRecord): string {
@@ -273,7 +299,7 @@ export function summarizeInstructorPay(
   lessons: LessonPayRecord[],
   rates: InstructorRateConfig,
 ): InstructorPaySummary {
-  const payable = lessons.filter(isPayableLesson)
+  const payable = dedupeLessonsBySlot(lessons).filter(isPayableLesson)
   const slotMap = new Map<string, LessonPayRecord[]>()
 
   for (const lesson of payable) {
@@ -345,7 +371,7 @@ export function summarizeInstructorPayDetailed(
   rates: InstructorRateConfig,
 ) {
   const summary = summarizeInstructorPay(lessons, rates)
-  const payable = lessons.filter(isPayableLesson)
+  const payable = dedupeLessonsBySlot(lessons).filter(isPayableLesson)
   const slotMap = new Map<string, LessonPayDetailRecord[]>()
 
   for (const lesson of payable) {

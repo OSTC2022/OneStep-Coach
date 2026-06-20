@@ -262,14 +262,43 @@ export type LessonAttendanceRow = LessonScheduleTiming & {
   attendance_status: string
   session_deducted?: boolean
   end_time?: string | null
+  signature_id?: string | null
   lesson_sessions?: Array<{ checked_in_at?: string | null }> | null
+}
+
+/** 종료·서명(또는 세션 차감)이 기록된 완료 수업 */
+export function isLessonCompletedRecord(
+  lesson: Pick<LessonAttendanceRow, 'session_deducted' | 'end_time' | 'signature_id'>,
+): boolean {
+  if (!lesson.end_time) return false
+  return Boolean(lesson.session_deducted || lesson.signature_id)
 }
 
 /** 출석 버튼을 눌렀거나 종료·차감이 기록된 경우만 true (예정 end_time 제외) */
 export function isAttendanceMarked(lesson: LessonAttendanceRow): boolean {
+  if (isLessonCompletedRecord(lesson)) return true
   if (lesson.attendance_status !== 'present') return true
   if (lesson.lesson_sessions?.[0]?.checked_in_at) return true
-  return Boolean(lesson.session_deducted && lesson.end_time)
+  return false
+}
+
+/** 수업현황 출석 집계와 동일 — 취소·미체크·미래 수업 제외 */
+export function isLessonCountedAsMemberAttendance(
+  lesson: LessonAttendanceRow,
+  options?: {
+    schedulePassed?: (row: LessonScheduleTiming) => boolean
+  },
+): boolean {
+  const schedulePassed =
+    options?.schedulePassed ?? ((row) => isLessonOccurredBy(row))
+
+  if (lesson.attendance_status === 'cancelled') return false
+  if (lesson.attendance_status === 'absent') return false
+  if (!schedulePassed(lesson)) return false
+  if (isLessonCompletedRecord(lesson)) return true
+  if (lesson.attendance_status === 'makeup') return true
+  if (lesson.attendance_status === 'present') return isAttendanceMarked(lesson)
+  return false
 }
 
 export function getAttendanceDisplay(

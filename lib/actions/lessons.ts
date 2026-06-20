@@ -39,8 +39,8 @@ import {
 import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import {
-  runGoogleLessonDeletes,
   runGoogleLessonPush,
+  scheduleGoogleLessonDeletes,
   touchAppModifiedAt,
 } from '@/lib/google-calendar/push-scheduler'
 import {
@@ -1852,14 +1852,7 @@ export async function deleteLessonsInSeries(
       }
     }
 
-    const { data: remaining } = await supabase
-      .from('lessons')
-      .select('id')
-      .in('id', chunk)
-    const remainingIds = new Set((remaining ?? []).map((row) => row.id))
-    for (const id of chunk) {
-      if (!remainingIds.has(id)) deletedIds.push(id)
-    }
+    deletedIds.push(...chunk)
   }
 
   const uniqueDeletedIds = [...new Set(deletedIds)]
@@ -1876,7 +1869,7 @@ export async function deleteLessonsInSeries(
   revalidatePath('/dashboard/lesson-status')
 
   const deletedSet = new Set(uniqueDeletedIds)
-  await runGoogleLessonDeletes(
+  scheduleGoogleLessonDeletes(
     (googleDeleteSnapshots ?? []).filter((row) => deletedSet.has(row.id)),
   )
 

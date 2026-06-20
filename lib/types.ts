@@ -215,6 +215,23 @@ export interface CenterSettings {
   updated_at: string
 }
 
+export type CenterBoardKind = 'notice' | 'event'
+
+export interface CenterBoardPost {
+  id: string
+  kind: CenterBoardKind
+  title: string
+  body: string
+  link_url: string | null
+  event_starts_at: string | null
+  event_ends_at: string | null
+  is_published: boolean
+  pinned: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface InstructorFormData {
   name: string
   phone?: string
