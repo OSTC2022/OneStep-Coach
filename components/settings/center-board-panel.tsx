@@ -13,6 +13,7 @@ import {
 } from '@/lib/actions/center-board'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { KoreanDateTimePicker } from '@/components/ui/korean-datetime-picker'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -344,24 +345,24 @@ export function CenterBoardPanel({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="event-start">시작</Label>
-                    <Input
+                    <KoreanDateTimePicker
                       id="event-start"
-                      type="datetime-local"
                       value={form.event_starts_at}
-                      onChange={(e) =>
-                        setForm((prev) => ({ ...prev, event_starts_at: e.target.value }))
+                      onChange={(next) =>
+                        setForm((prev) => ({ ...prev, event_starts_at: next }))
                       }
+                      datePlaceholder="시작일 선택"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="event-end">종료</Label>
-                    <Input
+                    <KoreanDateTimePicker
                       id="event-end"
-                      type="datetime-local"
                       value={form.event_ends_at}
-                      onChange={(e) =>
-                        setForm((prev) => ({ ...prev, event_ends_at: e.target.value }))
+                      onChange={(next) =>
+                        setForm((prev) => ({ ...prev, event_ends_at: next }))
                       }
+                      datePlaceholder="종료일 선택"
                     />
                   </div>
                 </div>

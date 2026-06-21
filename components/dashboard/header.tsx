@@ -46,9 +46,9 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
 
         {user ? <NotificationBell userId={user.id} /> : null}
 
-        {user?.role === 'admin' ? <MemberBackupHeaderMenu /> : null}
-
         <ShareWebsiteButton />
+
+        {user?.role === 'admin' ? <MemberBackupHeaderMenu /> : null}
         <InstallAppButton showLabel className="shrink-0" />
 
         <DropdownMenu>

@@ -7,6 +7,7 @@ import {
   RUNNING_LEAGUE_TARGET_GROUPS,
 } from '@/lib/running-league/constants'
 import { Input } from '@/components/ui/input'
+import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -60,21 +61,21 @@ export function RunningLeagueForm({ value, onChange, idPrefix = 'league' }: Runn
 
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-starts`}>시작일</Label>
-        <Input
+        <KoreanDatePicker
           id={`${idPrefix}-starts`}
-          type="date"
           value={value.starts_at}
-          onChange={(event) => patch('starts_at', event.target.value)}
+          onChange={(next) => patch('starts_at', next)}
+          placeholder="시작일 선택"
         />
       </div>
 
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-ends`}>종료일</Label>
-        <Input
+        <KoreanDatePicker
           id={`${idPrefix}-ends`}
-          type="date"
           value={value.ends_at}
-          onChange={(event) => patch('ends_at', event.target.value)}
+          onChange={(next) => patch('ends_at', next)}
+          placeholder="종료일 선택"
         />
       </div>
 
