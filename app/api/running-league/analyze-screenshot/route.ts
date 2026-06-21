@@ -1,7 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { analyzeRunningScreenshotBuffer } from '@/lib/running-league/analyze-running-screenshot'
 import { isOpenAiConfigured } from '@/lib/running-league/openai-config'
-import { countExtractedFields } from '@/lib/running-league/screenshot-extraction'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -55,7 +54,10 @@ export async function POST(request: Request) {
         heart_rate: result.extraction.heart_rate,
         calories: result.extraction.calories,
         confidence: result.extraction.confidence,
-        field_count: countExtractedFields(result.extraction),
+        field_count: result.diagnostics.field_count,
+        ai_status: result.diagnostics.ai_status,
+        ocr_status: result.diagnostics.ocr_status,
+        openai_configured: result.diagnostics.openai_configured,
       })
     }
 

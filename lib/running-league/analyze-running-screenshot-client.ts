@@ -18,14 +18,26 @@ export async function analyzeRunningScreenshotFile(
   const response = await fetch('/api/running-league/analyze-screenshot', {
     method: 'POST',
     body: formData,
+    credentials: 'same-origin',
   })
 
-  const payload = (await response.json()) as AnalyzeRunningScreenshotResponse
-  if (!response.ok && payload.ok === false) {
-    return payload
+  let payload: AnalyzeRunningScreenshotResponse
+  try {
+    payload = (await response.json()) as AnalyzeRunningScreenshotResponse
+  } catch {
+    return { ok: false, error: `이미지 분석 응답을 읽지 못했습니다. (HTTP ${response.status})` }
   }
-  if (!payload.ok) {
-    return { ok: false, error: '이미지 분석에 실패했습니다.' }
+
+  if (process.env.NODE_ENV === 'development' && payload.ok) {
+    console.info('[analyze-running-screenshot-client] diagnostics', payload.diagnostics)
   }
+
+  if (!response.ok || !payload.ok) {
+    if (!payload.ok) {
+      return { ok: false, error: 'AI 분석 실패, 수동 입력 필요', diagnostics: payload.diagnostics }
+    }
+    return { ok: false, error: 'AI 분석 실패, 수동 입력 필요' }
+  }
+
   return payload
 }

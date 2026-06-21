@@ -12,6 +12,7 @@ import {
   updateMemberMileageLogForm,
 } from '@/lib/actions/running-league'
 import { analyzeRunningScreenshotFile } from '@/lib/running-league/analyze-running-screenshot-client'
+import { formatDistanceKmInput } from '@/lib/running-analysis/normalize'
 import { countExtractedFields } from '@/lib/running-league/screenshot-extraction'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
 import { MILEAGE_SCORE_CAP_KM, mileageScoreFromKm } from '@/lib/running-league/scoring'
@@ -114,7 +115,10 @@ function applyExtractionToForm(
 ): MileageFormState {
   return {
     ...current,
-    distanceKm: extraction.distance_km != null ? String(extraction.distance_km) : current.distanceKm,
+    distanceKm:
+      extraction.distance_km != null
+        ? formatDistanceKmInput(extraction.distance_km)
+        : current.distanceKm,
     duration: extraction.duration ?? current.duration,
     pace: extraction.pace ?? current.pace,
     loggedAt: extraction.activity_date ?? current.loggedAt,
@@ -432,29 +436,31 @@ export function MemberMileageLogCard({
       const result = await analyzeRunningScreenshotFile(file)
       if (!result.ok) {
         setAnalysisStatus('failed')
-        setAnalysisMessage('사진에서 자동으로 읽지 못한 값이 있습니다. 확인 후 입력해주세요.')
+        setAnalysisMessage('AI 분석 실패, 수동 입력 필요')
         return
       }
 
-      setForm((current) => ({
-        ...applyExtractionToForm(result.extraction, current),
-        imageHash: result.image_hash,
-      }))
+      setForm(
+        applyExtractionToForm(result.extraction, {
+          ...initialFormState(),
+          imageHash: result.image_hash,
+        }),
+      )
 
       const extractedCount = countExtractedFields(result.extraction)
       if (extractedCount === 0) {
         setAnalysisStatus('failed')
-        setAnalysisMessage('사진에서 자동으로 읽지 못한 값이 있습니다. 확인 후 입력해주세요.')
-      } else if (result.extraction.partial_failure) {
+        setAnalysisMessage('AI 분석 실패, 수동 입력 필요')
+      } else if (result.extraction.partial_failure || result.extraction.confidence < 0.75) {
         setAnalysisStatus('partial')
-        setAnalysisMessage('일부 값만 읽었습니다. 확인 후 저장해주세요.')
+        setAnalysisMessage('사진에서 읽은 값을 확인해주세요.')
       } else {
         setAnalysisStatus('success')
         setAnalysisMessage('기록을 확인한 뒤 저장해주세요.')
       }
     } catch {
       setAnalysisStatus('failed')
-      setAnalysisMessage('사진에서 자동으로 읽지 못한 값이 있습니다. 확인 후 입력해주세요.')
+      setAnalysisMessage('AI 분석 실패, 수동 입력 필요')
     }
   }
 

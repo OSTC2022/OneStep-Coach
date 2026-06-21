@@ -39,14 +39,23 @@ export type RunningScreenshotImageMeta = {
   file_name?: string
 }
 
+export type RunningScreenshotAnalysisDiagnostics = {
+  openai_configured: boolean
+  ai_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
+  ocr_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
+  field_count: number
+}
+
 export type AnalyzeRunningScreenshotResponse = {
   ok: true
   extraction: RunningScreenshotExtraction
   image_meta: RunningScreenshotImageMeta
   image_hash: string
+  diagnostics: RunningScreenshotAnalysisDiagnostics
 } | {
   ok: false
   error: string
+  diagnostics?: RunningScreenshotAnalysisDiagnostics
 }
 
 const FIELD_LABELS = [
@@ -349,14 +358,51 @@ export function parseRunningMetricsFromText(text: string): RunningScreenshotExtr
   return result
 }
 
+function normalizeRawInput(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtractionRaw {
+  const next: RunningScreenshotExtractionRaw = { ...raw }
+
+  if (typeof next.distance_km === 'string') {
+    const parsed = Number(String(next.distance_km).replace(',', '.'))
+    next.distance_km = Number.isFinite(parsed) ? parsed : null
+  }
+
+  if (next.pace != null) {
+    next.pace = String(next.pace).replace(/\s*\/\s*km/gi, '').trim()
+  }
+
+  if (next.duration != null) {
+    next.duration = String(next.duration).replace(/\s+/g, '')
+  }
+
+  if (next.activity_time != null) {
+    const match = String(next.activity_time).match(/(\d{1,2}):(\d{2})/)
+    if (match) {
+      next.activity_time = `${pad2(Number(match[1]))}:${match[2]}`
+    }
+  }
+
+  if (typeof next.heart_rate === 'string') {
+    const parsed = Number(next.heart_rate)
+    next.heart_rate = Number.isFinite(parsed) ? parsed : null
+  }
+
+  if (typeof next.calories === 'string') {
+    const parsed = Number(next.calories)
+    next.calories = Number.isFinite(parsed) ? parsed : null
+  }
+
+  return next
+}
+
 function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtraction {
-  const distance_km = isValidDistance(raw.distance_km ?? null) ? raw.distance_km! : null
-  const duration = isValidDuration(raw.duration ?? null) ? raw.duration! : null
-  let pace = isValidPace(raw.pace ?? null) ? raw.pace! : null
-  const heart_rate = isValidHeartRate(raw.heart_rate ?? null) ? raw.heart_rate! : null
-  const calories = isValidCalories(raw.calories ?? null) ? raw.calories! : null
-  const activity_date = isValidDate(raw.activity_date ?? null) ? raw.activity_date! : null
-  const activity_time = isValidTime(raw.activity_time ?? null) ? raw.activity_time! : null
+  const normalized = normalizeRawInput(raw)
+  const distance_km = isValidDistance(normalized.distance_km ?? null) ? normalized.distance_km! : null
+  const duration = isValidDuration(normalized.duration ?? null) ? normalized.duration! : null
+  let pace = isValidPace(normalized.pace ?? null) ? normalized.pace! : null
+  const heart_rate = isValidHeartRate(normalized.heart_rate ?? null) ? normalized.heart_rate! : null
+  const calories = isValidCalories(normalized.calories ?? null) ? normalized.calories! : null
+  const activity_date = isValidDate(normalized.activity_date ?? null) ? normalized.activity_date! : null
+  const activity_time = isValidTime(normalized.activity_time ?? null) ? normalized.activity_time! : null
 
   if (distance_km != null && duration != null && pace == null) {
     const durationSeconds = parseDurationToSeconds(duration)
@@ -386,9 +432,9 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
     calories,
     activity_date,
     activity_time,
-    activity_type: raw.activity_type ?? null,
-    source_app: raw.source_app ?? null,
-    confidence: Math.max(0, Math.min(1, Number(raw.confidence ?? 0.5))),
+    activity_type: normalized.activity_type ?? null,
+    source_app: normalized.source_app ?? null,
+    confidence: Math.max(0, Math.min(1, Number(normalized.confidence ?? 0.5))),
     extraction_method: 'none',
     partial_failure,
     missing_fields,
