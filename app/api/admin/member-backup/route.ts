@@ -13,7 +13,8 @@ export async function POST() {
 
   const result = await runMemberBackupToGoogleDrive({ trigger: 'manual' })
   revalidatePath('/dashboard/settings/backup')
-  return NextResponse.json(result, { status: result.ok ? 200 : 500 })
+  const deployRev = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'
+  return NextResponse.json({ ...result, deployRev }, { status: result.ok ? 200 : 500 })
 }
 
 export async function GET() {

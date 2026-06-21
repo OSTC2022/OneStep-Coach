@@ -5,11 +5,12 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:turbo": "next dev",
-    "build": "npm run generate:splash && npm run generate:icons && next build",
+    "build": "npm run generate:splash && npm run generate:icons && next build && npm run verify:member-backup",
     "start": "next start",
     "lint": "eslint .",
     "generate:icons": "node scripts/clean-brand-icon.mjs",
-    "generate:splash": "node scripts/generate-pwa-splash.mjs"
+    "generate:splash": "node scripts/generate-pwa-splash.mjs",
+    "verify:member-backup": "node scripts/verify-member-backup.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
