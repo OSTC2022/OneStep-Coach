@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { runGoogleCalendarCronSync } from '@/lib/google-calendar/cron-sync'
 
+/** Vercel Hobby는 Cron 1일 1회 제한 — vercel.json에 등록하지 않음. 수동·캘린더 페이지 동기화 사용 */
+
 export const maxDuration = 120
 
 function isAuthorized(request: Request): boolean {

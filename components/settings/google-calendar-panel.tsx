@@ -268,7 +268,7 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                 </div>
                 <div>
                   <dt className="text-muted-foreground">자동 동기화</dt>
-                  <dd className="font-medium">15분마다 (서버)</dd>
+                  <dd className="font-medium">캘린더 페이지 열림 시 · 지금 동기화</dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">현재 상태</dt>
@@ -403,8 +403,9 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
           </p>
           <p>
             5. 센터에서 일정을 바꾸면 Google에 자동 반영됩니다. 폰에서 바꾼 내용은 웹훅·
-            <strong className="text-foreground">15분마다 자동 동기화</strong>·캘린더
-            열기·「지금 동기화」로 가져옵니다.
+            <strong className="text-foreground">캘린더 페이지</strong>를 열면 백그라운드로
+            가져오고, 설정의 <strong className="text-foreground">지금 동기화</strong>로
+            수동 실행할 수 있습니다. Push 웹훅이 활성이면 Google 변경 시에도 반영됩니다.
           </p>
           <p>
             6. <strong className="text-foreground">맥·아이폰·안드로이드</strong>에서도 연결할 수

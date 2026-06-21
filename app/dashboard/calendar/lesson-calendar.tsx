@@ -74,7 +74,8 @@ import {
   parseVirtualLessonId,
 } from '@/lib/calendar-recurrence/types'
 
-const GOOGLE_SYNC_POLL_MS = 400
+/** 캘린더 페이지가 열려 있는 동안 Google → 앱 증분 동기화 (Vercel Cron 대신) */
+const GOOGLE_SYNC_POLL_MS = 60_000
 
 function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   const map = new Map<string, Lesson>()

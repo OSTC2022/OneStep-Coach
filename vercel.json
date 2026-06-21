@@ -4,10 +4,6 @@
     {
       "path": "/api/cron/member-backup",
       "schedule": "0 15 * * *"
-    },
-    {
-      "path": "/api/cron/google-calendar-sync",
-      "schedule": "*/15 * * * *"
     }
   ]
 }
