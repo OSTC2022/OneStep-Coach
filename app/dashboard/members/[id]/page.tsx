@@ -19,6 +19,8 @@ import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { notFound } from 'next/navigation'
 import { MemberDetail } from './member-detail'
 
+export const dynamic = 'force-dynamic'
+
 const MEMBER_LESSON_FETCH_LIMIT = 500
 
 export default async function MemberDetailPage({

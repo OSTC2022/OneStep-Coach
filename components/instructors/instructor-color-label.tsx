@@ -24,7 +24,8 @@ export function InstructorColorLabel({
   className,
   compact = false,
 }: InstructorColorLabelProps) {
-  const resolvedColor = color ?? getInstructorCalendarColor(instructor)
+  const resolvedColor =
+    color ?? getInstructorCalendarColor(instructor ? { ...instructor, name } : { name })
 
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-2', className)}>

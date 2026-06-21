@@ -700,7 +700,7 @@ export function SessionsList({
                       <p className="text-sm text-muted-foreground">{pkg.member?.phone}</p>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     {formatPackagePlanLabel(pkg.total_sessions, pkg.note, {
                       duplicateCount,
                       cumulativeTotalSessions,

@@ -4,6 +4,8 @@ import { requireMemberManager } from '@/lib/auth/member-access'
 import { notFound } from 'next/navigation'
 import { MemberEditForm } from './member-edit-form'
 
+export const dynamic = 'force-dynamic'
+
 export default async function MemberEditPage({
   params,
 }: {
@@ -24,7 +26,11 @@ export default async function MemberEditPage({
     <div className="space-y-6 pt-12 lg:pt-0">
       <MemberEditForm
         member={member}
-        instructors={instructors.map(({ id, name }) => ({ id, name }))}
+        instructors={instructors.map(({ id, name, calendar_color }) => ({
+          id,
+          name,
+          calendar_color,
+        }))}
       />
     </div>
   )

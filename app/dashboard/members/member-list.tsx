@@ -152,7 +152,9 @@ export function MemberList({
   const [pageLoading, setPageLoading] = useState(false)
   const skipFetchRef = useRef(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [instructors, setInstructors] = useState<{ id: string; name: string }[]>([])
+  const [instructors, setInstructors] = useState<
+    Array<{ id: string; name: string; calendar_color?: string | null }>
+  >([])
   const [instructorsLoading, setInstructorsLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Member | null>(null)
@@ -231,7 +233,9 @@ export function MemberList({
     setInstructorsLoading(true)
     void getInstructors({ isActive: true, picker: true, limit: 100 }).then((rows) => {
       if (cancelled) return
-      setInstructors(rows.map(({ id, name }) => ({ id, name })))
+      setInstructors(
+        rows.map(({ id, name, calendar_color }) => ({ id, name, calendar_color })),
+      )
       setInstructorsLoading(false)
     })
 

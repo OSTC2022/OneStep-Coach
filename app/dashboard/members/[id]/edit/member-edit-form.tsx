@@ -24,6 +24,7 @@ import {
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
+import { stashMemberDetailPatch, toNullableTrimmed } from '@/lib/member-detail-sync'
 
 interface MemberEditFormProps {
   member: Member
@@ -61,16 +62,16 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
       name: formData.name,
       birth_date: formData.birth_date,
       age: formData.age,
-      grade: formData.grade || undefined,
-      school: formData.school || undefined,
-      phone: formData.phone || undefined,
-      parent_phone: formData.parent_phone || undefined,
-      sport: formData.sport || undefined,
+      grade: formData.grade,
+      school: formData.school,
+      phone: formData.phone,
+      parent_phone: formData.parent_phone,
+      sport: formData.sport,
       height_cm: formData.height_cm ? Number(formData.height_cm) : undefined,
       weight_kg: formData.weight_kg ? Number(formData.weight_kg) : undefined,
-      goal: formData.goal || undefined,
-      injury_history: formData.injury_history || undefined,
-      memo: formData.memo || undefined,
+      goal: formData.goal,
+      injury_history: formData.injury_history,
+      memo: formData.memo,
       primary_instructor_id: normalizePrimaryInstructorId(formData.primary_instructor_id),
     })
 
@@ -79,6 +80,10 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
     if (result.error) {
       toast.error('저장 실패', { description: result.error })
       return
+    }
+
+    if (result.warning) {
+      toast.warning('일부 항목만 저장됨', { description: result.warning })
     }
 
     if (formData.is_active !== member.is_active) {
@@ -90,7 +95,33 @@ export function MemberEditForm({ member, instructors }: MemberEditFormProps) {
     }
 
     toast.success('회원 정보가 저장되었습니다.')
-    router.push(`/dashboard/members/${member.id}`)
+
+    const primaryInstructorId = normalizePrimaryInstructorId(formData.primary_instructor_id)
+    const selectedInstructor = instructors.find(
+      (instructor) => instructor.id === primaryInstructorId,
+    )
+
+    stashMemberDetailPatch(member.id, {
+      birth_date: toNullableTrimmed(formData.birth_date),
+      age: formData.age ?? null,
+      grade: toNullableTrimmed(formData.grade),
+      school: toNullableTrimmed(formData.school),
+      name: formData.name.trim(),
+      phone: toNullableTrimmed(formData.phone),
+      parent_phone: toNullableTrimmed(formData.parent_phone),
+      sport: toNullableTrimmed(formData.sport),
+      height_cm: formData.height_cm ? Number(formData.height_cm) : null,
+      weight_kg: formData.weight_kg ? Number(formData.weight_kg) : null,
+      goal: toNullableTrimmed(formData.goal),
+      injury_history: toNullableTrimmed(formData.injury_history),
+      memo: toNullableTrimmed(formData.memo),
+      primary_instructor_id: primaryInstructorId,
+      primary_instructor: selectedInstructor
+        ? { id: selectedInstructor.id, name: selectedInstructor.name }
+        : null,
+    })
+
+    router.replace(`/dashboard/members/${member.id}`)
     router.refresh()
   }
 

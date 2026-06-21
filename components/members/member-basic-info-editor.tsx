@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Pencil, Check, X, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateMemberBasicInfo } from '@/lib/actions/members'
+import { stashMemberDetailPatch, toNullableTrimmed } from '@/lib/member-detail-sync'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -97,30 +98,36 @@ export function MemberBasicInfoEditor({
     } else {
       toast.success('기본 정보가 저장되었습니다.')
     }
-    if (result.data) {
-      onSaved?.(result.data)
+
+    const patch = {
+      birth_date: toNullableTrimmed(formData.birth_date),
+      age: formData.age ?? null,
+      grade: toNullableTrimmed(formData.grade),
+      school: toNullableTrimmed(formData.school),
     }
+    onSaved?.(patch)
+    stashMemberDetailPatch(memberId, patch)
     setIsEditing(false)
     router.refresh()
   }
 
   const viewContent = (
     <div className="space-y-3">
-      <div className="flex justify-between gap-3">
-        <span className="text-muted-foreground shrink-0">생년월일</span>
-        <span className="text-right">{formatBirthDateDisplay(birthDate)}</span>
+      <div className="space-y-0.5">
+        <p className="text-muted-foreground">생년월일</p>
+        <p className="tabular-nums">{formatBirthDateDisplay(birthDate)}</p>
       </div>
-      <div className="flex justify-between gap-3">
-        <span className="text-muted-foreground shrink-0">나이</span>
-        <span className="text-right">{formatMemberAge({ age, birth_date: birthDate })}</span>
+      <div className="space-y-0.5">
+        <p className="text-muted-foreground">나이</p>
+        <p className="tabular-nums">{formatMemberAge({ age, birth_date: birthDate })}</p>
       </div>
-      <div className="flex justify-between gap-3">
-        <span className="text-muted-foreground shrink-0">학교 / 소속팀</span>
-        <span className="text-right">{displayValue(school)}</span>
+      <div className="space-y-0.5">
+        <p className="text-muted-foreground">학년 / 포지션</p>
+        <p className="break-keep leading-snug">{displayValue(grade)}</p>
       </div>
-      <div className="flex justify-between gap-3">
-        <span className="text-muted-foreground shrink-0">학년 / 포지션</span>
-        <span className="text-right">{displayValue(grade)}</span>
+      <div className="space-y-0.5">
+        <p className="text-muted-foreground">학교 / 소속팀</p>
+        <p className="break-keep leading-snug">{displayValue(school)}</p>
       </div>
     </div>
   )
@@ -157,19 +164,19 @@ export function MemberBasicInfoEditor({
         />
       </div>
       <div className="space-y-2">
-        <label className="text-sm text-muted-foreground">학교 / 소속팀</label>
-        <Input
-          value={formData.school}
-          onChange={(e) => setFormData((prev) => ({ ...prev, school: e.target.value }))}
-          placeholder="예: OO고 · OO클럽"
-        />
-      </div>
-      <div className="space-y-2">
         <label className="text-sm text-muted-foreground">학년 / 포지션</label>
         <Input
           value={formData.grade}
           onChange={(e) => setFormData((prev) => ({ ...prev, grade: e.target.value }))}
-          placeholder="예: 고2 · 포수"
+          placeholder="예: 중3 / 공격수"
+        />
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm text-muted-foreground">학교 / 소속팀</label>
+        <Input
+          value={formData.school}
+          onChange={(e) => setFormData((prev) => ({ ...prev, school: e.target.value }))}
+          placeholder="예: OO고 / OO클럽"
         />
       </div>
       <div className="flex gap-2">

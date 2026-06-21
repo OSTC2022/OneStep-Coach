@@ -39,6 +39,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { formatPrimaryInstructorName } from '@/lib/member-utils'
+import { mergeMemberWithDetailPatch } from '@/lib/member-detail-sync'
 import { MemberBasicInfoEditor } from '@/components/members/member-basic-info-editor'
 import { MemberContactEditor } from '@/components/members/member-contact-editor'
 import type { VisibleSnsAccount } from '@/lib/sns-account'
@@ -116,7 +117,9 @@ export function MemberDetail({
   instructorAccount = null,
   centerAccount = null,
 }: MemberDetailProps) {
-  const [memberState, setMemberState] = useState(member)
+  const [memberState, setMemberState] = useState(() =>
+    mergeMemberWithDetailPatch(member, member.id),
+  )
   const [sessionPackages, setSessionPackages] = useState(initialPackages)
   const [deleteTarget, setDeleteTarget] = useState<SessionPackage | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -132,8 +135,22 @@ export function MemberDetail({
   )
 
   useEffect(() => {
-    setMemberState(member)
-  }, [member])
+    setMemberState(mergeMemberWithDetailPatch(member, member.id))
+  }, [
+    member,
+    member.id,
+    member.birth_date,
+    member.age,
+    member.grade,
+    member.school,
+    member.name,
+    member.phone,
+    member.parent_phone,
+    member.sport,
+    member.height_cm,
+    member.weight_kg,
+    member.primary_instructor_id,
+  ])
 
   const lessonTotalPages = Math.max(
     1,
@@ -450,7 +467,7 @@ export function MemberDetail({
             </div>
             <div className="w-full min-w-0 overflow-hidden">
               <div className="flex items-center gap-2 border-b border-border px-0.5 py-2 text-xs font-medium text-muted-foreground">
-                <span className="flex w-[4.25rem] shrink-0 items-center gap-0.5">
+                <span className="flex min-w-[7rem] shrink-0 items-center gap-0.5 whitespace-nowrap">
                   <span>수업권</span>
                   {canManage ? (
                     <SessionPackageTrashSheet
@@ -483,7 +500,7 @@ export function MemberDetail({
                     key={pkg.id}
                     className="flex min-w-0 items-center gap-2 px-0.5 py-2.5 text-sm"
                   >
-                    <span className="w-[4.25rem] shrink-0 font-medium">
+                    <span className="min-w-[7rem] shrink-0 whitespace-nowrap font-medium">
                       {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
                     </span>
                     <span

@@ -15,6 +15,12 @@ export const INSTRUCTOR_CALENDAR_COLORS = [
 
 export const DEFAULT_INSTRUCTOR_CALENDAR_COLOR = INSTRUCTOR_CALENDAR_COLORS[0].hex
 
+/** DB 색상 미설정 시 센터 기본 강사 색 (이전 캘린더 표시와 동일) */
+export const INSTRUCTOR_CALENDAR_COLOR_BY_NAME: Record<string, string> = {
+  이교직: INSTRUCTOR_CALENDAR_COLORS[2].hex,
+  장지용: INSTRUCTOR_CALENDAR_COLORS[0].hex,
+}
+
 /** 강사 미지정(자율배정) — 연한 회색·흰색 테두리 */
 export const AUTO_INSTRUCTOR_BORDER_COLOR = '#E2E8F0'
 
@@ -40,11 +46,22 @@ export type InstructorColorSource = {
 }
 
 export function getInstructorCalendarColor(
-  instructor?: { calendar_color?: string | null } | null,
+  instructor?: { calendar_color?: string | null; name?: string | null } | null,
+  catalogIndex?: number,
 ): string {
   if (instructor?.calendar_color && isInstructorCalendarColor(instructor.calendar_color)) {
     return instructor.calendar_color
   }
+
+  const name = instructor?.name?.trim()
+  if (name && INSTRUCTOR_CALENDAR_COLOR_BY_NAME[name]) {
+    return INSTRUCTOR_CALENDAR_COLOR_BY_NAME[name]
+  }
+
+  if (catalogIndex != null) {
+    return getDefaultInstructorCalendarColor(catalogIndex)
+  }
+
   return DEFAULT_INSTRUCTOR_CALENDAR_COLOR
 }
 

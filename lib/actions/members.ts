@@ -6,7 +6,7 @@ import { canEditMemberBasicInfo, profileRoleToAppRole } from '@/lib/roles'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, unstable_noStore as noStore } from 'next/cache'
 import type { Member, MemberFormData } from '@/lib/types'
 import { addMemberBodyRecord } from '@/lib/actions/member-body-records'
 import {
@@ -485,6 +485,7 @@ export async function searchMembersForPickerCached(
 }
 
 export async function getMember(id: string): Promise<Member | null> {
+  noStore()
   const supabase = await createStaffDataClient()
 
   const selectAttempts = [
@@ -612,7 +613,7 @@ export async function createMember(formData: MemberFormData): Promise<{ data?: M
   return { data: data as Member }
 }
 
-export async function updateMember(id: string, formData: Partial<MemberFormData>): Promise<{ data?: Member; error?: string }> {
+export async function updateMember(id: string, formData: Partial<MemberFormData>): Promise<{ data?: Member; error?: string; warning?: string }> {
   await requireRole(['admin'])
   const supabase = await memberWriteClient()
   
@@ -634,8 +635,8 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
           : null
     }
   }
-  if (formData.grade !== undefined) updateData.grade = formData.grade || null
-  if (formData.school !== undefined) updateData.school = formData.school || null
+  if (formData.grade !== undefined) updateData.grade = normalizeOptionalString(formData.grade)
+  if (formData.school !== undefined) updateData.school = normalizeOptionalString(formData.school)
   if (formData.phone !== undefined) updateData.phone = formData.phone || null
   if (formData.parent_phone !== undefined) updateData.parent_phone = formData.parent_phone || null
   if (formData.sport !== undefined) updateData.sport = formData.sport || null
@@ -653,12 +654,26 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
     updateData.primary_instructor_id = normalizePrimaryInstructorId(formData.primary_instructor_id)
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('members')
     .update(updateData)
     .eq('id', id)
     .select()
     .single()
+
+  let warning: string | undefined
+  if (error && isSchoolMissingError(error.message, error.code) && 'school' in updateData) {
+    const { school: _school, ...withoutSchool } = updateData
+    const retry = await supabase
+      .from('members')
+      .update(withoutSchool)
+      .eq('id', id)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+    if (!error) warning = SCHOOL_MIGRATION_HINT
+  }
 
   if (error) {
     console.error('Error updating member:', error)
@@ -673,8 +688,12 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
 
   revalidatePath('/dashboard/members')
   revalidatePath(`/dashboard/members/${id}`)
+  revalidatePath(`/dashboard/members/${id}/edit`)
   revalidatePath('/dashboard/my')
-  return { data: data as Member }
+  return {
+    data: withMemberRowDefaults(data as Record<string, unknown>) as Member,
+    warning,
+  }
 }
 
 export type MemberBasicInfoFormData = {
@@ -753,6 +772,7 @@ export async function updateMemberBasicInfo(
 
   revalidatePath('/dashboard/members')
   revalidatePath(`/dashboard/members/${memberId}`)
+  revalidatePath(`/dashboard/members/${memberId}/edit`)
   revalidatePath('/dashboard/my')
   return { data: withMemberRowDefaults(data as Record<string, unknown>) as Member, warning }
 }
