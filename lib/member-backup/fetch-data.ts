@@ -7,6 +7,7 @@ import {
   tallySessionPackages,
   type LessonAttendanceRow,
 } from '@/lib/lesson-record-utils'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export type MemberBackupRow = {
   memberId: string

@@ -701,7 +701,7 @@ export async function syncGoogleCalendarLessons(options?: {
   }
 }
 
-const STALE_SYNC_LOCK_MS = 90_000
+const STALE_SYNC_LOCK_MS = 5 * 60 * 1000
 
 export function isGoogleCalendarSyncInProgress(row: GoogleCalendarSyncRow | null): boolean {
   if (row?.sync_status !== 'syncing') return false

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { handleGoogleCalendarWebhookSync } from '@/lib/google-calendar/webhook-handler'
 import { getGoogleCalendarWebhookSecret } from '@/lib/google-calendar/config'
+
+export const maxDuration = 120
 
 export async function POST(request: NextRequest) {
   const channelToken = request.headers.get('x-goog-channel-token')
@@ -19,11 +22,13 @@ export async function POST(request: NextRequest) {
     return new NextResponse(null, { status: 200 })
   }
 
-  try {
-    await handleGoogleCalendarWebhookSync()
-  } catch (error) {
-    console.error('[google-calendar] webhook sync failed', error)
-  }
+  after(async () => {
+    try {
+      await handleGoogleCalendarWebhookSync()
+    } catch (error) {
+      console.error('[google-calendar] webhook sync failed', error)
+    }
+  })
 
   return new NextResponse(null, { status: 200 })
 }

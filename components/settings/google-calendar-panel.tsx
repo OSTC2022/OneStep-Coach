@@ -267,6 +267,10 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
                   </dd>
                 </div>
                 <div>
+                  <dt className="text-muted-foreground">자동 동기화</dt>
+                  <dd className="font-medium">15분마다 (서버)</dd>
+                </div>
+                <div>
                   <dt className="text-muted-foreground">현재 상태</dt>
                   <dd
                     className={`inline-flex items-center gap-1 font-medium ${syncStatusClass(status.syncStatus, status.isSyncing)}`}
@@ -398,8 +402,9 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             <strong className="text-foreground">장지용</strong> 강사·색상으로 자동 반영됩니다.
           </p>
           <p>
-            5. 센터에서 일정을 바꾸면 Google에 자동 반영됩니다. 폰에서 바꾼 내용은 웹훅·캘린더
-            열기·「지금 동기화」·새로고침으로 가져옵니다.
+            5. 센터에서 일정을 바꾸면 Google에 자동 반영됩니다. 폰에서 바꾼 내용은 웹훅·
+            <strong className="text-foreground">15분마다 자동 동기화</strong>·캘린더
+            열기·「지금 동기화」로 가져옵니다.
           </p>
           <p>
             6. <strong className="text-foreground">맥·아이폰·안드로이드</strong>에서도 연결할 수

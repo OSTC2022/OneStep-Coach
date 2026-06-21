@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import {
   exchangeGoogleOAuthCode,
@@ -9,6 +10,7 @@ import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import { ensureLessonCalendars } from '@/lib/google-calendar/lesson-calendars'
 import {
   ensureGoogleCalendarWatch,
+  syncGoogleCalendarLessons,
   upsertGoogleCalendarSyncRow,
 } from '@/lib/google-calendar/sync'
 
@@ -58,6 +60,26 @@ export async function connectGoogleCalendarFromOAuthCode(
     })
 
     await ensureGoogleCalendarWatch()
+
+    after(async () => {
+      try {
+        await syncGoogleCalendarLessons({
+          reason: 'connect',
+          forceFull: true,
+          skipDedupe: true,
+        })
+      } catch (error) {
+        console.error(
+          '[google-calendar] initial connect sync failed:',
+          error instanceof Error ? error.message : error,
+        )
+      } finally {
+        revalidatePath('/dashboard/settings/google-calendar')
+        revalidatePath('/dashboard/calendar')
+        revalidatePath('/dashboard/lesson-status')
+        revalidatePath('/dashboard')
+      }
+    })
 
     revalidatePath('/dashboard/settings/google-calendar')
     revalidatePath('/dashboard/calendar')
