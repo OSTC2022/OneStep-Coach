@@ -1,7 +1,7 @@
 import 'server-only'
 
 import * as XLSX from 'xlsx'
-import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
+import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
 import {
   fetchMemberBackupData,
   formatAttendanceStatus,
@@ -40,7 +40,7 @@ export async function buildMemberBackupWorkbookBuffer(): Promise<{
   memberCount: number
   attendanceCount: number
 }> {
-  const supabase = getMemberBackupAdminClient()
+  const supabase = getSupabaseAdmin()
   const { members, attendance } = await fetchMemberBackupData(supabase)
   const workbook = XLSX.utils.book_new()
 

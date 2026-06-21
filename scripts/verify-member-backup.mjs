@@ -11,6 +11,12 @@ const sourceRoots = [
   'components/dashboard/member-backup-header-menu.tsx',
 ]
 
+const forbiddenTokens = [
+  '@/lib/supabase/admin',
+  'getMemberBackupAdminClient',
+  'admin-client',
+]
+
 function listFiles(target) {
   const abs = join(root, target)
   if (!statSync(abs).isDirectory()) return [abs]
@@ -24,13 +30,16 @@ function listFiles(target) {
   return out
 }
 
-const forbidden = ['@/lib/supabase/admin']
+const legacyAdminHelper = ['create', 'Admin', 'Client'].join('')
 const offenders = []
 
 for (const target of sourceRoots) {
   for (const file of listFiles(target)) {
     const text = readFileSync(file, 'utf8')
-    for (const token of forbidden) {
+    if (text.includes(legacyAdminHelper)) {
+      offenders.push(`${relative(root, file)} (${legacyAdminHelper})`)
+    }
+    for (const token of forbiddenTokens) {
       if (text.includes(token)) {
         offenders.push(`${relative(root, file)} (${token})`)
       }
@@ -39,8 +48,8 @@ for (const target of sourceRoots) {
 }
 
 if (offenders.length > 0) {
-  console.error('[verify-member-backup] backup chain must stay isolated:', offenders.join(', '))
+  console.error('[verify-member-backup] backup chain isolation failed:', offenders.join(', '))
   process.exit(1)
 }
 
-console.log('[verify-member-backup] OK — backup chain isolated from shared admin module')
+console.log('[verify-member-backup] OK — backup chain uses getSupabaseAdmin only')

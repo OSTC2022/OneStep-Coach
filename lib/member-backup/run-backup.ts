@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
-import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
+import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
 import { withGoogleAccessToken } from '@/lib/google-calendar/client'
 import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
 import {
@@ -27,7 +27,7 @@ export type MemberBackupRunResult = {
 const SETTINGS_ID = 'default'
 
 export async function getMemberBackupSettingsRow() {
-  const supabase = getMemberBackupAdminClient()
+  const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('member_backup_settings')
     .select('*')
@@ -44,7 +44,7 @@ export async function getMemberBackupSettingsRow() {
 async function upsertBackupSettings(
   patch: Record<string, unknown>,
 ): Promise<void> {
-  const supabase = getMemberBackupAdminClient()
+  const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
   const { error } = await supabase.from('member_backup_settings').upsert(
     {

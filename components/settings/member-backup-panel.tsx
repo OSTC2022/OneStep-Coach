@@ -15,8 +15,8 @@ import {
 import { toast } from 'sonner'
 import {
   setMemberBackupEnabled,
-  type MemberBackupStatus,
 } from '@/lib/actions/member-backup'
+import type { MemberBackupStatus } from '@/lib/member-backup/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
@@ -34,6 +34,7 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
   const [isSavingEnabled, setIsSavingEnabled] = useState(false)
 
   async function handleRunBackup() {
+    setStatus((prev) => ({ ...prev, lastError: null }))
     setIsUploading(true)
     try {
       const response = await fetch('/api/admin/member-backup', { method: 'POST' })
@@ -43,12 +44,23 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
         memberCount?: number
         attendanceCount?: number
         fileName?: string
+        deployRev?: string
       }
       if (!result.ok) {
+        setStatus((prev) => ({
+          ...prev,
+          lastError: result.error ?? 'Drive 백업에 실패했습니다.',
+        }))
         toast.error('Drive 백업 실패', { description: result.error })
         router.refresh()
         return
       }
+      setStatus((prev) => ({
+        ...prev,
+        lastError: null,
+        lastSuccessAt: new Date().toISOString(),
+        lastFileName: result.fileName ?? prev.lastFileName,
+      }))
       toast.success('Google Drive 백업 완료', {
         description: `회원 ${result.memberCount}명 · 출석 ${result.attendanceCount}건 · ${result.fileName}`,
       })

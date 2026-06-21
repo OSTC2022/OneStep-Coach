@@ -1,13 +1,13 @@
 import 'server-only'
 
 import { GOOGLE_CALENDAR_SYNC_ID } from '@/lib/google-calendar/config'
-import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
+import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
 
 export async function getGoogleBackupAuthRow(): Promise<{
   refresh_token: string | null
   connected_email: string | null
 } | null> {
-  const supabase = getMemberBackupAdminClient()
+  const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('google_calendar_sync')
     .select('refresh_token, connected_email')
