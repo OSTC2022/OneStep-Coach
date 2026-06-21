@@ -14,8 +14,6 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  downloadMemberBackupExcel,
-  runMemberBackupNow,
   setMemberBackupEnabled,
   type MemberBackupStatus,
 } from '@/lib/actions/member-backup'
@@ -38,7 +36,14 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
   async function handleRunBackup() {
     setIsUploading(true)
     try {
-      const result = await runMemberBackupNow()
+      const response = await fetch('/api/admin/member-backup', { method: 'POST' })
+      const result = (await response.json()) as {
+        ok: boolean
+        error?: string
+        memberCount?: number
+        attendanceCount?: number
+        fileName?: string
+      }
       if (!result.ok) {
         toast.error('Drive 백업 실패', { description: result.error })
         router.refresh()
@@ -56,8 +61,13 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
   async function handleDownload() {
     setIsDownloading(true)
     try {
-      const result = await downloadMemberBackupExcel()
-      if (result.error || !result.data || !result.fileName) {
+      const response = await fetch('/api/admin/member-backup')
+      const result = (await response.json()) as {
+        data?: string
+        fileName?: string
+        error?: string
+      }
+      if (!response.ok || result.error || !result.data || !result.fileName) {
         toast.error(result.error ?? '엑셀 다운로드 실패')
         return
       }

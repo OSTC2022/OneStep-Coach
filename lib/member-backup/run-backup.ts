@@ -3,7 +3,7 @@ import 'server-only'
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
 import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
 import { withGoogleAccessToken } from '@/lib/google-calendar/client'
-import { getGoogleCalendarSyncRow } from '@/lib/google-calendar/sync'
+import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
 import {
   createDriveFolder,
   findDriveFileInFolder,
@@ -94,7 +94,7 @@ export async function runMemberBackupToGoogleDrive(options?: {
       return { ok: true, skipped: true }
     }
 
-    const syncRow = await getGoogleCalendarSyncRow()
+    const syncRow = await getGoogleBackupAuthRow()
     if (!syncRow?.refresh_token) {
       throw new Error(
         'Google 계정이 연결되어 있지 않습니다. 설정 → Google 캘린더에서 연결 후 Drive 권한을 포함해 다시 연결해 주세요.',

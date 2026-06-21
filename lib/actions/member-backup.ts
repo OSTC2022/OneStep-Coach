@@ -3,8 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
 import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
+import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
-import { getGoogleCalendarSyncRow } from '@/lib/google-calendar/sync'
 import {
   getMemberBackupSettingsRow,
   runMemberBackupToGoogleDrive,
@@ -28,7 +28,7 @@ const SETTINGS_ID = 'default'
 export async function getMemberBackupStatus(): Promise<MemberBackupStatus> {
   await requireRole(['admin'])
 
-  const syncRow = await getGoogleCalendarSyncRow()
+  const syncRow = await getGoogleBackupAuthRow()
   const settings = await getMemberBackupSettingsRow()
 
   return {

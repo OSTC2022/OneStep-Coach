@@ -4,10 +4,6 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { CloudUpload, Download, HardDrive, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  downloadMemberBackupExcel,
-  runMemberBackupNow,
-} from '@/lib/actions/member-backup'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -44,7 +40,13 @@ export function MemberBackupHeaderMenu({ className }: { className?: string }) {
   async function handleDriveBackup() {
     setIsUploading(true)
     try {
-      const result = await runMemberBackupNow()
+      const response = await fetch('/api/admin/member-backup', { method: 'POST' })
+      const result = (await response.json()) as {
+        ok: boolean
+        error?: string
+        memberCount?: number
+        attendanceCount?: number
+      }
       if (!result.ok) {
         toast.error('Drive 백업 실패', { description: result.error })
         return
@@ -60,8 +62,15 @@ export function MemberBackupHeaderMenu({ className }: { className?: string }) {
   async function handleDownload() {
     setIsDownloading(true)
     try {
-      const result = await downloadMemberBackupExcel()
-      if (result.error || !result.data || !result.fileName) {
+      const response = await fetch('/api/admin/member-backup')
+      const result = (await response.json()) as {
+        data?: string
+        fileName?: string
+        error?: string
+        memberCount?: number
+        attendanceCount?: number
+      }
+      if (!response.ok || result.error || !result.data || !result.fileName) {
         toast.error(result.error ?? '엑셀 다운로드 실패')
         return
       }
