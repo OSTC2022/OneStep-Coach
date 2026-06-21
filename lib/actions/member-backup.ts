@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
 import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
-import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors'
+import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors-shared'
 import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
 import {
   clearObsoleteBackupErrors,

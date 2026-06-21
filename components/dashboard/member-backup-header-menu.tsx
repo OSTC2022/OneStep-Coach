@@ -65,16 +65,35 @@ export function MemberBackupHeaderMenu({ className }: { className?: string }) {
   async function handleDownload() {
     setIsDownloading(true)
     try {
-      const response = await fetch('/api/admin/member-backup')
+      const response = await fetch('/api/admin/member-backup', {
+        cache: 'no-store',
+      })
       const result = (await response.json()) as {
+        ok?: boolean
         data?: string
         fileName?: string
         error?: string
         memberCount?: number
         attendanceCount?: number
+        deployRev?: string
+        backupApiRev?: string
       }
-      if (!response.ok || result.error || !result.data || !result.fileName) {
-        toast.error(result.error ?? '엑셀 다운로드 실패')
+      if (
+        !response.ok ||
+        result.ok === false ||
+        result.error ||
+        !result.data ||
+        !result.fileName
+      ) {
+        toast.error('엑셀 다운로드 실패', {
+          description: [
+            result.error,
+            result.deployRev ? `(배포 ${result.deployRev})` : null,
+            result.backupApiRev ? `[${result.backupApiRev}]` : null,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        })
         return
       }
       downloadBase64Excel(result.data, result.fileName)

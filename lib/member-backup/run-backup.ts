@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
-import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors'
+import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors-shared'
 import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
 import { withGoogleAccessToken } from '@/lib/google-calendar/client'
 import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
@@ -109,11 +109,12 @@ export async function runMemberBackupToGoogleDrive(options?: {
       )
     }
 
+    const supabase = getSupabaseAdmin()
     const { buildMemberBackupWorkbookBuffer, MEMBER_BACKUP_DRIVE_FILENAME } =
       await import('@/lib/member-backup/export-xlsx')
 
     const { buffer, memberCount, attendanceCount } =
-      await buildMemberBackupWorkbookBuffer()
+      await buildMemberBackupWorkbookBuffer(supabase)
 
     const result = await withGoogleAccessToken(syncRow.refresh_token, async (token) => {
       const folder = await ensureDriveFolder(token, settings?.drive_folder_id)

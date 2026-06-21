@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { requireBackupAdminApi } from '@/lib/member-backup/require-backup-admin'
 import {
   clearObsoleteBackupErrors,
@@ -10,9 +10,9 @@ import {
 export const maxDuration = 120
 export const dynamic = 'force-dynamic'
 
-const BACKUP_API_REV = 'drive-backup-v3'
+const BACKUP_API_REV = 'drive-backup-v4'
 
-function getBackupRouteSupabase() {
+function getBackupRouteSupabase(): SupabaseClient {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
@@ -28,6 +28,13 @@ function getBackupRouteSupabase() {
   })
 }
 
+function backupMeta() {
+  return {
+    deployRev: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local',
+    backupApiRev: BACKUP_API_REV,
+  }
+}
+
 export async function POST() {
   const isAdmin = await requireBackupAdminApi()
   if (!isAdmin) {
@@ -35,24 +42,21 @@ export async function POST() {
   }
 
   try {
-    // route 번들 자체에 service-role 클라이언트 생성 가능한지 런타임 확인
     getBackupRouteSupabase()
     await clearObsoleteBackupErrors()
 
     const result = await runMemberBackupToGoogleDrive({ trigger: 'manual' })
     revalidatePath('/dashboard/settings/backup')
 
-    const deployRev = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'
     return NextResponse.json(
-      { ...result, deployRev, backupApiRev: BACKUP_API_REV },
+      { ...result, ...backupMeta() },
       { status: result.ok ? 200 : 500 },
     )
   } catch (error) {
     const message =
       error instanceof Error ? error.message : '백업 중 알 수 없는 오류가 발생했습니다.'
-    const deployRev = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'
     return NextResponse.json(
-      { ok: false, error: message, deployRev, backupApiRev: BACKUP_API_REV },
+      { ok: false, error: message, ...backupMeta() },
       { status: 500 },
     )
   }
@@ -65,27 +69,29 @@ export async function GET() {
   }
 
   try {
-    getBackupRouteSupabase()
+    const supabase = getBackupRouteSupabase()
     await clearObsoleteBackupErrors()
 
     const { buildMemberBackupWorkbookBuffer, buildMemberBackupDownloadFilename } =
       await import('@/lib/member-backup/export-xlsx')
     const { buffer, memberCount, attendanceCount } =
-      await buildMemberBackupWorkbookBuffer()
+      await buildMemberBackupWorkbookBuffer(supabase)
 
     return NextResponse.json({
+      ok: true,
       data: buffer.toString('base64'),
       fileName: buildMemberBackupDownloadFilename(),
       memberCount,
       attendanceCount,
-      backupApiRev: BACKUP_API_REV,
+      ...backupMeta(),
     })
   } catch (error) {
     return NextResponse.json(
       {
+        ok: false,
         error:
           error instanceof Error ? error.message : '엑셀 생성 중 오류가 발생했습니다.',
-        backupApiRev: BACKUP_API_REV,
+        ...backupMeta(),
       },
       { status: 500 },
     )

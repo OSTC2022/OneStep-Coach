@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
@@ -17,6 +17,7 @@ import {
   setMemberBackupEnabled,
 } from '@/lib/actions/member-backup'
 import type { MemberBackupStatus } from '@/lib/member-backup/types'
+import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors-shared'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
@@ -28,10 +29,21 @@ interface MemberBackupPanelProps {
 
 export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
   const router = useRouter()
-  const [status, setStatus] = useState(initialStatus)
+  const [status, setStatus] = useState<MemberBackupStatus>(() => ({
+    ...initialStatus,
+    lastError: isObsoleteBackupError(initialStatus.lastError)
+      ? null
+      : initialStatus.lastError,
+  }))
   const [isUploading, setIsUploading] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [isSavingEnabled, setIsSavingEnabled] = useState(false)
+
+  useEffect(() => {
+    if (isObsoleteBackupError(initialStatus.lastError)) {
+      setStatus((prev) => ({ ...prev, lastError: null }))
+    }
+  }, [initialStatus.lastError])
 
   async function handleRunBackup() {
     setStatus((prev) => ({ ...prev, lastError: null }))
@@ -84,14 +96,32 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
   async function handleDownload() {
     setIsDownloading(true)
     try {
-      const response = await fetch('/api/admin/member-backup')
+      const response = await fetch('/api/admin/member-backup', {
+        cache: 'no-store',
+      })
       const result = (await response.json()) as {
+        ok?: boolean
         data?: string
         fileName?: string
         error?: string
+        deployRev?: string
+        backupApiRev?: string
       }
-      if (!response.ok || result.error || !result.data || !result.fileName) {
-        toast.error(result.error ?? '엑셀 다운로드 실패')
+      if (
+        !response.ok ||
+        result.ok === false ||
+        result.error ||
+        !result.data ||
+        !result.fileName
+      ) {
+        const description = [
+          result.error ?? '엑셀 다운로드 실패',
+          result.deployRev ? `(배포 ${result.deployRev})` : null,
+          result.backupApiRev ? `[${result.backupApiRev}]` : null,
+        ]
+          .filter(Boolean)
+          .join(' ')
+        toast.error('엑셀 다운로드 실패', { description })
         return
       }
       const binary = atob(result.data)
@@ -257,7 +287,7 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
                 ) : null}
               </p>
             ) : null}
-            {status.lastError ? (
+            {status.lastError && !isObsoleteBackupError(status.lastError) ? (
               <p className="text-destructive">오류: {status.lastError}</p>
             ) : null}
           </div>
