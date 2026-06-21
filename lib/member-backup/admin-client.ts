@@ -2,7 +2,7 @@ import 'server-only'
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-/** 백업 전용 Supabase 클라이언트 — createAdminClient 번들 이슈 회피 */
+/** 백업 전용 Supabase service-role 클라이언트 */
 export function getMemberBackupAdminClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY

@@ -1,22 +1,13 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { getDashboardProfile } from '@/lib/auth/dashboard-user'
-import { profileRoleToAppRole } from '@/lib/roles'
+import { requireBackupAdminApi } from '@/lib/member-backup/require-backup-admin'
 import { runMemberBackupToGoogleDrive } from '@/lib/member-backup/run-backup'
 
 export const maxDuration = 120
 
-async function requireAdminApi() {
-  const profile = await getDashboardProfile()
-  if (!profile || profileRoleToAppRole(profile.role) !== 'admin') {
-    return null
-  }
-  return profile
-}
-
 export async function POST() {
-  const profile = await requireAdminApi()
-  if (!profile) {
+  const isAdmin = await requireBackupAdminApi()
+  if (!isAdmin) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -26,8 +17,8 @@ export async function POST() {
 }
 
 export async function GET() {
-  const profile = await requireAdminApi()
-  if (!profile) {
+  const isAdmin = await requireBackupAdminApi()
+  if (!isAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
