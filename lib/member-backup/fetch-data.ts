@@ -1,5 +1,6 @@
 import 'server-only'
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { isLessonSchedulePassedInKst } from '@/lib/member-backup/kst-date'
 import { dedupeLessonsBySlot } from '@/lib/lesson-slot-dedupe'
 import {
@@ -7,7 +8,6 @@ import {
   tallySessionPackages,
   type LessonAttendanceRow,
 } from '@/lib/lesson-record-utils'
-import { createAdminClient } from '@/lib/supabase/admin'
 
 export type MemberBackupRow = {
   memberId: string
@@ -62,12 +62,12 @@ function isBackupAttendanceLesson(lesson: LessonBackupRow): boolean {
   })
 }
 
-export async function fetchMemberBackupData(): Promise<{
+export async function fetchMemberBackupData(
+  supabase: SupabaseClient,
+): Promise<{
   members: MemberBackupRow[]
   attendance: MemberAttendanceRow[]
 }> {
-  const supabase = createAdminClient()
-
   const [membersRes, packagesRes, lessonsRes] = await Promise.all([
     supabase
       .from('members')
