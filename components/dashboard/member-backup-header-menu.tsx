@@ -40,7 +40,10 @@ export function MemberBackupHeaderMenu({ className }: { className?: string }) {
   async function handleDriveBackup() {
     setIsUploading(true)
     try {
-      const response = await fetch('/api/admin/member-backup', { method: 'POST' })
+      const response = await fetch('/api/admin/member-backup', {
+        method: 'POST',
+        cache: 'no-store',
+      })
       const result = (await response.json()) as {
         ok: boolean
         error?: string

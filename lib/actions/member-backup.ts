@@ -3,8 +3,12 @@
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
 import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
+import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors'
 import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
-import { getMemberBackupSettingsRow } from '@/lib/member-backup/run-backup'
+import {
+  clearObsoleteBackupErrors,
+  getMemberBackupSettingsRow,
+} from '@/lib/member-backup/run-backup'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import type { MemberBackupStatus } from '@/lib/member-backup/types'
 
@@ -15,8 +19,12 @@ const SETTINGS_ID = 'default'
 export async function getMemberBackupStatus(): Promise<MemberBackupStatus> {
   await requireRole(['admin'])
 
+  await clearObsoleteBackupErrors()
+
   const syncRow = await getGoogleBackupAuthRow()
   const settings = await getMemberBackupSettingsRow()
+
+  const lastError = settings?.last_error ?? null
 
   return {
     configured: isGoogleCalendarConfigured(),
@@ -25,7 +33,7 @@ export async function getMemberBackupStatus(): Promise<MemberBackupStatus> {
     enabled: settings?.enabled ?? true,
     lastRunAt: settings?.last_run_at ?? null,
     lastSuccessAt: settings?.last_success_at ?? null,
-    lastError: settings?.last_error ?? null,
+    lastError: isObsoleteBackupError(lastError) ? null : lastError,
     lastFileName: settings?.last_file_name ?? null,
     lastFileUrl: settings?.last_file_url ?? null,
     driveFolderName: settings?.drive_folder_name ?? null,

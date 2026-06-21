@@ -37,7 +37,10 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
     setStatus((prev) => ({ ...prev, lastError: null }))
     setIsUploading(true)
     try {
-      const response = await fetch('/api/admin/member-backup', { method: 'POST' })
+      const response = await fetch('/api/admin/member-backup', {
+        method: 'POST',
+        cache: 'no-store',
+      })
       const result = (await response.json()) as {
         ok: boolean
         error?: string
@@ -45,13 +48,21 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
         attendanceCount?: number
         fileName?: string
         deployRev?: string
+        backupApiRev?: string
       }
       if (!result.ok) {
+        const description = [
+          result.error,
+          result.deployRev ? `(배포 ${result.deployRev})` : null,
+          result.backupApiRev ? `[${result.backupApiRev}]` : null,
+        ]
+          .filter(Boolean)
+          .join(' ')
         setStatus((prev) => ({
           ...prev,
           lastError: result.error ?? 'Drive 백업에 실패했습니다.',
         }))
-        toast.error('Drive 백업 실패', { description: result.error })
+        toast.error('Drive 백업 실패', { description })
         router.refresh()
         return
       }

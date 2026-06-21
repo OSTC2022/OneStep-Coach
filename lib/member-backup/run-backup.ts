@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
+import { isObsoleteBackupError } from '@/lib/member-backup/obsolete-errors'
 import { getSupabaseAdmin } from '@/lib/member-backup/supabase-admin'
 import { withGoogleAccessToken } from '@/lib/google-calendar/client'
 import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
@@ -25,6 +26,13 @@ export type MemberBackupRunResult = {
 }
 
 const SETTINGS_ID = 'default'
+
+/** DB에 남은 구버전 오류 메시지 제거 (화면에 계속 표시되는 것 방지) */
+export async function clearObsoleteBackupErrors(): Promise<void> {
+  const settings = await getMemberBackupSettingsRow()
+  if (!isObsoleteBackupError(settings?.last_error ?? null)) return
+  await upsertBackupSettings({ last_error: null })
+}
 
 export async function getMemberBackupSettingsRow() {
   const supabase = getSupabaseAdmin()
