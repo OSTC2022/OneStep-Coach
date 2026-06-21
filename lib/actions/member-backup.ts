@@ -2,14 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
+import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import { getGoogleCalendarSyncRow } from '@/lib/google-calendar/sync'
-import { buildMemberBackupWorkbookBuffer } from '@/lib/member-backup/export-xlsx'
 import {
   getMemberBackupSettingsRow,
   runMemberBackupToGoogleDrive,
 } from '@/lib/member-backup/run-backup'
-import { createAdminClient } from '@/lib/supabase/admin'
 
 export type MemberBackupStatus = {
   configured: boolean
@@ -64,7 +63,7 @@ export async function setMemberBackupEnabled(
   enabled: boolean,
 ): Promise<{ error?: string }> {
   await requireRole(['admin'])
-  const supabase = createAdminClient()
+  const supabase = await getMemberBackupAdminClient()
   const { error } = await supabase.from('member_backup_settings').upsert(
     {
       id: SETTINGS_ID,
@@ -85,11 +84,10 @@ export async function downloadMemberBackupExcel(): Promise<{
 }> {
   await requireRole(['admin'])
   try {
+    const { buildMemberBackupWorkbookBuffer, buildMemberBackupDownloadFilename } =
+      await import('@/lib/member-backup/export-xlsx')
     const { buffer, memberCount, attendanceCount } =
       await buildMemberBackupWorkbookBuffer()
-    const { buildMemberBackupDownloadFilename } = await import(
-      '@/lib/member-backup/export-xlsx'
-    )
     return {
       data: buffer.toString('base64'),
       fileName: buildMemberBackupDownloadFilename(),

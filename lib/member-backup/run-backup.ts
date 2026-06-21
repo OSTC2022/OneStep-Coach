@@ -1,10 +1,7 @@
 import 'server-only'
 
-import {
-  buildMemberBackupWorkbookBuffer,
-  MEMBER_BACKUP_DRIVE_FILENAME,
-} from '@/lib/member-backup/export-xlsx'
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
+import { getMemberBackupAdminClient } from '@/lib/member-backup/admin-client'
 import { withGoogleAccessToken } from '@/lib/google-calendar/client'
 import { getGoogleCalendarSyncRow } from '@/lib/google-calendar/sync'
 import {
@@ -14,7 +11,6 @@ import {
   MEMBER_BACKUP_DRIVE_FOLDER,
   uploadDriveFile,
 } from '@/lib/google-drive/client'
-import { createAdminClient } from '@/lib/supabase/admin'
 
 export type MemberBackupTrigger = 'manual' | 'cron'
 
@@ -31,7 +27,7 @@ export type MemberBackupRunResult = {
 const SETTINGS_ID = 'default'
 
 export async function getMemberBackupSettingsRow() {
-  const supabase = createAdminClient()
+  const supabase = await getMemberBackupAdminClient()
   const { data, error } = await supabase
     .from('member_backup_settings')
     .select('*')
@@ -48,7 +44,7 @@ export async function getMemberBackupSettingsRow() {
 async function upsertBackupSettings(
   patch: Record<string, unknown>,
 ): Promise<void> {
-  const supabase = createAdminClient()
+  const supabase = await getMemberBackupAdminClient()
   const now = new Date().toISOString()
   const { error } = await supabase.from('member_backup_settings').upsert(
     {
@@ -104,6 +100,9 @@ export async function runMemberBackupToGoogleDrive(options?: {
         'Google 계정이 연결되어 있지 않습니다. 설정 → Google 캘린더에서 연결 후 Drive 권한을 포함해 다시 연결해 주세요.',
       )
     }
+
+    const { buildMemberBackupWorkbookBuffer, MEMBER_BACKUP_DRIVE_FILENAME } =
+      await import('@/lib/member-backup/export-xlsx')
 
     const { buffer, memberCount, attendanceCount } =
       await buildMemberBackupWorkbookBuffer()
