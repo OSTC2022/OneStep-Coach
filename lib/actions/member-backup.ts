@@ -63,7 +63,7 @@ export async function setMemberBackupEnabled(
   enabled: boolean,
 ): Promise<{ error?: string }> {
   await requireRole(['admin'])
-  const supabase = await getMemberBackupAdminClient()
+  const supabase = getMemberBackupAdminClient()
   const { error } = await supabase.from('member_backup_settings').upsert(
     {
       id: SETTINGS_ID,

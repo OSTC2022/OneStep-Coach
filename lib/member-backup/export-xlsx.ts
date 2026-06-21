@@ -40,7 +40,7 @@ export async function buildMemberBackupWorkbookBuffer(): Promise<{
   memberCount: number
   attendanceCount: number
 }> {
-  const supabase = await getMemberBackupAdminClient()
+  const supabase = getMemberBackupAdminClient()
   const { members, attendance } = await fetchMemberBackupData(supabase)
   const workbook = XLSX.utils.book_new()
 

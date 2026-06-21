@@ -27,7 +27,7 @@ export type MemberBackupRunResult = {
 const SETTINGS_ID = 'default'
 
 export async function getMemberBackupSettingsRow() {
-  const supabase = await getMemberBackupAdminClient()
+  const supabase = getMemberBackupAdminClient()
   const { data, error } = await supabase
     .from('member_backup_settings')
     .select('*')
@@ -44,7 +44,7 @@ export async function getMemberBackupSettingsRow() {
 async function upsertBackupSettings(
   patch: Record<string, unknown>,
 ): Promise<void> {
-  const supabase = await getMemberBackupAdminClient()
+  const supabase = getMemberBackupAdminClient()
   const now = new Date().toISOString()
   const { error } = await supabase.from('member_backup_settings').upsert(
     {

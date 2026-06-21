@@ -7,7 +7,7 @@ export async function getGoogleBackupAuthRow(): Promise<{
   refresh_token: string | null
   connected_email: string | null
 } | null> {
-  const supabase = await getMemberBackupAdminClient()
+  const supabase = getMemberBackupAdminClient()
   const { data, error } = await supabase
     .from('google_calendar_sync')
     .select('refresh_token, connected_email')
