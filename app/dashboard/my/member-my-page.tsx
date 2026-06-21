@@ -16,15 +16,20 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
-import type { MemberPortalData } from '@/lib/member-portal-types'
+import { MemberMileageLogCard } from '@/components/dashboard/member-mileage-log-card'
+import { MemberRunningPbPanel } from '@/components/dashboard/member-running-pb-panel'
+import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
+import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
 import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
 import { portalStatusToneClass } from '@/lib/member-portal-status'
 import type { Member } from '@/lib/types'
+import { formatPackageExpiryDateLabel } from '@/lib/session-package-utils'
 import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
   data: MemberPortalData
   role?: string | null
+  runningLeagueHome?: MemberRunningLeagueHome | null
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -36,28 +41,55 @@ function formatTodayRecordSummary(recorded: boolean): string {
   return recorded ? '완료' : '입력 필요'
 }
 
-function formatRemainingSessionsHint(remaining: number | null | undefined): string {
-  if (remaining == null || remaining <= 0) return '수업권 확인 필요'
+function formatRemainingSessionsHint(sessionStatus: MemberPortalSessionStatus): string {
+  if (sessionStatus.kind === 'monthly') {
+    return sessionStatus.expiresAt
+      ? `만료일 ${formatPackageExpiryDateLabel(sessionStatus.expiresAt)}`
+      : '만료일 미지정'
+  }
+  if (!sessionStatus.isUsable) return '수업권 확인 필요'
   return '수업권 정상'
+}
+
+function formatSessionStatusValue(sessionStatus: MemberPortalSessionStatus): string {
+  if (sessionStatus.kind === 'monthly') {
+    return sessionStatus.remainingPeriodLabel
+  }
+  if (!sessionStatus.isUsable) return '수업권 확인 필요'
+  return '정상 이용 중'
+}
+
+function monthlySessionStatusToneClass(
+  sessionStatus: Extract<MemberPortalSessionStatus, { kind: 'monthly' }>,
+): string {
+  const days = sessionStatus.daysUntilExpiry
+  if (days != null && days < 0) return 'text-destructive'
+  if (days != null && days <= 7) return 'text-amber-300'
+  return 'text-primary'
 }
 
 function formatTodayRecordHint(recorded: boolean): string {
   return recorded ? '오늘 상태 저장됨' : '훈련 전 상태 체크'
 }
 
-function formatSessionStatusValue(remaining: number | null | undefined): string {
-  if (remaining == null || remaining <= 0) return '수업권 확인 필요'
-  return '정상 이용 중'
-}
-
 function resolveProfileAside(data: MemberPortalData) {
-  const { member, summary } = data
-  const remaining = member.remaining_sessions ?? 0
+  const { summary, sessionStatus } = data
 
-  if (remaining <= 0) {
+  if (sessionStatus.kind === 'monthly') {
     return {
       label: '수업 상태',
-      value: formatSessionStatusValue(remaining),
+      value: sessionStatus.remainingPeriodLabel,
+      valueClassName: monthlySessionStatusToneClass(sessionStatus),
+      hint: sessionStatus.expiresAt
+        ? `만료일 ${formatPackageExpiryDateLabel(sessionStatus.expiresAt)}`
+        : '만료일 미지정',
+    }
+  }
+
+  if (!sessionStatus.isUsable) {
+    return {
+      label: '수업 상태',
+      value: formatSessionStatusValue(sessionStatus),
       valueClassName: 'text-amber-300',
       hint: '센터에 문의해주세요',
     }
@@ -72,14 +104,16 @@ function resolveProfileAside(data: MemberPortalData) {
   }
 }
 
-export function MemberMyPage({ data, role }: MemberMyPageProps) {
-  const { member, summary, centerContact, coachContact } = data
+export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProps) {
+  const { member, summary, centerContact, coachContact, sessionStatus } = data
   const isAdultMember = role === 'adult_member'
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const sportProfile = formatSportProfile(member)
   const todayRecordLabel = formatTodayRecordSummary(summary.todayRecorded)
   const reportReady = summary.wellnessRecordCount >= MEMBER_REPORT_MIN_RECORDS
-  const profileAside = resolveProfileAside(data)
+  const profileAside = isAdultMember
+    ? null
+    : resolveProfileAside(data)
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-6">
@@ -101,7 +135,10 @@ export function MemberMyPage({ data, role }: MemberMyPageProps) {
         <CardContent className="p-4 sm:p-6">
           <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">
             <div className="space-y-1.5">
-              <p className="text-xl font-bold lg:text-2xl">{member.name} 선수</p>
+              <p className="text-xl font-bold lg:text-2xl">
+                {member.name}
+                {isAdultMember ? '' : ' 선수'}
+              </p>
               {sportProfile ? (
                 <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
               ) : null}
@@ -114,30 +151,48 @@ export function MemberMyPage({ data, role }: MemberMyPageProps) {
               </p>
             </div>
             <div className="rounded-lg border border-border/50 bg-background/30 px-3.5 py-3 md:border-l md:border-y-0 md:border-r-0 md:bg-transparent md:pl-8">
-              <p className="text-xs font-medium text-muted-foreground">
-                {profileAside.label}
-              </p>
-              <p
-                className={cn(
-                  'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
-                  profileAside.valueClassName,
-                )}
-              >
-                {profileAside.value}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
-              {(member.remaining_sessions ?? 0) <= 0 ? (
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
-                >
-                  <Link href="/dashboard/my/sessions#lesson-records">
-                    수업권 확인하러 가기
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                  </Link>
-                </Button>
+              {isAdultMember ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <MemberRunningPbPanel
+                    participant={runningLeagueHome?.participant ?? null}
+                    pbRecords={runningLeagueHome?.pbRecords ?? []}
+                    tableReady={runningLeagueHome?.tableReady ?? true}
+                  />
+                  <MemberMileageLogCard
+                    variant="embedded"
+                    participant={runningLeagueHome?.participant ?? null}
+                    mileageLogs={runningLeagueHome?.mileageLogs ?? []}
+                    tableReady={runningLeagueHome?.tableReady ?? true}
+                  />
+                </div>
+              ) : profileAside ? (
+                <>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {profileAside.label}
+                  </p>
+                  <p
+                    className={cn(
+                      'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
+                      profileAside.valueClassName,
+                    )}
+                  >
+                    {profileAside.value}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
+                  {!sessionStatus.isUsable ? (
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
+                    >
+                      <Link href="/dashboard/my/sessions#lesson-records">
+                        수업권 확인하러 가기
+                        <ChevronRight className="ml-1 h-4 w-4" />
+                      </Link>
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </div>
@@ -146,10 +201,21 @@ export function MemberMyPage({ data, role }: MemberMyPageProps) {
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
         <SummaryCard
-          title="남은 수업"
+          title={isAdultMember && sessionStatus.kind === 'monthly' ? '수업권 남은 기간' : sessionStatus.kind === 'monthly' ? '남은 기간' : '남은 수업'}
           icon={<CreditCard className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-          value={`${member.remaining_sessions ?? 0}회`}
-          hint={formatRemainingSessionsHint(member.remaining_sessions)}
+          value={
+            sessionStatus.kind === 'monthly'
+              ? sessionStatus.remainingPeriodLabel
+              : `${sessionStatus.remainingSessions ?? 0}회`
+          }
+          valueClassName={
+            sessionStatus.kind === 'monthly'
+              ? monthlySessionStatusToneClass(sessionStatus)
+              : !sessionStatus.isUsable
+                ? 'text-amber-300'
+                : undefined
+          }
+          hint={formatRemainingSessionsHint(sessionStatus)}
         />
         <SummaryCard
           title="최근 출석일"

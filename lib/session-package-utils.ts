@@ -1,3 +1,6 @@
+import { differenceInCalendarDays, format, parseISO } from 'date-fns'
+import { ko } from 'date-fns/locale'
+
 export const PACKAGE_PRESETS = [
   { sessions: 8, label: '8회' },
   { sessions: 10, label: '10회' },
@@ -332,4 +335,32 @@ export function formatPackageTallyRemainingDisplay(
   }
   const remaining = regular.reduce((sum, pkg) => sum + pkg.remaining_sessions, 0)
   return String(remaining)
+}
+
+export function getDaysUntilExpiry(
+  expiresAt: string | null | undefined,
+  today = new Date(),
+): number | null {
+  if (!expiresAt) return null
+  const expiryDate = expiresAt.split('T')[0]
+  const todayDate = today.toISOString().split('T')[0]
+  return differenceInCalendarDays(parseISO(expiryDate), parseISO(todayDate))
+}
+
+export function formatMonthlyPlanRemainingPeriod(
+  expiresAt: string | null | undefined,
+): string {
+  const days = getDaysUntilExpiry(expiresAt)
+  if (days == null) return '기간 미지정'
+  if (days < 0) return '만료됨'
+  if (days === 0) return '오늘 만료'
+  if (days === 1) return '1일 남음'
+  return `${days}일 남음`
+}
+
+export function formatPackageExpiryDateLabel(
+  expiresAt: string | null | undefined,
+): string {
+  if (!expiresAt) return '미지정'
+  return format(parseISO(expiresAt.split('T')[0]), 'yyyy.M.d (EEE)', { locale: ko })
 }

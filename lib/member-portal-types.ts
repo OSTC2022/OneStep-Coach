@@ -14,6 +14,21 @@ export type {
 } from '@/lib/center-contact'
 export type { VisibleSnsAccount } from '@/lib/sns-account'
 
+export type MemberPortalSessionStatus =
+  | {
+      kind: 'monthly'
+      isUsable: boolean
+      remainingPeriodLabel: string
+      expiresAt: string | null
+      planLabel: string
+      daysUntilExpiry: number | null
+    }
+  | {
+      kind: 'count'
+      isUsable: boolean
+      remainingSessions: number
+    }
+
 export type MemberPortalData = {
   member: Member
   instructorAccount: VisibleSnsAccount | null
@@ -27,4 +42,5 @@ export type MemberPortalData = {
   bodyRecords: MemberBodyRecord[]
   bodyTableReady: boolean
   summary: MemberPortalSummary
+  sessionStatus: MemberPortalSessionStatus
 }

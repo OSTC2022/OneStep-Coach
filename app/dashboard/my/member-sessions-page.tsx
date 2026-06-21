@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import type { MemberLessonRecordsData } from '@/lib/member-portal-lessons'
 import type { MemberPortalData } from '@/lib/member-portal-types'
+import { formatPackageExpiryDateLabel } from '@/lib/session-package-utils'
 
 interface MemberSessionsPageProps {
   data: MemberPortalData
@@ -16,7 +17,7 @@ interface MemberSessionsPageProps {
 }
 
 export function MemberSessionsPage({ data, lessonRecords }: MemberSessionsPageProps) {
-  const { member, nextLesson } = data
+  const { member, nextLesson, sessionStatus } = data
   const instructorName = member.primary_instructor?.name ?? '자율배정'
 
   return (
@@ -40,9 +41,18 @@ export function MemberSessionsPage({ data, lessonRecords }: MemberSessionsPagePr
           <CardContent className="space-y-1 p-5">
             <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
               <CreditCard className="h-4 w-4" />
-              남은 수업
+              {sessionStatus.kind === 'monthly' ? '남은 기간' : '남은 수업'}
             </p>
-            <p className="text-2xl font-bold tabular-nums">{member.remaining_sessions ?? 0}회</p>
+            <p className="text-2xl font-bold tabular-nums">
+              {sessionStatus.kind === 'monthly'
+                ? sessionStatus.remainingPeriodLabel
+                : `${sessionStatus.remainingSessions ?? 0}회`}
+            </p>
+            {sessionStatus.kind === 'monthly' && sessionStatus.expiresAt ? (
+              <p className="text-xs text-muted-foreground">
+                만료일 {formatPackageExpiryDateLabel(sessionStatus.expiresAt)}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
 

@@ -1,0 +1,194 @@
+'use client'
+
+import { useMemo, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { format, parseISO } from 'date-fns'
+import { ko } from 'date-fns/locale'
+import { toast } from 'sonner'
+import { saveMemberRunningPb } from '@/lib/actions/running-league'
+import type {
+  RunningLeagueDistanceEvent,
+  RunningLeagueParticipant,
+  RunningLeagueRecord,
+} from '@/lib/types'
+import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+const DISTANCE_EVENTS: RunningLeagueDistanceEvent[] = ['1km', '3km', '5km', '10km']
+
+interface MemberRunningPbPanelProps {
+  participant: RunningLeagueParticipant | null
+  pbRecords: RunningLeagueRecord[]
+  tableReady: boolean
+}
+
+export function MemberRunningPbPanel({
+  participant,
+  pbRecords,
+  tableReady,
+}: MemberRunningPbPanelProps) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [open, setOpen] = useState(false)
+  const [distance, setDistance] = useState<RunningLeagueDistanceEvent>('5km')
+  const [timeText, setTimeText] = useState('')
+  const [measuredAt, setMeasuredAt] = useState(new Date().toISOString().slice(0, 10))
+
+  const pbByDistance = useMemo(() => {
+    const map = new Map<RunningLeagueDistanceEvent, RunningLeagueRecord>()
+    for (const record of pbRecords) {
+      map.set(record.distance_event, record)
+    }
+    return map
+  }, [pbRecords])
+
+  const primaryPb = pbByDistance.get('5km') ?? pbRecords[0] ?? null
+
+  function handleSave() {
+    if (!timeText.trim()) {
+      toast.error('기록을 입력해주세요.')
+      return
+    }
+
+    startTransition(async () => {
+      const result = await saveMemberRunningPb({
+        distance_event: distance,
+        time_text: timeText.trim(),
+        measured_at: measuredAt,
+      })
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('개인 PB가 저장되었습니다.')
+      setTimeText('')
+      setOpen(false)
+      router.refresh()
+    })
+  }
+
+  if (!tableReady) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-muted-foreground">개인 러닝 PB</p>
+        <p className="mt-1 text-sm text-muted-foreground">DB 설정이 필요합니다.</p>
+      </div>
+    )
+  }
+
+  if (!participant) {
+    return (
+      <div>
+        <p className="text-xs font-medium text-muted-foreground">개인 러닝 PB</p>
+        <p className="mt-1 text-sm text-muted-foreground">러닝 리그 참가 후 기록할 수 있습니다.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">개인 러닝 PB</p>
+      {primaryPb?.time_text ? (
+        <div>
+          <p className="text-lg font-semibold text-primary lg:text-xl">
+            {primaryPb.distance_event} {primaryPb.time_text}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {format(parseISO(primaryPb.measured_at), 'yyyy.M.d (EEE)', { locale: ko })} 기록
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">아직 등록된 PB가 없습니다.</p>
+      )}
+
+      {pbRecords.length > 1 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {DISTANCE_EVENTS.map((event) => {
+            const record = pbByDistance.get(event)
+            if (!record?.time_text) return null
+            return (
+              <span
+                key={event}
+                className="rounded-md border border-border/60 bg-background/40 px-2 py-0.5 text-[11px] text-muted-foreground"
+              >
+                {event} {record.time_text}
+              </span>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {open ? (
+        <div className="space-y-2 rounded-lg border border-border/60 bg-background/40 p-2.5">
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">종목</Label>
+              <Select
+                value={distance}
+                onValueChange={(value) => setDistance(value as RunningLeagueDistanceEvent)}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DISTANCE_EVENTS.map((event) => (
+                    <SelectItem key={event} value={event}>
+                      {event}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">기록</Label>
+              <Input
+                className="h-9"
+                value={timeText}
+                onChange={(e) => setTimeText(e.target.value)}
+                placeholder="32:10"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">측정일</Label>
+            <KoreanDatePicker value={measuredAt} onChange={setMeasuredAt} compact placeholder="날짜 선택" />
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" className="h-8 flex-1" disabled={pending} onClick={handleSave}>
+              {pending ? '저장 중…' : 'PB 저장'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8"
+              disabled={pending}
+              onClick={() => setOpen(false)}
+            >
+              닫기
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 w-full border-primary/30 bg-background/50 text-xs sm:w-auto"
+          onClick={() => setOpen(true)}
+        >
+          PB {primaryPb ? '수정' : '등록'}
+        </Button>
+      )}
+    </div>
+  )
+}

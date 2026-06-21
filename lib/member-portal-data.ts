@@ -6,10 +6,12 @@ import {
   getSessionTransactionsForMember,
 } from '@/lib/actions/lesson-sessions'
 import { getLessons } from '@/lib/actions/lessons'
+import { getSessionPackages } from '@/lib/actions/sessions'
 import {
   buildCenterContactView,
   buildCoachContactView,
 } from '@/lib/center-contact'
+import { buildMemberPortalSessionStatus } from '@/lib/member-portal-session-status'
 import { buildMemberPortalSummary } from '@/lib/member-portal-summary'
 import type { MemberPortalData } from '@/lib/member-portal-types'
 import { toVisibleSnsAccount } from '@/lib/sns-account'
@@ -29,20 +31,28 @@ function resolveRecentAttendanceDate(
 }
 
 export async function loadMemberPortalData(member: Member): Promise<MemberPortalData> {
-  const [nextLesson, recentLessons, recentSessions, transactions, centerSettings, bodyData] =
-    await Promise.all([
-      getNextLessonForMember(member.id),
-      getLessons({ memberId: member.id, limit: 10, upToNow: true }),
-      getLessonSessionsForMember(member.id, 10),
-      getSessionTransactionsForMember(member.id, 15),
-      getCenterSettings(),
-      getMemberBodyRecords(member.id, {
-        weight_kg: member.weight_kg,
-        height_cm: member.height_cm,
-        registered_at: member.registered_at,
-        body_baseline_recorded_at: member.body_baseline_recorded_at,
-      }),
-    ])
+  const [
+    nextLesson,
+    recentLessons,
+    recentSessions,
+    transactions,
+    centerSettings,
+    bodyData,
+    packagesResult,
+  ] = await Promise.all([
+    getNextLessonForMember(member.id),
+    getLessons({ memberId: member.id, limit: 10, upToNow: true }),
+    getLessonSessionsForMember(member.id, 10),
+    getSessionTransactionsForMember(member.id, 15),
+    getCenterSettings(),
+    getMemberBodyRecords(member.id, {
+      weight_kg: member.weight_kg,
+      height_cm: member.height_cm,
+      registered_at: member.registered_at,
+      body_baseline_recorded_at: member.body_baseline_recorded_at,
+    }),
+    getSessionPackages({ memberId: member.id }),
+  ])
 
   const instructor = member.primary_instructor
   const centerContact = buildCenterContactView(centerSettings)
@@ -78,5 +88,6 @@ export async function loadMemberPortalData(member: Member): Promise<MemberPortal
       bodyData.records,
       resolveRecentAttendanceDate(recentSessions, recentLessons),
     ),
+    sessionStatus: buildMemberPortalSessionStatus(member, packagesResult.data),
   }
 }

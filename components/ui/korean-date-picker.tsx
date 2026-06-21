@@ -170,9 +170,17 @@ export function KoreanDatePicker({
           )}
         >
           <CalendarIcon className={cn('mr-2 shrink-0', compact ? 'h-3.5 w-3.5' : 'h-4 w-4')} />
-          {selected
-            ? format(selected, 'yyyy년 M월 d일 (EEE)', { locale: ko })
-            : placeholder}
+          {selected ? (
+            <span className="truncate">
+              {format(
+                selected,
+                compact ? 'M/d (EEE)' : 'yyyy년 M월 d일 (EEE)',
+                { locale: ko },
+              )}
+            </span>
+          ) : (
+            placeholder
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent

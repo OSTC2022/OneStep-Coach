@@ -355,6 +355,17 @@ export interface RunningLeagueMileageLog {
   logged_at: string
   source: RunningLeagueMileageSource
   notes: string
+  duration?: string | null
+  pace?: string | null
+  heart_rate?: number | null
+  calories?: number | null
+  activity_time?: string | null
+  source_app?: string | null
+  screenshot_url?: string | null
+  image_hash?: string | null
+  extraction_confidence?: number | null
+  extraction_raw_json?: Record<string, unknown> | null
+  verification_status?: string | null
   created_at: string
   updated_at: string
 }
