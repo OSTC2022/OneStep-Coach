@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
 
 const NOISE_WORDS = /수업|pt|PT|훈련|레슨|lesson|개인|그룹|group/gi
@@ -28,7 +28,7 @@ export type MemberLookup = {
  * 동기화 1회당 members 1회 조회 → Map 기반 O(1) 매칭
  */
 export async function buildMemberLookup(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
 ): Promise<MemberLookup> {
   const { data, error } = await supabase
     .from('members')

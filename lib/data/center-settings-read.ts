@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { unstable_cache } from 'next/cache'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import type { CenterSettings } from '@/lib/types'
 
 const CENTER_SETTINGS_ID = 'default'
@@ -41,7 +41,7 @@ export function normalizeCenterSettingsRow(data: Record<string, unknown>): Cente
 
 async function fetchCenterSettingsUncached(): Promise<CenterSettings> {
   try {
-    const supabase = createAdminClient()
+    const supabase = createServiceRoleClient()
     const { data, error } = await supabase
       .from('center_settings')
       .select(CENTER_SETTINGS_SELECT)

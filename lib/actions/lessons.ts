@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import type { Lesson, LessonFormData, AttendanceStatus } from '@/lib/types'
 import { getCurrentUser, requireRole } from './auth'
@@ -125,7 +125,7 @@ function mapLessonError(message: string): string {
 
 function getLessonWriteClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return null
   }

@@ -11,7 +11,7 @@ import type { Lesson } from '@/lib/types'
 import { enrichLessonRecurrenceFields } from '@/lib/lesson-recurrence-legacy'
 import { resolveLessonTitle, isLessonCalendarVisible, isLessonStatusPageVisible } from '@/lib/calendar-utils'
 import { isLessonIdentifiable } from '@/lib/calendar-recurrence/expand-lessons'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 function isMissingRecurrenceV2Column(error: { message?: string; code?: string } | null) {
   if (!error) return false
@@ -35,7 +35,7 @@ function normalizeCalendarLesson(lesson: Lesson): Lesson {
 }
 
 async function purgeUnnamedRecurringMasters() {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('lessons')
     .select('id, member_id, title, content, event_type')
@@ -61,7 +61,7 @@ async function purgeUnnamedRecurringMasters() {
 }
 
 async function purgeCancelledRecurrenceExceptions() {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('lessons')
     .select('id, google_recurring_event_id')

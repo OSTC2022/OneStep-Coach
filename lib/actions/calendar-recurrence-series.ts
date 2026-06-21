@@ -2,7 +2,7 @@ import 'server-only'
 
 import { addDays, format, parseISO } from 'date-fns'
 import { revalidatePath } from 'next/cache'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   addExdateToRecurrence,
   truncateRecurrenceUntil,
@@ -27,7 +27,7 @@ const MASTER_SELECT =
   'id, lesson_date, start_time, end_time, member_id, title, instructor_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, event_status, google_event_id, google_calendar_id, google_account_id, session_deducted'
 
 async function bulkDeleteByIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   ids: string[],
 ) {
   const unique = [...new Set(ids.filter(Boolean))]
@@ -42,7 +42,7 @@ async function bulkDeleteByIds(
 }
 
 async function deleteStoredOccurrenceRows(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   master: RecurrenceCapableLesson,
   occurrenceDate: string,
 ): Promise<string[]> {
@@ -110,7 +110,7 @@ export async function deleteRecurringMasterSeries(
   occurrenceDate: string,
 ): Promise<{ deletedIds?: string[]; error?: string }> {
   await requireRole(['admin', 'instructor'])
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
 
   const { data: master, error } = await supabase
     .from('lessons')
@@ -270,7 +270,7 @@ export async function resolveRecurringDeleteTarget(
     }
   }
 
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data } = await supabase
     .from('lessons')
     .select('id, event_type, lesson_date, recurring_master_id, recurrence_group_id')

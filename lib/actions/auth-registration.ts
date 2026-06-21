@@ -6,7 +6,7 @@ import { requireRole } from '@/lib/actions/auth'
 import { assignCoachRoleToInstructor } from '@/lib/actions/settings-accounts'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { appRoleToProfileRole, profileRoleToAppRole } from '@/lib/roles'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   fetchAllProfiles,
   isMissingApprovalColumn,
@@ -46,7 +46,7 @@ export async function signUpPublic(
 export async function listPendingAccounts(): Promise<PendingAccountRow[]> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const ordered = { ascending: false as const }
 
   let { data, error } = await admin
@@ -164,7 +164,7 @@ export async function grantAccountAccess(
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const rows = await fetchAllProfiles(admin)
   const profile = rows.find((p) => p.id === accountUserId)
 
@@ -215,7 +215,7 @@ export async function approveAccount(
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   let resolvedMemberId = memberId?.trim() || null
 
   if (role === 'member' && !resolvedMemberId) {
@@ -346,7 +346,7 @@ export async function approveAccount(
 export async function rejectAccount(userId: string): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const allProfiles = await fetchAllProfiles(admin)
   const profile = allProfiles.find((p) => p.id === userId)
 
@@ -387,7 +387,7 @@ function isAlreadyRegisteredError(message: string) {
 }
 
 async function findAuthUserIdByEmail(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   email: string,
 ): Promise<string | null> {
   const normalized = email.trim().toLowerCase()
@@ -411,7 +411,7 @@ async function findAuthUserIdByEmail(
 }
 
 async function persistAdminCreatedAccount(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
   authEmail: string,
   fullName: string,
@@ -467,9 +467,9 @@ export async function createAccountByAdmin(
   const authEmail = emailResult.email
   const profileRole = appRoleToProfileRole(input.role)
 
-  let admin: ReturnType<typeof createAdminClient>
+  let admin: ReturnType<typeof createServiceRoleClient>
   try {
-    admin = createAdminClient()
+    admin = createServiceRoleClient()
   } catch {
     return {
       error:

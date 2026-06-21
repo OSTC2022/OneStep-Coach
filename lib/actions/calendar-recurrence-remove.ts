@@ -2,7 +2,7 @@ import 'server-only'
 
 import { addDays, format, parseISO } from 'date-fns'
 import { revalidatePath } from 'next/cache'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   addExdateToRecurrence,
   truncateRecurrenceUntil,
@@ -53,7 +53,7 @@ function dayBefore(dateKey: string) {
 }
 
 async function bulkDeleteByIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   ids: string[],
 ) {
   const unique = [...new Set(ids.filter(Boolean))]
@@ -100,7 +100,7 @@ function buildSingleUpdatePayload(
 }
 
 async function insertSingleLesson(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   payload: Record<string, unknown>,
 ): Promise<Lesson> {
   const { data, error } = await supabase
@@ -116,7 +116,7 @@ async function insertSingleLesson(
 }
 
 async function fetchSlotCandidates(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   row: LegacySiblingRow,
 ) {
   if (row.member_id) {
@@ -154,7 +154,7 @@ function filterByScope(
 }
 
 async function removeSlotBasedRecurrence(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   lessonId: string,
   scope: LessonSeriesScope,
   anchorDate: string,
@@ -267,7 +267,7 @@ async function removeSlotBasedRecurrence(
 }
 
 async function fetchLegacySiblingIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   row: RecurrenceCapableLesson,
   groupId: string,
   anchorDate: string,
@@ -291,7 +291,7 @@ async function fetchLegacySiblingIds(
 }
 
 async function fetchRecurringMasterRow(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   masterId: string,
 ): Promise<RecurrenceCapableLesson | null> {
   const { data, error } = await supabase
@@ -328,7 +328,7 @@ async function removeRecurrenceFallback(
   updates: Partial<LessonFormData>,
   options?: { masterId?: string | null },
 ): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const virtual = parseVirtualLessonId(lessonId)
   const occurrenceDate = virtual?.occurrenceDate ?? anchorDate
   const masterId = options?.masterId ?? virtual?.masterId ?? null
@@ -422,7 +422,7 @@ async function removeRecurringMasterRecurrence(
   updates: Partial<LessonFormData>,
   sourceLessonId?: string,
 ): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
 
   const row = await fetchRecurringMasterRow(supabase, masterId)
 
@@ -513,7 +513,7 @@ async function removeLegacyMaterializedRecurrence(
   anchorDate: string,
   updates: Partial<LessonFormData>,
 ): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
 
   const { data: lesson, error } = await supabase
     .from('lessons')

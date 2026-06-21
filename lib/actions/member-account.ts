@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { isRedirectError } from 'next/dist/client/components/redirect-error'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { createAuthEmailClient } from '@/lib/supabase/auth-email-client'
 import {
@@ -89,7 +89,7 @@ function isAlreadyRegisteredError(message: string) {
 }
 
 async function listAuthUserByEmail(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   email: string,
 ): Promise<{ id: string; email: string | undefined } | null> {
   let page = 1
@@ -116,7 +116,7 @@ async function listAuthUserByEmail(
 
 /** Auth 삭제 후 남은 profiles/users·members 연결 정리 */
 async function cleanupOrphanRecordsByEmail(email: string) {
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const authUser = await listAuthUserByEmail(admin, email)
 
   const { data: profiles } = await admin
@@ -148,7 +148,7 @@ async function cleanupOrphanRecordsByEmail(email: string) {
 }
 
 async function clearStaleMemberAuthLink(memberId: string) {
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const { data: member } = await admin
     .from('members')
     .select('auth_user_id, user_id')
@@ -168,13 +168,13 @@ async function clearStaleMemberAuthLink(memberId: string) {
 }
 
 async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const authUser = await listAuthUserByEmail(admin, email)
   return authUser?.id ?? null
 }
 
 async function sendInviteEmail(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   email: string,
   memberName: string,
   memberId: string,
@@ -213,7 +213,7 @@ function extractActionLink(data: unknown): string | null {
 
 /** SMTP 실패 시 관리자가 직접 전달할 수 있는 일회성 링크 */
 async function generateManualAuthLink(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   email: string,
   memberName: string,
   memberId: string,
@@ -284,7 +284,7 @@ async function sendExistingUserLoginEmail(
 
 /** 신규는 초대 메일, 이미 등록된 이메일은 초대 재시도 후 비밀번호/매직링크 재발송 */
 async function sendMemberInviteEmail(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   email: string,
   memberName: string,
   memberId: string,
@@ -370,7 +370,7 @@ async function ensureMemberProfile(
     }
   }
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
 
   const { error: profileError } = await admin.from('profiles').upsert(
     {
@@ -416,7 +416,7 @@ async function linkMemberRecord(
   authUserId: string,
   inviteEmail?: string,
 ): Promise<{ error?: string }> {
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
 
   const { data: existing } = await admin
     .from('members')
@@ -482,7 +482,7 @@ export type MemberLinkSearchRow = MemberPickerOption & {
 }
 
 async function clearMemberLinksForAuthUser(authUserId: string) {
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   await admin
     .from('members')
     .update({
@@ -500,7 +500,7 @@ export async function searchMembersForAccountLink(
 ): Promise<MemberLinkSearchRow[]> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const q = query.trim()
 
   let dbQuery = admin
@@ -544,7 +544,7 @@ export async function getMemberLinkedToAccount(
 ): Promise<{ id: string; name: string } | null> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const { data } = await admin
     .from('members')
     .select('id, name')
@@ -565,7 +565,7 @@ export async function linkAuthUserToMemberRecord(
   const envError = getAdminEnvError()
   if (envError) return { error: envError }
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const { data: authUser, error: authError } =
     await admin.auth.admin.getUserById(authUserId)
   if (authError || !authUser.user) {
@@ -690,7 +690,7 @@ export async function linkExistingAuthUserToMember(
     return { error: envError }
   }
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const { data: authUser, error: authError } =
     await admin.auth.admin.getUserById(authUserId)
   if (authError || !authUser.user) {
@@ -765,7 +765,7 @@ export async function inviteMemberLogin(
     await clearStaleMemberAuthLink(memberId)
     await cleanupOrphanRecordsByEmail(normalizedEmail)
 
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     const siteUrl = getSiteUrl()
     const inviteRedirectTo = getInviteEmailRedirectUrl(siteUrl)
 
@@ -921,7 +921,7 @@ export async function getMemberAccountEmail(
   }
 
   try {
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     const { data: member } = await admin
       .from('members')
       .select('auth_user_id, user_id, invite_email')

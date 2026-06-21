@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import type { MemberLookup } from '@/lib/google-calendar/member-matcher'
 import { googleRecurrenceGroupId } from '@/lib/lesson-slot-utils'
 import {
@@ -51,7 +51,7 @@ export function preserveLinkedMemberOnGoogleSync(
 }
 
 async function bulkUpsertLessonRows(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   rows: Record<string, unknown>[],
   options?: {
     googleAccountId?: string
@@ -106,7 +106,7 @@ async function bulkUpsertLessonRows(
 }
 
 async function bulkCancelLessonIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   ids: string[],
 ) {
   if (ids.length === 0) return
@@ -131,7 +131,7 @@ type ExistingLesson = {
 }
 
 export async function loadExistingByGoogleEventId(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   googleEventIds: string[],
   options?: {
     googleAccountId?: string | null
@@ -184,7 +184,7 @@ export async function loadExistingByGoogleEventId(
 
 /** Google 이벤트에 센터 lesson ID가 있으면 기존 행과 연결 (푸시 직후 웹훅 중복 방지) */
 export async function enrichExistingMapFromGoogleLessonIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   events: GoogleCalendarEvent[],
   existingMap: Map<string, ExistingLesson>,
 ): Promise<void> {
@@ -216,7 +216,7 @@ export async function enrichExistingMapFromGoogleLessonIds(
 }
 
 async function findExistingByGoogleKey(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   googleAccountId: string,
   googleCalendarId: string,
   googleEventId: string,
@@ -263,7 +263,7 @@ async function findExistingByGoogleKey(
 }
 
 async function upsertGoogleLessonRow(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   payload: Record<string, unknown>,
   googleAccountId: string,
   calendarId: string,
@@ -330,7 +330,7 @@ async function upsertGoogleLessonRow(
 }
 
 export async function loadExistingByGoogleRecurringInstance(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   keys: { recurringEventId: string; originalStartIso: string }[],
 ): Promise<Map<string, ExistingLesson>> {
   const map = new Map<string, ExistingLesson>()
@@ -496,7 +496,7 @@ function emptySyncResult(): GoogleCalendarSyncResult {
 }
 
 export async function applyGoogleEventsBatch(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   events: GoogleCalendarEvent[],
   memberLookup: MemberLookup,
   existingMap: Map<string, ExistingLesson>,
@@ -532,7 +532,7 @@ export async function applyGoogleEventsBatch(
 }
 
 async function resolveMasterIdByGoogleRecurringEventId(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   recurringEventId: string,
 ): Promise<string | null> {
   const groupId = googleRecurrenceGroupId(recurringEventId)
@@ -547,7 +547,7 @@ async function resolveMasterIdByGoogleRecurringEventId(
 }
 
 async function bulkDeleteLessonIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   ids: string[],
 ) {
   const unique = [...new Set(ids.filter(Boolean))]
@@ -562,7 +562,7 @@ async function bulkDeleteLessonIds(
 }
 
 async function deleteGoogleRecurringSeries(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   masterGoogleEventId: string,
   knownMasterDbId?: string | null,
 ): Promise<number> {
@@ -619,7 +619,7 @@ async function deleteGoogleRecurringSeries(
 }
 
 async function consolidateGoogleRecurringSeriesRows(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   options: {
     masterGoogleEventId: string
     masterDbId: string
@@ -673,7 +673,7 @@ async function consolidateGoogleRecurringSeriesRows(
 }
 
 async function applyGoogleEventsChunk(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   events: GoogleCalendarEvent[],
   memberLookup: MemberLookup,
   existingMap: Map<string, ExistingLesson>,

@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { appRoleToProfileRole } from '@/lib/roles'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { upsertUserProfile } from '@/lib/profiles-admin'
 import {
   parseRequiredEmail,
@@ -32,7 +32,7 @@ function normalizeSignupPhone(value: string, label: string): SignupPhoneResult {
 }
 
 async function createSignupMemberProfile(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
   payload: {
     name: string
@@ -153,9 +153,9 @@ async function runPublicSignup(
 
   const profileRole = appRoleToProfileRole(requestedRole)
 
-  let admin: ReturnType<typeof createAdminClient>
+  let admin: ReturnType<typeof createServiceRoleClient>
   try {
-    admin = createAdminClient()
+    admin = createServiceRoleClient()
   } catch {
     return {
       error:

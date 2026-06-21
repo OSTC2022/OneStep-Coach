@@ -3,7 +3,7 @@
 import { getMemberForCurrentUser, requireRole } from '@/lib/actions/auth'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { canEditMemberBasicInfo, profileRoleToAppRole } from '@/lib/roles'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -532,7 +532,7 @@ function mapMemberError(message: string): string {
 
 function getMemberWriteClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return null
   }

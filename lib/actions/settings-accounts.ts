@@ -12,7 +12,7 @@ import {
   getApprovalStatusLabel,
   resolveApprovalStatus,
 } from '@/lib/profile-approval'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import {
   ensureProfileRowForAdmin,
@@ -53,7 +53,7 @@ export type ListRegisteredAccountsResult = {
 export async function listRegisteredAccountsResult(): Promise<ListRegisteredAccountsResult> {
   try {
     await requireRole(['admin'])
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     const accounts = await mapRegisteredAccounts(admin)
     return { accounts }
   } catch (e) {
@@ -72,7 +72,7 @@ export async function listRegisteredAccounts(): Promise<RegisteredAccount[]> {
 }
 
 async function mapRegisteredAccounts(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
 ): Promise<RegisteredAccount[]> {
   const rows = await fetchAllProfiles(admin)
   const ids = rows.map((p) => p.id)
@@ -142,7 +142,7 @@ async function mapRegisteredAccounts(
 }
 
 async function syncLegacyUser(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
   email: string | null,
   fullName: string | null,
@@ -165,7 +165,7 @@ async function syncLegacyUser(
 }
 
 async function clearInstructorUserLinks(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
   exceptInstructorId?: string,
 ) {
@@ -182,7 +182,7 @@ async function clearInstructorUserLinks(
 }
 
 async function linkInstructorRecord(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   instructorId: string,
   userId: string,
 ): Promise<{ error?: string }> {
@@ -198,7 +198,7 @@ async function linkInstructorRecord(
 }
 
 async function ensureInstructorLink(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
   fullName: string | null,
   email: string | null,
@@ -243,7 +243,7 @@ async function ensureInstructorLink(
 }
 
 async function unlinkInstructorUser(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
 ) {
   await admin
@@ -255,7 +255,7 @@ async function unlinkInstructorUser(
 export async function listInstructorsForSettings(): Promise<InstructorRoleRow[]> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const { data: instructors, error } = await admin
     .from('instructors')
     .select('id, name, phone, user_id, is_active')
@@ -311,7 +311,7 @@ export async function listInstructorsForSettings(): Promise<InstructorRoleRow[]>
 }
 
 async function applyCoachProfileForUser(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
   instructorId?: string,
 ): Promise<{ error?: string }> {
@@ -379,9 +379,9 @@ export async function assignCoachRoleToInstructor(
 ): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
-  let admin: ReturnType<typeof createAdminClient>
+  let admin: ReturnType<typeof createServiceRoleClient>
   try {
-    admin = createAdminClient()
+    admin = createServiceRoleClient()
   } catch {
     return {
       error:
@@ -428,7 +428,7 @@ export async function updateAccountRole(
     return { error: '본인 계정의 권한은 여기서 변경할 수 없습니다.' }
   }
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const profileRole = toProfileRole(role)
   const allProfiles = await fetchAllProfiles(admin)
   const existingRow = allProfiles.find((p) => p.id === userId)
@@ -525,7 +525,7 @@ export async function revokeAccountRole(
 ): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const allProfiles = await fetchAllProfiles(admin)
   const profile = allProfiles.find((p) => p.id === userId)
 
@@ -546,7 +546,7 @@ export async function revokeAccountApproval(
 ): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const allProfiles = await fetchAllProfiles(admin)
   const profile = allProfiles.find((p) => p.id === userId)
 
@@ -593,7 +593,7 @@ export async function revokeAccountApproval(
 export async function deleteAccount(userId: string): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const allProfiles = await fetchAllProfiles(admin)
   const profile = allProfiles.find((p) => p.id === userId)
 

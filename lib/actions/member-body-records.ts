@@ -29,7 +29,7 @@ import {
 import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
 import { roundBodyMetric } from '@/lib/member-utils'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 export type MemberBodyRecord = {
   id: string
@@ -577,7 +577,7 @@ export async function getMemberBodyRecords(
 
 async function memberBodyWriteClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return await createStaffDataClient()
   }

@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUser, getMemberForCurrentUser, requireAuth } from '@/lib/actions/auth'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
@@ -42,7 +42,7 @@ async function syncContactToLinkedRecords(
     .or(`auth_user_id.eq.${userId},user_id.eq.${userId}`)
 
   try {
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     await admin
       .from('instructors')
       .update({
@@ -175,7 +175,7 @@ export async function updateMyProfile(input: {
   )
 
   try {
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     await admin.auth.admin.updateUserById(user.id, {
       user_metadata: {
         full_name: fullName,

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import type { ProfileRole } from '@/lib/types'
 
 /** 권한 변경·실수 초대로부터 보호하는 시스템 관리자 이메일 */
@@ -29,9 +29,9 @@ export async function ensureProtectedAdminRole(
 ): Promise<void> {
   if (!isProtectedAdminAccount(email)) return
 
-  let admin: ReturnType<typeof createAdminClient>
+  let admin: ReturnType<typeof createServiceRoleClient>
   try {
-    admin = createAdminClient()
+    admin = createServiceRoleClient()
   } catch {
     return
   }

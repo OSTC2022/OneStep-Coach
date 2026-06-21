@@ -2,7 +2,7 @@ import 'server-only'
 
 import { addDays, format, parseISO } from 'date-fns'
 import { revalidatePath } from 'next/cache'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   addExdateToRecurrence,
   truncateRecurrenceUntil,
@@ -102,7 +102,7 @@ function buildSlotMatchTargetFromMaster(
 }
 
 async function bulkDeleteByIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   ids: string[],
 ) {
   const unique = [...new Set(ids.filter(Boolean))]
@@ -131,7 +131,7 @@ function ensureMasterRecurrenceLines(row: RecurrenceCapableLesson): string[] {
 }
 
 async function purgeGroupStoredRowsFromDate(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   recurrenceGroupId: string | null | undefined,
   fromDate: string,
   keepIds: string[],
@@ -155,7 +155,7 @@ async function purgeGroupStoredRowsFromDate(
 }
 
 async function purgeMemberSlotRowsFromDate(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   row: RecurrenceCapableLesson,
   fromDate: string,
   keepIds: string[],
@@ -183,7 +183,7 @@ async function purgeMemberSlotRowsFromDate(
 }
 
 async function purgeExtraRecurringMastersFromDate(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   recurrenceGroupId: string | null | undefined,
   fromDate: string,
   keepIds: string[],
@@ -207,7 +207,7 @@ async function purgeExtraRecurringMastersFromDate(
 }
 
 async function syncAndPurgeRecurringSlot(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   slotMatchTarget: ReturnType<typeof buildSlotMatchTargetFromMaster>,
   scope: LessonSeriesScope,
   anchorDate: string,
@@ -255,7 +255,7 @@ export async function updateRecurringMasterSeries(
   occurrenceDate: string,
   updates: Partial<LessonFormData>,
 ): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
 
   const { data: master, error } = await supabase
     .from('lessons')

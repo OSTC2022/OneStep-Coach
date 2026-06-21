@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { revalidatePath } from 'next/cache'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { truncateRecurrenceUntil } from '@/lib/calendar-recurrence/expand-lessons'
 import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
@@ -43,7 +43,7 @@ function revalidateCalendarPaths() {
 }
 
 async function bulkDeleteByIds(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   ids: string[],
 ) {
   const unique = [...new Set(ids.filter(Boolean))]
@@ -101,7 +101,7 @@ function filterByScope(
 }
 
 async function fetchSlotCandidates(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   source: SlotRow,
 ) {
   if (source.member_id) {
@@ -125,7 +125,7 @@ async function fetchSlotCandidates(
 }
 
 async function deleteUnnamedRecurringMastersAtSlot(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   slotTarget: SlotRow,
   anchorDate: string,
   keepMasterId: string,
@@ -162,7 +162,7 @@ export async function convertLessonToRecurringSeries(
   pattern: LessonRecurrencePattern,
   endDate?: string | null,
 ): Promise<{ data?: Lesson[]; deletedIds?: string[]; error?: string }> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
 
   const virtual = parseVirtualLessonId(lessonId)
   let resolvedLessonId = lessonId

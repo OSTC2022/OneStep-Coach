@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { createAdminClient } from '@/lib/supabase/admin'
+import type { createServiceRoleClient } from '@/lib/supabase/admin'
 
 const MEMBER_FK_TABLES = [
   'session_packages',
@@ -36,7 +36,7 @@ function normalizeEmail(email: string): string {
 
 /** 가입 시 자동 생성된 중복 회원 ID (대상 회원 제외) */
 export async function findAuthDuplicateMemberIds(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   authUserId: string,
   targetMemberId: string,
   email?: string | null,
@@ -104,7 +104,7 @@ function pickMergePatch(
 
 /** 중복 회원 데이터를 대상 회원으로 합치고 중복 행은 휴지통 처리 */
 export async function mergeMemberIntoTarget(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   keepMemberId: string,
   discardMemberId: string,
 ): Promise<{ error?: string; merged?: boolean }> {
@@ -193,7 +193,7 @@ export async function mergeMemberIntoTarget(
 }
 
 export async function mergeAuthDuplicateMembersIntoTarget(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   authUserId: string,
   targetMemberId: string,
   email?: string | null,

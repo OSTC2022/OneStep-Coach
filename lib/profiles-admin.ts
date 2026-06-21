@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { createAdminClient } from '@/lib/supabase/admin'
+import type { createServiceRoleClient } from '@/lib/supabase/admin'
 import { PROFILE_SELECT, USER_LEGACY_SELECT } from '@/lib/supabase-selects'
 import {
   getEffectiveApprovalStatus,
@@ -28,7 +28,7 @@ export function isMissingApprovalColumn(message: string | undefined): boolean {
 }
 
 export async function upsertUserProfile(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   row: {
     id: string
     email: string | null
@@ -77,7 +77,7 @@ function normalizeProfileRole(
 
 /** profiles 목록 + 컬럼/프로필 누락 시 Auth 사용자 보완 */
 export async function fetchAllProfiles(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
 ): Promise<ProfileRow[]> {
   const ordered = { ascending: false as const }
   let { data, error } = await admin
@@ -165,7 +165,7 @@ export async function fetchAllProfiles(
 
 /** Auth·profiles 어디에만 있어도 DB profiles 행 보장 */
 export async function ensureProfileRowForAdmin(
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
   userId: string,
 ): Promise<{ error?: string; profile?: ProfileRow }> {
   const all = await fetchAllProfiles(admin)

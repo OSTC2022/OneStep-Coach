@@ -1,7 +1,7 @@
 'use server'
 
 import { requireRole } from '@/lib/actions/auth'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -39,7 +39,7 @@ function mapSessionPackageError(message: string): string {
 
 function getSessionWriteClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return null
   }

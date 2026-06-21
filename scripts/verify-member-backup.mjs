@@ -24,22 +24,23 @@ function listFiles(target) {
   return out
 }
 
+const forbidden = ['@/lib/supabase/admin']
 const offenders = []
+
 for (const target of sourceRoots) {
   for (const file of listFiles(target)) {
     const text = readFileSync(file, 'utf8')
-    if (text.includes('createAdminClient')) {
-      offenders.push(relative(root, file))
+    for (const token of forbidden) {
+      if (text.includes(token)) {
+        offenders.push(`${relative(root, file)} (${token})`)
+      }
     }
   }
 }
 
 if (offenders.length > 0) {
-  console.error(
-    '[verify-member-backup] createAdminClient must not appear in backup chain:',
-    offenders.join(', '),
-  )
+  console.error('[verify-member-backup] backup chain must stay isolated:', offenders.join(', '))
   process.exit(1)
 }
 
-console.log('[verify-member-backup] OK — backup chain has 0 createAdminClient references')
+console.log('[verify-member-backup] OK — backup chain isolated from shared admin module')

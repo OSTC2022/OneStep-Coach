@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import {
   resolveGoogleCalendarTarget,
@@ -209,7 +209,7 @@ async function persistGoogleLink(
     google_ical_uid?: string | null
   },
 ) {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { error } = await supabase.from('lessons').update(patch).eq('id', lessonId)
   if (error && !isMissingSyncColumn(error)) {
     throw new Error(error.message)
@@ -217,7 +217,7 @@ async function persistGoogleLink(
 }
 
 async function loadLessonForPush(lessonId: string): Promise<Lesson | null> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('lessons')
     .select(LESSON_PUSH_SELECT)
@@ -348,7 +348,7 @@ async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
     return
   }
 
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const target = await resolveGoogleCalendarTarget(
     supabase,
     row,

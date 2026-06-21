@@ -10,7 +10,7 @@ import {
 } from '@/lib/calendar-utils'
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import type { Lesson } from '@/lib/types'
 
 type LinkLessonMemberResult = {
@@ -21,11 +21,11 @@ type LinkLessonMemberResult = {
 }
 
 async function lessonWriteClient() {
-  return createAdminClient()
+  return createServiceRoleClient()
 }
 
 async function resolveLinkTargetLessonId(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   lessonId: string,
   memberName: string,
 ): Promise<{ targetId: string; useVirtualUpdate: boolean }> {
@@ -70,7 +70,7 @@ async function resolveLinkTargetLessonId(
 }
 
 async function purgeDuplicateSlotLessonsAfterLink(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   params: {
     keepId: string
     lessonDate: string

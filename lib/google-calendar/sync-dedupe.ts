@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 type LessonGoogleRow = {
   id: string
@@ -33,7 +33,7 @@ function pickKeeper(rows: LessonGoogleRow[]): LessonGoogleRow {
  * google_event_id 기준 중복 임시 일정 정리 (세션 차감된 행 우선 보존)
  */
 export async function dedupeGoogleCalendarLessons(): Promise<number> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('lessons')
     .select('id, google_event_id, google_calendar_id, google_account_id, session_deducted, created_at')

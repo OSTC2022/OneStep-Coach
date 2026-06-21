@@ -2,7 +2,7 @@
 
 import { requireRole } from '@/lib/actions/auth'
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { revalidatePath } from 'next/cache'
 import type { Instructor, InstructorFormData, InstructorReport } from '@/lib/types'
@@ -56,7 +56,7 @@ function mapInstructorError(message: string): string {
 
 function getInstructorWriteClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return null
   }

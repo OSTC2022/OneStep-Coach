@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 /** 로그인 입력(이메일·로그인 ID·이름) → Supabase Auth 이메일 */
 export async function resolveLoginAuthEmail(
@@ -17,7 +17,7 @@ export async function resolveLoginAuthEmail(
   }
 
   try {
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
 
     const { data: byEmail } = await admin
       .from('profiles')

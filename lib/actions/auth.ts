@@ -116,8 +116,8 @@ export async function signIn(
   const appRole = profileRoleToAppRole(profileRole) as AppRole
   if (appRole === 'member' || appRole === 'guardian') {
     try {
-      const { createAdminClient } = await import('@/lib/supabase/admin')
-      const admin = createAdminClient()
+      const { createServiceRoleClient } = await import('@/lib/supabase/admin')
+      const admin = createServiceRoleClient()
       await admin
         .from('members')
         .update({ last_login_at: new Date().toISOString() })
@@ -263,8 +263,8 @@ export async function getMemberForCurrentUser(): Promise<Member | null> {
 
   // RLS 정책 미적용 환경 — 본인 auth id와 일치하는 행만 service role로 조회
   try {
-    const { createAdminClient } = await import('@/lib/supabase/admin')
-    const admin = createAdminClient()
+    const { createServiceRoleClient } = await import('@/lib/supabase/admin')
+    const admin = createServiceRoleClient()
     return await fetchLinkedMemberRow(admin, authUser.id)
   } catch {
     return null

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createAuthEmailClient } from '@/lib/supabase/auth-email-client'
 import {
   getAppSmtpConfig,
@@ -78,7 +78,7 @@ export async function findAuthUserByEmail(
   email: string,
 ): Promise<{ id: string; email: string } | null> {
   try {
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     let page = 1
 
     while (page <= 10) {
@@ -109,7 +109,7 @@ export async function generatePasswordRecoveryLink(
   email: string,
 ): Promise<string | null> {
   try {
-    const admin = createAdminClient()
+    const admin = createServiceRoleClient()
     const siteUrl = getSiteUrl()
     const redirectTo = getRecoveryEmailRedirectUrl(siteUrl)
 

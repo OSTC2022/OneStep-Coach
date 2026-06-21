@@ -2,7 +2,7 @@
 
 import { requireRole } from '@/lib/actions/auth'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { CenterBoardKind, CenterBoardPost } from '@/lib/types'
@@ -41,7 +41,7 @@ function mapRow(row: Record<string, unknown>): CenterBoardPost {
 
 async function boardClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return createClient()
   }

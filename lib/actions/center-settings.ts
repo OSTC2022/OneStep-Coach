@@ -5,7 +5,7 @@ import {
   getCenterSettingsCached,
   normalizeCenterSettingsRow,
 } from '@/lib/data/center-settings-read'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import type { CenterSettings } from '@/lib/types'
@@ -22,7 +22,7 @@ function normalizeOptionalString(value?: string | null): string | null {
 
 async function settingsClient() {
   try {
-    return createAdminClient()
+    return createServiceRoleClient()
   } catch {
     return createClient()
   }

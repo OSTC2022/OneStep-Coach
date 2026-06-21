@@ -4,14 +4,14 @@ import {
   GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME,
 } from '@/lib/google-calendar/config'
 import type { GoogleCalendarSyncRow } from '@/lib/google-calendar/types'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 
 export type GoogleCalendarInstructorResolver = {
   resolveInstructorId(googleCalendarId: string): string | null
 }
 
 export async function buildGoogleCalendarInstructorResolver(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   row: Pick<
     GoogleCalendarSyncRow,
     'calendar_id' | 'calendar_name' | 'calendar_id_2' | 'calendar_name_2'
@@ -70,7 +70,7 @@ export async function buildGoogleCalendarInstructorResolver(
 
 /** 강사 ID → Google 캘린더 (수업/수업2) — 인바운드 동기화와 동일한 매핑 */
 export async function resolveGoogleCalendarTarget(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   row: Pick<
     GoogleCalendarSyncRow,
     'calendar_id' | 'calendar_name' | 'calendar_id_2' | 'calendar_name_2'
@@ -110,7 +110,7 @@ export async function resolveGoogleCalendarTarget(
 
 /** Google에서 가져온 기존 일정에 캘린더별 담당 강사 일괄 반영 */
 export async function backfillGoogleCalendarInstructor(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   googleCalendarId: string,
   instructorId: string | null,
 ): Promise<void> {

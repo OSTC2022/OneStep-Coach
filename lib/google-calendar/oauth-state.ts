@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { GOOGLE_CALENDAR_SYNC_ID } from '@/lib/google-calendar/config'
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
@@ -11,7 +11,7 @@ function isMissingOAuthStateColumn(error: { message?: string } | null) {
 }
 
 export async function saveGoogleOAuthState(state: string): Promise<void> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString()
 
   const { data: current } = await supabase
@@ -51,7 +51,7 @@ export async function saveGoogleOAuthState(state: string): Promise<void> {
 }
 
 export async function verifyGoogleOAuthState(state: string): Promise<boolean> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('google_calendar_sync')
     .select('oauth_state, oauth_state_expires_at')

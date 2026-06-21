@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { canAddBodyRecordFor } from '@/lib/auth/member-access'
 import { type MemberBodyRecord } from '@/lib/actions/member-body-records'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { buildMemberBodyShareUrl, memberBodySharePath } from '@/lib/member-body-share-url'
 
 export type SharedBodyReportMember = {
@@ -28,7 +28,7 @@ export type SharedBodyReportData = {
 
 
 async function writeMemberShareToken(memberId: string, token: string | null) {
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const { error } = await admin
     .from('members')
     .update({ body_share_token: token })
@@ -48,7 +48,7 @@ async function writeMemberShareToken(memberId: string, token: string | null) {
   return {}
 }
 
-async function ensureShareTokenColumn(admin: ReturnType<typeof createAdminClient>) {
+async function ensureShareTokenColumn(admin: ReturnType<typeof createServiceRoleClient>) {
   const { error } = await admin
     .from('members')
     .select('body_share_token')
@@ -64,7 +64,7 @@ export async function getMemberBodyShareUrl(
     return { error: '권한이 없습니다.' }
   }
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const columnReady = await ensureShareTokenColumn(admin)
   if (!columnReady) {
     return {
@@ -118,7 +118,7 @@ export async function getSharedBodyReportByToken(
 ): Promise<SharedBodyReportData | null> {
   if (!token || token.length < 8) return null
 
-  const admin = createAdminClient()
+  const admin = createServiceRoleClient()
   const columnReady = await ensureShareTokenColumn(admin)
   if (!columnReady) return null
 
@@ -140,7 +140,7 @@ export async function getSharedBodyReportByToken(
 
 async function fetchSharedBodyReport(
   member: SharedBodyReportMember & { body_share_token?: string | null },
-  admin: ReturnType<typeof createAdminClient>,
+  admin: ReturnType<typeof createServiceRoleClient>,
 ): Promise<SharedBodyReportData> {
   const { data, error } = await admin
     .from('member_body_records')

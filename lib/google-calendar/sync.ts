@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { randomUUID } from 'crypto'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   GOOGLE_CALENDAR_SYNC_ID,
   isGoogleCalendarConfigured,
@@ -89,7 +89,7 @@ let instructorResolverCache: {
 } | null = null
 
 async function getMemberLookupCached(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   lightweight: boolean,
 ): Promise<MemberLookup> {
   if (
@@ -107,7 +107,7 @@ async function getMemberLookupCached(
 }
 
 async function getInstructorResolverCached(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
   row: GoogleCalendarSyncRow,
   lightweight: boolean,
 ): Promise<GoogleCalendarInstructorResolver> {
@@ -159,7 +159,7 @@ function isMissingGoogleLessonColumn(error: { message?: string } | null) {
 }
 
 export async function getGoogleCalendarSyncRow(): Promise<GoogleCalendarSyncRow | null> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('google_calendar_sync')
     .select(SYNC_SELECT)
@@ -200,7 +200,7 @@ export async function getGoogleCalendarSyncRow(): Promise<GoogleCalendarSyncRow 
 export async function upsertGoogleCalendarSyncRow(
   patch: Partial<Omit<GoogleCalendarSyncRow, 'id' | 'updated_at'>>,
 ): Promise<GoogleCalendarSyncRow> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const current = await getGoogleCalendarSyncRow()
 
   const payload: GoogleCalendarSyncRow = {
@@ -259,12 +259,12 @@ export async function upsertGoogleCalendarSyncRow(
 }
 
 export async function clearGoogleCalendarSyncRow(): Promise<void> {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   await supabase.from('google_calendar_sync').delete().eq('id', GOOGLE_CALENDAR_SYNC_ID)
 }
 
 async function countPendingMemberLessons(
-  supabase: ReturnType<typeof createAdminClient>,
+  supabase: ReturnType<typeof createServiceRoleClient>,
 ): Promise<number> {
   const { count, error } = await supabase
     .from('lessons')
@@ -447,7 +447,7 @@ export async function syncGoogleCalendarLessons(options?: {
   }
 
   const lightweight = Boolean(options?.lightweight)
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const attemptAt = new Date().toISOString()
   const runStats = emptyRunStats()
 
@@ -872,7 +872,7 @@ export async function stopGoogleCalendarWatchForRow(
 }
 
 export async function listPendingGoogleSyncLessons(limit = 20) {
-  const supabase = createAdminClient()
+  const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('lessons')
     .select('id, title, lesson_date, start_time, created_at')
