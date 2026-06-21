@@ -420,6 +420,31 @@ export async function listMembersForPicker(limit = 80): Promise<MemberPickerOpti
   return mapMembersToPickerOptions(data)
 }
 
+/** 성인 러닝반 회원 우선 — sport에 러닝/성인 포함, 없으면 전체 활성 회원 */
+export async function listAdultRunningMembersForPicker(limit = 200): Promise<MemberPickerOption[]> {
+  const { data } = await getMembers({
+    isActive: true,
+    limit: 500,
+    orderBy: 'name',
+    orderAsc: true,
+  })
+
+  const running = data.filter((member) => {
+    const sport = (member.sport ?? '').toLowerCase()
+    return (
+      sport.includes('러닝') ||
+      sport.includes('running') ||
+      sport.includes('성인') ||
+      sport.includes('마라톤') ||
+      sport.includes('10k') ||
+      sport.includes('5k')
+    )
+  })
+
+  const source = running.length > 0 ? running : data
+  return mapMembersToPickerOptions(source.slice(0, limit))
+}
+
 export async function searchMembersForPicker(search: string) {
   const q = search.trim()
   if (!q) return []

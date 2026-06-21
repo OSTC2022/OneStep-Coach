@@ -19,6 +19,8 @@ export type MemberBackupRow = {
   remainingSessions: number
   usedSessions: number
   memberRemainingCached: number
+  paymentCount: number
+  lastPaymentDate: string | null
   lastAttendanceDate: string | null
   attendanceCount: number
 }
@@ -76,7 +78,7 @@ export async function fetchMemberBackupData(
       .order('name'),
     supabase
       .from('session_packages')
-      .select('member_id, total_sessions, remaining_sessions')
+      .select('member_id, total_sessions, remaining_sessions, paid_at, created_at')
       .is('deleted_at', null),
     supabase
       .from('lessons')
@@ -99,12 +101,29 @@ export async function fetchMemberBackupData(
 
   const packagesByMember = new Map<
     string,
-    Array<{ total_sessions: number; remaining_sessions: number }>
+    Array<{
+      total_sessions: number
+      remaining_sessions: number
+      paid_at: string | null
+      created_at: string
+    }>
+  >()
+  const paymentStats = new Map<
+    string,
+    { count: number; lastDate: string | null }
   >()
   for (const pkg of packages) {
     const list = packagesByMember.get(pkg.member_id) ?? []
     list.push(pkg)
     packagesByMember.set(pkg.member_id, list)
+
+    const paidDate = (pkg.paid_at ?? pkg.created_at)?.split('T')[0] ?? null
+    const stats = paymentStats.get(pkg.member_id) ?? { count: 0, lastDate: null }
+    stats.count += 1
+    if (paidDate && (!stats.lastDate || paidDate > stats.lastDate)) {
+      stats.lastDate = paidDate
+    }
+    paymentStats.set(pkg.member_id, stats)
   }
 
   const memberNameById = new Map(members.map((m) => [m.id, m.name]))
@@ -143,6 +162,7 @@ export async function fetchMemberBackupData(
   const memberRows: MemberBackupRow[] = members.map((member) => {
     const tally = tallySessionPackages(packagesByMember.get(member.id) ?? [])
     const stats = attendanceStats.get(member.id)
+    const payments = paymentStats.get(member.id)
     return {
       memberId: member.id,
       name: member.name,
@@ -153,6 +173,8 @@ export async function fetchMemberBackupData(
       remainingSessions: tally.remaining,
       usedSessions: tally.used,
       memberRemainingCached: member.remaining_sessions ?? 0,
+      paymentCount: payments?.count ?? 0,
+      lastPaymentDate: payments?.lastDate ?? null,
       lastAttendanceDate: stats?.lastDate ?? null,
       attendanceCount: stats?.count ?? 0,
     }

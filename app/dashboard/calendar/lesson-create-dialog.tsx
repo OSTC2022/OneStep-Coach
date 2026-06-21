@@ -88,7 +88,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { cn } from '@/lib/utils'
+import { isLessonEditFloatingUIOpen } from '@/lib/lesson-edit-floating-ui'
 import { useTouchFriendlyLayout } from '@/hooks/use-touch-friendly-layout'
 import type { Instructor, Lesson } from '@/lib/types'
 
@@ -569,12 +569,15 @@ export function LessonCreateDialog({
       if (target.closest('[data-slot="select-content"]')) return
       if (target.closest('[role="listbox"]')) return
       if (target.closest('[role="dialog"], [role="alertdialog"]')) return
+      if (saveScopeOpen || deleteScopeOpen) return
+      // capture 단계에서 검사 — Radix가 Select를 닫기 전에 열림 상태를 확인
+      if (isLessonEditFloatingUIOpen()) return
       handleOpenChange(false)
     }
 
-    window.addEventListener('pointerdown', handlePointerDown)
-    return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [open, useAnchoredPopup])
+    window.addEventListener('pointerdown', handlePointerDown, true)
+    return () => window.removeEventListener('pointerdown', handlePointerDown, true)
+  }, [open, useAnchoredPopup, saveScopeOpen, deleteScopeOpen])
 
   function handleMemberChange(
     nextMemberId: string,
@@ -1677,6 +1680,11 @@ export function LessonCreateDialog({
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent
           mobileSheet
+          onInteractOutside={(event) => {
+            if (isLessonEditFloatingUIOpen()) {
+              event.preventDefault()
+            }
+          }}
           className={cn(
             'sm:max-w-md',
             touchFriendly &&

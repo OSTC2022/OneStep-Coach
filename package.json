@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "generate:icons": "node scripts/clean-brand-icon.mjs",
     "generate:splash": "node scripts/generate-pwa-splash.mjs",
-    "verify:member-backup": "node scripts/verify-member-backup.mjs"
+    "verify:member-backup": "node scripts/verify-member-backup.mjs",
+    "verify:running-league-scoring": "node scripts/verify-running-league-scoring.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

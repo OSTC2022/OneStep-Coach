@@ -3,20 +3,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { CalendarDays, ExternalLink, Loader2, Megaphone } from 'lucide-react'
+import { CalendarDays, ExternalLink, Loader2, Megaphone, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { RunningLeagueEventView } from '@/components/dashboard/running-league-event-view'
 import { getPublishedCenterBoardPosts } from '@/lib/actions/center-board'
 import {
   countUnreadBoardPosts,
   getBoardLastSeenAt,
   markBoardSeenNow,
 } from '@/lib/center-board-storage'
-import type { CenterBoardKind, CenterBoardPost } from '@/lib/types'
+import type { CenterBoardAudience, CenterBoardKind, CenterBoardPost } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const BOARD_META: Record<
@@ -38,6 +39,7 @@ const BOARD_META: Record<
 interface MemberBoardPopoverProps {
   userId: string
   kind: CenterBoardKind
+  audience?: CenterBoardAudience
 }
 
 function formatEventRange(post: CenterBoardPost): string | null {
@@ -56,7 +58,18 @@ function formatEventRange(post: CenterBoardPost): string | null {
   return format(parseISO(single), 'M월 d일 HH:mm', { locale: ko })
 }
 
-export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
+function eventListPrefix(post: CenterBoardPost): string {
+  if (post.event_subtype === 'running_league') return '🏅 '
+  if (post.event_subtype === 'mileage_challenge') return '🏃 '
+  if (post.pinned) return '📌 '
+  return ''
+}
+
+export function MemberBoardPopover({
+  userId,
+  kind,
+  audience = 'general',
+}: MemberBoardPopoverProps) {
   const meta = BOARD_META[kind]
   const Icon = meta.icon
   const [open, setOpen] = useState(false)
@@ -70,7 +83,7 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
     try {
       const data = await getPublishedCenterBoardPosts(kind)
       setItems(data)
-      setLastSeenAt(getBoardLastSeenAt(userId, kind))
+      setLastSeenAt(getBoardLastSeenAt(userId, kind, audience))
       setSelectedId((prev) => {
         if (prev && data.some((item) => item.id === prev)) return prev
         return data[0]?.id ?? null
@@ -78,7 +91,7 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
     } finally {
       setIsLoading(false)
     }
-  }, [kind, userId])
+  }, [kind, userId, audience])
 
   useEffect(() => {
     let cancelled = false
@@ -86,13 +99,13 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
       const data = await getPublishedCenterBoardPosts(kind)
       if (cancelled) return
       setItems(data)
-      setLastSeenAt(getBoardLastSeenAt(userId, kind))
+      setLastSeenAt(getBoardLastSeenAt(userId, kind, audience))
     }
     void prefetch()
     return () => {
       cancelled = true
     }
-  }, [kind, userId])
+  }, [kind, userId, audience])
 
   useEffect(() => {
     if (!open) return
@@ -100,8 +113,8 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
   }, [open, loadPosts])
 
   const unreadCount = useMemo(
-    () => countUnreadBoardPosts(userId, kind, items),
-    [userId, kind, items, lastSeenAt],
+    () => countUnreadBoardPosts(userId, kind, items, audience),
+    [userId, kind, items, lastSeenAt, audience],
   )
 
   const selected = useMemo(
@@ -109,17 +122,20 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
     [items, selectedId],
   )
 
+  const isRunningLeague =
+    kind === 'event' && selected?.event_subtype === 'running_league'
+
   function handleOpenChange(next: boolean) {
     setOpen(next)
     if (next) {
-      markBoardSeenNow(userId, kind)
-      setLastSeenAt(getBoardLastSeenAt(userId, kind))
+      markBoardSeenNow(userId, kind, audience)
+      setLastSeenAt(getBoardLastSeenAt(userId, kind, audience))
       if (items[0]) setSelectedId(items[0].id)
     }
   }
 
   function isUnread(post: CenterBoardPost) {
-    const seen = lastSeenAt ?? getBoardLastSeenAt(userId, kind)
+    const seen = lastSeenAt ?? getBoardLastSeenAt(userId, kind, audience)
     if (!seen) return true
     return Date.parse(post.updated_at) > Date.parse(seen)
   }
@@ -141,9 +157,19 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(22rem,calc(100vw-2rem))] p-0" align="end">
+      <PopoverContent
+        className={cn(
+          'p-0',
+          isRunningLeague
+            ? 'w-[min(30rem,calc(100vw-1rem))]'
+            : 'w-[min(22rem,calc(100vw-2rem))]',
+        )}
+        align="end"
+      >
         <div className="border-b border-border px-3 py-2">
-          <p className="text-sm font-semibold">{meta.label}</p>
+          <p className="text-sm font-semibold">
+            {isRunningLeague ? '이벤트 · 원스텝 러닝 리그' : meta.label}
+          </p>
           <p className="text-xs text-muted-foreground">
             {unreadCount > 0 ? `새 글 ${unreadCount}건` : '센터 소식을 확인하세요'}
           </p>
@@ -158,8 +184,18 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
             {meta.empty}
           </p>
         ) : (
-          <div className="flex max-h-[min(24rem,60vh)] flex-col">
-            <div className="max-h-36 overflow-y-auto border-b border-border">
+          <div
+            className={cn(
+              'flex flex-col',
+              isRunningLeague ? 'max-h-[min(36rem,78vh)]' : 'max-h-[min(24rem,60vh)]',
+            )}
+          >
+            <div
+              className={cn(
+                'overflow-y-auto border-b border-border',
+                isRunningLeague ? 'max-h-28' : 'max-h-36',
+              )}
+            >
               {items.map((item) => {
                 const active = selected?.id === item.id
                 return (
@@ -178,7 +214,7 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
                         isUnread(item) ? 'font-semibold' : 'font-medium text-muted-foreground',
                       )}
                     >
-                      {item.pinned ? '📌 ' : ''}
+                      {eventListPrefix(item)}
                       {item.title}
                     </span>
                     {isUnread(item) ? (
@@ -191,20 +227,44 @@ export function MemberBoardPopover({ userId, kind }: MemberBoardPopoverProps) {
 
             {selected ? (
               <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-                <h3 className="text-sm font-semibold leading-snug">{selected.title}</h3>
-                {kind === 'event' && formatEventRange(selected) ? (
-                  <p className="mt-1 text-xs font-medium text-primary">
-                    {formatEventRange(selected)}
-                  </p>
-                ) : null}
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {format(parseISO(selected.created_at), 'M월 d일 HH:mm', { locale: ko })}
-                </p>
-                {selected.body ? (
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-                    {selected.body}
-                  </p>
-                ) : null}
+                {selected.event_subtype === 'running_league' ? (
+                  <RunningLeagueEventView post={selected} />
+                ) : (
+                  <>
+                    {selected.event_subtype === 'mileage_challenge' ? (
+                      <div className="mb-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                        <div className="flex items-center gap-2 text-primary">
+                          <Trophy className="h-4 w-4 shrink-0" />
+                          <p className="text-sm font-semibold">러닝 마일리지 챌린지</p>
+                        </div>
+                        {selected.challenge_goal_km != null ? (
+                          <p className="mt-2 text-2xl font-bold tabular-nums text-foreground">
+                            목표 {selected.challenge_goal_km}km
+                          </p>
+                        ) : null}
+                        {formatEventRange(selected) ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {formatEventRange(selected)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <h3 className="text-sm font-semibold leading-snug">{selected.title}</h3>
+                    {kind === 'event' && formatEventRange(selected) ? (
+                      <p className="mt-1 text-xs font-medium text-primary">
+                        {formatEventRange(selected)}
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {format(parseISO(selected.created_at), 'M월 d일 HH:mm', { locale: ko })}
+                    </p>
+                    {selected.body ? (
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                        {selected.body}
+                      </p>
+                    ) : null}
+                  </>
+                )}
                 {selected.link_url ? (
                   <a
                     href={selected.link_url}

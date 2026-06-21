@@ -27,6 +27,7 @@ import {
 
 const ROLES: { value: SettingsAssignableRole; label: string }[] = [
   { value: 'member', label: '회원' },
+  { value: 'adult_member', label: '성인회원' },
   { value: 'guardian', label: '학부모' },
   { value: 'admin', label: '관리자' },
   { value: 'instructor', label: '강사' },

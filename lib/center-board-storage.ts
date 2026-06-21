@@ -1,10 +1,14 @@
 'use client'
 
-import type { CenterBoardKind } from '@/lib/types'
+import type { CenterBoardAudience, CenterBoardKind } from '@/lib/types'
 
 const STORAGE_PREFIX = 'center-board-last-seen'
 
-type BoardReadMap = Partial<Record<CenterBoardKind, string>>
+type BoardReadMap = Partial<Record<string, string>>
+
+function boardStorageKey(kind: CenterBoardKind, audience: CenterBoardAudience) {
+  return `${audience}:${kind}`
+}
 
 function storageKey(userId: string) {
   return `${STORAGE_PREFIX}:${userId}`
@@ -33,13 +37,18 @@ function writeMap(userId: string, map: BoardReadMap) {
 export function getBoardLastSeenAt(
   userId: string,
   kind: CenterBoardKind,
+  audience: CenterBoardAudience = 'general',
 ): string | null {
-  return readMap(userId)[kind] ?? null
+  return readMap(userId)[boardStorageKey(kind, audience)] ?? null
 }
 
-export function markBoardSeenNow(userId: string, kind: CenterBoardKind) {
+export function markBoardSeenNow(
+  userId: string,
+  kind: CenterBoardKind,
+  audience: CenterBoardAudience = 'general',
+) {
   const map = readMap(userId)
-  map[kind] = new Date().toISOString()
+  map[boardStorageKey(kind, audience)] = new Date().toISOString()
   writeMap(userId, map)
 }
 
@@ -47,8 +56,9 @@ export function countUnreadBoardPosts(
   userId: string,
   kind: CenterBoardKind,
   posts: Array<{ updated_at: string }>,
+  audience: CenterBoardAudience = 'general',
 ): number {
-  const lastSeen = getBoardLastSeenAt(userId, kind)
+  const lastSeen = getBoardLastSeenAt(userId, kind, audience)
   if (!lastSeen) return posts.length
   const seenMs = Date.parse(lastSeen)
   if (!Number.isFinite(seenMs)) return posts.length

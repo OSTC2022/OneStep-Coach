@@ -1,15 +1,16 @@
 import type { AttendanceStatus, UserRole as DbUserRole } from '@/lib/types'
 
 /** DB profile roles */
-export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian'
+export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian' | 'adult_member'
 
 /** App navigation roles (coach shown as instructor in legacy UI) */
-export type AppRole = 'admin' | 'instructor' | 'member' | 'guardian'
+export type AppRole = 'admin' | 'instructor' | 'member' | 'guardian' | 'adult_member'
 
 export function profileRoleToAppRole(role: ProfileRole | DbUserRole | string | null): AppRole {
   if (role === 'coach' || role === 'instructor') return 'instructor'
   if (role === 'admin') return 'admin'
   if (role === 'guardian') return 'guardian'
+  if (role === 'adult_member') return 'adult_member'
   return 'member'
 }
 
@@ -26,6 +27,8 @@ export function getRoleLabel(role: AppRole): string {
       return '강사'
     case 'guardian':
       return '학부모'
+    case 'adult_member':
+      return '성인회원'
     default:
       return '회원'
   }
@@ -35,6 +38,7 @@ export function getDefaultDashboardPath(role: AppRole): string {
   switch (role) {
     case 'member':
     case 'guardian':
+    case 'adult_member':
       return '/dashboard/my'
     default:
       return '/dashboard'
@@ -107,7 +111,7 @@ export function isMemberPortalPath(pathname: string): boolean {
 export function canAccessPath(role: AppRole, pathname: string): boolean {
   if (role === 'admin') return true
 
-  if (role === 'member' || role === 'guardian') {
+  if (role === 'member' || role === 'guardian' || role === 'adult_member') {
     return isMemberPortalPath(pathname)
   }
 

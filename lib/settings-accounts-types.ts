@@ -4,9 +4,15 @@ import type { ProfileApprovalStatus, ProfileRole } from '@/lib/types'
 /** 설정 화면에서 부여 가능한 권한 */
 export type SettingsAssignableRole =
   | 'member'
+  | 'adult_member'
   | 'instructor'
   | 'guardian'
   | 'admin'
+
+/** 회원 프로필 연결이 필요한 권한 */
+export function requiresMemberLinkRole(role: SettingsAssignableRole): boolean {
+  return role === 'member' || role === 'adult_member'
+}
 
 export type RegisteredAccount = {
   id: string

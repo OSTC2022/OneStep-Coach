@@ -11,6 +11,7 @@ import {
   ClipboardCheck,
   CreditCard,
   LineChart,
+  Trophy,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
   data: MemberPortalData
+  role?: string | null
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -70,8 +72,9 @@ function resolveProfileAside(data: MemberPortalData) {
   }
 }
 
-export function MemberMyPage({ data }: MemberMyPageProps) {
+export function MemberMyPage({ data, role }: MemberMyPageProps) {
   const { member, summary, centerContact, coachContact } = data
+  const isAdultMember = role === 'adult_member'
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const sportProfile = formatSportProfile(member)
   const todayRecordLabel = formatTodayRecordSummary(summary.todayRecorded)
@@ -82,12 +85,15 @@ export function MemberMyPage({ data }: MemberMyPageProps) {
     <div className="mx-auto w-full max-w-[1120px] space-y-6">
       <div className="space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-          ONESTEP ATHLETE REPORT
+          {isAdultMember ? 'ONE STEP RUNNING LEAGUE' : 'ONESTEP ATHLETE REPORT'}
         </p>
-        <h1 className="text-2xl font-bold lg:text-3xl">내 선수 리포트</h1>
+        <h1 className="text-2xl font-bold lg:text-3xl">
+          {isAdultMember ? '내 러닝 포털' : '내 선수 리포트'}
+        </h1>
         <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수
-          있습니다.
+          {isAdultMember
+            ? '러닝 챌린지 점수, 순위, 리그 안내를 한곳에서 확인할 수 있습니다.'
+            : '오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.'}
         </p>
       </div>
 
@@ -173,6 +179,28 @@ export function MemberMyPage({ data }: MemberMyPageProps) {
           highlighted={!summary.todayRecorded}
         />
       </div>
+
+      {isAdultMember ? (
+        <Card className="border-primary/20 bg-gradient-to-br from-primary/10 to-transparent">
+          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="space-y-1">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <Trophy className="h-4 w-4 text-primary" />
+                러닝 챌린지
+              </p>
+              <p className="text-sm text-muted-foreground">
+                출석·목표·기록·마일리지·회복관리 점수와 순위를 확인하세요.
+              </p>
+            </div>
+            <Button asChild className="min-h-11 w-full sm:w-auto">
+              <Link href="/dashboard/my/running-league">
+                리그 보기
+                <ChevronRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="border-primary/15">
         <CardHeader className="pb-2 sm:px-6">

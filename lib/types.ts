@@ -1,7 +1,7 @@
 // Database types for OneStep Coach
 
-export type UserRole = 'admin' | 'instructor' | 'member' | 'guardian'
-export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian'
+export type UserRole = 'admin' | 'instructor' | 'member' | 'guardian' | 'adult_member'
+export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian' | 'adult_member'
 export type ProfileApprovalStatus = 'pending' | 'approved' | 'rejected'
 
 export interface User {
@@ -216,18 +216,223 @@ export interface CenterSettings {
 }
 
 export type CenterBoardKind = 'notice' | 'event'
+export type CenterBoardAudience = 'general' | 'adult'
+export type CenterBoardEventSubtype = 'mileage_challenge' | 'running_league' | null
 
 export interface CenterBoardPost {
   id: string
   kind: CenterBoardKind
+  audience: CenterBoardAudience
   title: string
   body: string
   link_url: string | null
   event_starts_at: string | null
   event_ends_at: string | null
+  event_subtype: CenterBoardEventSubtype
+  challenge_goal_km: number | null
   is_published: boolean
   pinned: boolean
   created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type RunningLeagueStatus = 'draft' | 'active' | 'closed'
+
+/** draft=예정, active=진행중, closed=종료 */
+export type RunningLeagueAudience = 'adult'
+
+export type RunningLeagueTargetGroup =
+  | 'all'
+  | 'beginner'
+  | '5km'
+  | '10km'
+  | 'half_marathon'
+
+export type RunningLeagueMemberLevel = 'beginner' | 'elementary' | 'intermediate' | 'race_prep'
+
+export type RunningLeagueGoalType =
+  | 'finish'
+  | 'record_improvement'
+  | 'attendance'
+  | 'mileage'
+  | 'health'
+  | 'race_prep'
+
+export type RunningLeagueDistanceEvent = '1km' | '3km' | '5km' | '10km'
+export type RunningLeagueRecordPhase = 'month_start' | 'month_end' | 'mid_month' | 'other'
+export type RunningLeagueMileageSource = 'manual' | 'lesson' | 'import' | 'other'
+export type RunningLeagueRecoveryCheckType =
+  | 'stretching'
+  | 'pain_check'
+  | 'condition_check'
+  | 'recovery_jog'
+  | 'intensity_compliance'
+
+export type RecoveryCondition = 'good' | 'normal' | 'tired'
+export type RecoveryPain = 'none' | 'mild' | 'severe'
+export type RecoveryStretching = 'done' | 'not_done'
+export type RecoveryIntensity = 'light' | 'moderate' | 'hard' | 'excessive'
+export type RecoveryCoachCompliance = 'followed' | 'slightly_fast' | 'excessive'
+export type RunningLeagueScoreSource = 'manual' | 'auto' | 'import'
+
+export interface RunningLeague {
+  id: string
+  title: string
+  description: string
+  starts_at: string
+  ends_at: string
+  status: RunningLeagueStatus
+  audience: RunningLeagueAudience
+  target_group: RunningLeagueTargetGroup
+  board_post_id: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueParticipant {
+  id: string
+  league_id: string
+  member_id: string
+  goal_level: string | null
+  goal_type: RunningLeagueGoalType | null
+  personal_goal: string | null
+  goal_achievement_rate: number | null
+  attendance_score: number
+  goal_score: number
+  record_score: number
+  mileage_score: number
+  recovery_score: number
+  mileage_km: number
+  total_score: number
+  record_baseline: string | null
+  record_current: string | null
+  notes: string
+  coach_comment: string
+  created_at: string
+  updated_at: string
+  member?: Pick<Member, 'id' | 'name' | 'sport' | 'phone'> | null
+}
+
+export interface RunningLeagueGoal {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  goal_level: string | null
+  goal_type: RunningLeagueGoalType | null
+  personal_goal: string
+  achievement_rate: number | null
+  goal_score: number
+  week_number: number | null
+  is_primary: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueRecord {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  distance_event: RunningLeagueDistanceEvent
+  record_phase: RunningLeagueRecordPhase
+  time_text: string | null
+  time_seconds: number | null
+  measured_at: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueMileageLog {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  distance_km: number
+  logged_at: string
+  source: RunningLeagueMileageSource
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueRecoveryLog {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  check_type: RunningLeagueRecoveryCheckType
+  completed: boolean
+  points: number
+  logged_at: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueDailyRecovery {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  logged_at: string
+  condition: RecoveryCondition
+  pain: RecoveryPain
+  stretching: RecoveryStretching
+  intensity: RecoveryIntensity
+  coach_compliance: RecoveryCoachCompliance
+  points: number
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueScoreSnapshot {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  attendance_score: number
+  goal_score: number
+  record_score: number
+  mileage_score: number
+  recovery_score: number
+  total_score: number
+  week_number: number | null
+  source: RunningLeagueScoreSource
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueAward {
+  id: string
+  league_id: string
+  participant_id: string
+  member_id: string
+  award_key: string
+  award_name: string
+  criteria: string
+  reason: string
+  is_recommended: boolean
+  is_confirmed: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningLeagueReport {
+  id: string
+  participant_id: string
+  league_id: string
+  member_id: string
+  rank: number | null
+  total_score: number | null
+  summary: string
+  highlights: string[]
+  coach_comment: string
+  is_published: boolean
+  published_at: string | null
   created_at: string
   updated_at: string
 }

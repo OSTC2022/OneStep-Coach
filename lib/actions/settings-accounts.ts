@@ -36,7 +36,7 @@ function toProfileRole(role: SettingsAssignableRole): ProfileRole {
 
 function toLegacyUsersRole(profileRole: ProfileRole): string {
   if (profileRole === 'coach') return 'instructor'
-  if (profileRole === 'guardian') return 'member'
+  if (profileRole === 'guardian' || profileRole === 'adult_member') return 'member'
   return profileRole
 }
 
@@ -500,11 +500,13 @@ export async function updateAccountRole(
       existing.email,
     )
     if (link.error) return link
-  } else if (profileRole === 'member') {
+  } else if (profileRole === 'member' || profileRole === 'adult_member') {
     await unlinkInstructorUser(admin, userId)
     const memberId = options?.memberId?.trim()
     if (memberId) {
-      const linked = await linkAuthUserToMemberRecord(userId, memberId)
+      const linked = await linkAuthUserToMemberRecord(userId, memberId, {
+        role: profileRole,
+      })
       if (linked.error) return linked
     }
   } else {

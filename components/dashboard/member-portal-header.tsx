@@ -73,8 +73,16 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
 
         <div className="flex-1" />
 
-        <MemberBoardPopover userId={user.id} kind="notice" />
-        <MemberBoardPopover userId={user.id} kind="event" />
+        <MemberBoardPopover
+          userId={user.id}
+          kind="notice"
+          audience={user.role === 'adult_member' ? 'adult' : 'general'}
+        />
+        <MemberBoardPopover
+          userId={user.id}
+          kind="event"
+          audience={user.role === 'adult_member' ? 'adult' : 'general'}
+        />
 
         <NotificationBell userId={user.id} />
 

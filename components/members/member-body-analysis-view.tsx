@@ -146,6 +146,8 @@ interface MemberBodyAnalysisViewProps {
   readOnly?: boolean
   /** 대시보드에서 공유 링크 패널 표시 */
   showShareLink?: boolean
+  /** 성인회원 포털 — '선수' 대신 회원님 표기 */
+  reportVariant?: 'athlete' | 'adult'
 }
 
 function formatRecordDate(date: string) {
@@ -163,6 +165,7 @@ export function MemberBodyAnalysisView({
   canEditBodyBaseline = false,
   readOnly = false,
   showShareLink = true,
+  reportVariant = 'athlete',
 }: MemberBodyAnalysisViewProps) {
   const router = useRouter()
   const memberBackHref = backHref ?? `/dashboard/members/${member.id}`
@@ -641,8 +644,17 @@ export function MemberBodyAnalysisView({
               Athlete Condition Report
             </p>
             <h1 className="text-2xl font-bold lg:text-3xl">
-              <span className="mr-2">{member.name}</span>
-              선수의 컨디션 &amp; 신체변화
+              {reportVariant === 'adult' ? (
+                <>
+                  <span className="mr-1">{member.name}</span>
+                  회원님의 컨디션 &amp; 신체변화
+                </>
+              ) : (
+                <>
+                  <span className="mr-2">{member.name}</span>
+                  선수의 컨디션 &amp; 신체변화
+                </>
+              )}
             </h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-foreground/90">
               체중은 경기력과 컨디션을 확인하기 위한 참고 지표입니다.

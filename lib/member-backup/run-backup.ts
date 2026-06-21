@@ -7,6 +7,7 @@ import { withGoogleAccessToken } from '@/lib/google-calendar/client'
 import { getGoogleBackupAuthRow } from '@/lib/member-backup/google-token'
 import {
   createDriveFolder,
+  downloadDriveFile,
   findDriveFileInFolder,
   findDriveFolderByName,
   MEMBER_BACKUP_DRIVE_FOLDER,
@@ -79,7 +80,7 @@ async function ensureDriveFolder(
 }
 
 /**
- * DB → Drive 단방향 업로드만 수행합니다. Drive 파일을 읽어 앱 데이터를 바꾸지 않습니다.
+ * DB → Drive 백업. 기존 Drive 파일이 있으면 다운로드 후 병합(중복 제외·이력 유지)하여 업로드합니다.
  */
 export async function runMemberBackupToGoogleDrive(options?: {
   trigger?: MemberBackupTrigger
@@ -113,7 +114,7 @@ export async function runMemberBackupToGoogleDrive(options?: {
     const { buildMemberBackupWorkbookBuffer, MEMBER_BACKUP_DRIVE_FILENAME } =
       await import('@/lib/member-backup/export-xlsx')
 
-    const { buffer, memberCount, attendanceCount } =
+    const { buffer: freshBuffer, memberCount, attendanceCount } =
       await buildMemberBackupWorkbookBuffer(supabase)
 
     const result = await withGoogleAccessToken(syncRow.refresh_token, async (token) => {
@@ -129,9 +130,25 @@ export async function runMemberBackupToGoogleDrive(options?: {
         existingFileId = found?.id ?? null
       }
 
+      let uploadBuffer = freshBuffer
+      if (existingFileId) {
+        try {
+          const existingBuffer = await downloadDriveFile(token, existingFileId)
+          const { mergeBackupWorkbooks } = await import(
+            '@/lib/member-backup/merge-workbook'
+          )
+          uploadBuffer = mergeBackupWorkbooks(existingBuffer, freshBuffer)
+        } catch (downloadError) {
+          console.warn(
+            '[member-backup] existing file merge skipped:',
+            downloadError instanceof Error ? downloadError.message : downloadError,
+          )
+        }
+      }
+
       const file = await uploadDriveFile(token, {
         name: MEMBER_BACKUP_DRIVE_FILENAME,
-        buffer,
+        buffer: uploadBuffer,
         folderId: folder.id,
         existingFileId,
       })

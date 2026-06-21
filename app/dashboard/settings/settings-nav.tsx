@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, CalendarSync, HardDrive, Megaphone, Users } from 'lucide-react'
+import { Building2, CalendarSync, HardDrive, Megaphone, Trophy, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const SETTINGS_TABS = [
@@ -15,13 +15,29 @@ const SETTINGS_TABS = [
       !path.startsWith('/dashboard/settings/center-contact') &&
       !path.startsWith('/dashboard/settings/google-calendar') &&
       !path.startsWith('/dashboard/settings/center-board') &&
+      !path.startsWith('/dashboard/settings/adult-center-board') &&
+      !path.startsWith('/dashboard/settings/running-league') &&
       !path.startsWith('/dashboard/settings/backup'),
   },
   {
     href: '/dashboard/settings/center-board',
     label: '공지 · 이벤트',
     icon: Megaphone,
-    isActive: (path: string) => path.startsWith('/dashboard/settings/center-board'),
+    isActive: (path: string) =>
+      path.startsWith('/dashboard/settings/center-board') &&
+      !path.startsWith('/dashboard/settings/adult-center-board'),
+  },
+  {
+    href: '/dashboard/settings/adult-center-board',
+    label: '성인 공지 · 이벤트',
+    icon: Megaphone,
+    isActive: (path: string) => path.startsWith('/dashboard/settings/adult-center-board'),
+  },
+  {
+    href: '/dashboard/settings/running-league',
+    label: '러닝 리그',
+    icon: Trophy,
+    isActive: (path: string) => path.startsWith('/dashboard/settings/running-league'),
   },
   {
     href: '/dashboard/settings/backup',

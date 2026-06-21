@@ -6,6 +6,7 @@ import {
   getMemberBodyRecords,
   getMemberProteinSettings,
 } from '@/lib/actions/member-body-records'
+import { isMemberPortalRole } from '@/lib/member-portal-routes'
 import { MemberBodyAnalysisView } from '@/components/members/member-body-analysis-view'
 
 export default async function MyBodyPage() {
@@ -14,7 +15,7 @@ export default async function MyBodyPage() {
     getMemberPortalData(),
   ])
   if (!data) {
-    if (profile?.role === 'member' || profile?.role === 'guardian') {
+    if (profile && isMemberPortalRole(profile.role)) {
       return <MemberPortalUnavailable userName={profile.full_name} />
     }
     redirect('/auth/login')
@@ -49,6 +50,7 @@ export default async function MyBodyPage() {
         nutritionColumnsReady={nutritionColumnsReady}
         proteinSettings={proteinSettings}
         backHref="/dashboard/my"
+        reportVariant={profile?.role === 'adult_member' ? 'adult' : 'athlete'}
       />
     </div>
   )

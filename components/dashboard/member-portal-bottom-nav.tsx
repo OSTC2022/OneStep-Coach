@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, ClipboardList, Home, LineChart } from 'lucide-react'
+import { CalendarDays, ClipboardList, Home, LineChart, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const NAV_ITEMS = [
+const ATHLETE_NAV_ITEMS = [
   {
     href: '/dashboard/my',
     label: '홈',
@@ -36,9 +36,47 @@ const NAV_ITEMS = [
   },
 ] as const
 
-export function MemberPortalBottomNav() {
+const ADULT_NAV_ITEMS = [
+  {
+    href: '/dashboard/my',
+    label: '홈',
+    icon: Home,
+    isActive: (path: string, _hash: string) => path === '/dashboard/my',
+  },
+  {
+    href: '/dashboard/my/running-league',
+    label: '러닝 챌린지',
+    icon: Trophy,
+    isActive: (path: string, _hash: string) => path.startsWith('/dashboard/my/running-league'),
+  },
+  {
+    href: '/dashboard/my/body#today-record',
+    label: '컨디션',
+    icon: ClipboardList,
+    isActive: (path: string, hash: string) =>
+      path.startsWith('/dashboard/my/body') && hash === '#today-record',
+  },
+  {
+    href: '/dashboard/my/sessions',
+    label: '수업',
+    icon: CalendarDays,
+    isActive: (path: string, _hash: string) => path.startsWith('/dashboard/my/sessions'),
+  },
+] as const
+
+interface MemberPortalBottomNavProps {
+  role?: string | null
+}
+
+export function MemberPortalBottomNav({ role }: MemberPortalBottomNavProps) {
   const pathname = usePathname()
   const [hash, setHash] = useState('')
+  const isAdultMember = role === 'adult_member'
+
+  const navItems = useMemo(
+    () => (isAdultMember ? ADULT_NAV_ITEMS : ATHLETE_NAV_ITEMS),
+    [isAdultMember],
+  )
 
   useEffect(() => {
     function syncHash() {
@@ -52,7 +90,7 @@ export function MemberPortalBottomNav() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
       <div className="mx-auto grid max-w-[1120px] grid-cols-4 px-2">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = item.isActive(pathname, hash)
           const Icon = item.icon
           return (

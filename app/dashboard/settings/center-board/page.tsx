@@ -7,7 +7,7 @@ export default async function CenterBoardSettingsPage() {
   const user = await requireDashboardProfile()
   if (user.role !== 'admin') redirect('/unauthorized')
 
-  const posts = await getCenterBoardPostsForAdmin()
+  const posts = await getCenterBoardPostsForAdmin(undefined, 'general')
 
   return (
     <div className="space-y-4">

@@ -17,6 +17,7 @@ import {
   mergeAuthDuplicateMembersIntoTarget,
 } from '@/lib/member-merge'
 import type { MemberPickerOption } from '@/lib/actions/members'
+import type { ProfileRole } from '@/lib/types'
 
 const INVITE_SUCCESS =
   '초대 메일을 보냈습니다. 회원이 이메일에서 링크를 눌러 비밀번호를 설정하면 앱에 로그인할 수 있습니다.'
@@ -362,6 +363,7 @@ async function ensureMemberProfile(
   authUserId: string,
   email: string,
   fullName: string,
+  role: ProfileRole = 'member',
 ): Promise<{ error?: string }> {
   if (isProtectedAdminAccount(email)) {
     return {
@@ -377,7 +379,7 @@ async function ensureMemberProfile(
       id: authUserId,
       email,
       full_name: fullName,
-      role: 'member',
+      role,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' },
@@ -387,13 +389,20 @@ async function ensureMemberProfile(
     return { error: profileError.message }
   }
 
+  const legacyUsersRole =
+    role === 'adult_member' || role === 'guardian'
+      ? 'member'
+      : role === 'coach'
+        ? 'instructor'
+        : role
+
   // public.users CHECK allows admin | instructor | member only
   const { error: legacyError } = await admin.from('users').upsert(
     {
       id: authUserId,
       email,
       full_name: fullName,
-      role: 'member',
+      role: legacyUsersRole,
     },
     { onConflict: 'id' },
   )
@@ -559,6 +568,7 @@ export async function getMemberLinkedToAccount(
 export async function linkAuthUserToMemberRecord(
   authUserId: string,
   memberId: string,
+  options?: { role?: ProfileRole },
 ): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
@@ -606,13 +616,21 @@ export async function linkAuthUserToMemberRecord(
     email.split('@')[0] ||
     '회원'
 
+  const profileRole: ProfileRole = options?.role ?? 'member'
+  const legacyRole =
+    profileRole === 'adult_member' || profileRole === 'guardian'
+      ? 'member'
+      : profileRole === 'coach'
+        ? 'instructor'
+        : profileRole
+
   await clearMemberLinksForAuthUser(authUserId)
 
   const profileSave = await upsertUserProfile(admin, {
     id: authUserId,
     email: email || null,
     full_name: fullName,
-    role: 'member',
+    role: profileRole,
     approval_status: 'approved',
   })
   if (profileSave.error) return { error: profileSave.error }
@@ -622,7 +640,7 @@ export async function linkAuthUserToMemberRecord(
       id: authUserId,
       email: email || null,
       full_name: fullName,
-      role: 'member',
+      role: legacyRole,
     },
     { onConflict: 'id' },
   )
@@ -645,7 +663,7 @@ export async function linkAuthUserToMemberRecord(
     await admin.auth.admin.updateUserById(authUserId, {
       user_metadata: {
         full_name: fullName,
-        role: 'member',
+        role: profileRole,
         approval_status: 'approved',
         member_id: memberId,
       },

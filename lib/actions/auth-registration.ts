@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/actions/auth'
 import { assignCoachRoleToInstructor } from '@/lib/actions/settings-accounts'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
-import { appRoleToProfileRole, profileRoleToAppRole } from '@/lib/roles'
+import { appRoleToProfileRole, profileRoleToAppRole, getRoleLabel } from '@/lib/roles'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   fetchAllProfiles,
@@ -19,6 +19,7 @@ import {
   executePublicSignup,
 } from '@/lib/auth/public-signup'
 import type { SettingsAssignableRole } from '@/lib/settings-accounts-types'
+import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 
 export type PendingAccountRow = {
   id: string
@@ -139,14 +140,7 @@ function mapPendingAccountRow(
     loginEmail: row.email,
     full_name: row.full_name,
     role: row.role,
-    roleLabel:
-      appRole === 'admin'
-        ? '관리자'
-        : appRole === 'guardian'
-          ? '학부모'
-          : appRole === 'instructor'
-            ? '강사'
-            : '회원',
+    roleLabel: getRoleLabel(appRole),
     created_at: row.created_at,
     birth_date: signupMember?.birth_date ?? null,
     phone: signupMember?.phone ?? null,
@@ -184,7 +178,7 @@ export async function grantAccountAccess(
       accountUserId,
       role,
       role === 'instructor' ? instructorId : null,
-      role === 'member' ? memberId : null,
+      requiresMemberLinkRole(role) ? memberId : null,
     )
   }
 
@@ -199,7 +193,7 @@ export async function grantAccountAccess(
 
   const { updateAccountRole } = await import('@/lib/actions/settings-accounts')
   const updated = await updateAccountRole(accountUserId, role, {
-    memberId: role === 'member' ? memberId : null,
+    memberId: requiresMemberLinkRole(role) ? memberId : null,
   })
   if (updated.error) return updated
 
@@ -218,7 +212,7 @@ export async function approveAccount(
   const admin = createServiceRoleClient()
   let resolvedMemberId = memberId?.trim() || null
 
-  if (role === 'member' && !resolvedMemberId) {
+  if (requiresMemberLinkRole(role) && !resolvedMemberId) {
     const { data: signupMember } = await admin
       .from('members')
       .select('id')
@@ -229,8 +223,8 @@ export async function approveAccount(
     }
   }
 
-  if (role === 'member' && !resolvedMemberId) {
-    return { error: '회원 권한은 센터 회원 프로필을 선택해 연결해주세요.' }
+  if (requiresMemberLinkRole(role) && !resolvedMemberId) {
+    return { error: '회원·성인회원 권한은 센터 회원 프로필을 선택해 연결해주세요.' }
   }
 
   const allProfiles = await fetchAllProfiles(admin)
@@ -316,7 +310,7 @@ export async function approveAccount(
       role:
         role === 'instructor'
           ? 'instructor'
-          : role === 'guardian'
+          : role === 'guardian' || role === 'adult_member'
             ? 'member'
             : role,
     },
@@ -330,7 +324,7 @@ export async function approveAccount(
     const { updateAccountRole } = await import('@/lib/actions/settings-accounts')
     const result = await updateAccountRole(userId, role, {
       skipApprovalCheck: true,
-      memberId: role === 'member' ? resolvedMemberId : null,
+      memberId: requiresMemberLinkRole(role) ? resolvedMemberId : null,
     })
     if (result.error) return result
   }

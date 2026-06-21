@@ -37,7 +37,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
         >
           {children}
         </main>
-        <MemberPortalBottomNav />
+        <MemberPortalBottomNav role={user.role} />
       </div>
     )
   }

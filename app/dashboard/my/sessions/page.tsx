@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getMemberPortalData } from '@/lib/actions/member-portal'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { MemberPortalUnavailable } from '@/components/dashboard/member-portal-unavailable'
+import { isMemberPortalRole } from '@/lib/member-portal-routes'
 import { loadMemberLessonRecords } from '@/lib/member-portal-lessons'
 import { MemberSessionsPage } from '../member-sessions-page'
 
@@ -12,7 +13,7 @@ export default async function MySessionsPage() {
   ])
 
   if (!data) {
-    if (profile?.role === 'member' || profile?.role === 'guardian') {
+    if (profile && isMemberPortalRole(profile.role)) {
       return <MemberPortalUnavailable userName={profile.full_name} />
     }
     redirect('/auth/login')

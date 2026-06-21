@@ -114,7 +114,7 @@ export async function signIn(
   }
 
   const appRole = profileRoleToAppRole(profileRole) as AppRole
-  if (appRole === 'member' || appRole === 'guardian') {
+  if (appRole === 'member' || appRole === 'guardian' || appRole === 'adult_member') {
     try {
       const { createServiceRoleClient } = await import('@/lib/supabase/admin')
       const admin = createServiceRoleClient()

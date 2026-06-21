@@ -14,6 +14,7 @@ import type {
   InstructorRoleRow,
   SettingsAssignableRole,
 } from '@/lib/settings-accounts-types'
+import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -44,6 +45,7 @@ import { formatBirthDateDisplay } from '@/lib/member-utils'
 
 const APPROVE_ROLES: { value: SettingsAssignableRole; label: string }[] = [
   { value: 'member', label: '회원' },
+  { value: 'adult_member', label: '성인회원' },
   { value: 'guardian', label: '학부모' },
   { value: 'admin', label: '관리자' },
   { value: 'instructor', label: '강사' },
@@ -118,7 +120,11 @@ export function PendingApprovalsPanel({
       toast.error('강사 프로필을 선택해주세요.')
       return
     }
-    if (approveRole === 'member' && !memberId && !selected.signupMemberId) {
+    if (
+      requiresMemberLinkRole(approveRole) &&
+      !memberId &&
+      !selected.signupMemberId
+    ) {
       toast.error('연결할 센터 회원을 선택해주세요.')
       return
     }
@@ -128,7 +134,9 @@ export function PendingApprovalsPanel({
       selected.id,
       approveRole,
       approveRole === 'instructor' ? instructorId : null,
-      approveRole === 'member' ? memberId || selected.signupMemberId : null,
+      requiresMemberLinkRole(approveRole)
+        ? memberId || selected.signupMemberId
+        : null,
     )
     setBusy(false)
 
@@ -340,7 +348,7 @@ export function PendingApprovalsPanel({
                 </Select>
               </div>
 
-              {approveRole === 'member' && selected ? (
+              {requiresMemberLinkRole(approveRole) && selected ? (
                 <AccountMemberLinkSelect
                   accountUserId={selected.id}
                   value={memberId}

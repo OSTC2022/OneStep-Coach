@@ -17,6 +17,7 @@ import type {
   RegisteredAccount,
   SettingsAssignableRole,
 } from '@/lib/settings-accounts-types'
+import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -66,6 +67,7 @@ const ASSIGNABLE_ROLES: {
   label: string
 }[] = [
   { value: 'member', label: '회원' },
+  { value: 'adult_member', label: '성인회원' },
   { value: 'guardian', label: '학부모' },
   { value: 'admin', label: '관리자' },
   { value: 'instructor', label: '강사' },
@@ -140,6 +142,7 @@ function appRoleToAssignable(account: RegisteredAccount): SettingsAssignableRole
   if (account.appRole === 'instructor') return 'instructor'
   if (account.appRole === 'guardian') return 'guardian'
   if (account.appRole === 'admin') return 'admin'
+  if (account.appRole === 'adult_member') return 'adult_member'
   return 'member'
 }
 
@@ -271,7 +274,7 @@ export function AccountRoleManagement({
     if (!selected || selectedAssignable === null) return
 
     if (
-      pendingRole === 'member' &&
+      requiresMemberLinkRole(pendingRole) &&
       !memberId &&
       !selected.linkedMemberId
     ) {
@@ -281,7 +284,9 @@ export function AccountRoleManagement({
 
     setSaving(true)
     const result = await updateAccountRole(selected.id, pendingRole, {
-      memberId: pendingRole === 'member' ? memberId || selected.linkedMemberId : null,
+      memberId: requiresMemberLinkRole(pendingRole)
+        ? memberId || selected.linkedMemberId
+        : null,
     })
     setSaving(false)
 
@@ -298,14 +303,22 @@ export function AccountRoleManagement({
     }
 
     toast.success(
-      pendingRole === 'member' ? '회원 연결이 저장되었습니다.' : '권한이 변경되었습니다.',
+      pendingRole === 'adult_member'
+        ? '성인회원 권한이 저장되었습니다.'
+        : requiresMemberLinkRole(pendingRole)
+          ? '회원 연결이 저장되었습니다.'
+          : '권한이 변경되었습니다.',
       {
         description:
-          pendingRole === 'member' && updated?.linkedMemberName
-            ? `${selected.full_name || selected.email} → ${updated.linkedMemberName}`
-            : `${selected.full_name || selected.email} → ${
-                ASSIGNABLE_ROLES.find((r) => r.value === pendingRole)?.label
-              }`,
+          pendingRole === 'adult_member'
+            ? `${selected.full_name || selected.email} → 성인회원${
+                updated?.linkedMemberName ? ` (${updated.linkedMemberName})` : ''
+              }`
+            : requiresMemberLinkRole(pendingRole) && updated?.linkedMemberName
+              ? `${selected.full_name || selected.email} → ${updated.linkedMemberName}`
+              : `${selected.full_name || selected.email} → ${
+                  ASSIGNABLE_ROLES.find((r) => r.value === pendingRole)?.label
+                }`,
       },
     )
     router.refresh()
@@ -565,7 +578,9 @@ export function AccountRoleManagement({
                   value={pendingRole}
                   onValueChange={(v) => {
                     setPendingRole(v as SettingsAssignableRole)
-                    if (v !== 'member') setMemberId('')
+                    if (!requiresMemberLinkRole(v as SettingsAssignableRole)) {
+                      setMemberId('')
+                    }
                   }}
                 >
                   <SelectTrigger>
@@ -580,12 +595,12 @@ export function AccountRoleManagement({
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  강사: 캘린더·수업·출석 메뉴 · 학부모: 마이페이지(보호자) · 회원: 일반
-                  회원 마이페이지
+                  강사: 캘린더·수업·출석 · 학부모: 보호자 마이페이지 · 회원: 일반 마이페이지 ·
+                  성인회원: 성인 전용 공지·리포트
                 </p>
               </div>
 
-              {pendingRole === 'member' ? (
+              {requiresMemberLinkRole(pendingRole) ? (
                 <AccountMemberLinkSelect
                   accountUserId={selected.id}
                   value={memberId}
@@ -598,7 +613,8 @@ export function AccountRoleManagement({
                 className="w-full"
                 disabled={
                   saving ||
-                  (pendingRole === selectedAssignable && pendingRole !== 'member')
+                  (pendingRole === selectedAssignable &&
+                    !requiresMemberLinkRole(pendingRole))
                 }
                 onClick={() => void handleSaveRole()}
               >
@@ -607,14 +623,15 @@ export function AccountRoleManagement({
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     저장 중…
                   </>
-                ) : pendingRole === 'member' ? (
+                ) : requiresMemberLinkRole(pendingRole) ? (
                   '회원 연결 · 권한 저장'
                 ) : (
                   '권한 저장'
                 )}
               </Button>
 
-              {selected.appRole !== 'member' && (
+              {selected.appRole !== 'member' &&
+                selected.appRole !== 'adult_member' && (
                 <Button
                   type="button"
                   variant="outline"

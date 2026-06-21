@@ -77,6 +77,27 @@ export async function findDriveFileInFolder(
   return data.files?.[0] ?? null
 }
 
+export async function downloadDriveFile(
+  accessToken: string,
+  fileId: string,
+): Promise<Buffer> {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(120_000),
+    },
+  )
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Google Drive 다운로드 실패 (${response.status}): ${text}`)
+  }
+
+  const arrayBuffer = await response.arrayBuffer()
+  return Buffer.from(arrayBuffer)
+}
+
 export async function uploadDriveFile(
   accessToken: string,
   params: {

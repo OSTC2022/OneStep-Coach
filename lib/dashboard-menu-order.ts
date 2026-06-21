@@ -14,7 +14,7 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     id: '/dashboard/my',
     title: '마이페이지',
     url: '/dashboard/my',
-    roles: ['member', 'guardian'],
+    roles: ['member', 'guardian', 'adult_member'],
   },
   {
     id: '/dashboard',

@@ -210,6 +210,18 @@ export function MemberSearchSelect({
     setSearchOpen(false)
   }
 
+  const inlinePickerOpen = suggestOpen || searchOpen
+
+  useEffect(() => {
+    if (!inlinePickerOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (containerRef.current?.contains(e.target as Node)) return
+      closePickers()
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
+  }, [inlinePickerOpen])
+
   function selectMember(member: MemberSearchOption) {
     if (isMemberDisabled(member)) {
       toast.error('이미 같은 시간에 배정된 회원입니다.')
@@ -330,6 +342,7 @@ export function MemberSearchSelect({
           />
           {enableRecentSearches && suggestOpen && !query.trim() && recentRows.length > 0 && (
             <div
+              data-inline-picker-open="true"
               className={suggestionListClass}
               onMouseDown={(e) => e.preventDefault()}
             >
@@ -351,6 +364,7 @@ export function MemberSearchSelect({
           )}
           {searchOpen && query.trim() && (filtered.length > 0 || showSearchingHint) && (
             <div
+              data-inline-picker-open="true"
               className={suggestionListClass}
               onMouseDown={(e) => e.preventDefault()}
             >

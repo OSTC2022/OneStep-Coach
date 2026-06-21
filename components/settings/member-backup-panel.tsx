@@ -182,24 +182,27 @@ export function MemberBackupPanel({ initialStatus }: MemberBackupPanelProps) {
           <p className="leading-relaxed text-muted-foreground">
             센터 DB에서 엑셀을 만들어 Google Drive{' '}
             <strong>OneStep 회원 백업</strong> 폴더의{' '}
-            <strong>회원백업.xlsx</strong> 한 파일에 <strong>업로드만</strong>{' '}
-            합니다. Drive에서 수정해도 앱 데이터는 바뀌지 않으며, Drive → 앱
-            가져오기는 없습니다.
+            <strong>회원백업.xlsx</strong> 한 파일에 업로드합니다. 기존 파일이
+            있으면 <strong>중복 없이 새 기록만 추가</strong>하고, 이전 월·출석·결제
+            내역은 유지합니다. Drive에서 수정해도 앱 데이터는 바뀌지 않습니다.
           </p>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            자동 백업: 매일 <strong>00:00 (한국 시간)</strong>에 하루 1회 덮어쓰기.
-            수동 「지금 Drive에 백업」은 언제든 가능합니다.
+            자동 백업: 매일 <strong>00:00 (한국 시간)</strong>에 하루 1회 병합
+            업로드. 수동 「지금 Drive에 백업」은 언제든 가능합니다.
           </p>
 
           <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground">엑셀 시트 구성</p>
             <ul className="mt-1 list-inside list-disc space-y-0.5">
               <li>
-                <strong>회원_요약</strong> — 회원명, 종목, 세션 총횟수, 남은 횟수,
-                최근 출석일
+                <strong>회원_요약</strong> — 회원 정보, 세션·결제·출석 요약
               </li>
               <li>
-                <strong>출석_내역</strong> — 수업현황과 동일(출석 체크·종료 확인된 수업만)
+                <strong>출석_내역</strong> — 전체 출석 기록(수업현황과 동일 기준)
+              </li>
+              <li>
+                <strong>YYYY_MM월</strong> — 올해 1월~현재 월별 시트. 출석·결제
+                일자, 금액, 구매·남은·사용 횟수, 결제방법 등
               </li>
             </ul>
           </div>
