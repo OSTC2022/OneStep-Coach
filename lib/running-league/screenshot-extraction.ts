@@ -56,20 +56,26 @@ export type RunningScreenshotAnalysisDiagnostics = {
   runtime?: 'vercel' | 'local'
   vercel_env?: string | null
   ocr_supported?: boolean
+  openai_http_status?: number | null
   failure_reason?: ScreenshotFailureReason | null
   failure_detail?: string | null
 }
 
 export type AnalyzeRunningScreenshotResponse = {
   ok: true
+  success: true
   extraction: RunningScreenshotExtraction
   image_meta: RunningScreenshotImageMeta
   image_hash: string
   diagnostics: RunningScreenshotAnalysisDiagnostics
 } | {
   ok: false
+  success: false
   error: string
+  message: string
+  errorCode?: string
   error_code?: ScreenshotFailureReason
+  manualInputRequired?: boolean
   diagnostics?: RunningScreenshotAnalysisDiagnostics
 }
 

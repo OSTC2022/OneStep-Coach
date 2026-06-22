@@ -1,7 +1,6 @@
-const MAX_EDGE_PX = 1600
-const JPEG_QUALITY = 0.85
-/** 원본이 이보다 크면 압축 시도 */
-const COMPRESS_IF_BYTES = 1.5 * 1024 * 1024
+/** OpenAI Vision 토큰·용량 부담을 줄이기 위한 클라이언트 압축 기준 */
+const MAX_EDGE_PX = 1280
+const JPEG_QUALITY = 0.8
 
 function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -52,8 +51,8 @@ function scaledDimensions(
 }
 
 /**
- * 업로드 전 클라이언트 압축 — Vercel 4.5MB 본문 제한·서버리스 안정성.
- * 긴 변 1600px 이하, 필요 시 JPEG 0.85.
+ * 업로드 전 클라이언트 압축 — OpenAI 요청 비용·429 완화.
+ * 긴 변 1280px 이하, JPEG 0.8로 정규화.
  */
 export async function prepareScreenshotForUpload(file: File): Promise<File> {
   console.info('[prepare-screenshot-upload] file selected', {
@@ -66,23 +65,12 @@ export async function prepareScreenshotForUpload(file: File): Promise<File> {
     return file
   }
 
-  const needsCompression = file.size > COMPRESS_IF_BYTES
   let img: HTMLImageElement
   try {
     img = await loadImageFromFile(file)
   } catch (error) {
     console.warn('[prepare-screenshot-upload] skip compression — decode failed', {
       error: error instanceof Error ? error.message : String(error),
-    })
-    return file
-  }
-
-  const needsResize = Math.max(img.naturalWidth, img.naturalHeight) > MAX_EDGE_PX
-  if (!needsCompression && !needsResize) {
-    console.info('[prepare-screenshot-upload] skip compression — within limits', {
-      width: img.naturalWidth,
-      height: img.naturalHeight,
-      file_size: file.size,
     })
     return file
   }
@@ -97,13 +85,11 @@ export async function prepareScreenshotForUpload(file: File): Promise<File> {
   }
   ctx.drawImage(img, 0, 0, width, height)
 
-  const outputType = file.type === 'image/png' && !needsCompression ? 'image/png' : 'image/jpeg'
-  const quality = outputType === 'image/jpeg' ? JPEG_QUALITY : undefined
-  const blob = await canvasToBlob(canvas, outputType, quality ?? JPEG_QUALITY)
+  const outputType = 'image/jpeg'
+  const blob = await canvasToBlob(canvas, outputType, JPEG_QUALITY)
 
   const baseName = file.name.replace(/\.[^.]+$/, '') || 'screenshot'
-  const ext = outputType === 'image/jpeg' ? 'jpg' : 'png'
-  const compressed = new File([blob], `${baseName}.${ext}`, {
+  const compressed = new File([blob], `${baseName}.jpg`, {
     type: outputType,
     lastModified: Date.now(),
   })

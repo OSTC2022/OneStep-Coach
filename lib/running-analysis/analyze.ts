@@ -23,7 +23,10 @@ import {
 import { extractRunningMetricsWithOcr } from '@/lib/running-league/screenshot-ocr-server'
 import { getOpenAiApiKey, isOpenAiConfigured } from '@/lib/running-league/openai-config'
 import { getScreenshotRuntimeProfile } from '@/lib/running-league/screenshot-runtime'
-import type { ScreenshotFailureReason } from '@/lib/running-league/screenshot-analysis-errors'
+import {
+  buildScreenshotApiErrorBody,
+  type ScreenshotFailureReason,
+} from '@/lib/running-league/screenshot-analysis-errors'
 
 function resolveDiagnosticsFailureReason(
   diagnostics: RunningScreenshotAnalysisDiagnostics,
@@ -40,6 +43,12 @@ function resolveDiagnosticsFailureReason(
     return 'ai_timeout'
   }
   if (diagnostics.ai_status === 'failed') {
+    if (diagnostics.openai_http_status === 429) {
+      return 'openai_429'
+    }
+    if (diagnostics.openai_http_status === 401) {
+      return 'openai_401'
+    }
     if (diagnostics.failure_detail === 'parse_failed') {
       return 'parse_failed'
     }
@@ -87,10 +96,6 @@ function resolveExtraction(aiResult: RunningScreenshotExtraction, ocrResult: Run
   return merged
 }
 
-function isAiResultUsable(result: RunningScreenshotExtraction | null): result is RunningScreenshotExtraction {
-  return result != null && hasMinimumScreenshotExtraction(result)
-}
-
 export async function analyzeRunningScreenshotBuffer(
   originalBuffer: Buffer,
   mimeType: string,
@@ -130,11 +135,12 @@ export async function analyzeRunningScreenshotBuffer(
     }
 
     let aiResult = emptyExtraction()
+    let aiHardFailure: ScreenshotFailureReason | null = null
     const hasKey = Boolean(getOpenAiApiKey({ logIfMissing: true }))
 
     if (hasKey) {
       try {
-        const result = await withTimeout(
+        const aiResponse = await withTimeout(
           analyzeRunningScreenshotWithOpenAi(aiBuffer, 'image/jpeg', {
             detail: runtime.openAiDetail,
             retryWithLowDetail: runtime.isVercel,
@@ -142,9 +148,30 @@ export async function analyzeRunningScreenshotBuffer(
           runtime.aiTimeoutMs,
           'AI',
         )
-        if (isAiResultUsable(result)) {
-          aiResult = result
+
+        if (aiResponse.ok) {
+          aiResult = aiResponse.extraction
           diagnostics.ai_status = 'success'
+        } else if (aiResponse.reason === 'openai_429' || aiResponse.reason === 'openai_401') {
+          diagnostics.ai_status = 'failed'
+          diagnostics.openai_http_status = aiResponse.httpStatus
+          diagnostics.failure_reason = aiResponse.reason
+          aiHardFailure = aiResponse.reason
+          console.warn('[running-analysis] OpenAI HTTP error', {
+            file_name: options?.fileName ?? null,
+            OPENAI_API_KEY_exists: true,
+            runtime: diagnostics.runtime,
+            http_status: aiResponse.httpStatus,
+            reason: aiResponse.reason,
+          })
+        } else if (aiResponse.reason === 'parse_failed') {
+          diagnostics.ai_status = 'failed'
+          diagnostics.failure_detail = 'parse_failed'
+          console.warn('[running-analysis] OpenAI parse failed', {
+            file_name: options?.fileName ?? null,
+            OPENAI_API_KEY_exists: true,
+            runtime: diagnostics.runtime,
+          })
         } else {
           diagnostics.ai_status = 'empty'
           console.warn('[running-analysis] OpenAI returned no usable core fields', {
@@ -209,12 +236,22 @@ export async function analyzeRunningScreenshotBuffer(
     const extraction = enrichExtractionWithAnalysis(resolveExtraction(aiResult, ocrResult))
     diagnostics.field_count = countExtractedFields(extraction)
     const coreFieldCount = countRequiredExtractionFields(extraction)
-    diagnostics.failure_reason = resolveDiagnosticsFailureReason(
-      diagnostics,
-      coreFieldCount,
-      openaiConfigured,
-      runtime.isVercel,
-    )
+    diagnostics.failure_reason =
+      aiHardFailure ??
+      resolveDiagnosticsFailureReason(
+        diagnostics,
+        coreFieldCount,
+        openaiConfigured,
+        runtime.isVercel,
+      )
+
+    if (aiHardFailure && !hasMinimumScreenshotExtraction(extraction)) {
+      const errorBody = buildScreenshotApiErrorBody({
+        reason: aiHardFailure,
+        diagnostics,
+      })
+      return errorBody
+    }
 
     if (options?.logMeta) {
       console.info('[running-analysis] parsed extraction', {
@@ -250,6 +287,7 @@ export async function analyzeRunningScreenshotBuffer(
 
     return {
       ok: true,
+      success: true,
       extraction,
       image_meta: meta,
       image_hash,
@@ -261,10 +299,9 @@ export async function analyzeRunningScreenshotBuffer(
       runtime: diagnostics.runtime,
       error: error instanceof Error ? error.message : String(error),
     })
-    return {
-      ok: false,
-      error: '이미지 분석에 실패했습니다.',
+    return buildScreenshotApiErrorBody({
+      reason: 'unknown',
       diagnostics,
-    }
+    })
   }
 }

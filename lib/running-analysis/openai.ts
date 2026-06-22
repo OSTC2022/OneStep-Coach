@@ -5,6 +5,7 @@ import { hasMinimumScreenshotExtraction } from '@/lib/running-league/screenshot-
 import { mapOpenAiJsonToRaw } from '@/lib/running-analysis/normalize'
 import { buildExtractionFromRaw } from '@/lib/running-league/screenshot-extraction'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
+import { OpenAiApiError, isOpenAiApiError, sleep } from '@/lib/running-analysis/openai-errors'
 
 const EXTRACTION_PROMPT = `You extract running workout stats from mobile app screenshots (Samsung Health, Garmin, Strava, Nike, Apple Fitness, etc).
 Return ONLY valid JSON. No markdown. No explanation. Use this exact shape:
@@ -36,6 +37,8 @@ Rules:
 
 type OpenAiVisionDetail = 'high' | 'auto' | 'low'
 
+const MAX_RATE_LIMIT_RETRIES = 2
+
 async function callOpenAiVision(
   buffer: Buffer,
   mimeType: string,
@@ -48,84 +51,117 @@ async function callOpenAiVision(
   const imageBase64 = buffer.toString('base64')
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      max_tokens: 500,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: EXTRACTION_PROMPT },
-            { type: 'image_url', image_url: { url: dataUrl, detail } },
-          ],
-        },
-      ],
-    }),
-  })
+  let lastError: OpenAiApiError | null = null
 
-  console.log('ai_status', response.status)
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.min(1000 * 2 ** (attempt - 1), 8000)
+      console.info('[running-analysis/openai] rate limit retry', {
+        attempt,
+        delay_ms: delayMs,
+        OPENAI_API_KEY_exists: true,
+      })
+      await sleep(delayMs)
+    }
 
-  if (!response.ok) {
-    const detailText = await response.text()
-    console.log('ai_raw_text_preview', detailText.slice(0, 300))
-    console.error('[running-analysis/openai] API error', {
-      OPENAI_API_KEY_exists: true,
-      status: response.status,
-      detail,
-      body_preview: detailText.slice(0, 300),
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: EXTRACTION_PROMPT },
+              { type: 'image_url', image_url: { url: dataUrl, detail } },
+            ],
+          },
+        ],
+      }),
     })
-    throw new Error(`OpenAI API HTTP ${response.status}`)
+
+    console.log('ai_status', response.status)
+
+    if (!response.ok) {
+      const detailText = await response.text()
+      console.log('ai_raw_text_preview', detailText.slice(0, 300))
+      console.error('[running-analysis/openai] API error', {
+        OPENAI_API_KEY_exists: true,
+        status: response.status,
+        detail,
+        attempt,
+        body_preview: detailText.slice(0, 300),
+      })
+
+      const apiError = new OpenAiApiError(response.status)
+      lastError = apiError
+
+      if (apiError.retryable && attempt < MAX_RATE_LIMIT_RETRIES) {
+        continue
+      }
+
+      throw apiError
+    }
+
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>
+    }
+
+    const content = payload.choices?.[0]?.message?.content
+    console.log('ai_raw_text_preview', content?.slice(0, 300) ?? null)
+
+    if (!content) return null
+
+    try {
+      const json = JSON.parse(content) as Record<string, unknown>
+      console.log('parsed_result', json)
+      const raw = mapOpenAiJsonToRaw(json)
+      return buildExtractionFromRaw(raw, 'ai', { raw_json: json })
+    } catch (error) {
+      console.error('[running-analysis/openai] JSON parse failed', {
+        OPENAI_API_KEY_exists: true,
+        error: error instanceof Error ? error.message : String(error),
+        content_preview: content.slice(0, 200),
+      })
+      console.error('ai_error_message', error instanceof Error ? error.message : String(error))
+      console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
+      throw new Error('OpenAI JSON parse failed')
+    }
   }
 
-  const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
+  if (lastError) {
+    throw lastError
   }
 
-  const content = payload.choices?.[0]?.message?.content
-  console.log('ai_raw_text_preview', content?.slice(0, 300) ?? null)
-
-  if (!content) return null
-
-  try {
-    const json = JSON.parse(content) as Record<string, unknown>
-    console.log('parsed_result', json)
-    const raw = mapOpenAiJsonToRaw(json)
-    return buildExtractionFromRaw(raw, 'ai', { raw_json: json })
-  } catch (error) {
-    console.error('[running-analysis/openai] JSON parse failed', {
-      OPENAI_API_KEY_exists: true,
-      error: error instanceof Error ? error.message : String(error),
-      content_preview: content.slice(0, 200),
-    })
-    console.error('ai_error_message', error instanceof Error ? error.message : String(error))
-    console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
-    throw new Error('OpenAI JSON parse failed')
-  }
+  return null
 }
 
 function isUsableAiExtraction(result: RunningScreenshotExtraction | null): result is RunningScreenshotExtraction {
   return result != null && hasMinimumScreenshotExtraction(result)
 }
 
+export type OpenAiAnalysisResult =
+  | { ok: true; extraction: RunningScreenshotExtraction }
+  | { ok: false; httpStatus: number | null; reason: 'openai_429' | 'openai_401' | 'parse_failed' | 'empty' | 'unknown' }
+
 export async function analyzeRunningScreenshotWithOpenAi(
   buffer: Buffer,
   mimeType: string,
   options?: { detail?: OpenAiVisionDetail; retryWithLowDetail?: boolean },
-): Promise<RunningScreenshotExtraction | null> {
+): Promise<OpenAiAnalysisResult> {
   const apiKey = getOpenAiApiKey()
   if (!apiKey) {
     console.warn('[running-analysis/openai] OPENAI_API_KEY가 설정되지 않았습니다', {
       openai_configured: false,
     })
-    return null
+    return { ok: false, httpStatus: null, reason: 'empty' }
   }
 
   const model = getOpenAiVisionModel()
@@ -140,43 +176,65 @@ export async function analyzeRunningScreenshotWithOpenAi(
   })
   console.log('ai_processing_start', Date.now())
 
-  try {
-    const result = await callOpenAiVision(buffer, mimeType, detail)
-    if (isUsableAiExtraction(result)) {
-      console.info('[running-analysis/openai] success', {
-        openai_configured: true,
-        detail,
-        distance_km: result.distance_km,
-        duration: result.duration,
-        pace: result.pace,
-        activity_date: result.activity_date,
-        analysis_success: result.analysis_success,
-      })
-      return result
-    }
-  } catch (error) {
-    console.error('[running-analysis/openai] call failed', {
-      openai_configured: true,
-      detail,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    console.error('ai_error_message', error instanceof Error ? error.message : String(error))
-    console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
-  }
-
-  if (options?.retryWithLowDetail && detail !== 'low') {
-    console.info('[running-analysis/openai] retrying with low detail')
+  const runDetail = async (visionDetail: OpenAiVisionDetail) => {
     try {
-      const retry = await callOpenAiVision(buffer, mimeType, 'low')
-      if (isUsableAiExtraction(retry)) return retry
+      const result = await callOpenAiVision(buffer, mimeType, visionDetail)
+      if (isUsableAiExtraction(result)) {
+        console.info('[running-analysis/openai] success', {
+          openai_configured: true,
+          detail: visionDetail,
+          distance_km: result.distance_km,
+          duration: result.duration,
+          pace: result.pace,
+          activity_date: result.activity_date,
+          analysis_success: result.analysis_success,
+        })
+        return { ok: true as const, extraction: result }
+      }
+      return { ok: false as const, httpStatus: null, reason: 'empty' as const }
     } catch (error) {
-      console.error('[running-analysis/openai] retry failed', {
+      console.error('[running-analysis/openai] call failed', {
+        openai_configured: true,
+        detail: visionDetail,
         error: error instanceof Error ? error.message : String(error),
       })
       console.error('ai_error_message', error instanceof Error ? error.message : String(error))
       console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
+
+      if (isOpenAiApiError(error)) {
+        if (error.status === 429) {
+          return { ok: false as const, httpStatus: 429, reason: 'openai_429' as const }
+        }
+        if (error.status === 401) {
+          return { ok: false as const, httpStatus: 401, reason: 'openai_401' as const }
+        }
+        return { ok: false as const, httpStatus: error.status, reason: 'unknown' as const }
+      }
+
+      if (error instanceof Error && error.message.includes('JSON parse failed')) {
+        return { ok: false as const, httpStatus: null, reason: 'parse_failed' as const }
+      }
+
+      return { ok: false as const, httpStatus: null, reason: 'unknown' as const }
     }
   }
 
-  return null
+  const primary = await runDetail(detail)
+  if (primary.ok) return primary
+
+  if (
+    options?.retryWithLowDetail &&
+    detail !== 'low' &&
+    primary.reason !== 'openai_429' &&
+    primary.reason !== 'openai_401'
+  ) {
+    console.info('[running-analysis/openai] retrying with low detail')
+    const retry = await runDetail('low')
+    if (retry.ok) return retry
+    if (retry.reason === 'openai_429' || retry.reason === 'openai_401') {
+      return retry
+    }
+  }
+
+  return primary
 }

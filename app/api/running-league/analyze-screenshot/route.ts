@@ -1,7 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { analyzeRunningScreenshotBuffer } from '@/lib/running-league/analyze-running-screenshot'
-import { isOpenAiConfigured } from '@/lib/running-league/openai-config'
-import { screenshotFailureUserMessage } from '@/lib/running-league/screenshot-analysis-errors'
+import {
+  buildScreenshotApiErrorBody,
+  httpStatusForScreenshotError,
+  screenshotApiErrorMessage,
+  toScreenshotApiErrorCode,
+} from '@/lib/running-league/screenshot-analysis-errors'
 import {
   checkOpenAiEnv,
   checkPublicSupabaseEnv,
@@ -51,32 +55,28 @@ export async function POST(request: Request) {
 
   try {
     if (!supabaseEnv.ok) {
-      const responseBody = {
-        ok: false,
-        error: screenshotFailureUserMessage('missing_supabase'),
-        error_code: 'missing_supabase',
+      const responseBody = buildScreenshotApiErrorBody({
+        reason: 'missing_supabase',
         diagnostics: {
           ...baseDiagnostics,
           failure_reason: 'missing_supabase',
         },
-      }
+      })
       console.log('final_response', responseBody)
-      return Response.json(responseBody, { status: 503 })
+      return Response.json(responseBody, { status: httpStatusForScreenshotError('missing_supabase') })
     }
 
     if (!openaiEnv.ok) {
-      const responseBody = {
-        ok: false,
-        error: screenshotFailureUserMessage('missing_openai_key'),
-        error_code: 'missing_openai_key',
+      const responseBody = buildScreenshotApiErrorBody({
+        reason: 'missing_openai_key',
         diagnostics: {
           ...baseDiagnostics,
           openai_configured: false,
           failure_reason: 'missing_openai_key',
         },
-      }
+      })
       console.log('final_response', responseBody)
-      return Response.json(responseBody, { status: 503 })
+      return Response.json(responseBody, { status: httpStatusForScreenshotError('missing_openai_key') })
     }
 
     const supabase = await createClient()
@@ -85,14 +85,12 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser()
 
     if (!user) {
-      const responseBody = {
-        ok: false,
-        error: screenshotFailureUserMessage('unauthorized'),
-        error_code: 'unauthorized',
+      const responseBody = buildScreenshotApiErrorBody({
+        reason: 'unauthorized',
         diagnostics: baseDiagnostics,
-      }
+      })
       console.log('final_response', responseBody)
-      return Response.json(responseBody, { status: 401 })
+      return Response.json(responseBody, { status: httpStatusForScreenshotError('unauthorized') })
     }
 
     const formData = await request.formData()
@@ -104,40 +102,35 @@ export async function POST(request: Request) {
     console.log('image_type', image?.type ?? 'no_type')
 
     if (!image) {
-      const responseBody = {
-        ok: false,
-        error: '이미지 파일이 필요합니다.',
-        error_code: 'invalid_image',
+      const responseBody = buildScreenshotApiErrorBody({
+        reason: 'invalid_image',
+        message: '이미지 파일이 필요합니다.',
         diagnostics: baseDiagnostics,
-      }
+      })
       console.log('final_response', responseBody)
       return Response.json(responseBody, { status: 400 })
     }
 
     if (!image.type.startsWith('image/')) {
-      const responseBody = {
-        ok: false,
-        error: screenshotFailureUserMessage('invalid_image'),
-        error_code: 'invalid_image',
+      const responseBody = buildScreenshotApiErrorBody({
+        reason: 'invalid_image',
         diagnostics: baseDiagnostics,
-      }
+      })
       console.log('final_response', responseBody)
-      return Response.json(responseBody, { status: 400 })
+      return Response.json(responseBody, { status: httpStatusForScreenshotError('invalid_image') })
     }
 
     if (image.size > MAX_UPLOAD_BYTES) {
-      const responseBody = {
-        ok: false,
-        error: screenshotFailureUserMessage('image_too_large'),
-        error_code: 'image_too_large',
+      const responseBody = buildScreenshotApiErrorBody({
+        reason: 'image_too_large',
         diagnostics: {
           ...baseDiagnostics,
           failure_reason: 'image_too_large',
           failure_detail: `file_size=${image.size}`,
         },
-      }
+      })
       console.log('final_response', responseBody)
-      return Response.json(responseBody, { status: 413 })
+      return Response.json(responseBody, { status: httpStatusForScreenshotError('image_too_large') })
     }
 
     const buffer = Buffer.from(await image.arrayBuffer())
@@ -149,19 +142,22 @@ export async function POST(request: Request) {
     })
 
     if (!result.ok) {
-      const errorCode = result.error_code ?? result.diagnostics?.failure_reason ?? 'unknown'
       const responseBody = {
         ...result,
-        error_code: errorCode,
-        error: result.error || screenshotFailureUserMessage(errorCode),
+        success: false as const,
+        errorCode: result.errorCode ?? toScreenshotApiErrorCode(result.error_code),
+        message: result.message ?? result.error,
+        manualInputRequired: result.manualInputRequired ?? true,
       }
       console.log('parsed_result', null)
       console.log('final_response', {
-        ok: responseBody.ok,
-        error: responseBody.error,
-        error_code: responseBody.error_code,
+        success: responseBody.success,
+        errorCode: responseBody.errorCode,
+        message: responseBody.message,
+        manualInputRequired: responseBody.manualInputRequired,
       })
-      return Response.json(responseBody, { status: 500 })
+      const httpStatus = httpStatusForScreenshotError(result.error_code ?? 'unknown')
+      return Response.json(responseBody, { status: httpStatus })
     }
 
     console.log('parsed_result', {
@@ -177,9 +173,12 @@ export async function POST(request: Request) {
       raw_json: result.extraction.raw_json ?? null,
     })
 
-    const responseBody = result
+    const responseBody = {
+      ...result,
+      success: true as const,
+    }
     console.log('final_response', {
-      ok: responseBody.ok,
+      success: responseBody.success,
       analysis_status: responseBody.extraction.analysis_status,
       analysis_success: responseBody.extraction.analysis_success,
       distance_km: responseBody.extraction.distance_km,
@@ -192,12 +191,11 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('ai_error_message', error instanceof Error ? error.message : String(error))
     console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
-    const responseBody = {
-      ok: false,
-      error: error instanceof Error ? error.message : '이미지 분석에 실패했습니다.',
-      error_code: 'unknown',
+    const responseBody = buildScreenshotApiErrorBody({
+      reason: 'unknown',
+      message: error instanceof Error ? error.message : screenshotApiErrorMessage('UNKNOWN_ERROR'),
       diagnostics: baseDiagnostics,
-    }
+    })
     console.log('final_response', responseBody)
     return Response.json(responseBody, { status: 500 })
   }

@@ -5,8 +5,10 @@ import {
   resolveScreenshotAnalysisUi,
 } from '@/lib/running-league/screenshot-analysis-ui'
 import {
+  fromScreenshotApiErrorCode,
   resolveFailureReasonFromDiagnostics,
-  screenshotFailureUserMessage,
+  screenshotApiErrorMessage,
+  toScreenshotApiErrorCode,
   type ScreenshotFailureReason,
 } from '@/lib/running-league/screenshot-analysis-errors'
 
@@ -18,11 +20,37 @@ function isSuccessPayload(
   return payload.ok === true
 }
 
+function resolvePayloadErrorCode(payload: AnalyzeRunningScreenshotResponse): ScreenshotFailureReason {
+  if (!payload.ok) {
+    if (payload.error_code) {
+      return payload.error_code
+    }
+    if (payload.errorCode) {
+      return fromScreenshotApiErrorCode(payload.errorCode)
+    }
+  }
+  return 'unknown'
+}
+
+function resolvePayloadMessage(
+  payload: AnalyzeRunningScreenshotResponse,
+  reason: ScreenshotFailureReason,
+): string {
+  if (!payload.ok) {
+    return (
+      payload.message ||
+      payload.error ||
+      screenshotApiErrorMessage(payload.errorCode ?? toScreenshotApiErrorCode(reason))
+    )
+  }
+  return screenshotApiErrorMessage(toScreenshotApiErrorCode(reason))
+}
+
 function logAnalyzeFailure(context: {
   url: string
   status: number
   body: unknown
-  errorCode?: ScreenshotFailureReason
+  errorCode?: string
   message: string
 }) {
   console.error('[analyze-running-screenshot-client] analysis failed', context)
@@ -46,9 +74,18 @@ export async function analyzeRunningScreenshotFile(
       url: ANALYZE_API_URL,
       status: 0,
       body: null,
+      errorCode: 'UNKNOWN_ERROR',
       message,
     })
-    return { ok: false, error: message, error_code: 'unknown' }
+    return {
+      ok: false,
+      success: false,
+      error: message,
+      message,
+      errorCode: 'UNKNOWN_ERROR',
+      error_code: 'unknown',
+      manualInputRequired: true,
+    }
   }
 
   const formData = new FormData()
@@ -69,15 +106,23 @@ export async function analyzeRunningScreenshotFile(
       credentials: 'same-origin',
     })
   } catch (error) {
-    const message = screenshotFailureUserMessage('network_error')
+    const message = screenshotApiErrorMessage('NETWORK_ERROR')
     logAnalyzeFailure({
       url: ANALYZE_API_URL,
       status: 0,
       body: error instanceof Error ? error.message : String(error),
-      errorCode: 'network_error',
+      errorCode: 'NETWORK_ERROR',
       message,
     })
-    return { ok: false, error: message, error_code: 'network_error' }
+    return {
+      ok: false,
+      success: false,
+      error: message,
+      message,
+      errorCode: 'NETWORK_ERROR',
+      error_code: 'network_error',
+      manualInputRequired: true,
+    }
   }
 
   let payload: AnalyzeRunningScreenshotResponse
@@ -91,30 +136,36 @@ export async function analyzeRunningScreenshotFile(
       url: ANALYZE_API_URL,
       status: response.status,
       body: rawBody,
+      errorCode: 'UNKNOWN_ERROR',
       message,
     })
-    return { ok: false, error: message, error_code: 'unknown' }
+    return {
+      ok: false,
+      success: false,
+      error: message,
+      message,
+      errorCode: 'UNKNOWN_ERROR',
+      error_code: 'unknown',
+      manualInputRequired: true,
+    }
   }
 
   console.info('[analyze-running-screenshot-client] API response', {
     http_status: response.status,
-    payload_ok: isSuccessPayload(payload) ? payload.ok : payload.ok,
+    payload_ok: payload.ok,
+    success: 'success' in payload ? payload.success : null,
+    errorCode: !payload.ok ? payload.errorCode : null,
     analysis_status: isSuccessPayload(payload) ? payload.extraction.analysis_status : null,
-    analysis_success: isSuccessPayload(payload) ? payload.extraction.analysis_success : null,
     distance_km: isSuccessPayload(payload) ? payload.extraction.distance_km : null,
     duration: isSuccessPayload(payload) ? payload.extraction.duration : null,
-    diagnostics: isSuccessPayload(payload) ? payload.diagnostics : null,
   })
 
   if (!response.ok || !isSuccessPayload(payload)) {
     const errorCode =
-      (!payload.ok && payload.error_code) ||
-      resolveFailureReasonFromDiagnostics(!payload.ok ? payload.diagnostics : undefined) ||
-      (response.status === 413 ? 'image_too_large' : response.status === 503 ? 'missing_openai_key' : 'unknown')
-
-    const message = !payload.ok
-      ? payload.error || screenshotFailureUserMessage(errorCode)
-      : screenshotFailureUserMessage(errorCode)
+      (!payload.ok && payload.errorCode) ||
+      toScreenshotApiErrorCode(resolvePayloadErrorCode(payload))
+    const reason = resolvePayloadErrorCode(payload)
+    const message = resolvePayloadMessage(payload, reason)
 
     logAnalyzeFailure({
       url: ANALYZE_API_URL,
@@ -126,8 +177,12 @@ export async function analyzeRunningScreenshotFile(
 
     return {
       ok: false,
+      success: false,
       error: message,
-      error_code: errorCode,
+      message,
+      errorCode,
+      error_code: reason,
+      manualInputRequired: !payload.ok ? (payload.manualInputRequired ?? true) : true,
       diagnostics: !payload.ok ? payload.diagnostics : undefined,
     }
   }
@@ -137,15 +192,6 @@ export async function analyzeRunningScreenshotFile(
     ui_status: ui.status,
     ui_message: ui.message,
     has_minimum: hasMinimumScreenshotExtraction(payload.extraction),
-    form_values: {
-      distanceKm: payload.extraction.distance_km,
-      duration: payload.extraction.duration,
-      pace: payload.extraction.pace,
-      heartRate: payload.extraction.heart_rate,
-      calories: payload.extraction.calories,
-      date: payload.extraction.activity_date,
-      startTime: payload.extraction.activity_time,
-    },
   })
 
   return payload

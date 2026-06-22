@@ -19,7 +19,8 @@ import {
 } from '@/lib/running-league/screenshot-analysis-ui'
 import {
   resolveFailureReasonFromDiagnostics,
-  screenshotFailureUserMessage,
+  screenshotApiErrorMessage,
+  toScreenshotApiErrorCode,
 } from '@/lib/running-league/screenshot-analysis-errors'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
 import { MILEAGE_SCORE_CAP_KM, mileageScoreFromKm } from '@/lib/running-league/scoring'
@@ -522,10 +523,12 @@ export function MemberMileageLogCard({
       const result = await analyzeRunningScreenshotFile(file)
       if (!result.ok) {
         setAnalysisStatus('failed')
-        setAnalysisMessage(result.error)
+        setAnalysisMessage(result.message || result.error)
         setFieldHints(EMPTY_FIELD_HINTS)
         console.error('[mileage-log-card] screenshot analysis failed', {
           error: result.error,
+          message: result.message,
+          errorCode: result.errorCode,
           error_code: result.error_code,
           diagnostics: result.diagnostics,
         })
@@ -544,7 +547,7 @@ export function MemberMileageLogCard({
       if (!hasMinimumScreenshotExtraction(extraction)) {
         const reason = resolveFailureReasonFromDiagnostics(result.diagnostics)
         setAnalysisStatus('failed')
-        setAnalysisMessage(screenshotFailureUserMessage(reason))
+        setAnalysisMessage(screenshotApiErrorMessage(toScreenshotApiErrorCode(reason)))
         console.error('[mileage-log-card] extraction empty after ok response', {
           diagnostics: result.diagnostics,
           reason,
@@ -571,7 +574,7 @@ export function MemberMileageLogCard({
       })
     } catch (error) {
       setAnalysisStatus('failed')
-      setAnalysisMessage(screenshotFailureUserMessage('unknown'))
+      setAnalysisMessage(screenshotApiErrorMessage('UNKNOWN_ERROR'))
       setFieldHints(EMPTY_FIELD_HINTS)
       console.error('[mileage-log-card] screenshot analysis threw', {
         error: error instanceof Error ? error.message : String(error),
