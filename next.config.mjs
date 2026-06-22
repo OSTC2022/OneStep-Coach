@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Tesseract·Sharp는 Node 네이티브 워커 사용 — 번들 시 worker 경로가 깨져 dev 서버가 죽을 수 있음
+  serverExternalPackages: ['tesseract.js', 'tesseract.js-core', 'sharp'],
   typescript: {
     ignoreBuildErrors: true,
   },
