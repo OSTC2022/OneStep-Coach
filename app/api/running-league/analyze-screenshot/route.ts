@@ -1,12 +1,44 @@
 import { createClient } from '@/lib/supabase/server'
 import { analyzeRunningScreenshotBuffer } from '@/lib/running-league/analyze-running-screenshot'
 import { isOpenAiConfigured } from '@/lib/running-league/openai-config'
+import {
+  checkOpenAiEnv,
+  checkPublicSupabaseEnv,
+  getRuntimeDeploymentInfo,
+  logEnvCheckFailure,
+} from '@/lib/env/config'
 
 export const runtime = 'nodejs'
-export const maxDuration = 30
+export const maxDuration = 60
 
 export async function POST(request: Request) {
+  const deployment = getRuntimeDeploymentInfo()
+  const supabaseEnv = checkPublicSupabaseEnv()
+  const openaiEnv = checkOpenAiEnv()
+  logEnvCheckFailure('analyze-screenshot/supabase', supabaseEnv)
+  if (!openaiEnv.ok) {
+    logEnvCheckFailure('analyze-screenshot/openai', openaiEnv)
+  }
+
   try {
+    if (!supabaseEnv.ok) {
+      return Response.json(
+        {
+          ok: false,
+          error: '서버 Supabase 설정이 없습니다. 관리자에게 문의해주세요.',
+          diagnostics: {
+            openai_configured: openaiEnv.ok,
+            ai_status: 'skipped' as const,
+            ocr_status: 'skipped' as const,
+            field_count: 0,
+            runtime: deployment.vercel ? 'vercel' : 'local',
+            vercel_env: deployment.vercel_env,
+          },
+        },
+        { status: 503 },
+      )
+    }
+
     const supabase = await createClient()
     const {
       data: { user },
@@ -32,9 +64,9 @@ export async function POST(request: Request) {
       file_name: image.name,
       mime_type: image.type,
       file_size: image.size,
-      last_modified: image.lastModified,
       buffer_length: buffer.length,
       openai_configured: isOpenAiConfigured(),
+      deployment,
     })
 
     const result = await analyzeRunningScreenshotBuffer(buffer, image.type, {

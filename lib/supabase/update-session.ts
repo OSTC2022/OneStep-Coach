@@ -19,6 +19,7 @@ import {
   type AppRole,
 } from '@/lib/roles'
 import type { ProfileApprovalStatus } from '@/lib/types'
+import { getPublicSupabaseEnv, hasPublicSupabaseEnv } from '@/lib/supabase/env'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
 const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 3000
@@ -225,15 +226,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request })
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error(
-      '[proxy] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    )
+  if (!hasPublicSupabaseEnv()) {
+    console.error('[proxy] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY', {
+      vercel_env: process.env.VERCEL_ENV ?? null,
+    })
     return missingSupabaseEnvResponse()
   }
+
+  const { url: supabaseUrl, anonKey: supabaseAnonKey } = getPublicSupabaseEnv({ log: true })
 
   let supabaseResponse = NextResponse.next({
     request,

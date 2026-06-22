@@ -291,7 +291,14 @@ async function loadPriorFinishMemberIds(
 async function leagueClient() {
   try {
     return createServiceRoleClient()
-  } catch {
+  } catch (error) {
+    console.error(
+      '[running-league] SUPABASE_SERVICE_ROLE_KEY 없음 — 세션 클라이언트로 대체 (RLS로 저장 실패 가능)',
+      {
+        error: error instanceof Error ? error.message : String(error),
+        vercel_env: process.env.VERCEL_ENV ?? null,
+      },
+    )
     return createClient()
   }
 }
