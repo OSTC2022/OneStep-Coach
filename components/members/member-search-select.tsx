@@ -27,7 +27,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { filterAndSortKoreanNames } from '@/lib/korean-search'
+import { filterSortMembersForPicker, sortMembersByPreferredName } from '@/lib/korean-search'
 import { formatMemberCalendarMeta } from '@/lib/member-utils'
 
 export interface MemberSearchOption {
@@ -71,6 +71,8 @@ interface MemberSearchSelectProps {
   maxRecentSearches?: number
   /** 서버 검색 (캘린더 등 전체 회원 미로드 시) */
   onSearchMembers?: (query: string) => Promise<MemberSearchOption[]>
+  /** 수업·캘린더 라벨과 동일한 이름 회원 우선 */
+  preferredName?: string
   /** 제안 목록을 입력 위·아래 중 어디에 띄울지 */
   suggestionsPlacement?: 'below' | 'above'
 }
@@ -90,6 +92,7 @@ export function MemberSearchSelect({
   enableRecentSearches = false,
   maxRecentSearches = 10,
   onSearchMembers,
+  preferredName,
   suggestionsPlacement = 'below',
 }: MemberSearchSelectProps) {
   const [open, setOpen] = useState(false)
@@ -106,6 +109,11 @@ export function MemberSearchSelect({
 
   const selected = members.find((m) => m.id === value)
   const query = inputValue ?? internalQuery
+
+  const sortedMembers = useMemo(
+    () => sortMembersByPreferredName(members, preferredName),
+    [members, preferredName],
+  )
 
   function setQuery(next: string) {
     if (onInputValueChange) {
@@ -156,14 +164,19 @@ export function MemberSearchSelect({
   const localFiltered = useMemo(() => {
     const q = query.trim()
     if (!q) return []
-    return filterAndSortKoreanNames(members, q, 15)
-  }, [members, query])
+    return filterSortMembersForPicker(sortedMembers, q, {
+      preferredName,
+      limit: 15,
+    })
+  }, [sortedMembers, query, preferredName])
 
   const filtered = useMemo(() => {
     const q = query.trim()
-    if (!q) return members.slice(0, 12)
+    if (!q) {
+      return filterSortMembersForPicker(sortedMembers, '', { preferredName, limit: 12 })
+    }
     if (!onSearchMembers) {
-      return filterAndSortKoreanNames(members, q, 15)
+      return filterSortMembersForPicker(sortedMembers, q, { preferredName, limit: 15 })
     }
 
     const merged = new Map<string, MemberSearchOption>()
@@ -175,8 +188,8 @@ export function MemberSearchSelect({
         merged.set(member.id, member)
       }
     }
-    return Array.from(merged.values()).slice(0, 15)
-  }, [members, query, onSearchMembers, localFiltered, remoteMatches])
+    return sortMembersByPreferredName(Array.from(merged.values()), preferredName).slice(0, 15)
+  }, [sortedMembers, query, onSearchMembers, localFiltered, remoteMatches, preferredName])
 
   const hasLocalMatches = localFiltered.length > 0
   const showSearchingHint =
@@ -193,9 +206,9 @@ export function MemberSearchSelect({
     const stored = hasMemberRecentSearches()
     setHasStoredRecent(stored)
     if (stored) {
-      setRecentRows(buildRecentSearchRows(members, maxRecentSearches))
+      setRecentRows(buildRecentSearchRows(sortedMembers, maxRecentSearches))
     } else {
-      setRecentRows(buildDefaultMemberPickerRows(members, maxRecentSearches))
+      setRecentRows(buildDefaultMemberPickerRows(sortedMembers, maxRecentSearches))
     }
   }
 
@@ -267,12 +280,21 @@ export function MemberSearchSelect({
     if (!enableRecentSearches || query.trim()) return
     const stored = hasMemberRecentSearches()
     const rows = stored
-      ? buildRecentSearchRows(members, maxRecentSearches)
-      : buildDefaultMemberPickerRows(members, maxRecentSearches)
+      ? buildRecentSearchRows(sortedMembers, maxRecentSearches)
+      : buildDefaultMemberPickerRows(sortedMembers, maxRecentSearches)
     setHasStoredRecent(stored)
     setRecentRows(rows)
     setSuggestOpen(rows.length > 0)
   }
+
+  useEffect(() => {
+    if (!inlineSearch || !preferredName?.trim()) return
+    const q = query.trim()
+    if (q && q === preferredName.trim()) {
+      setSearchOpen(true)
+      setSuggestOpen(false)
+    }
+  }, [inlineSearch, preferredName, query])
 
   function scheduleClosePickers() {
     clearBlurTimeout()
@@ -458,7 +480,10 @@ export function MemberSearchSelect({
           <CommandList>
             <CommandEmpty>회원을 찾을 수 없습니다.</CommandEmpty>
             <CommandGroup>
-              {(query.trim() ? filtered : members.slice(0, 12)).map((m) => (
+              {(query.trim()
+                ? filtered
+                : filterSortMembersForPicker(sortedMembers, '', { preferredName, limit: 12 })
+              ).map((m) => (
                 <CommandItem
                   key={m.id}
                   value={m.name}

@@ -662,6 +662,8 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                       {formatPackageRemainingDisplay(
                         formData.remaining_sessions,
                         formData.note,
+                        formData.expires_at || null,
+                        formData.paid_at || null,
                       )}
                     </span>
                   </>

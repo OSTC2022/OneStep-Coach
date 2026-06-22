@@ -379,6 +379,7 @@ export function MemberDetail({
                       note={activePackage.note}
                       isActive={activePackage.is_active}
                       expiresAt={activePackage.expires_at}
+                      paidAt={activePackage.paid_at}
                     />
                   </span>
                 </p>
@@ -513,7 +514,12 @@ export function MemberDetail({
                         ),
                       )}
                     >
-                      {formatPackageRemainingDisplay(pkg.remaining_sessions, pkg.note)} /{' '}
+                      {formatPackageRemainingDisplay(
+                        pkg.remaining_sessions,
+                        pkg.note,
+                        pkg.expires_at,
+                        pkg.paid_at,
+                      )}{' '}
                       {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
                       {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
                         <span className="ml-1 text-[10px] text-destructive">초과</span>

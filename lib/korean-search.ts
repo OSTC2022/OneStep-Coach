@@ -126,3 +126,55 @@ export function matchMemberSearch(
 ): boolean {
   return scoreMemberSearch(member, query) < Number.POSITIVE_INFINITY
 }
+
+function preferredNameTier(name: string, preferredName: string): number {
+  if (name === preferredName) return 0
+  if (name.startsWith(preferredName)) return 1
+  return 2
+}
+
+export function sortMembersByPreferredName<T extends { name: string }>(
+  members: T[],
+  preferredName?: string | null,
+): T[] {
+  const preferred = preferredName?.trim()
+  if (!preferred) return members
+  return [...members].sort((a, b) => {
+    const tierDiff =
+      preferredNameTier(a.name, preferred) - preferredNameTier(b.name, preferred)
+    if (tierDiff !== 0) return tierDiff
+    return a.name.localeCompare(b.name, 'ko')
+  })
+}
+
+/** 회원 검색·선택 — 동일 이름 우선 정렬 */
+export function filterSortMembersForPicker<T extends { name: string; sport?: string | null }>(
+  members: T[],
+  query: string,
+  options?: { preferredName?: string | null; limit?: number },
+): T[] {
+  const q = query.trim()
+  const limit = options?.limit ?? 15
+  const preferred = options?.preferredName?.trim()
+
+  if (!q) {
+    return sortMembersByPreferredName(members, preferred).slice(0, limit)
+  }
+
+  return members
+    .map((item) => {
+      let score = scoreMemberSearch(item, q)
+      if (preferred) {
+        if (item.name === preferred) score -= 10_000
+        else if (item.name.startsWith(preferred)) score -= 5_000
+      }
+      return { item, score }
+    })
+    .filter(({ score }) => score < Number.POSITIVE_INFINITY)
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score
+      return a.item.name.localeCompare(b.item.name, 'ko')
+    })
+    .slice(0, limit)
+    .map(({ item }) => item)
+}

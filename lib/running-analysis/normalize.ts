@@ -29,8 +29,8 @@ export function normalizeTimeToken(value: string): string {
 
 export function mapOpenAiJsonToRaw(json: Record<string, unknown>): RunningAnalysisRaw {
   const distance =
-    json.distanceKm ??
     json.distance_km ??
+    json.distanceKm ??
     json.distance ??
     json.mileage_km ??
     null
@@ -42,27 +42,55 @@ export function mapOpenAiJsonToRaw(json: Record<string, unknown>): RunningAnalys
     distance_km = parseKmToken(String(distance))
   }
 
+  const durationSource =
+    json.duration ?? json.total_time ?? json.totalTime ?? json.elapsed_time ?? null
+
   const pace =
-    json.averagePace ?? json.average_pace ?? json.pace ?? json.avg_pace ?? null
+    json.pace ??
+    json.averagePace ??
+    json.average_pace ??
+    json.avg_pace ??
+    null
 
   const date = json.date ?? json.activity_date ?? json.activityDate ?? null
   const time = json.activity_time ?? json.activityTime ?? json.time ?? null
 
+  const heartRateSource =
+    json.avg_heart_rate ??
+    json.avgHeartRate ??
+    json.heart_rate ??
+    json.heartRate ??
+    null
+
+  let heart_rate: number | null = null
+  if (heartRateSource != null) {
+    const parsed = Number(heartRateSource)
+    heart_rate = Number.isFinite(parsed) ? parsed : null
+  }
+
+  let calories: number | null = null
+  const caloriesSource = json.calories ?? json.calories_kcal ?? json.caloriesKcal ?? null
+  if (caloriesSource != null) {
+    const parsed = Number(caloriesSource)
+    calories = Number.isFinite(parsed) ? parsed : null
+  }
+
   return {
     distance_km,
-    duration: json.duration != null ? normalizeTimeToken(String(json.duration)) : null,
+    duration:
+      durationSource != null ? normalizeTimeToken(String(durationSource)) : null,
     pace: pace != null ? normalizeTimeToken(String(pace).replace(/\s*\/\s*km/gi, '')) : null,
-    heart_rate:
-      json.heart_rate != null
-        ? Number(json.heart_rate)
-        : json.heartRate != null
-          ? Number(json.heartRate)
-          : null,
-    calories: json.calories != null ? Number(json.calories) : null,
+    heart_rate,
+    calories,
     activity_date: date != null ? String(date).slice(0, 10) : null,
     activity_time: time != null ? String(time).slice(0, 5) : null,
     activity_type: json.activity_type != null ? String(json.activity_type) : 'running',
-    source_app: json.source_app != null ? String(json.source_app) : json.sourceApp != null ? String(json.sourceApp) : null,
+    source_app:
+      json.source_app != null
+        ? String(json.source_app)
+        : json.sourceApp != null
+          ? String(json.sourceApp)
+          : null,
     confidence: json.confidence != null ? Number(json.confidence) : 0.85,
     needs_review: json.needsReview === true || json.needs_review === true,
   }

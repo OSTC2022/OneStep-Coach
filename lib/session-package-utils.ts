@@ -229,9 +229,10 @@ export function formatGroupedPackageUsageDisplay(
   latestPurchaseTotalSessions: number,
   cumulativeTotalSessions: number,
   note?: string | null,
+  expiresAt?: string | null,
 ): string {
   if (isMonthlyPlanPackage(note)) {
-    return formatPackageRemainingDisplay(remainingSessions, note)
+    return formatPackageRemainingDisplay(remainingSessions, note, expiresAt)
   }
   return `${remainingSessions}회 / ${latestPurchaseTotalSessions}회 / ${cumulativeTotalSessions}회`
 }
@@ -253,11 +254,28 @@ export function formatPackageSessionsDisplay(
 export function formatPackageRemainingDisplay(
   remainingSessions: number,
   note?: string | null,
+  expiresAt?: string | null,
+  paidAt?: string | null,
 ): string {
   if (isMonthlyPlanPackage(note)) {
-    return UNLIMITED_SESSIONS_DISPLAY
+    return formatMonthlyPlanRemainingPeriod(
+      resolveMonthlyPackageExpiryDate(note, expiresAt, paidAt),
+    )
   }
   return `${remainingSessions}회`
+}
+
+function resolveMonthlyPackageExpiryDate(
+  note?: string | null,
+  expiresAt?: string | null,
+  paidAt?: string | null,
+): string | null {
+  if (expiresAt) return expiresAt.split('T')[0]
+  if (!paidAt) return null
+  const months = parseMonthlyPlanMonthsFromNote(note)
+  if (months != null) return calculateMonthlyPlanExpiryDate(paidAt, months)
+  if (isMonthlyRecurringPlan(note)) return calculateMonthlyRecurringExpiryDate(paidAt)
+  return null
 }
 
 /** 잔여 0 미만일 때 초과 횟수 (예: -2 → 2) */

@@ -13,6 +13,7 @@ type GroupedPackageUsageDisplayProps = {
   note?: string | null
   isActive?: boolean
   expiresAt?: string | null
+  paidAt?: string | null
   className?: string
 }
 
@@ -23,6 +24,7 @@ export function GroupedPackageUsageDisplay({
   note,
   isActive = true,
   expiresAt,
+  paidAt,
   className,
 }: GroupedPackageUsageDisplayProps) {
   const expired =
@@ -42,7 +44,7 @@ export function GroupedPackageUsageDisplay({
           className,
         )}
       >
-        {formatPackageRemainingDisplay(remainingSessions, note)}
+        {formatPackageRemainingDisplay(remainingSessions, note, expiresAt, paidAt)}
       </span>
     )
   }

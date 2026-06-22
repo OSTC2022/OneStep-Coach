@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { History, RotateCcw, Clock } from 'lucide-react'
+import { CheckCircle2, History, RotateCcw, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TimeInput24 } from '@/components/ui/time-input-24'
@@ -24,6 +24,10 @@ const PastLessonSignatureDialog = dynamic(
     })),
   { ssr: false },
 )
+
+export type SignaturePadSuccessSummary = {
+  remainingLabel?: string | null
+}
 
 interface SignaturePadDialogProps {
   open: boolean
@@ -49,7 +53,15 @@ interface SignaturePadDialogProps {
   /** 수업 종료 시 종료 시간 표시 (비관리자는 읽기 전용) */
   showEndTime?: boolean
   defaultEndTime?: string
-  onConfirm: (signatureData: string, endTime?: string) => void
+  onConfirm: (
+    signatureData: string,
+    endTime?: string,
+  ) =>
+    | void
+    | SignaturePadSuccessSummary
+    | Promise<void | SignaturePadSuccessSummary | null | false>
+    | null
+    | false
 }
 
 export function SignaturePadDialog({
@@ -75,6 +87,9 @@ export function SignaturePadDialog({
   const [signatureData, setSignatureData] = useState<string | null>(null)
   const [pastLessonOpen, setPastLessonOpen] = useState(false)
   const [endTime, setEndTime] = useState(defaultEndTime)
+  const [successSummary, setSuccessSummary] = useState<SignaturePadSuccessSummary | null>(
+    null,
+  )
 
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -110,6 +125,7 @@ export function SignaturePadDialog({
       setSignatureData(null)
       setIsDrawing(false)
       setPastLessonOpen(false)
+      setSuccessSummary(null)
       return
     }
 
@@ -186,10 +202,17 @@ export function SignaturePadDialog({
     initCanvas()
   }
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!signatureData) return
     if (showEndTime && !endTime.trim()) return
-    onConfirm(signatureData, showEndTime ? endTime : undefined)
+
+    const result = await onConfirm(signatureData, showEndTime ? endTime : undefined)
+    if (result === null || result === false) return
+    if (result && typeof result === 'object') {
+      setSuccessSummary(result)
+      return
+    }
+    onOpenChange(false)
   }
 
   return (
@@ -228,6 +251,21 @@ export function SignaturePadDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pb-2 sm:px-6">
+        {successSummary ? (
+          <div className="flex flex-col items-center gap-3 py-10 text-center sm:py-12">
+            <CheckCircle2 className="h-12 w-12 text-primary" aria-hidden />
+            <p className="text-2xl font-semibold tracking-tight text-foreground">감사합니다</p>
+            {successSummary.remainingLabel ? (
+              <p className="text-base font-medium text-primary tabular-nums">
+                {successSummary.remainingLabel}
+              </p>
+            ) : null}
+            <p className="max-w-xs text-sm text-muted-foreground">
+              수업이 종료되었습니다.
+            </p>
+          </div>
+        ) : (
+          <>
         {showEndTime ? (
           <div className="space-y-1.5">
             <Label htmlFor="lesson-end-time">종료 시간</Label>
@@ -251,7 +289,7 @@ export function SignaturePadDialog({
           </div>
         ) : null}
 
-        <div ref={containerRef} className="overflow-hidden rounded-lg border border-border">
+        <div ref={containerRef} className="relative overflow-hidden rounded-lg border border-border">
           <canvas
             ref={canvasRef}
             onMouseDown={startDrawing}
@@ -261,22 +299,45 @@ export function SignaturePadDialog({
             onTouchStart={startDrawing}
             onTouchMove={draw}
             onTouchEnd={stopDrawing}
-            className="block w-full touch-none cursor-crosshair"
+            className="relative z-0 block w-full touch-none cursor-crosshair"
           />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none text-4xl font-semibold tracking-[0.2em] text-white/10 sm:text-5xl"
+          >
+            서명
+          </span>
         </div>
 
         <Button type="button" variant="outline" onClick={clearSignature} className="w-full">
           <RotateCcw className="mr-2 h-4 w-4" />
           다시 서명
         </Button>
+          </>
+        )}
         </div>
 
         <DialogFooter
           className={cn(
             'shrink-0 border-t border-border px-4 py-3 sm:px-6',
-            showPastLessonFinder ? 'gap-2 sm:justify-between' : 'gap-2 sm:justify-end',
+            showPastLessonFinder && !successSummary
+              ? 'gap-2 sm:justify-between'
+              : 'gap-2 sm:justify-end',
           )}
         >
+          {successSummary ? (
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => {
+                setSuccessSummary(null)
+                onOpenChange(false)
+              }}
+            >
+              확인
+            </Button>
+          ) : (
+            <>
           {showPastLessonFinder ? (
             <Button
               type="button"
@@ -299,12 +360,14 @@ export function SignaturePadDialog({
             </Button>
             <Button
               type="button"
-              onClick={handleConfirm}
+              onClick={() => void handleConfirm()}
               disabled={isSubmitting || !signatureData || (showEndTime && !endTime.trim())}
             >
               {isSubmitting ? '저장 중...' : confirmLabel}
             </Button>
           </div>
+          </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,9 +1,10 @@
 import 'server-only'
 
 import {
-  countCoreExtractionFields,
+  countRequiredExtractionFields,
   enrichExtractionWithAnalysis,
 } from '@/lib/running-league/screenshot-analysis-status'
+import { hasMinimumScreenshotExtraction } from '@/lib/running-league/screenshot-analysis-ui'
 import { analyzeRunningScreenshotWithOpenAi } from '@/lib/running-analysis/openai'
 import {
   countExtractedFields,
@@ -26,11 +27,11 @@ import type { ScreenshotFailureReason } from '@/lib/running-league/screenshot-an
 
 function resolveDiagnosticsFailureReason(
   diagnostics: RunningScreenshotAnalysisDiagnostics,
-  coreFieldCount: number,
+  requiredFieldCount: number,
   openaiConfigured: boolean,
   isVercel: boolean,
 ): ScreenshotFailureReason | null {
-  if (coreFieldCount > 0) return null
+  if (requiredFieldCount >= 2) return null
 
   if (!openaiConfigured && isVercel) {
     return 'missing_openai_key'
@@ -87,7 +88,7 @@ function resolveExtraction(aiResult: RunningScreenshotExtraction, ocrResult: Run
 }
 
 function isAiResultUsable(result: RunningScreenshotExtraction | null): result is RunningScreenshotExtraction {
-  return result != null && countCoreExtractionFields(result) >= 1
+  return result != null && hasMinimumScreenshotExtraction(result)
 }
 
 export async function analyzeRunningScreenshotBuffer(
@@ -180,7 +181,7 @@ export async function analyzeRunningScreenshotBuffer(
     const shouldRunOcr =
       runtime.ocrSupported &&
       (!hasKey ||
-        countCoreExtractionFields(aiResult) < 2 ||
+        !hasMinimumScreenshotExtraction(aiResult) ||
         countExtractedFields(aiResult) < 3)
 
     if (shouldRunOcr) {
@@ -207,7 +208,7 @@ export async function analyzeRunningScreenshotBuffer(
 
     const extraction = enrichExtractionWithAnalysis(resolveExtraction(aiResult, ocrResult))
     diagnostics.field_count = countExtractedFields(extraction)
-    const coreFieldCount = countCoreExtractionFields(extraction)
+    const coreFieldCount = countRequiredExtractionFields(extraction)
     diagnostics.failure_reason = resolveDiagnosticsFailureReason(
       diagnostics,
       coreFieldCount,
@@ -238,7 +239,7 @@ export async function analyzeRunningScreenshotBuffer(
         ai_status: diagnostics.ai_status,
         ocr_status: diagnostics.ocr_status,
         field_count: diagnostics.field_count,
-        core_field_count: countCoreExtractionFields(extraction),
+        core_field_count: countRequiredExtractionFields(extraction),
         analysis_status: extraction.analysis_status,
         analysis_reason: extraction.analysis_reason,
         distance_km: extraction.distance_km,

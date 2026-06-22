@@ -20,9 +20,9 @@ const USER_MESSAGES: Record<ScreenshotFailureReason, string> = {
   ai_request_failed: 'AI 분석 서버 응답이 실패했습니다.',
   ai_timeout: 'AI 분석 시간이 초과되었습니다. 다시 시도하거나 수동 입력해주세요.',
   parse_failed: '분석 결과를 입력값으로 변환하지 못했습니다.',
-  extraction_empty: 'AI 분석 실패, 수동 입력 필요',
+  extraction_empty: '스크린샷 자동 인식에 실패했어요. 아래 기록을 직접 입력해 주세요.',
   network_error: '분석 서버에 연결하지 못했습니다.',
-  unknown: 'AI 분석 실패, 수동 입력 필요',
+  unknown: '스크린샷 자동 인식에 실패했어요. 아래 기록을 직접 입력해 주세요.',
 }
 
 export function screenshotFailureUserMessage(

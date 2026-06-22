@@ -30,6 +30,7 @@ export type RunningScreenshotExtraction = {
   analysis_status?: 'success' | 'partial' | 'failed'
   analysis_reason?: string
   analysis_messages?: string[]
+  analysis_success?: boolean
   date_needs_review?: boolean
   raw_text?: string
   raw_json?: Record<string, unknown>

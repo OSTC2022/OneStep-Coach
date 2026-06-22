@@ -715,6 +715,7 @@ export function SessionsList({
                         note={pkg.note}
                         isActive={pkg.is_active}
                         expiresAt={pkg.expires_at}
+                        paidAt={pkg.paid_at}
                       />
                       {isSessionPackageOverage(cumulativeRemainingSessions, pkg.note) ? (
                         <Badge variant="destructive" className="text-[10px]">

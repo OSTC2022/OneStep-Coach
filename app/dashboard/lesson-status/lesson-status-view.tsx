@@ -83,7 +83,9 @@ import {
   toDateKey,
   type CalendarView,
 } from '@/lib/calendar-utils'
+import { formatLessonCompletionRemainingLabel } from '@/lib/lesson-completion-summary'
 import { formatSessionOverageAlert } from '@/lib/session-package-utils'
+import type { SignaturePadSuccessSummary } from '@/components/ui/signature-pad-dialog'
 import { cn } from '@/lib/utils'
 import {
   AUTO_INSTRUCTOR_BORDER_COLOR,
@@ -271,6 +273,9 @@ const AthleteTile = memo(function AthleteTile({
   const [isCompleting, setIsCompleting] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
   const [isSavingEndTime, setIsSavingEndTime] = useState(false)
+  const [completionRemainingLabel, setCompletionRemainingLabel] = useState<string | null>(
+    null,
+  )
 
   const display = getLessonCalendarDisplayParts(lesson)
   const label = display.meta ? `${display.name}(${display.meta})` : display.name
@@ -322,11 +327,14 @@ const AthleteTile = memo(function AthleteTile({
           : '대기'
   const showActions = !compact
 
-  async function handleCompleteLesson(signatureData: string, endTimeInput?: string) {
+  async function handleCompleteLesson(
+    signatureData: string,
+    endTimeInput?: string,
+  ): Promise<SignaturePadSuccessSummary | null> {
     const endTime = endTimeInput?.trim()
     if (!endTime) {
       toast.error('종료 시간을 확인할 수 없습니다.')
-      return
+      return null
     }
 
     setIsCompleting(true)
@@ -335,20 +343,29 @@ const AthleteTile = memo(function AthleteTile({
 
     if (result.error) {
       toast.error('수업 종료 실패', { description: result.error })
-      return
+      return null
     }
 
     if (result.data) {
+      const remainingLabel = formatLessonCompletionRemainingLabel(result.data)
+      setCompletionRemainingLabel(remainingLabel)
+
       onLessonCompleted(lesson.id, {
         id: result.data.id,
         end_time: result.data.end_time,
         session_deducted: result.data.session_deducted,
         attendance_status: result.data.attendance_status,
         signature_id: result.data.signature_id,
+        ...(result.data.member_remaining_sessions != null && lesson.member
+          ? {
+              member: {
+                ...lesson.member,
+                remaining_sessions: result.data.member_remaining_sessions,
+              },
+            }
+          : {}),
       })
-      toast.success(`${label} 수업 종료`, {
-        description: `종료 ${formatTime(result.data.end_time)} · 보호자 서명 저장 · 세션 1회 차감`,
-      })
+
       if (result.data.session_overage && result.data.session_overage > 0) {
         toast.warning(
           formatSessionOverageAlert(result.data.session_overage, {
@@ -357,9 +374,11 @@ const AthleteTile = memo(function AthleteTile({
           { duration: 8000 },
         )
       }
+
+      return { remainingLabel }
     }
 
-    setSignatureOpen(false)
+    return null
   }
 
   async function handleCancelCompletion() {
@@ -379,6 +398,7 @@ const AthleteTile = memo(function AthleteTile({
         attendance_status: result.data.attendance_status,
         signature_id: null,
       })
+      setCompletionRemainingLabel(null)
       toast.success(`${label} 종료 취소`, {
         description: '세션 차감이 복구되었습니다. 다시 종료·서명할 수 있습니다.',
       })
@@ -630,6 +650,18 @@ const AthleteTile = memo(function AthleteTile({
             />
           ) : null}
           {completed ? (
+            <>
+            {completionRemainingLabel ||
+            (lesson.member?.remaining_sessions != null &&
+              lesson.member.remaining_sessions >= 0) ? (
+              <div className="mt-1 rounded border border-primary/25 bg-primary/5 px-1 py-1.5 text-center">
+                <p className="text-[9px] font-semibold text-primary">감사합니다</p>
+                <p className="text-[9px] tabular-nums text-muted-foreground">
+                  {completionRemainingLabel ??
+                    `남은 수업 ${lesson.member!.remaining_sessions}회`}
+                </p>
+              </div>
+            ) : null}
             <div className="mt-1 flex gap-0.5">
               <button
                 type="button"
@@ -719,6 +751,7 @@ const AthleteTile = memo(function AthleteTile({
                 </>
               ) : null}
             </div>
+            </>
           ) : (
             <button
               type="button"
@@ -823,7 +856,7 @@ const AthleteTile = memo(function AthleteTile({
         pastLessonMemberId={lesson.member_id ?? lesson.member?.id}
         onPastLessonUpdated={onLessonCompleted}
         onConfirm={(signatureData, endTime) =>
-          void handleCompleteLesson(signatureData, endTime)
+          handleCompleteLesson(signatureData, endTime)
         }
       />
     )}

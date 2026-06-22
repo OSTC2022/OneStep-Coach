@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { linkLessonToMember } from '@/lib/actions/link-lesson-member'
@@ -10,6 +10,8 @@ import {
   type MemberPickerOption,
 } from '@/lib/actions/members'
 import { getLessonCalendarDisplayParts } from '@/lib/calendar-utils'
+import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
+import { sortMembersByPreferredName } from '@/lib/korean-search'
 import { MemberSearchSelect } from '@/components/members/member-search-select'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,24 +39,37 @@ export function LessonMemberLinkDialog({
 }: LessonMemberLinkDialogProps) {
   const [memberId, setMemberId] = useState('')
   const [memberName, setMemberName] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [pickerMembers, setPickerMembers] = useState<MemberPickerOption[]>([])
   const [saving, setSaving] = useState(false)
+
+  const preferredName = useMemo(() => {
+    if (!lesson) return ''
+    const display = getLessonCalendarDisplayParts(lesson)
+    const label = display.meta ? `${display.name}(${display.meta})` : display.name
+    return extractMemberNameFromCalendarLabel(label) || display.name
+  }, [lesson])
 
   useEffect(() => {
     if (!open) {
       setMemberId('')
       setMemberName('')
+      setSearchQuery('')
       return
     }
 
+    setSearchQuery(preferredName)
+
     let cancelled = false
     void listMembersForPicker(100).then((rows) => {
-      if (!cancelled) setPickerMembers(rows)
+      if (!cancelled) {
+        setPickerMembers(sortMembersByPreferredName(rows, preferredName))
+      }
     })
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, preferredName])
 
   const searchMembers = useCallback(
     (query: string) => searchMembersForPickerCached(query),
@@ -143,6 +158,9 @@ export function LessonMemberLinkDialog({
             placeholder="회원 이름 검색"
             inlineSearch
             enableRecentSearches
+            preferredName={preferredName}
+            inputValue={searchQuery}
+            onInputValueChange={setSearchQuery}
             onSearchMembers={searchMembers}
           />
         </div>

@@ -1,31 +1,38 @@
 import 'server-only'
 
 import { getOpenAiApiKey, getOpenAiVisionModel } from '@/lib/running-league/openai-config'
-import { countCoreExtractionFields } from '@/lib/running-league/screenshot-analysis-status'
+import { hasMinimumScreenshotExtraction } from '@/lib/running-league/screenshot-analysis-ui'
 import { mapOpenAiJsonToRaw } from '@/lib/running-analysis/normalize'
 import { buildExtractionFromRaw } from '@/lib/running-league/screenshot-extraction'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
 
 const EXTRACTION_PROMPT = `You extract running workout stats from mobile app screenshots (Samsung Health, Garmin, Strava, Nike, Apple Fitness, etc).
-Return ONLY valid JSON in this exact shape:
+Return ONLY valid JSON. No markdown. No explanation. Use this exact shape:
 {
-  "distanceKm": 13.5,
+  "success": true,
+  "distance_km": 13.5,
   "duration": "1:00:27",
-  "averagePace": "4:29",
-  "date": "2026-06-20",
+  "pace": "4:29",
+  "avg_heart_rate": 154,
   "calories": 714,
+  "date": "2026-06-22",
+  "activity_time": "11:05",
   "confidence": 0.9,
-  "needsReview": false
+  "missing_fields": []
 }
 
 Rules:
-- distanceKm is total run distance in kilometers (number, e.g. 13.5 for "13.50 km")
+- success is true when distance_km and duration are readable
+- distance_km is total run distance in kilometers (number)
 - duration is total elapsed time (h:mm:ss or mm:ss)
-- averagePace is min/km without "/km" suffix (e.g. "4:29")
-- date is YYYY-MM-DD
+- pace is min/km without "/km" suffix (e.g. "4:29") — optional
+- date is YYYY-MM-DD when possible
+- activity_time is HH:mm 24h — optional
+- avg_heart_rate and calories are optional numbers
+- missing_fields lists field names you could not read
 - Read Korean labels: 거리, km, 페이스, 시간, 칼로리, bpm
-- If unsure about a field, use null
-- Do not guess`
+- If unsure about an optional field, use null and add its name to missing_fields
+- Do not guess distance or duration`
 
 type OpenAiVisionDetail = 'high' | 'auto' | 'low'
 
@@ -50,7 +57,7 @@ async function callOpenAiVision(
     body: JSON.stringify({
       model,
       temperature: 0,
-      max_tokens: 400,
+      max_tokens: 500,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -64,8 +71,11 @@ async function callOpenAiVision(
     }),
   })
 
+  console.log('ai_status', response.status)
+
   if (!response.ok) {
     const detailText = await response.text()
+    console.log('ai_raw_text_preview', detailText.slice(0, 300))
     console.error('[running-analysis/openai] API error', {
       OPENAI_API_KEY_exists: true,
       status: response.status,
@@ -80,10 +90,13 @@ async function callOpenAiVision(
   }
 
   const content = payload.choices?.[0]?.message?.content
+  console.log('ai_raw_text_preview', content?.slice(0, 300) ?? null)
+
   if (!content) return null
 
   try {
     const json = JSON.parse(content) as Record<string, unknown>
+    console.log('parsed_result', json)
     const raw = mapOpenAiJsonToRaw(json)
     return buildExtractionFromRaw(raw, 'ai', { raw_json: json })
   } catch (error) {
@@ -92,12 +105,14 @@ async function callOpenAiVision(
       error: error instanceof Error ? error.message : String(error),
       content_preview: content.slice(0, 200),
     })
+    console.error('ai_error_message', error instanceof Error ? error.message : String(error))
+    console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
     throw new Error('OpenAI JSON parse failed')
   }
 }
 
 function isUsableAiExtraction(result: RunningScreenshotExtraction | null): result is RunningScreenshotExtraction {
-  return result != null && countCoreExtractionFields(result) >= 1
+  return result != null && hasMinimumScreenshotExtraction(result)
 }
 
 export async function analyzeRunningScreenshotWithOpenAi(
@@ -123,6 +138,7 @@ export async function analyzeRunningScreenshotWithOpenAi(
     mime_type: mimeType || 'image/jpeg',
     detail,
   })
+  console.log('ai_processing_start', Date.now())
 
   try {
     const result = await callOpenAiVision(buffer, mimeType, detail)
@@ -134,7 +150,7 @@ export async function analyzeRunningScreenshotWithOpenAi(
         duration: result.duration,
         pace: result.pace,
         activity_date: result.activity_date,
-        core_fields: countCoreExtractionFields(result),
+        analysis_success: result.analysis_success,
       })
       return result
     }
@@ -144,6 +160,8 @@ export async function analyzeRunningScreenshotWithOpenAi(
       detail,
       error: error instanceof Error ? error.message : String(error),
     })
+    console.error('ai_error_message', error instanceof Error ? error.message : String(error))
+    console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
   }
 
   if (options?.retryWithLowDetail && detail !== 'low') {
@@ -155,6 +173,8 @@ export async function analyzeRunningScreenshotWithOpenAi(
       console.error('[running-analysis/openai] retry failed', {
         error: error instanceof Error ? error.message : String(error),
       })
+      console.error('ai_error_message', error instanceof Error ? error.message : String(error))
+      console.error('ai_error_stack', error instanceof Error ? error.stack : 'no_stack')
     }
   }
 

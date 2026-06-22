@@ -13,7 +13,10 @@ import {
 } from '@/lib/actions/running-league'
 import { analyzeRunningScreenshotFile } from '@/lib/running-league/analyze-running-screenshot-client'
 import { formatDistanceKmInput } from '@/lib/running-analysis/normalize'
-import { countCoreExtractedFields } from '@/lib/running-league/screenshot-extraction'
+import {
+  hasMinimumScreenshotExtraction,
+  resolveScreenshotAnalysisUi,
+} from '@/lib/running-league/screenshot-analysis-ui'
 import {
   resolveFailureReasonFromDiagnostics,
   screenshotFailureUserMessage,
@@ -173,26 +176,10 @@ function fieldLabelClass(hint: FieldHint) {
 function resolveAnalysisUi(
   extraction: RunningScreenshotExtraction,
 ): { status: AnalysisStatus; message: string } {
-  const coreCount = countCoreExtractedFields(extraction)
-  const messages = extraction.analysis_messages ?? []
-
-  if (coreCount >= 2) {
-    return {
-      status: extraction.analysis_status === 'success' ? 'success' : 'partial',
-      message: messages.length > 0 ? messages.join(' · ') : '주요 기록 인식 완료',
-    }
-  }
-
-  if (coreCount === 1) {
-    return {
-      status: 'partial',
-      message: messages.length > 0 ? messages.join(' · ') : '일부 항목 확인 필요',
-    }
-  }
-
+  const ui = resolveScreenshotAnalysisUi(extraction)
   return {
-    status: 'failed',
-    message: screenshotFailureUserMessage('extraction_empty'),
+    status: ui.status,
+    message: ui.message,
   }
 }
 
@@ -529,6 +516,7 @@ export function MemberMileageLogCard({
     setEditingLogId(null)
     setAnalysisStatus('analyzing')
     setAnalysisMessage(null)
+    setFieldHints(EMPTY_FIELD_HINTS)
 
     try {
       const result = await analyzeRunningScreenshotFile(file)
@@ -536,13 +524,11 @@ export function MemberMileageLogCard({
         setAnalysisStatus('failed')
         setAnalysisMessage(result.error)
         setFieldHints(EMPTY_FIELD_HINTS)
-        if (process.env.NODE_ENV === 'development') {
-          console.error('[mileage-log-card] screenshot analysis failed', {
-            error: result.error,
-            error_code: result.error_code,
-            diagnostics: result.diagnostics,
-          })
-        }
+        console.error('[mileage-log-card] screenshot analysis failed', {
+          error: result.error,
+          error_code: result.error_code,
+          diagnostics: result.diagnostics,
+        })
         return
       }
 
@@ -555,17 +541,15 @@ export function MemberMileageLogCard({
         }),
       )
 
-      const coreCount = countCoreExtractedFields(extraction)
-      if (coreCount === 0) {
+      if (!hasMinimumScreenshotExtraction(extraction)) {
         const reason = resolveFailureReasonFromDiagnostics(result.diagnostics)
         setAnalysisStatus('failed')
         setAnalysisMessage(screenshotFailureUserMessage(reason))
-        if (process.env.NODE_ENV === 'development') {
-          console.error('[mileage-log-card] extraction empty after ok response', {
-            diagnostics: result.diagnostics,
-            reason,
-          })
-        }
+        console.error('[mileage-log-card] extraction empty after ok response', {
+          diagnostics: result.diagnostics,
+          reason,
+          extraction,
+        })
         return
       }
 
@@ -573,29 +557,25 @@ export function MemberMileageLogCard({
       setAnalysisStatus(ui.status)
       setAnalysisMessage(ui.message)
 
-      if (process.env.NODE_ENV === 'development') {
-        console.info('[mileage-log-card] screenshot analysis applied to form', {
-          distanceKm: extraction.distance_km,
-          duration: extraction.duration,
-          pace: extraction.pace,
-          heartRate: extraction.heart_rate,
-          calories: extraction.calories,
-          date: extraction.activity_date,
-          startTime: extraction.activity_time,
-          status: extraction.analysis_status,
-          reason: extraction.analysis_reason,
-          messages: extraction.analysis_messages,
-        })
-      }
+      console.info('[mileage-log-card] screenshot analysis applied to form', {
+        distanceKm: extraction.distance_km,
+        duration: extraction.duration,
+        pace: extraction.pace,
+        heartRate: extraction.heart_rate,
+        calories: extraction.calories,
+        date: extraction.activity_date,
+        startTime: extraction.activity_time,
+        status: ui.status,
+        message: ui.message,
+        analysis_success: extraction.analysis_success,
+      })
     } catch (error) {
       setAnalysisStatus('failed')
       setAnalysisMessage(screenshotFailureUserMessage('unknown'))
       setFieldHints(EMPTY_FIELD_HINTS)
-      if (process.env.NODE_ENV === 'development') {
-        console.error('[mileage-log-card] screenshot analysis threw', {
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
+      console.error('[mileage-log-card] screenshot analysis threw', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 

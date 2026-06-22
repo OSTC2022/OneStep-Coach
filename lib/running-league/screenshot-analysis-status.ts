@@ -1,14 +1,24 @@
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
+import {
+  hasFullScreenshotExtraction,
+  hasMinimumScreenshotExtraction,
+  SCREENSHOT_ANALYSIS_MESSAGES,
+} from '@/lib/running-league/screenshot-analysis-ui'
 
 export type ScreenshotAnalysisStatus = 'success' | 'partial' | 'failed'
 
-export const CORE_EXTRACTION_FIELDS = ['distance_km', 'duration', 'pace'] as const
+/** 필수: 거리, 총 시간, 날짜 */
+export const REQUIRED_EXTRACTION_FIELDS = ['distance_km', 'duration', 'activity_date'] as const
+/** 선택: 페이스, 심박, 칼로리, 운동 시각 */
 export const OPTIONAL_EXTRACTION_FIELDS = [
+  'pace',
   'heart_rate',
   'calories',
-  'activity_date',
   'activity_time',
 ] as const
+
+/** @deprecated pace는 선택값 — 하위 호환용 */
+export const CORE_EXTRACTION_FIELDS = ['distance_km', 'duration', 'pace'] as const
 
 export type ScreenshotAnalysisClassification = {
   status: ScreenshotAnalysisStatus
@@ -35,6 +45,17 @@ export function countCoreExtractionFields(
   ).length
 }
 
+export function countRequiredExtractionFields(
+  extraction: Pick<
+    RunningScreenshotExtraction,
+    'distance_km' | 'duration' | 'activity_date'
+  >,
+): number {
+  return [extraction.distance_km, extraction.duration, extraction.activity_date].filter(
+    (value) => value != null && value !== '',
+  ).length
+}
+
 export function applyDateDefaultIfMissing(
   extraction: RunningScreenshotExtraction,
 ): RunningScreenshotExtraction {
@@ -55,30 +76,32 @@ export function applyDateDefaultIfMissing(
 export function classifyScreenshotExtraction(
   extraction: RunningScreenshotExtraction,
 ): ScreenshotAnalysisClassification {
-  const core_field_count = countCoreExtractionFields(extraction)
+  const core_field_count = countRequiredExtractionFields(extraction)
 
-  const missing_core_fields = CORE_EXTRACTION_FIELDS.filter((field) => {
+  const missing_core_fields = REQUIRED_EXTRACTION_FIELDS.filter((field) => {
     if (field === 'distance_km') return extraction.distance_km == null
     if (field === 'duration') return !extraction.duration
-    if (field === 'pace') return !extraction.pace
+    if (field === 'activity_date') {
+      return !extraction.activity_date || extraction.date_needs_review === true
+    }
     return false
   })
 
   const missing_optional_fields = OPTIONAL_EXTRACTION_FIELDS.filter((field) => {
+    if (field === 'pace') return !extraction.pace
     if (field === 'heart_rate') return extraction.heart_rate == null
     if (field === 'calories') return extraction.calories == null
-    if (field === 'activity_date') return extraction.date_needs_review === true
     if (field === 'activity_time') return !extraction.activity_time
     return false
   })
 
   const date_needs_review = Boolean(extraction.date_needs_review)
 
-  if (core_field_count === 0) {
+  if (!hasMinimumScreenshotExtraction(extraction)) {
     return {
       status: 'failed',
-      reason: 'core_fields_empty',
-      messages: ['AI 분석 실패, 수동 입력 필요'],
+      reason: 'required_fields_empty',
+      messages: [SCREENSHOT_ANALYSIS_MESSAGES.failed],
       date_needs_review,
       missing_core_fields,
       missing_optional_fields,
@@ -86,34 +109,26 @@ export function classifyScreenshotExtraction(
     }
   }
 
-  if (core_field_count === 1) {
-    const messages = ['일부 항목 확인 필요']
-    if (date_needs_review) messages.push('날짜를 확인해주세요')
+  if (hasFullScreenshotExtraction(extraction)) {
     return {
-      status: 'partial',
-      reason: 'single_core_field',
-      messages,
+      status: missing_optional_fields.length > 0 ? 'partial' : 'success',
+      reason:
+        missing_optional_fields.length > 0 ? 'optional_fields_missing' : 'required_fields_complete',
+      messages:
+        missing_optional_fields.length > 0
+          ? [SCREENSHOT_ANALYSIS_MESSAGES.partial]
+          : [SCREENSHOT_ANALYSIS_MESSAGES.success],
       date_needs_review,
       missing_core_fields,
       missing_optional_fields,
       core_field_count,
     }
   }
-
-  const messages = ['주요 기록 인식 완료']
-  if (missing_optional_fields.length > 0) {
-    messages.push('일부 항목 확인 필요')
-  }
-  if (date_needs_review) {
-    messages.push('날짜를 확인해주세요')
-  }
-
-  const hasOptionalGaps = missing_optional_fields.length > 0 || date_needs_review
 
   return {
-    status: hasOptionalGaps ? 'partial' : 'success',
-    reason: hasOptionalGaps ? 'optional_fields_missing' : 'core_fields_complete',
-    messages,
+    status: 'partial',
+    reason: 'required_fields_incomplete',
+    messages: [SCREENSHOT_ANALYSIS_MESSAGES.partial],
     date_needs_review,
     missing_core_fields,
     missing_optional_fields,
@@ -143,6 +158,7 @@ export function enrichExtractionWithAnalysis(
       ...classification.missing_core_fields,
       ...classification.missing_optional_fields,
     ],
+    analysis_success: classification.status !== 'failed',
   }
 }
 
@@ -151,8 +167,6 @@ export function logExtractionDebug(
   extraction: RunningScreenshotExtraction,
   extras?: { raw_text?: string },
 ): void {
-  if (process.env.NODE_ENV !== 'development') return
-
   console.info(`[running-analysis/debug] ${label}`, {
     ocr_raw_text: extras?.raw_text?.slice(0, 500) ?? extraction.raw_text?.slice(0, 500) ?? null,
     distanceKm: extraction.distance_km,
@@ -166,5 +180,6 @@ export function logExtractionDebug(
     status: extraction.analysis_status ?? null,
     reason: extraction.analysis_reason ?? null,
     messages: extraction.analysis_messages ?? null,
+    analysis_success: extraction.analysis_success ?? null,
   })
 }
