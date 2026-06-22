@@ -67,12 +67,12 @@ async function callOpenAiVision(
   if (!response.ok) {
     const detailText = await response.text()
     console.error('[running-analysis/openai] API error', {
-      openai_configured: true,
+      OPENAI_API_KEY_exists: true,
       status: response.status,
       detail,
       body_preview: detailText.slice(0, 300),
     })
-    return null
+    throw new Error(`OpenAI API HTTP ${response.status}`)
   }
 
   const payload = (await response.json()) as {
@@ -88,9 +88,11 @@ async function callOpenAiVision(
     return buildExtractionFromRaw(raw, 'ai', { raw_json: json })
   } catch (error) {
     console.error('[running-analysis/openai] JSON parse failed', {
+      OPENAI_API_KEY_exists: true,
       error: error instanceof Error ? error.message : String(error),
+      content_preview: content.slice(0, 200),
     })
-    return null
+    throw new Error('OpenAI JSON parse failed')
   }
 }
 
@@ -115,7 +117,7 @@ export async function analyzeRunningScreenshotWithOpenAi(
   const detail = options?.detail ?? 'high'
 
   console.info('[running-analysis/openai] calling OpenAI Vision', {
-    openai_configured: true,
+    OPENAI_API_KEY_exists: true,
     model,
     image_bytes: buffer.length,
     mime_type: mimeType || 'image/jpeg',

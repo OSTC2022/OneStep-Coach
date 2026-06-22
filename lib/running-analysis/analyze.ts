@@ -3,7 +3,6 @@ import 'server-only'
 import {
   countCoreExtractionFields,
   enrichExtractionWithAnalysis,
-  logExtractionDebug,
 } from '@/lib/running-league/screenshot-analysis-status'
 import { analyzeRunningScreenshotWithOpenAi } from '@/lib/running-analysis/openai'
 import {
@@ -23,6 +22,36 @@ import {
 import { extractRunningMetricsWithOcr } from '@/lib/running-league/screenshot-ocr-server'
 import { getOpenAiApiKey, isOpenAiConfigured } from '@/lib/running-league/openai-config'
 import { getScreenshotRuntimeProfile } from '@/lib/running-league/screenshot-runtime'
+import type { ScreenshotFailureReason } from '@/lib/running-league/screenshot-analysis-errors'
+
+function resolveDiagnosticsFailureReason(
+  diagnostics: RunningScreenshotAnalysisDiagnostics,
+  coreFieldCount: number,
+  openaiConfigured: boolean,
+  isVercel: boolean,
+): ScreenshotFailureReason | null {
+  if (coreFieldCount > 0) return null
+
+  if (!openaiConfigured && isVercel) {
+    return 'missing_openai_key'
+  }
+  if (diagnostics.ai_status === 'timeout') {
+    return 'ai_timeout'
+  }
+  if (diagnostics.ai_status === 'failed') {
+    if (diagnostics.failure_detail === 'parse_failed') {
+      return 'parse_failed'
+    }
+    return 'ai_request_failed'
+  }
+  if (diagnostics.ai_status === 'empty' && openaiConfigured) {
+    return 'extraction_empty'
+  }
+  if (!openaiConfigured) {
+    return 'missing_openai_key'
+  }
+  return 'extraction_empty'
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   if (ms <= 0) {
@@ -124,14 +153,21 @@ export async function analyzeRunningScreenshotBuffer(
           })
         }
       } catch (error) {
-        diagnostics.ai_status =
-          error instanceof Error && error.message.includes('timeout') ? 'timeout' : 'failed'
+        const message = error instanceof Error ? error.message : String(error)
+        if (message.includes('timeout')) {
+          diagnostics.ai_status = 'timeout'
+        } else if (message.includes('JSON parse failed')) {
+          diagnostics.ai_status = 'failed'
+          diagnostics.failure_detail = 'parse_failed'
+        } else {
+          diagnostics.ai_status = 'failed'
+        }
         console.warn('[running-analysis] OpenAI failed', {
           file_name: options?.fileName ?? null,
-          openai_configured: true,
+          OPENAI_API_KEY_exists: true,
           runtime: diagnostics.runtime,
           status: diagnostics.ai_status,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         })
       }
     } else if (runtime.isVercel) {
@@ -171,11 +207,28 @@ export async function analyzeRunningScreenshotBuffer(
 
     const extraction = enrichExtractionWithAnalysis(resolveExtraction(aiResult, ocrResult))
     diagnostics.field_count = countExtractedFields(extraction)
+    const coreFieldCount = countCoreExtractionFields(extraction)
+    diagnostics.failure_reason = resolveDiagnosticsFailureReason(
+      diagnostics,
+      coreFieldCount,
+      openaiConfigured,
+      runtime.isVercel,
+    )
 
-    logExtractionDebug('final', extraction, {
-      raw_text: extraction.raw_text,
-    })
-
+    if (options?.logMeta) {
+      console.info('[running-analysis] parsed extraction', {
+        file_name: options.fileName ?? null,
+        distance_km: extraction.distance_km,
+        duration: extraction.duration,
+        pace: extraction.pace,
+        activity_date: extraction.activity_date,
+        activity_time: extraction.activity_time,
+        heart_rate: extraction.heart_rate,
+        calories: extraction.calories,
+        raw_json: extraction.raw_json ?? null,
+        failure_reason: diagnostics.failure_reason,
+      })
+    }
     if (options?.logMeta) {
       console.info('[running-analysis] done', {
         file_name: options.fileName ?? null,

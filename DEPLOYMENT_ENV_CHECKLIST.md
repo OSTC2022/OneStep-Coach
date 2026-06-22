@@ -7,6 +7,25 @@
 
 ---
 
+## 1-A. AI/OCR 환경변수 — `.env.local` ↔ 코드 ↔ Vercel
+
+| `.env.local` / Vercel 변수명 | 코드 참조 (`process.env`) | 로컬 값 | Production 값 |
+|------------------------------|---------------------------|---------|-----------------|
+| `OPENAI_API_KEY` | `OPENAI_API_KEY` | `sk-...` | Vercel Production에 등록 (서버 전용) |
+| `OPENAI_VISION_MODEL` | `OPENAI_VISION_MODEL` | (선택) `gpt-4o-mini` | (선택) 기본 `gpt-4o-mini` |
+| `SCREENSHOT_AI_TIMEOUT_MS` | `SCREENSHOT_AI_TIMEOUT_MS` | (선택) 25000 | Hobby: 8000, Pro: 20000+ |
+| `NEXT_PUBLIC_SUPABASE_URL` | `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL | 동일 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key | 동일 |
+| `SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE_SERVICE_ROLE_KEY` | service role | 동일 (서버 전용) |
+| `NEXT_PUBLIC_SITE_URL` | `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | `https://one-step-coach-hlbv.vercel.app` |
+| `ENABLE_OPENAI_ENV_DEBUG` | `ENABLE_OPENAI_ENV_DEBUG` | (선택) | 키 확인 시만 `true` |
+
+**OCR(Tesseract)는 별도 API 키 없음** — 로컬에서만 fallback으로 동작. Vercel에서는 `OPENAI_API_KEY` 필수.
+
+**스크린샷 분석 API:** `POST /api/running-league/analyze-screenshot` (상대경로, localhost 하드코딩 없음)
+
+---
+
 ## 1. Vercel Environment Variables (Production 필수)
 
 Vercel Dashboard → Project **one-step-coach-hlbv** → Settings → Environment Variables

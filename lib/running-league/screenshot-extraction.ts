@@ -45,6 +45,8 @@ export type RunningScreenshotImageMeta = {
   file_name?: string
 }
 
+import type { ScreenshotFailureReason } from '@/lib/running-league/screenshot-analysis-errors'
+
 export type RunningScreenshotAnalysisDiagnostics = {
   openai_configured: boolean
   ai_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
@@ -53,6 +55,8 @@ export type RunningScreenshotAnalysisDiagnostics = {
   runtime?: 'vercel' | 'local'
   vercel_env?: string | null
   ocr_supported?: boolean
+  failure_reason?: ScreenshotFailureReason | null
+  failure_detail?: string | null
 }
 
 export type AnalyzeRunningScreenshotResponse = {
@@ -64,6 +68,7 @@ export type AnalyzeRunningScreenshotResponse = {
 } | {
   ok: false
   error: string
+  error_code?: ScreenshotFailureReason
   diagnostics?: RunningScreenshotAnalysisDiagnostics
 }
 
