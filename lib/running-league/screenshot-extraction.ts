@@ -25,6 +25,12 @@ export type RunningScreenshotExtraction = {
   extraction_method: 'ai' | 'ocr' | 'hybrid' | 'none'
   partial_failure: boolean
   missing_fields: string[]
+  missing_core_fields?: string[]
+  missing_optional_fields?: string[]
+  analysis_status?: 'success' | 'partial' | 'failed'
+  analysis_reason?: string
+  analysis_messages?: string[]
+  date_needs_review?: boolean
   raw_text?: string
   raw_json?: Record<string, unknown>
 }
@@ -58,11 +64,12 @@ export type AnalyzeRunningScreenshotResponse = {
   diagnostics?: RunningScreenshotAnalysisDiagnostics
 }
 
-const FIELD_LABELS = [
-  'distance_km',
-  'duration',
-  'pace',
+const CORE_FIELD_LABELS = ['distance_km', 'duration', 'pace'] as const
+const OPTIONAL_FIELD_LABELS = [
+  'heart_rate',
+  'calories',
   'activity_date',
+  'activity_time',
 ] as const
 
 export function parseDurationToSeconds(value: string): number | null {
@@ -145,7 +152,13 @@ function isValidDate(value: string | null): value is string {
 }
 
 function isValidTime(value: string | null): value is string {
-  return value != null && /^\d{2}:\d{2}$/.test(value)
+  return value != null && /^\d{1,2}:\d{2}$/.test(value)
+}
+
+function normalizeTimeValue(value: string): string {
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return value.trim()
+  return `${pad2(Number(match[1]))}:${match[2]}`
 }
 
 function inferYear(month: number, day: number, today = new Date()): number {
@@ -161,23 +174,55 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
   activity_date: string | null
   activity_time: string | null
 } {
-  const normalized = text.replace(/\s+/g, ' ')
+  const normalized = text.replace(/\s+/g, ' ').replace(/[@·|]/g, ' ')
 
   const koreanDateTime = normalized.match(
-    /(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*(오전|오후)?\s*(\d{1,2})\s*:\s*(\d{2})/,
+    /(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s+)?(?:오전|오후)?\s*(\d{1,2})\s*:\s*(\d{2})/,
   )
   if (koreanDateTime) {
     const month = Number(koreanDateTime[1])
     const day = Number(koreanDateTime[2])
-    let hour = Number(koreanDateTime[4])
-    const minute = Number(koreanDateTime[5])
-    const meridiem = koreanDateTime[3]
+    let hour = Number(koreanDateTime[3])
+    const minute = Number(koreanDateTime[4])
+    const meridiemMatch = normalized.match(
+      /(\d{1,2})\s*월\s*(\d{1,2})\s*일[\s\S]{0,24}?(오전|오후)/,
+    )
+    const meridiem = meridiemMatch?.[3]
     if (meridiem === '오후' && hour < 12) hour += 12
     if (meridiem === '오전' && hour === 12) hour = 0
     const year = inferYear(month, day, today)
     return {
       activity_date: `${year}-${pad2(month)}-${pad2(day)}`,
       activity_time: `${pad2(hour)}:${pad2(minute)}`,
+    }
+  }
+
+  const dottedDate = normalized.match(/\b(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})\b/)
+  if (dottedDate) {
+    return {
+      activity_date: `${dottedDate[1]}-${pad2(Number(dottedDate[2]))}-${pad2(Number(dottedDate[3]))}`,
+      activity_time: null,
+    }
+  }
+
+  const isoDate = normalized.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/)
+  if (isoDate) {
+    return {
+      activity_date: `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`,
+      activity_time: null,
+    }
+  }
+
+  const slashDate = normalized.match(/\b(\d{1,2})\/(\d{1,2})\b/)
+  if (slashDate) {
+    const month = Number(slashDate[1])
+    const day = Number(slashDate[2])
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const year = inferYear(month, day, today)
+      return {
+        activity_date: `${year}-${pad2(month)}-${pad2(day)}`,
+        activity_time: null,
+      }
     }
   }
 
@@ -197,6 +242,18 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
     return {
       activity_date: `${year}-${pad2(month)}-${pad2(day)}`,
       activity_time: null,
+    }
+  }
+
+  const timeOnly = normalized.match(/(오전|오후)\s*(\d{1,2})\s*:\s*(\d{2})/)
+  if (timeOnly) {
+    let hour = Number(timeOnly[2])
+    const minute = Number(timeOnly[3])
+    if (timeOnly[1] === '오후' && hour < 12) hour += 12
+    if (timeOnly[1] === '오전' && hour === 12) hour = 0
+    return {
+      activity_date: null,
+      activity_time: `${pad2(hour)}:${pad2(minute)}`,
     }
   }
 
@@ -402,7 +459,9 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
   const heart_rate = isValidHeartRate(normalized.heart_rate ?? null) ? normalized.heart_rate! : null
   const calories = isValidCalories(normalized.calories ?? null) ? normalized.calories! : null
   const activity_date = isValidDate(normalized.activity_date ?? null) ? normalized.activity_date! : null
-  const activity_time = isValidTime(normalized.activity_time ?? null) ? normalized.activity_time! : null
+  const activity_time = isValidTime(normalized.activity_time ?? null)
+    ? normalizeTimeValue(normalized.activity_time!)
+    : null
 
   if (distance_km != null && duration != null && pace == null) {
     const durationSeconds = parseDurationToSeconds(duration)
@@ -414,15 +473,22 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
     }
   }
 
-  const missing_fields = FIELD_LABELS.filter((field) => {
+  const missing_core_fields = CORE_FIELD_LABELS.filter((field) => {
     if (field === 'distance_km') return distance_km == null
     if (field === 'duration') return duration == null
     if (field === 'pace') return pace == null
-    if (field === 'activity_date') return activity_date == null
     return false
   })
 
-  const partial_failure = missing_fields.length > 0
+  const missing_optional_fields = OPTIONAL_FIELD_LABELS.filter((field) => {
+    if (field === 'heart_rate') return heart_rate == null
+    if (field === 'calories') return calories == null
+    if (field === 'activity_date') return activity_date == null
+    if (field === 'activity_time') return activity_time == null
+    return false
+  })
+
+  const partial_failure = missing_core_fields.length > 0
 
   return {
     distance_km,
@@ -437,9 +503,13 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
     confidence: Math.max(0, Math.min(1, Number(normalized.confidence ?? 0.5))),
     extraction_method: 'none',
     partial_failure,
-    missing_fields,
+    missing_fields: [...missing_core_fields, ...missing_optional_fields],
+    missing_core_fields,
+    missing_optional_fields,
   }
 }
+
+import { enrichExtractionWithAnalysis } from '@/lib/running-league/screenshot-analysis-status'
 
 export function buildExtractionFromRaw(
   raw: RunningScreenshotExtractionRaw,
@@ -447,12 +517,13 @@ export function buildExtractionFromRaw(
   extras?: { raw_text?: string; raw_json?: Record<string, unknown> },
 ): RunningScreenshotExtraction {
   const sanitized = sanitizeRaw(raw)
-  return {
+  const base: RunningScreenshotExtraction = {
     ...sanitized,
     extraction_method: method,
     raw_text: extras?.raw_text,
     raw_json: extras?.raw_json,
   }
+  return enrichExtractionWithAnalysis(base)
 }
 
 function pickField<T>(ai: T | null, ocr: T | null, aiConfidence: number): T | null {
@@ -507,9 +578,15 @@ export function countExtractedFields(extraction: RunningScreenshotExtraction): n
     extraction.distance_km,
     extraction.duration,
     extraction.pace,
-    extraction.activity_date,
-    extraction.activity_time,
     extraction.heart_rate,
     extraction.calories,
+    extraction.activity_date,
+    extraction.activity_time,
   ].filter((value) => value != null).length
+}
+
+export function countCoreExtractedFields(extraction: RunningScreenshotExtraction): number {
+  return [extraction.distance_km, extraction.duration, extraction.pace].filter(
+    (value) => value != null,
+  ).length
 }

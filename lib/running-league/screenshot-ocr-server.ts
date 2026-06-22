@@ -74,11 +74,10 @@ export async function extractRunningMetricsWithOcr(buffer: Buffer) {
 
       const combined = mergeOcrTexts(chunks)
       const parsed = parseRunningMetricsFromText(combined)
-      const coreFound =
-        parsed.distance_km != null &&
-        parsed.duration != null &&
-        parsed.pace != null &&
-        parsed.activity_date != null
+    const coreFound =
+      parsed.distance_km != null &&
+      parsed.duration != null &&
+      parsed.pace != null
 
       if (coreFound) break
     }

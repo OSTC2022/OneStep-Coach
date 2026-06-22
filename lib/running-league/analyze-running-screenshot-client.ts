@@ -29,7 +29,20 @@ export async function analyzeRunningScreenshotFile(
   }
 
   if (process.env.NODE_ENV === 'development' && payload.ok) {
-    console.info('[analyze-running-screenshot-client] diagnostics', payload.diagnostics)
+    console.info('[analyze-running-screenshot-client] result', {
+      diagnostics: payload.diagnostics,
+      distanceKm: payload.extraction.distance_km,
+      duration: payload.extraction.duration,
+      pace: payload.extraction.pace,
+      heartRate: payload.extraction.heart_rate,
+      calories: payload.extraction.calories,
+      date: payload.extraction.activity_date,
+      startTime: payload.extraction.activity_time,
+      status: payload.extraction.analysis_status,
+      reason: payload.extraction.analysis_reason,
+      messages: payload.extraction.analysis_messages,
+      ocr_preview: payload.extraction.raw_text?.slice(0, 300) ?? null,
+    })
   }
 
   if (!response.ok || !payload.ok) {

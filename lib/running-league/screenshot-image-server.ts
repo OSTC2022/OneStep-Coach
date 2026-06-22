@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import type { RunningScreenshotImageMeta } from '@/lib/running-league/screenshot-extraction'
 
-export const SCREENSHOT_MAX_EDGE = 1600
+/** 분석용 최소 너비 — OCR·Vision 품질 유지 */
+export const SCREENSHOT_MIN_WIDTH = 1200
+export const SCREENSHOT_MAX_EDGE = 2400
 
 export function hashScreenshotBuffer(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex')
@@ -19,12 +21,21 @@ export async function prepareScreenshotForAnalysis(
 }> {
   const original = sharp(buffer, { failOn: 'none' })
   const originalMeta = await original.metadata()
+  const originalWidth = originalMeta.width ?? 0
+
+  let targetWidth = originalWidth
+  if (targetWidth > SCREENSHOT_MAX_EDGE) {
+    targetWidth = SCREENSHOT_MAX_EDGE
+  }
+  if (targetWidth < SCREENSHOT_MIN_WIDTH) {
+    targetWidth = SCREENSHOT_MIN_WIDTH
+  }
 
   const resized = original.rotate().resize({
-    width: SCREENSHOT_MAX_EDGE,
+    width: targetWidth,
     height: SCREENSHOT_MAX_EDGE,
     fit: 'inside',
-    withoutEnlargement: true,
+    withoutEnlargement: false,
   })
 
   const output = await resized.jpeg({ quality: 85, mozjpeg: true }).toBuffer()

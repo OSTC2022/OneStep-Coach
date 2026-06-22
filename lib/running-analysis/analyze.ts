@@ -1,5 +1,10 @@
 import 'server-only'
 
+import {
+  countCoreExtractionFields,
+  enrichExtractionWithAnalysis,
+  logExtractionDebug,
+} from '@/lib/running-league/screenshot-analysis-status'
 import { analyzeRunningScreenshotWithOpenAi } from '@/lib/running-analysis/openai'
 import {
   countExtractedFields,
@@ -111,7 +116,10 @@ export async function analyzeRunningScreenshotBuffer(
     }
 
     let ocrResult = emptyExtraction()
-    const shouldRunOcr = !hasKey || !hasUsableExtraction(aiResult) || countExtractedFields(aiResult) < 2
+    const shouldRunOcr =
+      !hasKey ||
+      countCoreExtractionFields(aiResult) < 2 ||
+      countExtractedFields(aiResult) < 3
 
     if (shouldRunOcr) {
       try {
@@ -128,8 +136,12 @@ export async function analyzeRunningScreenshotBuffer(
       }
     }
 
-    const extraction = resolveExtraction(aiResult, ocrResult)
+    const extraction = enrichExtractionWithAnalysis(resolveExtraction(aiResult, ocrResult))
     diagnostics.field_count = countExtractedFields(extraction)
+
+    logExtractionDebug('final', extraction, {
+      raw_text: extraction.raw_text,
+    })
 
     if (options?.logMeta) {
       console.info('[running-analysis] done', {
@@ -138,10 +150,17 @@ export async function analyzeRunningScreenshotBuffer(
         ai_status: diagnostics.ai_status,
         ocr_status: diagnostics.ocr_status,
         field_count: diagnostics.field_count,
+        core_field_count: countCoreExtractionFields(extraction),
+        analysis_status: extraction.analysis_status,
+        analysis_reason: extraction.analysis_reason,
         distance_km: extraction.distance_km,
         duration: extraction.duration,
         pace: extraction.pace,
         activity_date: extraction.activity_date,
+        activity_time: extraction.activity_time,
+        heart_rate: extraction.heart_rate,
+        calories: extraction.calories,
+        date_needs_review: extraction.date_needs_review,
       })
     }
 

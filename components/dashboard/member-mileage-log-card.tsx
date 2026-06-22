@@ -13,7 +13,7 @@ import {
 } from '@/lib/actions/running-league'
 import { analyzeRunningScreenshotFile } from '@/lib/running-league/analyze-running-screenshot-client'
 import { formatDistanceKmInput } from '@/lib/running-analysis/normalize'
-import { countExtractedFields } from '@/lib/running-league/screenshot-extraction'
+import { countCoreExtractedFields } from '@/lib/running-league/screenshot-extraction'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
 import { MILEAGE_SCORE_CAP_KM, mileageScoreFromKm } from '@/lib/running-league/scoring'
 import type { RunningLeagueMileageLog, RunningLeagueParticipant } from '@/lib/types'
@@ -41,6 +41,28 @@ type MemberMileageLogCardProps = {
 }
 
 type AnalysisStatus = 'idle' | 'analyzing' | 'success' | 'partial' | 'failed'
+
+type FieldHint = 'filled' | 'review' | 'missing' | 'neutral'
+
+type ExtractionFieldHints = {
+  distanceKm: FieldHint
+  duration: FieldHint
+  pace: FieldHint
+  heartRate: FieldHint
+  calories: FieldHint
+  loggedAt: FieldHint
+  activityTime: FieldHint
+}
+
+const EMPTY_FIELD_HINTS: ExtractionFieldHints = {
+  distanceKm: 'neutral',
+  duration: 'neutral',
+  pace: 'neutral',
+  heartRate: 'neutral',
+  calories: 'neutral',
+  loggedAt: 'neutral',
+  activityTime: 'neutral',
+}
 
 type MileageFormState = {
   distanceKm: string
@@ -106,6 +128,67 @@ function mileageSourceLabel(source: RunningLeagueMileageLog['source']): string {
       return '기타'
     default:
       return '직접 입력'
+  }
+}
+
+function buildFieldHints(extraction: RunningScreenshotExtraction): ExtractionFieldHints {
+  return {
+    distanceKm: extraction.distance_km != null ? 'filled' : 'missing',
+    duration: extraction.duration ? 'filled' : 'missing',
+    pace: extraction.pace ? 'filled' : 'missing',
+    heartRate: extraction.heart_rate != null ? 'filled' : 'missing',
+    calories: extraction.calories != null ? 'filled' : 'missing',
+    loggedAt: extraction.date_needs_review
+      ? 'review'
+      : extraction.activity_date
+        ? 'filled'
+        : 'missing',
+    activityTime: extraction.activity_time ? 'filled' : 'missing',
+  }
+}
+
+function fieldInputClass(hint: FieldHint) {
+  return cn(
+    'h-9',
+    hint === 'filled' && 'border-emerald-500/40 bg-emerald-500/5',
+    hint === 'review' && 'border-amber-400/50 bg-amber-400/5',
+    hint === 'missing' && 'border-amber-400/30 bg-amber-400/5',
+  )
+}
+
+function fieldLabelClass(hint: FieldHint) {
+  return cn(
+    'text-[11px]',
+    hint === 'filled' && 'text-emerald-400',
+    hint === 'review' && 'text-amber-300',
+    hint === 'missing' && 'text-amber-300/80',
+    hint === 'neutral' && 'text-muted-foreground',
+  )
+}
+
+function resolveAnalysisUi(
+  extraction: RunningScreenshotExtraction,
+): { status: AnalysisStatus; message: string } {
+  const coreCount = countCoreExtractedFields(extraction)
+  const messages = extraction.analysis_messages ?? []
+
+  if (coreCount >= 2) {
+    return {
+      status: extraction.analysis_status === 'success' ? 'success' : 'partial',
+      message: messages.length > 0 ? messages.join(' · ') : '주요 기록 인식 완료',
+    }
+  }
+
+  if (coreCount === 1) {
+    return {
+      status: 'partial',
+      message: messages.length > 0 ? messages.join(' · ') : '일부 항목 확인 필요',
+    }
+  }
+
+  return {
+    status: 'failed',
+    message: 'AI 분석 실패, 수동 입력 필요',
   }
 }
 
@@ -256,20 +339,29 @@ function MileageLogList({
   )
 }
 
-function AnalysisSummary({ form }: { form: MileageFormState }) {
+function AnalysisSummary({
+  form,
+  fieldHints,
+}: {
+  form: MileageFormState
+  fieldHints: ExtractionFieldHints
+}) {
   if (!form.distanceKm && !form.duration && !form.pace) return null
 
   return (
-    <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-xs">
-      <p className="font-medium text-primary">AI가 읽은 기록</p>
+    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5 text-xs">
+      <p className="font-medium text-emerald-400">인식된 기록</p>
       <div className="mt-1.5 space-y-0.5 text-muted-foreground">
-        {form.distanceKm ? <p>거리: {form.distanceKm}km</p> : null}
-        {form.duration ? <p>시간: {form.duration}</p> : null}
-        {form.pace ? <p>페이스: {form.pace}/km</p> : null}
+        {form.distanceKm ? <p className={fieldHints.distanceKm === 'filled' ? 'text-emerald-300' : ''}>거리: {form.distanceKm}km</p> : null}
+        {form.duration ? <p className={fieldHints.duration === 'filled' ? 'text-emerald-300' : ''}>시간: {form.duration}</p> : null}
+        {form.pace ? <p className={fieldHints.pace === 'filled' ? 'text-emerald-300' : ''}>페이스: {form.pace}/km</p> : null}
         {form.loggedAt ? (
-          <p>날짜: {formatLogDate(form.loggedAt)}</p>
+          <p className={fieldHints.loggedAt === 'review' ? 'text-amber-300' : fieldHints.loggedAt === 'filled' ? 'text-emerald-300' : ''}>
+            날짜: {formatLogDate(form.loggedAt)}
+            {fieldHints.loggedAt === 'review' ? ' (확인 필요)' : ''}
+          </p>
         ) : null}
-        {form.activityTime ? <p>운동 시각: {form.activityTime}</p> : null}
+        {form.activityTime ? <p className={fieldHints.activityTime === 'filled' ? 'text-emerald-300' : ''}>운동 시각: {form.activityTime}</p> : null}
       </div>
     </div>
   )
@@ -289,6 +381,7 @@ export function MemberMileageLogCard({
   const [saving, setSaving] = useState(false)
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle')
   const [analysisMessage, setAnalysisMessage] = useState<string | null>(null)
+  const [fieldHints, setFieldHints] = useState<ExtractionFieldHints>(EMPTY_FIELD_HINTS)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [duplicateOpen, setDuplicateOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -315,6 +408,7 @@ export function MemberMileageLogCard({
     screenshotFileRef.current = null
     setAnalysisStatus('idle')
     setAnalysisMessage(null)
+    setFieldHints(EMPTY_FIELD_HINTS)
   }
 
   const updateForm = (patch: Partial<MileageFormState>) => {
@@ -437,30 +531,41 @@ export function MemberMileageLogCard({
       if (!result.ok) {
         setAnalysisStatus('failed')
         setAnalysisMessage('AI 분석 실패, 수동 입력 필요')
+        setFieldHints(EMPTY_FIELD_HINTS)
         return
       }
 
+      const extraction = result.extraction
+      setFieldHints(buildFieldHints(extraction))
       setForm(
-        applyExtractionToForm(result.extraction, {
+        applyExtractionToForm(extraction, {
           ...initialFormState(),
           imageHash: result.image_hash,
         }),
       )
 
-      const extractedCount = countExtractedFields(result.extraction)
-      if (extractedCount === 0) {
-        setAnalysisStatus('failed')
-        setAnalysisMessage('AI 분석 실패, 수동 입력 필요')
-      } else if (result.extraction.partial_failure || result.extraction.confidence < 0.75) {
-        setAnalysisStatus('partial')
-        setAnalysisMessage('사진에서 읽은 값을 확인해주세요.')
-      } else {
-        setAnalysisStatus('success')
-        setAnalysisMessage('기록을 확인한 뒤 저장해주세요.')
+      const ui = resolveAnalysisUi(extraction)
+      setAnalysisStatus(ui.status)
+      setAnalysisMessage(ui.message)
+
+      if (process.env.NODE_ENV === 'development') {
+        console.info('[mileage-log-card] screenshot analysis', {
+          distanceKm: extraction.distance_km,
+          duration: extraction.duration,
+          pace: extraction.pace,
+          heartRate: extraction.heart_rate,
+          calories: extraction.calories,
+          date: extraction.activity_date,
+          startTime: extraction.activity_time,
+          status: extraction.analysis_status,
+          reason: extraction.analysis_reason,
+          messages: extraction.analysis_messages,
+        })
       }
     } catch {
       setAnalysisStatus('failed')
       setAnalysisMessage('AI 분석 실패, 수동 입력 필요')
+      setFieldHints(EMPTY_FIELD_HINTS)
     }
   }
 
@@ -604,8 +709,12 @@ export function MemberMileageLogCard({
               {analysisMessage ? (
                 <p
                   className={cn(
-                    'text-[11px]',
-                    analysisStatus === 'failed' ? 'text-amber-300' : 'text-muted-foreground',
+                    'text-[11px] font-medium',
+                    analysisStatus === 'failed'
+                      ? 'text-amber-300'
+                      : analysisStatus === 'partial'
+                        ? 'text-amber-200'
+                        : 'text-emerald-400',
                   )}
                 >
                   {analysisMessage}
@@ -613,14 +722,14 @@ export function MemberMileageLogCard({
               ) : null}
 
               {(analysisStatus === 'success' || analysisStatus === 'partial') && (
-                <AnalysisSummary form={form} />
+                <AnalysisSummary form={form} fieldHints={fieldHints} />
               )}
 
               <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-[11px] text-muted-foreground">거리 (km)</Label>
+                    <Label className={fieldLabelClass(fieldHints.distanceKm)}>거리 (km)</Label>
                     <Input
-                      className="h-9"
+                      className={fieldInputClass(fieldHints.distanceKm)}
                       type="number"
                       min="0"
                       step="0.01"
@@ -631,27 +740,27 @@ export function MemberMileageLogCard({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">총 시간</Label>
+                    <Label className={fieldLabelClass(fieldHints.duration)}>총 시간</Label>
                     <Input
-                      className="h-9"
+                      className={fieldInputClass(fieldHints.duration)}
                       placeholder="1:00:27"
                       value={form.duration}
                       onChange={(event) => updateForm({ duration: event.target.value })}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">페이스 (/km)</Label>
+                    <Label className={fieldLabelClass(fieldHints.pace)}>페이스 (/km)</Label>
                     <Input
-                      className="h-9"
+                      className={fieldInputClass(fieldHints.pace)}
                       placeholder="4:29"
                       value={form.pace}
                       onChange={(event) => updateForm({ pace: event.target.value })}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">심박수 (bpm)</Label>
+                    <Label className={fieldLabelClass(fieldHints.heartRate)}>심박수 (bpm)</Label>
                     <Input
-                      className="h-9"
+                      className={fieldInputClass(fieldHints.heartRate)}
                       inputMode="numeric"
                       placeholder="154"
                       value={form.heartRate}
@@ -659,9 +768,9 @@ export function MemberMileageLogCard({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">칼로리 (kcal)</Label>
+                    <Label className={fieldLabelClass(fieldHints.calories)}>칼로리 (kcal)</Label>
                     <Input
-                      className="h-9"
+                      className={fieldInputClass(fieldHints.calories)}
                       inputMode="numeric"
                       placeholder="714"
                       value={form.calories}
@@ -671,19 +780,26 @@ export function MemberMileageLogCard({
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">날짜</Label>
+                  <Label className={fieldLabelClass(fieldHints.loggedAt)}>
+                    날짜
+                    {fieldHints.loggedAt === 'review' ? ' (확인 필요)' : ''}
+                  </Label>
                   <KoreanDatePicker
                     value={form.loggedAt}
                     onChange={(value) => updateForm({ loggedAt: value })}
                     compact
                     placeholder="날짜 선택"
+                    className={cn(
+                      fieldHints.loggedAt === 'review' && 'ring-1 ring-amber-400/50',
+                      fieldHints.loggedAt === 'filled' && 'ring-1 ring-emerald-500/30',
+                    )}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">운동 시각 (HH:mm)</Label>
+                  <Label className={fieldLabelClass(fieldHints.activityTime)}>운동 시각 (HH:mm)</Label>
                   <Input
-                    className="h-9"
+                    className={fieldInputClass(fieldHints.activityTime)}
                     placeholder="11:05"
                     value={form.activityTime}
                     onChange={(event) => updateForm({ activityTime: event.target.value })}
