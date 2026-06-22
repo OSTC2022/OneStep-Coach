@@ -22,10 +22,11 @@ export async function createClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
             )
-          } catch {
-            // The "setAll" method was called from a Server Component.
-            // This can be ignored if you have proxy refreshing
-            // user sessions.
+          } catch (error) {
+            // Server Component에서는 쿠키 설정 불가 — proxy가 세션 갱신
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[supabase/server] cookie set skipped:', error)
+            }
           }
         },
       },

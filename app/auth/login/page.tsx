@@ -61,49 +61,23 @@ export default function LoginPage() {
     const formData = new FormData(form)
     let navigating = false
 
-    async function attemptLogin() {
-      return signIn(null, formData)
-    }
-
-    function finishWithRedirect(redirectTo: string) {
-      navigating = true
-      // 전체 페이지 이동 — PWA·데스크톱에서 세션 쿠키 반영이 더 안정적
-      window.location.assign(redirectTo)
-    }
-
     try {
-      let result = await attemptLogin()
+      const result = await signIn(null, formData)
       if (result?.redirectTo) {
-        finishWithRedirect(result.redirectTo)
+        navigating = true
+        window.location.assign(result.redirectTo)
         return
       }
       if (result?.error) {
         setLoginState(result)
-        return
       }
     } catch (error) {
       if (isRedirectError(error)) {
-        finishWithRedirect('/dashboard')
+        navigating = true
+        window.location.assign('/dashboard')
         return
       }
-
-      try {
-        const result = await attemptLogin()
-        if (result?.redirectTo) {
-          finishWithRedirect(result.redirectTo)
-          return
-        }
-        if (result?.error) {
-          setLoginState(result)
-          return
-        }
-      } catch (retryError) {
-        if (isRedirectError(retryError)) {
-          finishWithRedirect('/dashboard')
-          return
-        }
-      }
-
+      console.error('[login] signIn failed', error)
       setLoginState({
         error:
           '로그인 처리 중 오류가 발생했습니다. Wi-Fi 연결을 확인한 뒤 다시 시도해주세요.',

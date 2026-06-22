@@ -38,12 +38,24 @@ export async function signIn(
     return { error: resolved.error }
   }
 
-  const { error } = await supabase.auth.signInWithPassword({
+  // 깨진 refresh token·이전 세션 쿠키가 새 로그인을 막는 경우 방지
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } catch {
+    // ignore
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: resolved.email,
     password,
   })
 
   if (error) {
+    console.warn('[signIn] auth failed', {
+      email: resolved.email,
+      code: error.code ?? null,
+      message: error.message,
+    })
     const message =
       error.message === 'Invalid login credentials'
         ? '이메일 또는 비밀번호가 올바르지 않습니다.'
@@ -51,11 +63,13 @@ export async function signIn(
     return { error: message }
   }
 
-  const {
-    data: { user: authUser },
-  } = await supabase.auth.getUser()
+  const authUser = data.user
   if (!authUser) {
-    return { error: '로그인 처리에 실패했습니다.' }
+    console.error('[signIn] signInWithPassword succeeded but user is missing', {
+      email: resolved.email,
+      hasSession: Boolean(data.session),
+    })
+    return { error: '로그인 처리에 실패했습니다. 잠시 후 다시 시도해주세요.' }
   }
 
   const { data: profileRow } = await supabase
