@@ -50,6 +50,9 @@ export type RunningScreenshotAnalysisDiagnostics = {
   ai_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
   ocr_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
   field_count: number
+  runtime?: 'vercel' | 'local'
+  vercel_env?: string | null
+  ocr_supported?: boolean
 }
 
 export type AnalyzeRunningScreenshotResponse = {

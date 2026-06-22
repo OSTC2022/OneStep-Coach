@@ -28,21 +28,19 @@ export async function analyzeRunningScreenshotFile(
     return { ok: false, error: `이미지 분석 응답을 읽지 못했습니다. (HTTP ${response.status})` }
   }
 
-  if (process.env.NODE_ENV === 'development' && payload.ok) {
+    if (process.env.NODE_ENV === 'development' && payload.ok) {
     console.info('[analyze-running-screenshot-client] result', {
       diagnostics: payload.diagnostics,
       distanceKm: payload.extraction.distance_km,
       duration: payload.extraction.duration,
       pace: payload.extraction.pace,
-      heartRate: payload.extraction.heart_rate,
-      calories: payload.extraction.calories,
-      date: payload.extraction.activity_date,
-      startTime: payload.extraction.activity_time,
       status: payload.extraction.analysis_status,
       reason: payload.extraction.analysis_reason,
-      messages: payload.extraction.analysis_messages,
-      ocr_preview: payload.extraction.raw_text?.slice(0, 300) ?? null,
     })
+  }
+
+  if (payload.ok && payload.extraction.analysis_status === 'failed') {
+    console.warn('[analyze-running-screenshot-client] extraction empty on server', payload.diagnostics)
   }
 
   if (!response.ok || !payload.ok) {

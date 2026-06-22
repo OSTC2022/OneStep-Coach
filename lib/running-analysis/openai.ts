@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { getOpenAiApiKey, getOpenAiVisionModel } from '@/lib/running-league/openai-config'
+import { countCoreExtractionFields } from '@/lib/running-league/screenshot-analysis-status'
 import { mapOpenAiJsonToRaw } from '@/lib/running-analysis/normalize'
 import { buildExtractionFromRaw } from '@/lib/running-league/screenshot-extraction'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
@@ -26,9 +27,81 @@ Rules:
 - If unsure about a field, use null
 - Do not guess`
 
+type OpenAiVisionDetail = 'high' | 'auto' | 'low'
+
+async function callOpenAiVision(
+  buffer: Buffer,
+  mimeType: string,
+  detail: OpenAiVisionDetail,
+): Promise<RunningScreenshotExtraction | null> {
+  const apiKey = getOpenAiApiKey()
+  if (!apiKey) return null
+
+  const model = getOpenAiVisionModel()
+  const imageBase64 = buffer.toString('base64')
+  const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0,
+      max_tokens: 400,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: EXTRACTION_PROMPT },
+            { type: 'image_url', image_url: { url: dataUrl, detail } },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const detailText = await response.text()
+    console.error('[running-analysis/openai] API error', {
+      openai_configured: true,
+      status: response.status,
+      detail,
+      body_preview: detailText.slice(0, 300),
+    })
+    return null
+  }
+
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>
+  }
+
+  const content = payload.choices?.[0]?.message?.content
+  if (!content) return null
+
+  try {
+    const json = JSON.parse(content) as Record<string, unknown>
+    const raw = mapOpenAiJsonToRaw(json)
+    return buildExtractionFromRaw(raw, 'ai', { raw_json: json })
+  } catch (error) {
+    console.error('[running-analysis/openai] JSON parse failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+}
+
+function isUsableAiExtraction(result: RunningScreenshotExtraction | null): result is RunningScreenshotExtraction {
+  return result != null && countCoreExtractionFields(result) >= 1
+}
+
 export async function analyzeRunningScreenshotWithOpenAi(
   buffer: Buffer,
   mimeType: string,
+  options?: { detail?: OpenAiVisionDetail; retryWithLowDetail?: boolean },
 ): Promise<RunningScreenshotExtraction | null> {
   const apiKey = getOpenAiApiKey()
   if (!apiKey) {
@@ -39,89 +112,49 @@ export async function analyzeRunningScreenshotWithOpenAi(
   }
 
   const model = getOpenAiVisionModel()
-  const imageBase64 = buffer.toString('base64')
-  const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`
+  const detail = options?.detail ?? 'high'
 
   console.info('[running-analysis/openai] calling OpenAI Vision', {
     openai_configured: true,
     model,
     image_bytes: buffer.length,
     mime_type: mimeType || 'image/jpeg',
+    detail,
   })
 
-  let response: Response
   try {
-    response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 400,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: EXTRACTION_PROMPT },
-              { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-            ],
-          },
-        ],
-      }),
-    })
+    const result = await callOpenAiVision(buffer, mimeType, detail)
+    if (isUsableAiExtraction(result)) {
+      console.info('[running-analysis/openai] success', {
+        openai_configured: true,
+        detail,
+        distance_km: result.distance_km,
+        duration: result.duration,
+        pace: result.pace,
+        activity_date: result.activity_date,
+        core_fields: countCoreExtractionFields(result),
+      })
+      return result
+    }
   } catch (error) {
-    console.error('[running-analysis/openai] network error', {
+    console.error('[running-analysis/openai] call failed', {
       openai_configured: true,
+      detail,
       error: error instanceof Error ? error.message : String(error),
     })
-    return null
   }
 
-  if (!response.ok) {
-    const detail = await response.text()
-    console.error('[running-analysis/openai] API error', {
-      openai_configured: true,
-      status: response.status,
-      body_preview: detail.slice(0, 300),
-    })
-    return null
+  if (options?.retryWithLowDetail && detail !== 'low') {
+    console.info('[running-analysis/openai] retrying with low detail')
+    try {
+      const retry = await callOpenAiVision(buffer, mimeType, 'low')
+      if (isUsableAiExtraction(retry)) return retry
+    } catch (error) {
+      console.error('[running-analysis/openai] retry failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
-  const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-
-  const content = payload.choices?.[0]?.message?.content
-  if (!content) {
-    console.warn('[running-analysis/openai] empty response content', { openai_configured: true })
-    return null
-  }
-
-  try {
-    const json = JSON.parse(content) as Record<string, unknown>
-    const raw = mapOpenAiJsonToRaw(json)
-    const result = buildExtractionFromRaw(raw, 'ai', { raw_json: json })
-
-    console.info('[running-analysis/openai] success', {
-      openai_configured: true,
-      distance_km: result.distance_km,
-      duration: result.duration,
-      pace: result.pace,
-      activity_date: result.activity_date,
-      confidence: result.confidence,
-      partial_failure: result.partial_failure,
-    })
-
-    return result
-  } catch (error) {
-    console.error('[running-analysis/openai] JSON parse failed', {
-      openai_configured: true,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    return null
-  }
+  return null
 }

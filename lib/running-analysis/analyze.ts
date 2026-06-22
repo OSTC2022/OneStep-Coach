@@ -18,14 +18,16 @@ import {
 import {
   hashScreenshotBuffer,
   prepareScreenshotForAnalysis,
+  prepareScreenshotForOpenAi,
 } from '@/lib/running-league/screenshot-image-server'
 import { extractRunningMetricsWithOcr } from '@/lib/running-league/screenshot-ocr-server'
 import { getOpenAiApiKey, isOpenAiConfigured } from '@/lib/running-league/openai-config'
-
-const AI_TIMEOUT_MS = 25000
-const OCR_TIMEOUT_MS = 8000
+import { getScreenshotRuntimeProfile } from '@/lib/running-league/screenshot-runtime'
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  if (ms <= 0) {
+    return Promise.reject(new Error(`${label} disabled`))
+  }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timeout`)), ms)
     promise
@@ -55,31 +57,45 @@ function resolveExtraction(aiResult: RunningScreenshotExtraction, ocrResult: Run
   return merged
 }
 
+function isAiResultUsable(result: RunningScreenshotExtraction | null): result is RunningScreenshotExtraction {
+  return result != null && countCoreExtractionFields(result) >= 1
+}
+
 export async function analyzeRunningScreenshotBuffer(
   originalBuffer: Buffer,
   mimeType: string,
   options?: { logMeta?: boolean; fileName?: string },
 ): Promise<AnalyzeRunningScreenshotResponse> {
+  const runtime = getScreenshotRuntimeProfile()
   const openaiConfigured = isOpenAiConfigured()
   const diagnostics: RunningScreenshotAnalysisDiagnostics = {
     openai_configured: openaiConfigured,
     ai_status: 'skipped',
     ocr_status: 'skipped',
     field_count: 0,
+    runtime: runtime.isVercel ? 'vercel' : 'local',
+    vercel_env: runtime.vercelEnv,
+    ocr_supported: runtime.ocrSupported,
   }
 
   try {
-    const { buffer, meta } = await prepareScreenshotForAnalysis(originalBuffer, mimeType)
     const image_hash = hashScreenshotBuffer(originalBuffer)
+    const { buffer: aiBuffer, meta } = await prepareScreenshotForOpenAi(originalBuffer, mimeType)
 
     if (options?.logMeta) {
       console.info('[running-analysis] start', {
         file_name: options.fileName ?? null,
+        runtime: diagnostics.runtime,
+        vercel_env: runtime.vercelEnv,
+        ocr_supported: runtime.ocrSupported,
         openai_configured: openaiConfigured,
+        ai_timeout_ms: runtime.aiTimeoutMs,
         original_size: meta.original_size,
-        buffer_length: originalBuffer.length,
+        ai_image_bytes: aiBuffer.length,
         width: meta.width,
         height: meta.height,
+        resized_width: meta.resized_width,
+        resized_height: meta.resized_height,
       })
     }
 
@@ -89,18 +105,22 @@ export async function analyzeRunningScreenshotBuffer(
     if (hasKey) {
       try {
         const result = await withTimeout(
-          analyzeRunningScreenshotWithOpenAi(buffer, 'image/jpeg'),
-          AI_TIMEOUT_MS,
+          analyzeRunningScreenshotWithOpenAi(aiBuffer, 'image/jpeg', {
+            detail: runtime.openAiDetail,
+            retryWithLowDetail: runtime.isVercel,
+          }),
+          runtime.aiTimeoutMs,
           'AI',
         )
-        if (result && hasUsableExtraction(result)) {
+        if (isAiResultUsable(result)) {
           aiResult = result
           diagnostics.ai_status = 'success'
         } else {
           diagnostics.ai_status = 'empty'
-          console.warn('[running-analysis] OpenAI returned no usable fields', {
+          console.warn('[running-analysis] OpenAI returned no usable core fields', {
             file_name: options?.fileName ?? null,
             openai_configured: true,
+            runtime: diagnostics.runtime,
           })
         }
       } catch (error) {
@@ -109,21 +129,32 @@ export async function analyzeRunningScreenshotBuffer(
         console.warn('[running-analysis] OpenAI failed', {
           file_name: options?.fileName ?? null,
           openai_configured: true,
+          runtime: diagnostics.runtime,
           status: diagnostics.ai_status,
           error: error instanceof Error ? error.message : String(error),
         })
       }
+    } else if (runtime.isVercel) {
+      console.error('[running-analysis] Vercel에서 OPENAI_API_KEY가 없으면 스크린샷 인식 불가 (OCR 미지원)', {
+        file_name: options?.fileName ?? null,
+      })
     }
 
     let ocrResult = emptyExtraction()
     const shouldRunOcr =
-      !hasKey ||
-      countCoreExtractionFields(aiResult) < 2 ||
-      countExtractedFields(aiResult) < 3
+      runtime.ocrSupported &&
+      (!hasKey ||
+        countCoreExtractionFields(aiResult) < 2 ||
+        countExtractedFields(aiResult) < 3)
 
     if (shouldRunOcr) {
       try {
-        ocrResult = await withTimeout(extractRunningMetricsWithOcr(buffer), OCR_TIMEOUT_MS, 'OCR')
+        const { buffer: ocrBuffer } = await prepareScreenshotForAnalysis(originalBuffer, mimeType)
+        ocrResult = await withTimeout(
+          extractRunningMetricsWithOcr(ocrBuffer),
+          runtime.ocrTimeoutMs,
+          'OCR',
+        )
         diagnostics.ocr_status = hasUsableExtraction(ocrResult) ? 'success' : 'empty'
       } catch (error) {
         diagnostics.ocr_status =
@@ -134,6 +165,8 @@ export async function analyzeRunningScreenshotBuffer(
           error: error instanceof Error ? error.message : String(error),
         })
       }
+    } else if (runtime.isVercel) {
+      diagnostics.ocr_status = 'skipped'
     }
 
     const extraction = enrichExtractionWithAnalysis(resolveExtraction(aiResult, ocrResult))
@@ -146,6 +179,8 @@ export async function analyzeRunningScreenshotBuffer(
     if (options?.logMeta) {
       console.info('[running-analysis] done', {
         file_name: options.fileName ?? null,
+        runtime: diagnostics.runtime,
+        vercel_env: runtime.vercelEnv,
         openai_configured: openaiConfigured,
         ai_status: diagnostics.ai_status,
         ocr_status: diagnostics.ocr_status,
@@ -156,11 +191,6 @@ export async function analyzeRunningScreenshotBuffer(
         distance_km: extraction.distance_km,
         duration: extraction.duration,
         pace: extraction.pace,
-        activity_date: extraction.activity_date,
-        activity_time: extraction.activity_time,
-        heart_rate: extraction.heart_rate,
-        calories: extraction.calories,
-        date_needs_review: extraction.date_needs_review,
       })
     }
 
@@ -174,6 +204,7 @@ export async function analyzeRunningScreenshotBuffer(
   } catch (error) {
     console.error('[running-analysis] fatal error', {
       openai_configured: openaiConfigured,
+      runtime: diagnostics.runtime,
       error: error instanceof Error ? error.message : String(error),
     })
     return {

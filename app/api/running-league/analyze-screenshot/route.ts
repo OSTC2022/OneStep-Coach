@@ -58,6 +58,9 @@ export async function POST(request: Request) {
         ai_status: result.diagnostics.ai_status,
         ocr_status: result.diagnostics.ocr_status,
         openai_configured: result.diagnostics.openai_configured,
+        runtime: result.diagnostics.runtime,
+        vercel_env: result.diagnostics.vercel_env,
+        ocr_supported: result.diagnostics.ocr_supported,
       })
     }
 
