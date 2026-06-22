@@ -56,6 +56,7 @@ import {
   isTrialLessonType,
 } from '@/lib/trial-lesson-pay'
 import { formatRunningLessonPayHint } from '@/lib/running-lesson-pay'
+import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
