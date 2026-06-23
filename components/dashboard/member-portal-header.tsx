@@ -23,13 +23,19 @@ import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
 import type { User } from '@/lib/types'
 import { toast } from 'sonner'
 
-function portalTitle(pathname: string, hash: string): string {
+function portalTitle(pathname: string, hash: string, role?: string | null): string {
+  const isAdult = role === 'adult_member'
+  if (pathname.startsWith('/dashboard/my/running-league')) return '러닝 챌린지'
   if (pathname.startsWith('/dashboard/my/profile')) return '프로필'
   if (pathname.startsWith('/dashboard/my/body')) {
-    return hash === '#today-record' ? '오늘 기록' : '리포트'
+    return hash === '#today-record' ? (isAdult ? '컨디션' : '오늘 기록') : isAdult ? '컨디션' : '리포트'
   }
   if (pathname.startsWith('/dashboard/my/sessions')) return '수업'
-  return '내 선수 리포트'
+  return isAdult ? '내 러닝 포털' : '내 선수 리포트'
+}
+
+function portalBrandLabel(role?: string | null): string {
+  return role === 'adult_member' ? 'OneStep Running' : 'OneStep Athlete'
 }
 
 interface MemberPortalHeaderProps {
@@ -50,7 +56,8 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
     return () => window.removeEventListener('hashchange', syncHash)
   }, [pathname])
 
-  const title = portalTitle(pathname, hash)
+  const title = portalTitle(pathname, hash, user.role)
+  const brandLabel = portalBrandLabel(user.role)
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -66,7 +73,7 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
         <Link href="/dashboard/my" className="flex min-w-0 items-center gap-2.5">
           <BrandPulseAppIcon className="h-10 w-10" />
           <div className="min-w-0 leading-tight">
-            <p className="truncate text-sm font-bold text-foreground">OneStep Athlete</p>
+            <p className="truncate text-sm font-bold text-foreground">{brandLabel}</p>
             <p className="truncate text-[11px] text-muted-foreground">{title}</p>
           </div>
         </Link>

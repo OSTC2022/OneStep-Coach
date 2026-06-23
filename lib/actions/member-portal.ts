@@ -11,6 +11,21 @@ export async function getMemberPortalData() {
   return loadMemberPortalData(member)
 }
 
+export async function getMemberPortalDataForStaff(memberId: string) {
+  const { getMember } = await import('@/lib/actions/members')
+  const { getMemberLinkedProfileRole } = await import('@/lib/actions/member-account')
+  const { requireMemberViewer } = await import('@/lib/auth/member-access')
+
+  await requireMemberViewer()
+  const linkedRole = await getMemberLinkedProfileRole(memberId)
+  if (linkedRole !== 'adult_member') return null
+
+  const member = await getMember(memberId)
+  if (!member) return null
+
+  return loadMemberPortalData(member)
+}
+
 export async function getMemberRemainingSessions(memberId: string): Promise<number> {
   const supabase = await createClient()
   const { data } = await supabase

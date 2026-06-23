@@ -8,27 +8,29 @@ import {
   Flag,
   HeartPulse,
   MessageSquareQuote,
+  Route,
   Sparkles,
   Target,
   Timer,
   Trophy,
 } from 'lucide-react'
 import { RunningLeagueMemberReportCard } from '@/components/dashboard/running-league-member-report-card'
+import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
 import { DailyRecoveryForm } from '@/components/running-league/daily-recovery-form'
 import { RecordMeasurementPanel } from '@/components/running-league/record-measurement-panel'
 import { RunningLeagueLeaderboard } from '@/components/running-league/running-league-leaderboard'
+import { Button } from '@/components/ui/button'
 import { saveDailyRecovery } from '@/lib/actions/running-league'
 import { RUNNING_LEAGUE_STATUS_LABELS } from '@/lib/running-league/constants'
-import { goalTypeLabel, memberLevelLabel } from '@/lib/running-league/goals'
 import {
   buildMemberGrowthSnapshot,
   buildMemberRecordAnalysis,
-  formatMemberRankLabel,
-  formatMemberScoreLabel,
+  formatMemberProgressStatus,
+  formatMemberScoreDetail,
   getMemberWeeklyMission,
 } from '@/lib/running-league/member-portal'
 import { dailyRecoveryToFormState } from '@/lib/running-league/recovery'
-import { computeTotalScore, formatScoreDisplay } from '@/lib/running-league/scoring'
+import { computeTotalScore } from '@/lib/running-league/scoring'
 import type {
   RunningLeague,
   RunningLeagueAward,
@@ -36,10 +38,10 @@ import type {
   RunningLeagueParticipant,
   RunningLeagueRecord,
   RunningLeagueReport,
+  RunningLeagueMileageLog,
 } from '@/lib/types'
 import type { RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
 
 interface RunningLeagueMemberViewProps {
   league: RunningLeague | null
@@ -52,7 +54,9 @@ interface RunningLeagueMemberViewProps {
   attendanceCount: number
   myRank: number | null
   leaderboard: RunningLeagueRankRow[]
+  mileageLogs: RunningLeagueMileageLog[]
   tableReady: boolean
+  readOnly?: boolean
 }
 
 function formatDate(value: string): string {
@@ -67,8 +71,45 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
   return (
     <div className="rounded-xl border bg-background/70 px-3 py-3">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
-      {hint ? <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p> : null}
+      <p className="mt-1 break-words text-lg font-semibold leading-snug">{value}</p>
+      {hint ? <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{hint}</p> : null}
+    </div>
+  )
+}
+
+function MileageProgressTile({
+  mileageKm,
+  readOnly = false,
+  onOpenManual,
+}: {
+  mileageKm: number
+  readOnly?: boolean
+  onOpenManual?: () => void
+}) {
+  const empty = mileageKm <= 0
+
+  return (
+    <div className="col-span-2 space-y-2 rounded-xl border bg-background/70 px-3 py-3">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Route className="h-3.5 w-3.5 shrink-0" />
+        <span>누적 거리</span>
+      </div>
+      <p className="text-lg font-semibold">{mileageKm} km</p>
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        {empty ? '이번 달 러닝 기록이 아직 없어요' : '이번 달 누적 거리입니다'}
+      </p>
+      {!readOnly ? (
+        <div className="pt-1">
+          <Button
+            type="button"
+            size="sm"
+            className="min-h-11 w-full"
+            onClick={onOpenManual}
+          >
+            러닝 기록 입력하기
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -114,6 +155,8 @@ function GrowthDashboardCard({
   attendanceCount,
   myRank,
   totalParticipants,
+  readOnly = false,
+  onOpenMileageManual,
 }: {
   participant: RunningLeagueParticipant
   records: RunningLeagueRecord[]
@@ -121,6 +164,8 @@ function GrowthDashboardCard({
   attendanceCount: number
   myRank: number | null
   totalParticipants: number
+  readOnly?: boolean
+  onOpenMileageManual?: () => void
 }) {
   const totalScore = computeTotalScore({
     attendance_score: participant.attendance_score,
@@ -138,6 +183,8 @@ function GrowthDashboardCard({
     attendanceCount,
     totalScore,
   })
+  const scoreDetail = formatMemberScoreDetail(snapshot.totalScore)
+  const progressStatus = formatMemberProgressStatus(snapshot.rank, snapshot.totalParticipants)
 
   return (
     <Card>
@@ -148,23 +195,40 @@ function GrowthDashboardCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="grid grid-cols-2 gap-2">
-          <StatTile label="현재 점수" value={formatMemberScoreLabel(snapshot.totalScore)} />
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <StatTile
-            label="내 위치"
-            value={formatMemberRankLabel(snapshot.rank, snapshot.totalParticipants)}
-            hint="개인 성장 중심으로 확인해주세요"
+            label={scoreDetail.label}
+            value={scoreDetail.value}
+            hint={scoreDetail.hint}
+          />
+          <StatTile
+            label={progressStatus.label}
+            value={progressStatus.value}
+            hint={progressStatus.hint}
           />
           <StatTile
             label="목표 달성률"
             value={snapshot.goalAchievementRate != null ? `${snapshot.goalAchievementRate}%` : '—'}
+            hint="개인 목표 기준으로 계산됩니다"
           />
-          <StatTile label="누적 출석" value={`${snapshot.attendanceCount}회`} />
-          <StatTile label="누적 거리" value={`${snapshot.mileageKm} km`} />
+          <StatTile
+            label="누적 출석"
+            value={`${snapshot.attendanceCount}회`}
+            hint="꾸준한 출석이 점수에 반영됩니다"
+          />
+          <MileageProgressTile
+            mileageKm={snapshot.mileageKm}
+            readOnly={readOnly}
+            onOpenManual={onOpenMileageManual}
+          />
           <StatTile
             label="회복관리"
-            value={`${snapshot.recoveryCheckCount}회 체크`}
-            hint={`스트레칭 ${snapshot.recoveryStretchCount}회`}
+            value={
+              snapshot.recoveryCheckCount > 0
+                ? `${snapshot.recoveryCheckCount}회 체크 완료`
+                : '아직 기록 없음'
+            }
+            hint="꾸준히 기록할수록 점수가 올라갑니다 · 총점에 10% 반영"
           />
         </div>
       </CardContent>
@@ -174,7 +238,7 @@ function GrowthDashboardCard({
 
 function PersonalGoalCard({ participant }: { participant: RunningLeagueParticipant }) {
   return (
-    <Card>
+    <Card id="member-personal-goal">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
           <Target className="h-4 w-4" />
@@ -182,17 +246,7 @@ function PersonalGoalCard({ participant }: { participant: RunningLeagueParticipa
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        {participant.goal_level ? (
-          <p className="text-muted-foreground">
-            레벨 <span className="font-medium text-foreground">{memberLevelLabel(participant.goal_level)}</span>
-          </p>
-        ) : null}
-        {participant.goal_type ? (
-          <p className="text-muted-foreground">
-            유형 <span className="font-medium text-foreground">{goalTypeLabel(participant.goal_type)}</span>
-          </p>
-        ) : null}
-        <p className="rounded-lg border bg-muted/20 px-3 py-2 text-base font-medium">
+        <p className="rounded-lg border bg-muted/20 px-3 py-2 text-base font-medium leading-relaxed">
           {participant.personal_goal || '코치와 함께 개인 목표를 설정해주세요.'}
         </p>
         {participant.goal_achievement_rate != null ? (
@@ -214,7 +268,15 @@ function PersonalGoalCard({ participant }: { participant: RunningLeagueParticipa
   )
 }
 
-function WeeklyMissionCard({ league }: { league: RunningLeague }) {
+function WeeklyMissionCard({
+  league,
+  readOnly = false,
+  onOpenMileage,
+}: {
+  league: RunningLeague
+  readOnly?: boolean
+  onOpenMileage?: () => void
+}) {
   const weekly = getMemberWeeklyMission(league)
   return (
     <Card>
@@ -224,12 +286,31 @@ function WeeklyMissionCard({ league }: { league: RunningLeague }) {
           이번 주 미션
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2 text-sm">
+      <CardContent className="space-y-3 text-sm">
         <p className="font-medium">
           {weekly.weekLabel} · {weekly.title}
         </p>
-        <p className="rounded-lg border bg-muted/15 px-3 py-2">{weekly.mission}</p>
+        <p className="rounded-lg border bg-muted/15 px-3 py-2 leading-relaxed">{weekly.mission}</p>
         <p className="text-xs leading-relaxed text-muted-foreground">{weekly.coachNote}</p>
+        {!readOnly ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button asChild variant="outline" size="sm" className="min-h-11 w-full flex-1 sm:w-auto">
+              <a href="#member-personal-goal">목표 확인하기</a>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-11 w-full flex-1 sm:w-auto"
+              onClick={onOpenMileage}
+            >
+              러닝 기록 입력하기
+            </Button>
+            <Button asChild variant="outline" size="sm" className="min-h-11 w-full flex-1 sm:w-auto">
+              <a href="#member-recovery">회복관리 체크하기</a>
+            </Button>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -267,8 +348,8 @@ function MemberRecordCard({
           distance={recordInfo.distance}
           monthStart={pair.monthStart}
           monthEnd={pair.monthEnd}
-          recordScore={participant.record_score}
           readOnly
+          memberView
         />
       </CardContent>
     </Card>
@@ -314,22 +395,24 @@ function MemberRecoveryCard({
   participant,
   dailyRecoveries,
   todayRecovery,
+  readOnly = false,
 }: {
   participant: RunningLeagueParticipant
   dailyRecoveries: RunningLeagueDailyRecovery[]
   todayRecovery: RunningLeagueDailyRecovery | null
+  readOnly?: boolean
 }) {
   const router = useRouter()
   const today = new Date().toISOString().slice(0, 10)
 
   return (
-    <Card>
+    <Card id="member-recovery">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
           <HeartPulse className="h-4 w-4" />
           오늘 회복관리
         </CardTitle>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs leading-relaxed text-muted-foreground">
           컨디션·통증·스트레칭은 코치만 확인합니다. 순위표에는 공개되지 않습니다.
         </p>
       </CardHeader>
@@ -338,7 +421,8 @@ function MemberRecoveryCard({
           key={todayRecovery?.id ?? `recovery-${today}`}
           initialForm={dailyRecoveryToFormState(todayRecovery)}
           history={dailyRecoveries}
-          recoveryScore={participant.recovery_score}
+          readOnly={readOnly}
+          memberView
           onSave={async (form) => {
             const result = await saveDailyRecovery({
               participant_id: participant.id,
@@ -389,8 +473,15 @@ export function RunningLeagueMemberView({
   attendanceCount,
   myRank,
   leaderboard,
+  mileageLogs,
   tableReady,
+  readOnly = false,
 }: RunningLeagueMemberViewProps) {
+  const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
+
+  const openMileageManual = () => {
+    setMileageDialogOpen(true)
+  }
   if (!tableReady) {
     return (
       <Card>
@@ -430,15 +521,22 @@ export function RunningLeagueMemberView({
             attendanceCount={attendanceCount}
             myRank={myRank}
             totalParticipants={leaderboard.length}
+            readOnly={readOnly}
+            onOpenMileageManual={readOnly ? undefined : openMileageManual}
           />
           <PersonalGoalCard participant={participant} />
-          <WeeklyMissionCard league={league} />
+          <WeeklyMissionCard
+            league={league}
+            readOnly={readOnly}
+            onOpenMileage={readOnly ? undefined : openMileageManual}
+          />
           <MemberRecordCard participant={participant} records={records} />
           <CoachFeedbackCard participant={participant} />
           <MemberRecoveryCard
             participant={participant}
             dailyRecoveries={dailyRecoveries}
             todayRecovery={todayRecovery}
+            readOnly={readOnly}
           />
           <MemberAwardsCard awards={memberAwards} />
           <RunningLeagueMemberReportCard
@@ -455,6 +553,16 @@ export function RunningLeagueMemberView({
           title="참가자 순위 보기"
           highlightMemberId={participant?.member_id ?? null}
           compact
+        />
+      ) : null}
+
+      {participant && !readOnly ? (
+        <MemberMileageLogDialog
+          participant={participant}
+          mileageLogs={mileageLogs}
+          tableReady={tableReady}
+          open={mileageDialogOpen}
+          onOpenChange={setMileageDialogOpen}
         />
       ) : null}
     </div>

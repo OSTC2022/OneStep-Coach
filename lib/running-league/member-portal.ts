@@ -227,6 +227,44 @@ export function formatMemberRankLabel(rank: number | null, total: number): strin
   return `${rank}위 / ${total}명`
 }
 
+export function formatMemberProgressStatus(
+  rank: number | null,
+  total: number,
+): { label: string; value: string; hint: string } {
+  if (total <= 1) {
+    return {
+      label: '내 진행 상태',
+      value: '참여 중',
+      hint: '개인 성장 중심으로 확인해주세요',
+    }
+  }
+  return {
+    label: '내 위치',
+    value: formatMemberRankLabel(rank, total),
+    hint: '꾸준히 참여할수록 점수가 쌓입니다',
+  }
+}
+
+export function formatMemberScoreDetail(score: number): {
+  label: string
+  value: string
+  hint: string
+} {
+  const display = formatScoreDisplay(score)
+  const hint =
+    score < 25
+      ? '아직 챌린지 초반이에요 · 출석·목표·마일리지·회복관리가 반영됩니다'
+      : score < 60
+        ? '꾸준히 참여하며 점수가 쌓이고 있어요'
+        : '잘 하고 있어요 · 회복과 페이스 조절을 이어가세요'
+
+  return {
+    label: '현재 진행 점수',
+    value: `${display}점 / 100점`,
+    hint,
+  }
+}
+
 export function formatMemberScoreLabel(score: number): string {
   return `${formatScoreDisplay(score)}점`
 }

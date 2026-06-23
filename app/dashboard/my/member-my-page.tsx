@@ -30,6 +30,8 @@ interface MemberMyPageProps {
   data: MemberPortalData
   role?: string | null
   runningLeagueHome?: MemberRunningLeagueHome | null
+  adminPreview?: boolean
+  runningLeagueHref?: string
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -104,7 +106,13 @@ function resolveProfileAside(data: MemberPortalData) {
   }
 }
 
-export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProps) {
+export function MemberMyPage({
+  data,
+  role,
+  runningLeagueHome,
+  adminPreview = false,
+  runningLeagueHref = '/dashboard/my/running-league',
+}: MemberMyPageProps) {
   const { member, summary, centerContact, coachContact, sessionStatus } = data
   const isAdultMember = role === 'adult_member'
   const instructorName = member.primary_instructor?.name ?? '자율배정'
@@ -133,69 +141,91 @@ export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProp
 
       <Card className="border-primary/20 bg-primary/5">
         <CardContent className="p-4 sm:p-6">
-          <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">
-            <div className="space-y-1.5">
-              <p className="text-xl font-bold lg:text-2xl">
-                {member.name}
-                {isAdultMember ? '' : ' 선수'}
-              </p>
-              {sportProfile ? (
-                <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
-              ) : null}
-              {member.school ? (
-                <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
-              ) : null}
-              <p className="text-sm text-muted-foreground">
-                담당 코치:{' '}
-                <span className="font-medium text-foreground">{instructorName}</span>
-              </p>
+          {isAdultMember ? (
+            <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)] md:items-start md:gap-0">
+              <div className="space-y-1 md:pr-6">
+                <p className="text-xl font-bold leading-tight lg:text-2xl">{member.name}</p>
+                {sportProfile ? (
+                  <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
+                ) : null}
+                {member.school ? (
+                  <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
+                ) : null}
+                <p className="text-sm text-muted-foreground">
+                  담당 코치:{' '}
+                  <span className="font-medium text-foreground">{instructorName}</span>
+                </p>
+              </div>
+              <div className="md:border-l md:border-border/50 md:px-6">
+                <MemberRunningPbPanel
+                  participant={runningLeagueHome?.participant ?? null}
+                  pbRecords={runningLeagueHome?.pbRecords ?? []}
+                  tableReady={runningLeagueHome?.tableReady ?? true}
+                  readOnly={adminPreview}
+                  variant="embedded"
+                />
+              </div>
+              <div className="md:border-l md:border-border/50 md:pl-6">
+                <MemberMileageLogCard
+                  variant="embedded"
+                  participant={runningLeagueHome?.participant ?? null}
+                  mileageLogs={runningLeagueHome?.mileageLogs ?? []}
+                  tableReady={runningLeagueHome?.tableReady ?? true}
+                  readOnly={adminPreview}
+                />
+              </div>
             </div>
-            <div className="rounded-lg border border-border/50 bg-background/30 px-3.5 py-3 md:border-l md:border-y-0 md:border-r-0 md:bg-transparent md:pl-8">
-              {isAdultMember ? (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <MemberRunningPbPanel
-                    participant={runningLeagueHome?.participant ?? null}
-                    pbRecords={runningLeagueHome?.pbRecords ?? []}
-                    tableReady={runningLeagueHome?.tableReady ?? true}
-                  />
-                  <MemberMileageLogCard
-                    variant="embedded"
-                    participant={runningLeagueHome?.participant ?? null}
-                    mileageLogs={runningLeagueHome?.mileageLogs ?? []}
-                    tableReady={runningLeagueHome?.tableReady ?? true}
-                  />
-                </div>
-              ) : profileAside ? (
-                <>
-                  <p className="text-xs font-medium text-muted-foreground">
-                    {profileAside.label}
-                  </p>
-                  <p
-                    className={cn(
-                      'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
-                      profileAside.valueClassName,
-                    )}
-                  >
-                    {profileAside.value}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
-                  {!sessionStatus.isUsable ? (
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">
+              <div className="space-y-1.5">
+                <p className="text-xl font-bold lg:text-2xl">
+                  {member.name}
+                  {' 선수'}
+                </p>
+                {sportProfile ? (
+                  <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
+                ) : null}
+                {member.school ? (
+                  <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
+                ) : null}
+                <p className="text-sm text-muted-foreground">
+                  담당 코치:{' '}
+                  <span className="font-medium text-foreground">{instructorName}</span>
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/50 bg-background/30 px-3.5 py-3 md:border-l md:border-y-0 md:border-r-0 md:bg-transparent md:pl-8">
+                {profileAside ? (
+                  <>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {profileAside.label}
+                    </p>
+                    <p
+                      className={cn(
+                        'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
+                        profileAside.valueClassName,
+                      )}
                     >
-                      <Link href="/dashboard/my/sessions#lesson-records">
-                        수업권 확인하러 가기
-                        <ChevronRight className="ml-1 h-4 w-4" />
-                      </Link>
-                    </Button>
-                  ) : null}
-                </>
-              ) : null}
+                      {profileAside.value}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
+                    {!sessionStatus.isUsable ? (
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
+                      >
+                        <Link href="/dashboard/my/sessions#lesson-records">
+                          수업권 확인하러 가기
+                          <ChevronRight className="ml-1 h-4 w-4" />
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
@@ -258,8 +288,8 @@ export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProp
                 출석·목표·기록·마일리지·회복관리 점수와 순위를 확인하세요.
               </p>
             </div>
-            <Button asChild className="min-h-11 w-full sm:w-auto">
-              <Link href="/dashboard/my/running-league">
+            <Button asChild className="min-h-11 w-full shrink-0 sm:w-auto">
+              <Link href={runningLeagueHref}>
                 리그 보기
                 <ChevronRight className="ml-1 h-4 w-4" />
               </Link>
@@ -269,38 +299,38 @@ export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProp
       ) : null}
 
       <Card className="border-primary/15">
-        <CardHeader className="pb-2 sm:px-6">
-          <CardTitle className="text-base lg:text-lg">오늘 관리</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 p-4 sm:p-6 sm:pt-0">
-          {summary.todayRecorded ? (
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground lg:text-base">
-                오늘 상태 기록이 완료되었습니다.
-              </p>
-              <p className="text-sm leading-relaxed text-muted-foreground lg:text-base">
-                코치가 훈련 강도와 회복 상태를 확인할 수 있습니다.
-              </p>
-              {summary.todayRecordSummary ? (
-                <p className="text-sm leading-relaxed text-foreground/90">
-                  <span className="font-medium text-foreground">기록 요약: </span>
-                  {summary.todayRecordSummary}
+        <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div className="min-w-0 space-y-2">
+            <p className="text-base font-semibold lg:text-lg">오늘 관리</p>
+            {summary.todayRecorded ? (
+              <>
+                <p className="text-sm font-medium text-foreground lg:text-base">
+                  오늘 상태 기록이 완료되었습니다.
                 </p>
-              ) : null}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground lg:text-base">
-                오늘 컨디션 기록이 아직 없습니다.
-              </p>
-              <p className="text-sm leading-relaxed text-muted-foreground lg:text-base">
-                훈련 전 수면, 피로도, 통증, 식사 상태를 기록해주세요.
-              </p>
-              <p className="text-xs text-muted-foreground">기록 예상 시간: 약 30초</p>
-            </div>
-          )}
+                <p className="text-sm leading-relaxed text-muted-foreground lg:text-base">
+                  코치가 훈련 강도와 회복 상태를 확인할 수 있습니다.
+                </p>
+                {summary.todayRecordSummary ? (
+                  <p className="text-sm leading-relaxed text-foreground/90">
+                    <span className="font-medium text-foreground">기록 요약: </span>
+                    {summary.todayRecordSummary}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-foreground lg:text-base">
+                  오늘 컨디션 기록이 아직 없습니다.
+                </p>
+                <p className="text-sm leading-relaxed text-muted-foreground lg:text-base">
+                  훈련 전 수면, 피로도, 통증, 식사 상태를 기록해주세요.
+                </p>
+                <p className="text-xs text-muted-foreground">기록 예상 시간: 약 30초</p>
+              </>
+            )}
+          </div>
 
-          <Button asChild className="min-h-11 w-full sm:w-auto sm:min-w-[200px]">
+          <Button asChild className="min-h-11 w-full shrink-0 sm:w-auto sm:min-w-[200px]">
             <Link href="/dashboard/my/body#report-top" scroll={false}>
               {summary.todayRecorded ? '오늘 기록 수정하기' : '오늘 상태 기록하기'}
               <ChevronRight className="ml-1 h-4 w-4" />
@@ -309,6 +339,7 @@ export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProp
         </CardContent>
       </Card>
 
+      {!isAdultMember ? (
       <Card className="border-border/70">
         <CardHeader className="pb-2 sm:px-6">
           <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
@@ -361,6 +392,7 @@ export function MemberMyPage({ data, role, runningLeagueHome }: MemberMyPageProp
           ) : null}
         </CardContent>
       </Card>
+      ) : null}
 
       <MemberCenterContactCard coach={coachContact} center={centerContact} />
     </div>

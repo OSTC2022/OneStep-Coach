@@ -38,6 +38,8 @@ interface RecordMeasurementPanelProps {
   saveLabel?: string
   pending?: boolean
   readOnly?: boolean
+  /** 회원 화면: 점수·관리자용 수치 숨김 */
+  memberView?: boolean
 }
 
 export function RecordMeasurementPanel({
@@ -55,6 +57,7 @@ export function RecordMeasurementPanel({
   saveLabel = '기록 저장',
   pending = false,
   readOnly = false,
+  memberView = false,
 }: RecordMeasurementPanelProps) {
   const analysis = useMemo(
     () => analyzeRecordChange(monthStart, monthEnd, distance),
@@ -150,10 +153,12 @@ export function RecordMeasurementPanel({
                 : '—'}
             </p>
           </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">기록 향상 점수</p>
-            <p className="font-medium text-primary">{displayScore}점</p>
-          </div>
+          {!memberView ? (
+            <div>
+              <p className="text-[10px] text-muted-foreground">기록 향상 점수</p>
+              <p className="font-medium text-primary">{displayScore}점</p>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

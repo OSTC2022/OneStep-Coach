@@ -924,6 +924,41 @@ export type MemberAccountEmailInfo = {
   source: 'auth' | 'invite' | null
 }
 
+/** 회원에 연결된 로그인 계정 권한 (성인회원 포털 구분용) */
+export async function getMemberLinkedProfileRole(
+  memberId: string,
+): Promise<import('@/lib/types').ProfileRole | null> {
+  const supabase = await createClient()
+  const { data: member } = await supabase
+    .from('members')
+    .select('auth_user_id, user_id')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  if (!member) return null
+
+  const linkedUserId = member.auth_user_id ?? member.user_id
+  if (!linkedUserId) return null
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', linkedUserId)
+    .maybeSingle()
+
+  const role = profile?.role
+  if (
+    role === 'admin' ||
+    role === 'coach' ||
+    role === 'member' ||
+    role === 'guardian' ||
+    role === 'adult_member'
+  ) {
+    return role
+  }
+  return null
+}
+
 /** 연결된 auth 계정 또는 초대 이메일 조회 */
 export async function getMemberAccountEmail(
   memberId: string,

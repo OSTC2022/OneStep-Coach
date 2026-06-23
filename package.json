@@ -15,7 +15,8 @@
     "generate:splash": "node scripts/generate-pwa-splash.mjs",
     "verify:member-backup": "node scripts/verify-member-backup.mjs",
     "verify:running-league-scoring": "node scripts/verify-running-league-scoring.mjs",
-    "verify:running-screenshot-extraction": "node scripts/verify-running-screenshot-extraction.mjs"
+    "verify:running-screenshot-extraction": "node scripts/verify-running-screenshot-extraction.mjs",
+    "verify:screenshot-fixtures": "npx tsx scripts/test-screenshot-parsing.ts && node scripts/test-screenshot-e2e.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

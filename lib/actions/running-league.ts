@@ -33,7 +33,9 @@ import {
   suggestNextGoal,
   summarizeRecoveryForMember,
 } from '@/lib/running-league/member-portal'
+import { getMemberLinkedProfileRole } from '@/lib/actions/member-account'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
+import { requireMemberViewer } from '@/lib/auth/member-access'
 import type {
   RunningLeague,
   RunningLeagueAward,
@@ -52,7 +54,6 @@ import type {
   RunningLeagueTargetGroup,
 } from '@/lib/types'
 import { revalidatePath } from 'next/cache'
-import { uploadMileageScreenshot } from '@/lib/running-league/mileage-screenshot-storage'
 
 const LEAGUE_SELECT =
   'id, title, description, starts_at, ends_at, status, audience, target_group, board_post_id, created_by, created_at, updated_at'
@@ -311,6 +312,12 @@ function revalidateRunningLeaguePaths(leagueId?: string) {
   revalidatePath('/dashboard/settings/adult-center-board')
   revalidatePath('/dashboard/my/running-league')
   revalidatePath('/dashboard/my')
+}
+
+/** 회원 마일리지 저장 — 회원 화면만 빠르게 갱신 */
+function revalidateMemberMileagePaths() {
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/my/running-league')
 }
 
 function isMissingTableError(error: { code?: string } | null): boolean {
@@ -868,6 +875,7 @@ export async function getMemberRunningLeagueView(): Promise<{
   attendanceCount: number
   myRank: number | null
   leaderboard: RunningLeagueRankRow[]
+  mileageLogs: RunningLeagueMileageLog[]
   tableReady: boolean
 }> {
   const member = await getMemberForCurrentUser()
@@ -883,15 +891,37 @@ export async function getMemberRunningLeagueView(): Promise<{
       attendanceCount: 0,
       myRank: null,
       leaderboard: [],
+      mileageLogs: [],
       tableReady: true,
     }
   }
+  return fetchMemberRunningLeagueView(member.id)
+}
 
+export async function getMemberRunningLeagueViewForStaff(memberId: string) {
+  await assertStaffAdultRunningPortalAccess(memberId)
+  return fetchMemberRunningLeagueView(memberId)
+}
+
+async function fetchMemberRunningLeagueView(memberId: string): Promise<{
+  league: RunningLeague | null
+  participant: RunningLeagueParticipant | null
+  records: RunningLeagueRecord[]
+  dailyRecoveries: RunningLeagueDailyRecovery[]
+  todayRecovery: RunningLeagueDailyRecovery | null
+  memberAwards: RunningLeagueAward[]
+  publishedReport: RunningLeagueReport | null
+  attendanceCount: number
+  myRank: number | null
+  leaderboard: RunningLeagueRankRow[]
+  mileageLogs: RunningLeagueMileageLog[]
+  tableReady: boolean
+}> {
   const supabase = await createClient()
 
   let league: RunningLeague | null = null
   try {
-    league = await resolveMemberLeague(supabase, member.id)
+    league = await resolveMemberLeague(supabase, memberId)
   } catch (error) {
     const code = (error as { code?: string })?.code
     if (code === '42P01') {
@@ -906,6 +936,7 @@ export async function getMemberRunningLeagueView(): Promise<{
         attendanceCount: 0,
         myRank: null,
         leaderboard: [],
+        mileageLogs: [],
         tableReady: false,
       }
     }
@@ -924,6 +955,7 @@ export async function getMemberRunningLeagueView(): Promise<{
       attendanceCount: 0,
       myRank: null,
       leaderboard: [],
+      mileageLogs: [],
       tableReady: true,
     }
   }
@@ -933,7 +965,7 @@ export async function getMemberRunningLeagueView(): Promise<{
       .from('running_league_participants')
       .select(PARTICIPANT_SELECT)
       .eq('league_id', league.id)
-      .eq('member_id', member.id)
+      .eq('member_id', memberId)
       .maybeSingle(),
     supabase
       .from('running_league_participants')
@@ -952,6 +984,7 @@ export async function getMemberRunningLeagueView(): Promise<{
   let todayRecovery: RunningLeagueDailyRecovery | null = null
   let memberAwards: RunningLeagueAward[] = []
   let publishedReport: RunningLeagueReport | null = null
+  let mileageLogs: RunningLeagueMileageLog[] = []
   let attendanceCount = 0
   const today = new Date().toISOString().slice(0, 10)
   const myRankRow = participant
@@ -959,8 +992,14 @@ export async function getMemberRunningLeagueView(): Promise<{
     : null
 
   if (participant) {
-    const [{ data: recordRows }, { data: recoveryRows }, { data: awardRows }, { data: reportRow }] =
-      await Promise.all([
+    const { start, end } = currentMonthDateRange()
+    const [
+      { data: recordRows },
+      { data: recoveryRows },
+      { data: awardRows },
+      { data: reportRow },
+      { data: mileageRows, error: mileageError },
+    ] = await Promise.all([
       supabase
         .from('running_league_records')
         .select(
@@ -984,7 +1023,34 @@ export async function getMemberRunningLeagueView(): Promise<{
         .eq('participant_id', participant.id)
         .eq('is_published', true)
         .maybeSingle(),
+      supabase
+        .from('running_league_mileage_logs')
+        .select(
+          'id, participant_id, league_id, member_id, distance_km, logged_at, source, notes, duration, pace, heart_rate, calories, activity_time, source_app, screenshot_url, image_hash, extraction_confidence, extraction_raw_json, verification_status, created_at, updated_at',
+        )
+        .eq('participant_id', participant.id)
+        .gte('logged_at', start)
+        .lte('logged_at', end)
+        .order('logged_at', { ascending: false })
+        .order('created_at', { ascending: false }),
     ])
+    if (mileageError && isMissingTableError(mileageError)) {
+      return {
+        league,
+        participant,
+        records: [],
+        dailyRecoveries: [],
+        todayRecovery: null,
+        memberAwards: [],
+        publishedReport: null,
+        attendanceCount: 0,
+        myRank: myRankRow?.rank ?? null,
+        leaderboard,
+        mileageLogs: [],
+        tableReady: false,
+      }
+    }
+    mileageLogs = (mileageRows ?? []).map((row) => mapMileageLog(row as Record<string, unknown>))
     records = (recordRows ?? []).map((row) => mapRecord(row as Record<string, unknown>))
     dailyRecoveries = (recoveryRows ?? []).map((row) =>
       mapDailyRecovery(row as Record<string, unknown>),
@@ -1011,6 +1077,7 @@ export async function getMemberRunningLeagueView(): Promise<{
     attendanceCount,
     myRank: myRankRow?.rank ?? null,
     leaderboard,
+    mileageLogs,
     tableReady: true,
   }
 }
@@ -1537,6 +1604,39 @@ async function syncParticipantMileageFromLogs(
   return mileageKm
 }
 
+/** 신규 마일리지 로그 저장 — 월 합산 SELECT 없이 증분 반영 */
+async function addParticipantMileageDelta(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participantId: string,
+  previousKm: number,
+  addedKm: number,
+): Promise<number> {
+  const mileageKm = Math.round((previousKm + addedKm) * 100) / 100
+  const mileageScore = mileageScoreFromKm(mileageKm)
+
+  const { error: updateError } = await supabase
+    .from('running_league_participants')
+    .update({
+      mileage_km: mileageKm,
+      mileage_score: mileageScore,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', participantId)
+
+  if (updateError) throw new Error(updateError.message)
+
+  await syncParticipantTotalScore(supabase, participantId)
+  return mileageKm
+}
+
+async function assertStaffAdultRunningPortalAccess(memberId: string) {
+  await requireMemberViewer()
+  const linkedRole = await getMemberLinkedProfileRole(memberId)
+  if (linkedRole !== 'adult_member') {
+    throw new Error('성인회원으로 분류된 회원만 러닝 포털을 열 수 있습니다.')
+  }
+}
+
 export type MemberRunningLeagueHome = {
   league: RunningLeague | null
   participant: RunningLeagueParticipant | null
@@ -1545,17 +1645,12 @@ export type MemberRunningLeagueHome = {
   tableReady: boolean
 }
 
-export async function getMemberRunningLeagueHome(): Promise<MemberRunningLeagueHome> {
-  const member = await getMemberForCurrentUser()
-  if (!member) {
-    return { league: null, participant: null, pbRecords: [], mileageLogs: [], tableReady: true }
-  }
-
+async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRunningLeagueHome> {
   const supabase = await createClient()
 
   let league: RunningLeague | null = null
   try {
-    league = await resolveMemberLeague(supabase, member.id)
+    league = await resolveMemberLeague(supabase, memberId)
   } catch (error) {
     const code = (error as { code?: string })?.code
     if (code === '42P01') {
@@ -1572,7 +1667,7 @@ export async function getMemberRunningLeagueHome(): Promise<MemberRunningLeagueH
     .from('running_league_participants')
     .select(PARTICIPANT_SELECT)
     .eq('league_id', league.id)
-    .eq('member_id', member.id)
+    .eq('member_id', memberId)
     .maybeSingle()
 
   const participant = myRow ? mapParticipant(myRow as Record<string, unknown>) : null
@@ -1620,6 +1715,21 @@ export async function getMemberRunningLeagueHome(): Promise<MemberRunningLeagueH
   }
 }
 
+export async function getMemberRunningLeagueHomeForStaff(
+  memberId: string,
+): Promise<MemberRunningLeagueHome> {
+  await assertStaffAdultRunningPortalAccess(memberId)
+  return fetchMemberRunningLeagueHome(memberId)
+}
+
+export async function getMemberRunningLeagueHome(): Promise<MemberRunningLeagueHome> {
+  const member = await getMemberForCurrentUser()
+  if (!member) {
+    return { league: null, participant: null, pbRecords: [], mileageLogs: [], tableReady: true }
+  }
+  return fetchMemberRunningLeagueHome(member.id)
+}
+
 export async function saveMemberMileageLog(input: {
   distance_km: number
   logged_at?: string
@@ -1657,11 +1767,10 @@ export async function saveMemberMileageLog(input: {
     return { ok: false, error: '거리(km)를 입력해주세요.' }
   }
 
-  const access = await assertMemberOwnsParticipant(home.participant.id, member.id)
-  if (!access.ok) return access
-
   const loggedAt = input.logged_at ?? new Date().toISOString().slice(0, 10)
   const supabase = await leagueClient()
+  const participant = home.participant
+  const roundedDistance = Math.round(distanceKm * 100) / 100
 
   if (!input.skip_duplicate_check) {
     let duplicateRow: { id: string } | null = null
@@ -1670,8 +1779,8 @@ export async function saveMemberMileageLog(input: {
       const { data } = await supabase
         .from('running_league_mileage_logs')
         .select('id')
-        .eq('member_id', home.participant.member_id)
-        .eq('league_id', home.participant.league_id)
+        .eq('member_id', participant.member_id)
+        .eq('league_id', participant.league_id)
         .eq('image_hash', input.image_hash.trim())
         .limit(1)
         .maybeSingle()
@@ -1680,10 +1789,10 @@ export async function saveMemberMileageLog(input: {
       let query = supabase
         .from('running_league_mileage_logs')
         .select('id')
-        .eq('member_id', home.participant.member_id)
-        .eq('league_id', home.participant.league_id)
+        .eq('member_id', participant.member_id)
+        .eq('league_id', participant.league_id)
         .eq('logged_at', loggedAt)
-        .eq('distance_km', Math.round(distanceKm * 100) / 100)
+        .eq('distance_km', roundedDistance)
 
       if (input.duration?.trim()) {
         query = query.eq('duration', input.duration.trim())
@@ -1703,10 +1812,10 @@ export async function saveMemberMileageLog(input: {
   }
 
   const { error } = await supabase.from('running_league_mileage_logs').insert({
-    participant_id: home.participant.id,
-    league_id: home.participant.league_id,
-    member_id: home.participant.member_id,
-    distance_km: Math.round(distanceKm * 100) / 100,
+    participant_id: participant.id,
+    league_id: participant.league_id,
+    member_id: participant.member_id,
+    distance_km: roundedDistance,
     logged_at: loggedAt,
     source: input.source ?? 'manual',
     notes: input.notes?.trim() ?? '',
@@ -1732,8 +1841,13 @@ export async function saveMemberMileageLog(input: {
   }
 
   try {
-    const mileageKm = await syncParticipantMileageFromLogs(supabase, home.participant.id)
-    revalidateRunningLeaguePaths(home.participant.league_id)
+    const mileageKm = await addParticipantMileageDelta(
+      supabase,
+      participant.id,
+      Number(participant.mileage_km ?? 0),
+      roundedDistance,
+    )
+    revalidateMemberMileagePaths()
     return { ok: true, mileageKm }
   } catch (syncError) {
     return {
@@ -1761,22 +1875,7 @@ export async function saveMemberMileageLogForm(
     return { ok: false, error: '저장 데이터 형식이 올바르지 않습니다.' }
   }
 
-  const screenshot = formData.get('screenshot')
-  if (screenshot instanceof File && screenshot.size > 0) {
-    const member = await getMemberForCurrentUser()
-    const home = await getMemberRunningLeagueHome()
-    if (member && home.participant) {
-      const uploaded = await uploadMileageScreenshot({
-        memberId: member.id,
-        leagueId: home.participant.league_id,
-        file: screenshot,
-      })
-      if (uploaded.url) {
-        payload.screenshot_url = uploaded.url
-      }
-    }
-  }
-
+  // OCR은 클라이언트에서 완료됨 — 저장 시 스크린샷 재업로드 생략(속도)
   return saveMemberMileageLog(payload)
 }
 
@@ -1835,7 +1934,7 @@ export async function updateMemberMileageLog(
     let duplicateQuery = supabase
       .from('running_league_mileage_logs')
       .select('id')
-      .eq('member_id', member.id)
+      .eq('member_id', memberId)
       .eq('league_id', access.log.league_id)
       .eq('logged_at', loggedAt)
       .eq('distance_km', Math.round(distanceKm * 100) / 100)
@@ -1881,7 +1980,7 @@ export async function updateMemberMileageLog(
 
   try {
     const mileageKm = await syncParticipantMileageFromLogs(supabase, access.log.participant_id)
-    revalidateRunningLeaguePaths(access.log.league_id)
+    revalidateMemberMileagePaths()
     return { ok: true, mileageKm }
   } catch (syncError) {
     return {
@@ -1912,7 +2011,7 @@ export async function deleteMemberMileageLog(
 
   try {
     const mileageKm = await syncParticipantMileageFromLogs(supabase, access.log.participant_id)
-    revalidateRunningLeaguePaths(access.log.league_id)
+    revalidateMemberMileagePaths()
     return { ok: true, mileageKm }
   } catch (syncError) {
     return {
@@ -1963,16 +2062,14 @@ export async function saveMemberRunningPb(input: {
   const timeText = input.time_text.trim()
   if (!timeText) return { ok: false, error: '기록을 입력해주세요.' }
 
-  const access = await assertMemberOwnsParticipant(home.participant.id, member.id)
-  if (!access.ok) return access
-
+  const participant = home.participant
   const measuredAt = input.measured_at ?? new Date().toISOString().slice(0, 10)
   const supabase = await leagueClient()
   const { error } = await supabase.from('running_league_records').upsert(
     {
-      participant_id: home.participant.id,
-      league_id: home.participant.league_id,
-      member_id: home.participant.member_id,
+      participant_id: participant.id,
+      league_id: participant.league_id,
+      member_id: participant.member_id,
       distance_event: input.distance_event,
       record_phase: 'other',
       time_text: timeText,
@@ -1990,6 +2087,6 @@ export async function saveMemberRunningPb(input: {
     return { ok: false, error: error.message }
   }
 
-  revalidateRunningLeaguePaths(home.participant.league_id)
+  revalidateMemberMileagePaths()
   return { ok: true }
 }

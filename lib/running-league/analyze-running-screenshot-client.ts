@@ -21,10 +21,8 @@ export async function analyzeRunningScreenshotFile(
   })
 
   try {
-    const [imageHash, ocrResult] = await Promise.all([
-      hashScreenshotFile(file),
-      extractRunningMetricsWithClientOcr(file),
-    ])
+    const ocrResult = await extractRunningMetricsWithClientOcr(file)
+    const imageHash = await hashScreenshotFile(file)
 
     const { extraction, rawText, ocrStatus, width, height } = ocrResult
     const fieldCount = [
@@ -121,9 +119,12 @@ export async function analyzeRunningScreenshotFile(
       ok: false,
       success: false,
       error: message,
-      message,
-      errorCode: 'UNKNOWN_ERROR',
-      error_code: 'unknown',
+      message:
+        message === 'SCREENSHOT_ANALYSIS_TIMEOUT'
+          ? '사진 분석이 지연되고 있어요. 아래에서 직접 입력해 주세요.'
+          : message,
+      errorCode: message === 'SCREENSHOT_ANALYSIS_TIMEOUT' ? 'TIMEOUT' : 'UNKNOWN_ERROR',
+      error_code: message === 'SCREENSHOT_ANALYSIS_TIMEOUT' ? 'timeout' : 'unknown',
       manualInputRequired: true,
     }
   }

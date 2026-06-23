@@ -23,6 +23,8 @@ interface DailyRecoveryFormProps {
   onSave: (form: DailyRecoveryFormState) => Promise<{ ok: boolean; error?: string }>
   readOnly?: boolean
   showOvertrainingGuide?: boolean
+  /** 회원 화면: 원점수 대신 체크 횟수·안내 문구 */
+  memberView?: boolean
 }
 
 function recoveryChoiceTone(
@@ -51,12 +53,19 @@ function recoveryChoiceTone(
 }
 
 function toneClasses(tone: 'good' | 'caution' | 'alert' | null, selected: boolean): string {
-  if (!selected || !tone) {
+  if (!selected) {
     return 'border-border/60 bg-background/40 text-foreground/80 hover:bg-muted/25'
   }
-  if (tone === 'good') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-  if (tone === 'caution') return 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-  return 'border-red-500/50 bg-red-500/10 text-red-300'
+  if (tone === 'good') {
+    return 'border-lime-400/80 bg-lime-400/15 text-lime-100 ring-2 ring-lime-400/35 shadow-sm'
+  }
+  if (tone === 'caution') {
+    return 'border-amber-400/70 bg-amber-500/15 text-amber-100 ring-2 ring-amber-400/30'
+  }
+  if (tone === 'alert') {
+    return 'border-red-500/60 bg-red-500/15 text-red-200 ring-2 ring-red-500/30'
+  }
+  return 'border-lime-400/70 bg-lime-400/10 text-lime-100 ring-2 ring-lime-400/30'
 }
 
 function RecoveryChoiceButtons<K extends string>({
@@ -103,6 +112,7 @@ export function DailyRecoveryForm({
   onSave,
   readOnly = false,
   showOvertrainingGuide = true,
+  memberView = false,
 }: DailyRecoveryFormProps) {
   const [pending, startTransition] = useTransition()
   const [form, setForm] = useState<DailyRecoveryFormState>(initialForm ?? EMPTY_DAILY_RECOVERY_FORM)
@@ -153,11 +163,24 @@ export function DailyRecoveryForm({
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>이번 달 회복 체크 {entryCount}회</span>
-        <span>
-          회복관리 점수 <span className="font-semibold text-primary">{displayScore}</span> / 100
-          <span className="ml-1 text-[10px]">(총점 10%)</span>
-        </span>
+        {memberView ? (
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              {entryCount > 0 ? `${entryCount}회 체크 완료` : '아직 체크 기록이 없어요'}
+            </p>
+            <p className="text-[11px] leading-relaxed">
+              꾸준히 기록할수록 점수가 올라갑니다 · 총점에 10% 반영됩니다
+            </p>
+          </div>
+        ) : (
+          <>
+            <span>이번 달 회복 체크 {entryCount}회</span>
+            <span>
+              회복관리 점수 <span className="font-semibold text-primary">{displayScore}</span> / 100
+              <span className="ml-1 text-[10px]">(총점 10%)</span>
+            </span>
+          </>
+        )}
       </div>
 
       {DAILY_RECOVERY_FIELDS.map((field) => (

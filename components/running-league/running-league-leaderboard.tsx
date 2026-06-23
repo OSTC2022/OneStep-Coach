@@ -92,7 +92,12 @@ export function RunningLeagueLeaderboard({
         >
           <div>
             <p className="text-sm font-medium">{title}</p>
-            <p className="text-xs text-muted-foreground">이름과 총점만 표시됩니다</p>
+            <p className="text-xs text-muted-foreground">
+              참가자의 이름과 총점만 표시됩니다.
+              <span className="mt-0.5 block">
+                통증·컨디션 정보는 공개되지 않습니다.
+              </span>
+            </p>
           </div>
           <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} />
         </button>

@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 const DISTANCE_EVENTS: RunningLeagueDistanceEvent[] = ['1km', '3km', '5km', '10km']
 
@@ -29,13 +30,32 @@ interface MemberRunningPbPanelProps {
   participant: RunningLeagueParticipant | null
   pbRecords: RunningLeagueRecord[]
   tableReady: boolean
+  readOnly?: boolean
+  variant?: 'default' | 'embedded'
+}
+
+function PbSectionLabel({ embedded }: { embedded?: boolean }) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 font-medium leading-none text-muted-foreground',
+        embedded ? 'text-sm' : 'text-xs',
+      )}
+    >
+      {embedded ? <span className="inline-flex h-4 w-4 shrink-0" aria-hidden /> : null}
+      <span>개인 러닝 PB</span>
+    </div>
+  )
 }
 
 export function MemberRunningPbPanel({
   participant,
   pbRecords,
   tableReady,
+  readOnly = false,
+  variant = 'default',
 }: MemberRunningPbPanelProps) {
+  const embedded = variant === 'embedded'
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [open, setOpen] = useState(false)
@@ -78,28 +98,28 @@ export function MemberRunningPbPanel({
 
   if (!tableReady) {
     return (
-      <div>
-        <p className="text-xs font-medium text-muted-foreground">개인 러닝 PB</p>
-        <p className="mt-1 text-sm text-muted-foreground">DB 설정이 필요합니다.</p>
+      <div className={cn(embedded && 'space-y-2')}>
+        <PbSectionLabel embedded={embedded} />
+        <p className="mt-2 text-sm text-muted-foreground">DB 설정이 필요합니다.</p>
       </div>
     )
   }
 
   if (!participant) {
     return (
-      <div>
-        <p className="text-xs font-medium text-muted-foreground">개인 러닝 PB</p>
-        <p className="mt-1 text-sm text-muted-foreground">러닝 리그 참가 후 기록할 수 있습니다.</p>
+      <div className={cn(embedded && 'space-y-2')}>
+        <PbSectionLabel embedded={embedded} />
+        <p className="mt-2 text-sm text-muted-foreground">러닝 리그 참가 후 기록할 수 있습니다.</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-xs font-medium text-muted-foreground">개인 러닝 PB</p>
+    <div className={cn(embedded ? 'space-y-2' : 'space-y-2')}>
+      <PbSectionLabel embedded={embedded} />
       {primaryPb?.time_text ? (
-        <div>
-          <p className="text-lg font-semibold text-primary lg:text-xl">
+        <div className="mt-2">
+          <p className="text-2xl font-bold leading-none text-primary lg:text-3xl">
             {primaryPb.distance_event} {primaryPb.time_text}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -178,7 +198,7 @@ export function MemberRunningPbPanel({
             </Button>
           </div>
         </div>
-      ) : (
+      ) : readOnly ? null : (
         <Button
           type="button"
           variant="outline"

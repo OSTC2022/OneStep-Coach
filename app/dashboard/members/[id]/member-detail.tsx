@@ -31,6 +31,7 @@ import {
 import {
   ArrowLeft,
   Edit,
+  Trophy,
   Calendar,
   Target,
   AlertTriangle,
@@ -92,6 +93,7 @@ interface MemberDetailProps {
   canAddBodyRecord?: boolean
   instructorAccount?: VisibleSnsAccount | null
   centerAccount?: VisibleSnsAccount | null
+  linkedProfileRole?: string | null
 }
 
 function formatPackageDate(value: string | null | undefined) {
@@ -116,6 +118,7 @@ export function MemberDetail({
   canAddBodyRecord = false,
   instructorAccount = null,
   centerAccount = null,
+  linkedProfileRole = null,
 }: MemberDetailProps) {
   const [memberState, setMemberState] = useState(() =>
     mergeMemberWithDetailPatch(member, member.id),
@@ -266,12 +269,22 @@ export function MemberDetail({
           </div>
         </div>
         {canManage ? (
-          <Link href={`/dashboard/members/${memberState.id}/edit`}>
-            <Button>
-              <Edit className="h-4 w-4 mr-2" />
-              수정
-            </Button>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {linkedProfileRole === 'adult_member' ? (
+              <Link href={`/dashboard/members/${memberState.id}/running-portal`}>
+                <Button variant="outline">
+                  <Trophy className="mr-2 h-4 w-4" />
+                  러닝 포털 보기
+                </Button>
+              </Link>
+            ) : null}
+            <Link href={`/dashboard/members/${memberState.id}/edit`}>
+              <Button>
+                <Edit className="h-4 w-4 mr-2" />
+                수정
+              </Button>
+            </Link>
+          </div>
         ) : null}
       </div>
 

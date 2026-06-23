@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -12,6 +12,7 @@ import {
   updateMemberMileageLogForm,
 } from '@/lib/actions/running-league'
 import { analyzeRunningScreenshotFile } from '@/lib/running-league/analyze-running-screenshot-client'
+import { rehydrateScreenshotExtraction, type RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
 import { preloadScreenshotOcrWorker } from '@/lib/running-league/screenshot-ocr-client'
 import { formatDistanceKmInput } from '@/lib/running-analysis/normalize'
 import {
@@ -44,7 +45,26 @@ type MemberMileageLogCardProps = {
   participant: RunningLeagueParticipant | null
   mileageLogs: RunningLeagueMileageLog[]
   tableReady: boolean
-  variant?: 'card' | 'embedded'
+  variant?: 'card' | 'embedded' | 'form-only'
+  readOnly?: boolean
+  /** form-only: 팝업 열림 여부 */
+  active?: boolean
+  onClose?: () => void
+  startWithScreenshot?: boolean
+}
+
+function slimExtractionJson(
+  raw: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!raw) return null
+  const slim: Record<string, unknown> = {}
+  const method = raw.method ?? raw.extraction_method
+  const missing = raw.missing_fields
+  const confidence = raw.confidence ?? raw.extraction_confidence
+  if (method != null) slim.method = method
+  if (missing != null) slim.missing_fields = missing
+  if (confidence != null) slim.confidence = confidence
+  return Object.keys(slim).length > 0 ? slim : null
 }
 
 type AnalysisStatus = 'idle' | 'analyzing' | 'success' | 'partial' | 'failed'
@@ -187,23 +207,44 @@ function applyExtractionToForm(
   extraction: RunningScreenshotExtraction,
   current: MileageFormState,
 ): MileageFormState {
+  const resolved = rehydrateScreenshotExtraction(extraction)
+  const hasDistance = resolved.distance_km != null && resolved.distance_km >= 0.1
+
+  if (!hasDistance) {
+    return {
+      ...current,
+      distanceKm: '',
+      duration: '',
+      pace: '',
+      heartRate: '',
+      calories: '',
+      loggedAt: resolved.activity_date ?? '',
+      activityTime: resolved.activity_time ?? '',
+      sourceApp: resolved.source_app ?? current.sourceApp,
+      extractionConfidence: resolved.confidence,
+      extractionRawJson: resolved.raw_json ?? {
+        method: resolved.extraction_method,
+        missing_fields: resolved.missing_fields,
+      },
+    }
+  }
+
+  const distanceKm = formatDistanceKmInput(resolved.distance_km!)
+
   return {
     ...current,
-    distanceKm:
-      extraction.distance_km != null
-        ? formatDistanceKmInput(extraction.distance_km)
-        : current.distanceKm,
-    duration: extraction.duration ?? current.duration,
-    pace: extraction.pace ?? current.pace,
-    loggedAt: extraction.activity_date ?? current.loggedAt,
-    activityTime: extraction.activity_time ?? current.activityTime,
-    heartRate: extraction.heart_rate != null ? String(extraction.heart_rate) : current.heartRate,
-    calories: extraction.calories != null ? String(extraction.calories) : current.calories,
-    sourceApp: extraction.source_app ?? current.sourceApp,
-    extractionConfidence: extraction.confidence,
-    extractionRawJson: extraction.raw_json ?? {
-      method: extraction.extraction_method,
-      missing_fields: extraction.missing_fields,
+    distanceKm,
+    duration: resolved.duration ?? current.duration,
+    pace: resolved.pace ?? current.pace,
+    loggedAt: resolved.activity_date ?? current.loggedAt,
+    activityTime: resolved.activity_time ?? current.activityTime,
+    heartRate: resolved.heart_rate != null ? String(resolved.heart_rate) : current.heartRate,
+    calories: resolved.calories != null ? String(resolved.calories) : current.calories,
+    sourceApp: resolved.source_app ?? current.sourceApp,
+    extractionConfidence: resolved.confidence,
+    extractionRawJson: resolved.raw_json ?? {
+      method: resolved.extraction_method,
+      missing_fields: resolved.missing_fields,
     },
   }
 }
@@ -363,8 +404,13 @@ export function MemberMileageLogCard({
   mileageLogs,
   tableReady,
   variant = 'card',
+  readOnly = false,
+  active = false,
+  onClose,
+  startWithScreenshot = false,
 }: MemberMileageLogCardProps) {
   const router = useRouter()
+  const isFormOnly = variant === 'form-only'
   const [open, setOpen] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null)
@@ -381,6 +427,8 @@ export function MemberMileageLogCard({
   const [deleting, setDeleting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const screenshotFileRef = useRef<File | null>(null)
+  const analysisGenerationRef = useRef(0)
+  const [fileInputKey, setFileInputKey] = useState(0)
 
   const mileageKm = participant?.mileage_km ?? 0
   const mileageScore = participant?.mileage_score ?? mileageScoreFromKm(mileageKm)
@@ -406,6 +454,19 @@ export function MemberMileageLogCard({
     setFieldHints(EMPTY_FIELD_HINTS)
   }
 
+  useEffect(() => {
+    if (!isFormOnly || !active) return
+    setOpen(true)
+    if (!startWithScreenshot) {
+      resetForm()
+    }
+    if (startWithScreenshot) {
+      const timer = window.setTimeout(() => fileInputRef.current?.click(), 300)
+      return () => window.clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on manual open only
+  }, [isFormOnly, active, startWithScreenshot])
+
   const updateForm = (patch: Partial<MileageFormState>) => {
     setForm((current) => ({ ...current, ...patch }))
   }
@@ -421,12 +482,20 @@ export function MemberMileageLogCard({
     source_app: form.sourceApp || null,
     image_hash: form.imageHash || null,
     extraction_confidence: form.extractionConfidence,
-    extraction_raw_json: form.extractionRawJson,
+    extraction_raw_json: slimExtractionJson(form.extractionRawJson),
     verification_status: screenshotFileRef.current ? 'confirmed' as const : 'manual' as const,
     source: screenshotFileRef.current ? ('import' as const) : ('manual' as const),
     notes: screenshotFileRef.current ? '러닝 앱 스크린샷 인식' : '',
     skip_duplicate_check: skipDuplicateCheck,
   })
+
+  const closeForm = () => {
+    if (isFormOnly) {
+      onClose?.()
+    }
+    setOpen(false)
+    resetForm()
+  }
 
   const submitSave = async (skipDuplicateCheck = false) => {
     const parsedDistance = Number(form.distanceKm)
@@ -436,32 +505,34 @@ export function MemberMileageLogCard({
     }
 
     setSaving(true)
-    const formData = new FormData()
-    formData.append('payload', JSON.stringify(buildSavePayload(skipDuplicateCheck)))
+    try {
+      const formData = new FormData()
+      formData.append('payload', JSON.stringify(buildSavePayload(skipDuplicateCheck)))
 
-    const result = editingLogId
-      ? await updateMemberMileageLogForm(editingLogId, formData)
-      : await (async () => {
-          if (screenshotFileRef.current) {
-            formData.append('screenshot', screenshotFileRef.current, screenshotFileRef.current.name)
-          }
-          return saveMemberMileageLogForm(formData)
-        })()
-    setSaving(false)
+      const result = editingLogId
+        ? await updateMemberMileageLogForm(editingLogId, formData)
+        : await saveMemberMileageLogForm(formData)
 
-    if (!result.ok) {
-      if (result.duplicate) {
-        setDuplicateOpen(true)
+      if (!result.ok) {
+        if (result.duplicate) {
+          setDuplicateOpen(true)
+          return
+        }
+        toast.error(result.error)
         return
       }
-      toast.error(result.error)
-      return
-    }
 
-    toast.success(editingLogId ? '기록이 수정되었습니다.' : `${parsedDistance}km 기록이 저장되었습니다.`)
-    router.refresh()
-    setOpen(false)
-    resetForm()
+      toast.success(
+        editingLogId ? '기록이 수정되었습니다.' : `${parsedDistance}km 기록이 저장되었습니다.`,
+      )
+      closeForm()
+      void router.refresh()
+    } catch (error) {
+      console.error('[mileage-log-card] save failed', error)
+      toast.error('저장 중 오류가 발생했습니다. 다시 시도해주세요.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleEditLog = (log: RunningLeagueMileageLog) => {
@@ -506,6 +577,7 @@ export function MemberMileageLogCard({
   const handleScreenshotChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
+    setFileInputKey((key) => key + 1)
     if (!file) return
 
     if (!file.type.startsWith('image/')) {
@@ -513,17 +585,23 @@ export function MemberMileageLogCard({
       return
     }
 
+    const generation = analysisGenerationRef.current + 1
+    analysisGenerationRef.current = generation
+
     screenshotFileRef.current = file
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     setPreviewUrl(URL.createObjectURL(file))
     setOpen(true)
     setEditingLogId(null)
+    setForm(initialFormState())
     setAnalysisStatus('analyzing')
     setAnalysisMessage(null)
     setFieldHints(EMPTY_FIELD_HINTS)
 
     try {
       const result = await analyzeRunningScreenshotFile(file)
+      if (generation !== analysisGenerationRef.current) return
+
       if (!result.ok) {
         setAnalysisStatus('failed')
         setAnalysisMessage(result.message || result.error)
@@ -538,7 +616,7 @@ export function MemberMileageLogCard({
         return
       }
 
-      const extraction = result.extraction
+      const extraction = rehydrateScreenshotExtraction(result.extraction)
       setFieldHints(buildFieldHints(extraction))
       setForm(
         applyExtractionToForm(extraction, {
@@ -575,8 +653,14 @@ export function MemberMileageLogCard({
         analysis_success: extraction.analysis_success,
       })
     } catch (error) {
+      if (generation !== analysisGenerationRef.current) return
+      const message = error instanceof Error ? error.message : ''
       setAnalysisStatus('failed')
-      setAnalysisMessage(screenshotApiErrorMessage('UNKNOWN_ERROR'))
+      setAnalysisMessage(
+        message === 'SCREENSHOT_ANALYSIS_TIMEOUT'
+          ? '사진 분석이 지연되고 있어요. 아래에서 직접 입력해 주세요.'
+          : screenshotApiErrorMessage('UNKNOWN_ERROR'),
+      )
       setFieldHints(EMPTY_FIELD_HINTS)
       console.error('[mileage-log-card] screenshot analysis threw', {
         error: error instanceof Error ? error.message : String(error),
@@ -585,8 +669,10 @@ export function MemberMileageLogCard({
   }
 
   const embedded = variant === 'embedded'
+  const showForm = isFormOnly ? active : open
 
   if (!tableReady) {
+    if (isFormOnly) return null
     return (
       <div className={embedded ? 'space-y-2' : 'rounded-xl border border-border/60 bg-card p-4 shadow-sm'}>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -599,6 +685,7 @@ export function MemberMileageLogCard({
   }
 
   if (!participant) {
+    if (isFormOnly) return null
     return (
       <div className={embedded ? 'space-y-2' : 'rounded-xl border border-border/60 bg-card p-4 shadow-sm'}>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -610,13 +697,18 @@ export function MemberMileageLogCard({
     )
   }
 
+  if (isFormOnly && !active) return null
+
   return (
     <>
       <div
+        id={isFormOnly ? undefined : 'member-mileage-log'}
         className={cn(
-          embedded ? 'space-y-2' : 'rounded-xl border border-border/60 bg-card p-4 shadow-sm',
+          isFormOnly ? 'space-y-3' : embedded ? 'space-y-2' : 'rounded-xl border border-border/60 bg-card p-4 shadow-sm',
         )}
       >
+        {!isFormOnly ? (
+          <>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Route className="h-4 w-4 shrink-0" />
           <span>월 누적 마일리지</span>
@@ -628,8 +720,11 @@ export function MemberMileageLogCard({
         <p className="text-xs text-muted-foreground">
           마일리지 점수 {mileageScore}점 · {MILEAGE_SCORE_CAP_KM}km 만점
         </p>
+          </>
+        ) : null}
 
         <input
+          key={fileInputKey}
           ref={fileInputRef}
           type="file"
           accept="image/*"
@@ -637,7 +732,7 @@ export function MemberMileageLogCard({
           onChange={handleScreenshotChange}
         />
 
-        {!open ? (
+        {!showForm ? (
           <div className={cn('space-y-2', embedded ? 'pt-1' : 'mt-3')}>
             <div className="flex gap-2">
               <Button
@@ -849,7 +944,7 @@ export function MemberMileageLogCard({
                   <Button
                     type="button"
                     size="sm"
-                    className="h-8 flex-1"
+                    className={cn('flex-1', isFormOnly ? 'min-h-11' : 'h-8')}
                     onClick={() => submitSave(false)}
                     disabled={saving || analysisStatus === 'analyzing'}
                   >
@@ -859,11 +954,8 @@ export function MemberMileageLogCard({
                     type="button"
                     size="sm"
                     variant="ghost"
-                    className="h-8"
-                    onClick={() => {
-                      setOpen(false)
-                      resetForm()
-                    }}
+                    className={cn(isFormOnly ? 'min-h-11' : 'h-8')}
+                    onClick={closeForm}
                     disabled={saving || analysisStatus === 'analyzing'}
                   >
                     닫기

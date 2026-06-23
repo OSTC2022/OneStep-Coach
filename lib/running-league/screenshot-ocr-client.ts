@@ -5,17 +5,26 @@ import {
 } from '@/lib/running-league/screenshot-analysis-ui'
 import {
   buildExtractionFromRaw,
-  parseDurationToSeconds,
-  parsePaceToSecondsPerKm,
   parseRunningMetricsFromText,
+  rehydrateScreenshotExtraction,
+  scoreRunningExtraction,
   type RunningScreenshotExtraction,
 } from '@/lib/running-league/screenshot-extraction'
-import { prepareScreenshotForOcr } from '@/lib/running-league/screenshot-ocr-preprocess-client'
+import {
+  prepareScreenshotOcrPipeline,
+  type OcrImageVariant,
+  type OcrPreprocessResult,
+} from '@/lib/running-league/screenshot-ocr-preprocess-client'
 import { getTesseractBrowserOptions } from '@/lib/running-league/tesseract-browser-config'
 
-const MAX_OCR_MS = 45_000
+/** 전체 분석 예산 (ms) — eng+kor 워커 초기화·보완 OCR 포함 */
+const MAX_OCR_MS = 14_000
+/** variant 1회당 상한 */
+const VARIANT_TIMEOUT_MS = 3_000
+const HIGH_CONFIDENCE_SCORE = 12
 
 let workerPromise: Promise<Worker> | null = null
+let defaultPsm: number | null = null
 
 export function preloadScreenshotOcrWorker(): void {
   void getScreenshotOcrWorker().catch((error) => {
@@ -27,6 +36,7 @@ export function preloadScreenshotOcrWorker(): void {
 
 function resetWorkerPromise() {
   workerPromise = null
+  defaultPsm = null
 }
 
 async function createOcrWorker(langs: string): Promise<Worker> {
@@ -41,6 +51,7 @@ async function createOcrWorker(langs: string): Promise<Worker> {
   })
 
   const worker = await createWorker(langs, 1, options)
+  defaultPsm = PSM.AUTO
   await worker.setParameters({
     tessedit_pageseg_mode: PSM.AUTO,
   })
@@ -75,19 +86,41 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   })
 }
 
-async function recognizeCanvas(canvas: HTMLCanvasElement): Promise<string> {
+async function recognizeVariant(variant: OcrImageVariant): Promise<string> {
+  const worker = await getScreenshotOcrWorker()
+  const { PSM } = await import('tesseract.js')
+
+  const params: Record<string, string | number> = {
+    tessedit_pageseg_mode: variant.psm ?? defaultPsm ?? PSM.AUTO,
+  }
+  if (variant.whitelist) {
+    params.tessedit_char_whitelist = variant.whitelist
+  }
+
+  await worker.setParameters(params)
+
   try {
-    const worker = await getScreenshotOcrWorker()
-    const { data } = await worker.recognize(canvas)
+    const { data } = await worker.recognize(variant.canvas)
     return data.text ?? ''
-  } catch (error) {
-    resetWorkerPromise()
-    throw error
+  } finally {
+    await worker.setParameters({
+      tessedit_pageseg_mode: defaultPsm ?? PSM.AUTO,
+      tessedit_char_whitelist: '',
+    })
   }
 }
 
 function mergeOcrTexts(chunks: string[]): string {
-  return [...new Set(chunks.map((chunk) => chunk.trim()).filter(Boolean))].join('\n')
+  const lines = new Set<string>()
+  for (const chunk of chunks) {
+    for (const line of chunk.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.length >= 2) {
+        lines.add(trimmed)
+      }
+    }
+  }
+  return [...lines].join('\n')
 }
 
 function logOcrText(text: string) {
@@ -96,22 +129,92 @@ function logOcrText(text: string) {
   }
 }
 
+function hasReliableDistance(extraction: RunningScreenshotExtraction | null): boolean {
+  return extraction?.distance_km != null && extraction.distance_km >= 0.5
+}
+
+function pickBetterExtraction(
+  current: RunningScreenshotExtraction | null,
+  candidate: RunningScreenshotExtraction,
+): RunningScreenshotExtraction {
+  const hydratedCandidate = rehydrateScreenshotExtraction(candidate)
+  if (!current) return hydratedCandidate
+
+  const hydratedCurrent = rehydrateScreenshotExtraction(current)
+
+  const currentHasDistance = hasReliableDistance(hydratedCurrent)
+  const candidateHasDistance = hasReliableDistance(hydratedCandidate)
+  if (candidateHasDistance && !currentHasDistance) return hydratedCandidate
+  if (currentHasDistance && !candidateHasDistance) return hydratedCurrent
+
+  return scoreRunningExtraction(hydratedCandidate) >= scoreRunningExtraction(hydratedCurrent)
+    ? hydratedCandidate
+    : hydratedCurrent
+}
+
+function hasGoodEnoughExtraction(extraction: RunningScreenshotExtraction): boolean {
+  const hasDistance = hasReliableDistance(extraction)
+  const secondaryCount = [extraction.duration, extraction.pace, extraction.heart_rate, extraction.calories].filter(
+    (value) => value != null && value !== '',
+  ).length
+  return hasDistance && secondaryCount >= 1
+}
+
 function shouldStopOcrEarly(extraction: RunningScreenshotExtraction): boolean {
   if (hasFullScreenshotExtraction(extraction)) return true
+  if (!hasReliableDistance(extraction)) return false
+  if (hasGoodEnoughExtraction(extraction)) return true
+  return scoreRunningExtraction(extraction) >= HIGH_CONFIDENCE_SCORE
+}
 
-  const durationParts = extraction.duration?.split(':').length ?? 0
-  if (extraction.distance_km != null && durationParts === 3) return true
+function variantTimeoutMs(startedAt: number): number {
+  const remaining = MAX_OCR_MS - (Date.now() - startedAt)
+  if (remaining <= 0) return 0
+  return Math.min(VARIANT_TIMEOUT_MS, remaining)
+}
 
-  if (extraction.distance_km != null && extraction.duration && extraction.pace) {
-    const durSec = parseDurationToSeconds(extraction.duration)
-    const paceSec = parsePaceToSecondsPerKm(extraction.pace)
-    if (durSec != null && paceSec != null && paceSec > 0) {
-      const impliedKm = durSec / paceSec
-      if (extraction.distance_km >= impliedKm * 0.75) return true
+type OcrLoopState = {
+  chunks: string[]
+  bestExtraction: RunningScreenshotExtraction | null
+}
+
+async function runOcrVariants(
+  prepared: Pick<OcrPreprocessResult, 'variants'>,
+  startedAt: number,
+  state: OcrLoopState,
+): Promise<{ stoppedEarly: boolean }> {
+  for (const variant of prepared.variants) {
+    if (Date.now() - startedAt >= MAX_OCR_MS) break
+
+    const timeoutMs = variantTimeoutMs(startedAt)
+    if (timeoutMs <= 0) break
+
+    try {
+      const text = await withTimeout(recognizeVariant(variant), timeoutMs, 'OCR')
+      if (text.trim()) {
+        state.chunks.push(text)
+      }
+    } catch (error) {
+      console.warn('[screenshot-ocr-client] variant recognize failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      continue
+    }
+
+    const combined = mergeOcrTexts(state.chunks)
+    if (!combined) continue
+
+    logOcrText(combined)
+    const parsed = parseRunningMetricsFromText(combined)
+    const extraction = buildExtractionFromRaw(parsed, 'ocr', { raw_text: combined })
+    state.bestExtraction = pickBetterExtraction(state.bestExtraction, extraction)
+
+    if (shouldStopOcrEarly(extraction)) {
+      return { stoppedEarly: true }
     }
   }
 
-  return false
+  return { stoppedEarly: false }
 }
 
 export type ClientOcrExtractionResult = {
@@ -124,45 +227,21 @@ export type ClientOcrExtractionResult = {
 
 export async function extractRunningMetricsWithClientOcr(file: File): Promise<ClientOcrExtractionResult> {
   const startedAt = Date.now()
-  const chunks: string[] = []
+  const state: OcrLoopState = { chunks: [], bestExtraction: null }
 
   try {
-    const prepared = await prepareScreenshotForOcr(file)
+    const pipeline = await prepareScreenshotOcrPipeline(file)
+    const firstPass = await runOcrVariants(pipeline, startedAt, state)
 
-    for (const canvas of prepared.variants) {
-      if (Date.now() - startedAt > MAX_OCR_MS) break
-
-      const remainingMs = Math.max(2000, MAX_OCR_MS - (Date.now() - startedAt))
-      try {
-        const text = await withTimeout(recognizeCanvas(canvas), remainingMs, 'OCR')
-        if (text.trim()) {
-          chunks.push(text)
-        }
-      } catch (error) {
-        console.warn('[screenshot-ocr-client] variant recognize failed', {
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-
-      const combined = mergeOcrTexts(chunks)
-      if (!combined) continue
-
-      logOcrText(combined)
-      const parsed = parseRunningMetricsFromText(combined)
-      const extraction = buildExtractionFromRaw(parsed, 'ocr', { raw_text: combined })
-
-      if (shouldStopOcrEarly(extraction)) {
-        return {
-          extraction,
-          rawText: combined,
-          ocrStatus: 'success',
-          width: prepared.width,
-          height: prepared.height,
-        }
-      }
+    if (
+      !firstPass.stoppedEarly &&
+      !hasReliableDistance(state.bestExtraction) &&
+      Date.now() - startedAt < MAX_OCR_MS
+    ) {
+      await runOcrVariants({ variants: pipeline.supplementVariants }, startedAt, state)
     }
 
-    const rawText = mergeOcrTexts(chunks)
+    const rawText = mergeOcrTexts(state.chunks)
     logOcrText(rawText)
 
     if (!rawText.trim()) {
@@ -170,20 +249,23 @@ export async function extractRunningMetricsWithClientOcr(file: File): Promise<Cl
         extraction: buildExtractionFromRaw({}, 'ocr'),
         rawText: '',
         ocrStatus: 'empty',
-        width: prepared.width,
-        height: prepared.height,
+        width: pipeline.width,
+        height: pipeline.height,
       }
     }
 
     const parsed = parseRunningMetricsFromText(rawText)
     const extraction = buildExtractionFromRaw(parsed, 'ocr', { raw_text: rawText })
+    const finalExtraction = rehydrateScreenshotExtraction(
+      pickBetterExtraction(state.bestExtraction, extraction) ?? extraction,
+    )
 
     return {
-      extraction,
+      extraction: finalExtraction,
       rawText,
-      ocrStatus: hasMinimumScreenshotExtraction(extraction) ? 'success' : 'empty',
-      width: prepared.width,
-      height: prepared.height,
+      ocrStatus: hasMinimumScreenshotExtraction(finalExtraction) ? 'success' : 'empty',
+      width: pipeline.width,
+      height: pipeline.height,
     }
   } catch (error) {
     console.error('[screenshot-ocr-client] pipeline failed', {

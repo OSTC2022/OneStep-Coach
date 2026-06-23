@@ -242,27 +242,36 @@ async function fetchLinkedMemberRow(
   supabase: Awaited<ReturnType<typeof createClient>>,
   authUserId: string,
 ): Promise<Member | null> {
-  const { data, error } = await supabase
+  const { data: basic, error: basicError } = await supabase
     .from('members')
-    .select('*, primary_instructor:instructors(*)')
+    .select('*')
     .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
     .maybeSingle()
 
-  if (error) {
-    console.error('getMemberForCurrentUser:', error.message)
-    const { data: basic, error: basicError } = await supabase
-      .from('members')
-      .select('*')
-      .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
-      .maybeSingle()
-    if (basicError) {
-      console.error('getMemberForCurrentUser basic:', basicError.message)
-      return null
-    }
-    return (basic as Member | null) ?? null
+  if (basicError) {
+    console.error('getMemberForCurrentUser:', basicError.message)
+    return null
   }
 
-  return (data as Member | null) ?? null
+  if (!basic) return null
+
+  const member = basic as Member
+  if (!member.primary_instructor_id) {
+    return member
+  }
+
+  const { data: instructor } = await supabase
+    .from('instructors')
+    .select('id, name')
+    .eq('id', member.primary_instructor_id)
+    .maybeSingle()
+
+  if (!instructor) return member
+
+  return {
+    ...member,
+    primary_instructor: instructor,
+  }
 }
 
 export async function getMemberForCurrentUser(): Promise<Member | null> {

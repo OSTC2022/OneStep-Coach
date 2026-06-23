@@ -1345,18 +1345,20 @@ export async function getLessonSessionsForMember(
 
   const { data, error } = await supabase
     .from('lesson_sessions')
-    .select('*, instructor:instructors(*), lesson:lessons(*)')
+    .select('*')
     .eq('member_id', memberId)
     .order('session_date', { ascending: false })
     .order('checked_in_at', { ascending: false })
     .limit(limit)
 
   if (error) {
-    console.error('getLessonSessionsForMember:', error)
+    if (!isMissingTableError(error.message)) {
+      console.error('getLessonSessionsForMember:', error.message)
+    }
     return []
   }
 
-  return data as LessonSession[]
+  return (data ?? []) as LessonSession[]
 }
 
 export async function getSessionTransactionsForMember(
@@ -1368,18 +1370,20 @@ export async function getSessionTransactionsForMember(
   const { data, error } = await supabase
     .from('session_transactions')
     .select(
-      'id, member_id, session_package_id, lesson_id, instructor_id, delta, balance_after, reason, note, created_at',
+      'id, member_id, session_package_id, lesson_session_id, delta, balance_after, reason, note, created_by, created_at',
     )
     .eq('member_id', memberId)
     .order('created_at', { ascending: false })
     .limit(limit)
 
   if (error) {
-    console.error('getSessionTransactionsForMember:', error)
+    if (!isMissingTableError(error.message)) {
+      console.error('getSessionTransactionsForMember:', error.message)
+    }
     return []
   }
 
-  return data as SessionTransaction[]
+  return (data ?? []) as SessionTransaction[]
 }
 
 export type PastLessonSignatureRow = {

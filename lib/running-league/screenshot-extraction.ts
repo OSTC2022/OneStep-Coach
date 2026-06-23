@@ -166,6 +166,32 @@ function isClockTimeLike(value: string): boolean {
   return hours >= 0 && hours <= 12 && minutes >= 0 && minutes <= 59
 }
 
+/** Apple Fitness 등: 1:13:25가 113:25로 읽히는 OCR 오류 보정 */
+function tryRepairMisreadHmsDuration(duration: string): string | null {
+  const trimmed = duration.trim()
+  const parts = trimmed.split(':')
+  if (parts.length !== 2) return null
+
+  const left = parts[0]
+  const seconds = Number(parts[1])
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 59) return null
+
+  if (left.length === 3) {
+    const hours = Number(left[0])
+    const minutes = Number(left.slice(1))
+    if (hours >= 0 && hours <= 9 && minutes >= 0 && minutes <= 59) {
+      return `${hours}:${pad2(minutes)}:${pad2(seconds)}`
+    }
+  }
+
+  return null
+}
+
+function normalizeDurationCandidate(duration: string): string {
+  const repaired = tryRepairMisreadHmsDuration(duration)
+  return repaired ?? duration
+}
+
 function normalizeComparableTime(value: string): string {
   const match = value.trim().match(/^(\d{1,2}):(\d{2})$/)
   if (!match) return value.trim()
@@ -216,7 +242,7 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
   const normalized = text.replace(/\s+/g, ' ').replace(/[@·|]/g, ' ')
 
   const koreanDateTime = normalized.match(
-    /(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s*[@·])?\s*(?:오전|오후)?\s*(\d{1,2})\s*:\s*(\d{2})/,
+    /(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s*(?:월|화|수|목|금|토|일)(?:요일)?)?(?:\s*[@·])?\s*(?:오전|오후)?\s*(\d{1,2})\s*:\s*(\d{2})/,
   )
   if (koreanDateTime) {
     const month = Number(koreanDateTime[1])
@@ -260,6 +286,19 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
     }
   }
 
+  const monthDay = normalized.match(
+    /(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s*(?:월|화|수|목|금|토|일)(?:요일)?)?/,
+  )
+  if (monthDay) {
+    const month = Number(monthDay[1])
+    const day = Number(monthDay[2])
+    const year = inferYear(month, day, today)
+    return {
+      activity_date: `${year}-${pad2(month)}-${pad2(day)}`,
+      activity_time: null,
+    }
+  }
+
   const slashDate = normalized.match(/\b(\d{1,2})\/(\d{1,2})\b/)
   if (slashDate) {
     const month = Number(slashDate[1])
@@ -277,17 +316,6 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
   if (isoLike) {
     return {
       activity_date: `${isoLike[1]}-${pad2(Number(isoLike[2]))}-${pad2(Number(isoLike[3]))}`,
-      activity_time: null,
-    }
-  }
-
-  const monthDay = normalized.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/)
-  if (monthDay) {
-    const month = Number(monthDay[1])
-    const day = Number(monthDay[2])
-    const year = inferYear(month, day, today)
-    return {
-      activity_date: `${year}-${pad2(month)}-${pad2(day)}`,
       activity_time: null,
     }
   }
@@ -325,11 +353,25 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
 function normalizeOcrTextForParsing(text: string): string {
   let normalized = text.replace(/\r\n/g, '\n')
 
-  // OCR이 소수점 대신 공백을 넣는 경우: "13 50 km" → "13.50 km"
+  // OCR이 소수점 대신 공백을 넣는 경우: "13 50 km" / "12 32 km" → "13.50 km"
   normalized = normalized.replace(
-    /\b(\d{1,2})\s+(\d{2})\s*(km|KM|킬로|키로|k)?\b/gi,
+    /\b(\d{1,3})\s+(\d{2})\s*(km|KM|킬로|키로|k)?\b/gi,
     '$1.$2 $3',
   )
+
+  // Strava: "1 h 8 m" → "1h 8m", "lh 8m" → "1h 8m"
+  normalized = normalized.replace(/\bl\s*h\b/gi, '1h')
+  normalized = normalized.replace(
+    /(\d{1,2})\s*h(?:ours?|r)?\s*(\d{1,2})\s*m(?:in(?:ute)?s?)?/gi,
+    '$1h $2m',
+  )
+
+  // OCR: l/I → 1 (라인 시작·km 앞)
+  normalized = normalized.replace(/\bl(\d{1,2}[.,]\d{1,2})\s*km\b/gi, '1$1 km')
+  normalized = normalized.replace(/\bI(\d{1,2}[.,]\d{1,2})\s*km\b/gi, '1$1 km')
+  normalized = normalized.replace(/\bl(\d{1,2})\.(\d{2})\b/g, '1$1.$2')
+  normalized = normalized.replace(/\bS(\d{1,2}:\d{2})\b/g, '5$1')
+  normalized = normalized.replace(/\bO(\d{1,2}[.,]\d{1,2})\s*km\b/gi, '0$1 km')
 
   // 쉼표 소수: "13,50 km"
   normalized = normalized.replace(/(\d{1,3}),(\d{1,2})\s*(km|KM|킬로)?/gi, '$1.$2 $3')
@@ -346,7 +388,28 @@ function normalizeOcrTextForParsing(text: string): string {
   return normalized.replace(/\s+/g, ' ').replace(/[|]/g, ' ').trim()
 }
 
-/** Garmin 등: 큰 숫자가 라벨(거리) 위에 있는 레이아웃 */
+function scanFragmentForDistanceKm(fragment: string): number | null {
+  const patterns = [
+    /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로|키로)\b/i,
+    /(\d{1,3})\s+(\d{2})\s*(?:km|KM)?\b/i,
+    /(\d{1,3}[.,]\d{1,2})\b/,
+  ]
+
+  for (const pattern of patterns) {
+    const match = fragment.match(pattern)
+    if (!match?.[1]) continue
+    let token = match[1]
+    if (match[2] != null && !match[1].includes('.') && !match[1].includes(',')) {
+      token = `${match[1]}.${match[2]}`
+    }
+    const km = parseKmToken(token)
+    if (isValidDistance(km)) return km
+  }
+
+  return null
+}
+
+/** Garmin(라벨 아래 숫자) · Strava(라벨 위 숫자) 모두 지원 */
 function extractDistanceKmFromMultiline(text: string): number | null {
   const lines = text
     .replace(/\r\n/g, '\n')
@@ -357,42 +420,73 @@ function extractDistanceKmFromMultiline(text: string): number | null {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
-    // "13.50 km 거리" 한 줄
-    const inline = line.match(/(\d{1,2}[.,]\d{1,2})\s*(?:km|KM)?\s*거리/i)
+    const inline = line.match(/(\d{1,3}[.,]\d{1,2})\s*(?:km|KM)?\s*거리/i)
     if (inline?.[1]) {
       const km = parseKmToken(inline[1])
       if (isValidDistance(km)) return km
     }
 
-    if (!/거리|distance/i.test(line)) continue
+    if (!/거리|^distance$/i.test(line)) continue
 
-    // 라벨 위 1~3줄에서 거리 탐색 (Garmin: 13.50 / km / 거리)
     const above = lines.slice(Math.max(0, i - 3), i).join(' ')
-    const abovePatterns = [
-      /(\d{1,2}[.,]\d{1,2})\s*(?:km|KM|킬로|키로)\b/i,
-      /(\d{1,2}[.,]\d{1,2})\s+km\b/i,
-      /(\d{1,2})\s+(\d{2})\s*(?:km|KM)?/i,
-      /(\d{1,2}[.,]\d{1,2})\b/,
-    ]
-    for (const pattern of abovePatterns) {
-      const match = above.match(pattern)
-      if (!match?.[1]) continue
-      let token = match[1]
-      if (match[2] != null && !match[1].includes('.') && !match[1].includes(',')) {
-        token = `${match[1]}.${match[2]}`
-      }
-      const km = parseKmToken(token)
+    const below = lines.slice(i + 1, Math.min(lines.length, i + 4)).join(' ')
+    for (const fragment of [above, below]) {
+      const km = scanFragmentForDistanceKm(fragment)
+      if (km != null) return km
+    }
+  }
+
+  for (const line of lines) {
+    const solo = line.match(/^(\d{1,3}[.,]\d{1,2})\s*(km|KM|킬로|키로)?$/i)
+    if (solo?.[1]) {
+      const km = parseKmToken(solo[1])
       if (isValidDistance(km)) return km
     }
   }
 
-  // 거리만 크게 표시된 단독 줄 (예: "13.50 km")
-  for (const line of lines) {
-    const solo = line.match(/^(\d{1,2}[.,]\d{1,2})\s*(km|KM|킬로|키로)?$/i)
-    if (solo?.[1]) {
-      const km = parseKmToken(solo[1])
-      if (isValidDistance(km) && km >= 1) return km
+  return null
+}
+
+/** Strava 등: 1h 8m, 45m, 1h 8m 30s */
+function parseHumanDurationToken(token: string): string | null {
+  const trimmed = token.trim()
+
+  const hms = trimmed.match(
+    /^(\d{1,2})\s*h(?:ours?|r)?\s*(\d{1,2})\s*m(?:in(?:ute)?s?)?(?:\s*(\d{1,2})\s*s(?:ec(?:ond)?s?)?)?$/i,
+  )
+  if (hms) {
+    const totalSeconds =
+      Number(hms[1]) * 3600 + Number(hms[2]) * 60 + (hms[3] ? Number(hms[3]) : 0)
+    if (totalSeconds >= 60 && totalSeconds <= 24 * 3600) {
+      return formatSecondsAsDuration(totalSeconds)
     }
+  }
+
+  const minutesOnly = trimmed.match(/^(\d{1,3})\s*m(?:in(?:ute)?s?)?$/i)
+  if (minutesOnly) {
+    const minutes = Number(minutesOnly[1])
+    if (minutes >= 15 && minutes <= 600) {
+      return formatSecondsAsDuration(minutes * 60)
+    }
+  }
+
+  return null
+}
+
+function extractHumanDurationFromText(text: string): string | null {
+  const normalized = normalizeOcrTextForParsing(text)
+
+  const labeledPatterns = [
+    /(?:time|elapsed|총\s*시간|total\s*time)[^\d]{0,16}(\d{1,2}\s*h(?:ours?|r)?\s*\d{1,2}\s*m(?:in(?:ute)?s?)?)/i,
+    /(?:time|elapsed|총\s*시간|total\s*time)[^\d]{0,16}(\d{2,3}\s*m(?:in(?:ute)?s?)?)/i,
+    /\b(\d{1,2}\s*h(?:ours?|r)?\s*\d{1,2}\s*m(?:in(?:ute)?s?)?)(?!\s*\/\s*km)/i,
+  ]
+
+  for (const pattern of labeledPatterns) {
+    const match = normalized.match(pattern)
+    if (!match?.[1]) continue
+    const duration = parseHumanDurationToken(match[1].replace(/\s+/g, ' '))
+    if (duration && isValidDuration(duration)) return duration
   }
 
   return null
@@ -410,9 +504,64 @@ function impliedDistanceFromMetrics(
   return isValidDistance(implied) ? implied : null
 }
 
+function impliedDurationFromDistance(
+  distanceKm: number | null | undefined,
+  pace: string | null | undefined,
+): string | null {
+  if (distanceKm == null || !pace) return null
+  const paceSeconds = parsePaceToSecondsPerKm(pace)
+  if (paceSeconds == null || paceSeconds <= 0) return null
+  const totalSeconds = Math.round(distanceKm * paceSeconds)
+  if (totalSeconds < 60 || totalSeconds > 24 * 3600) return null
+  const formatted = formatSecondsAsDuration(totalSeconds)
+  return isValidDuration(formatted) ? formatted : null
+}
+
 function isDistancePlausibleVsImplied(ocrKm: number, impliedKm: number): boolean {
   if (impliedKm <= 0) return true
   return Math.abs(ocrKm - impliedKm) / impliedKm <= 0.22
+}
+
+function isDurationPlausibleVsImplied(ocrDuration: string, impliedDuration: string): boolean {
+  const ocrSeconds = parseDurationToSeconds(ocrDuration)
+  const impliedSeconds = parseDurationToSeconds(impliedDuration)
+  if (ocrSeconds == null || impliedSeconds == null || impliedSeconds <= 0) return true
+  return Math.abs(ocrSeconds - impliedSeconds) / impliedSeconds <= 0.22
+}
+
+/** OCR 결과 품질 점수 — 여러 이미지 변형 중 최적 결과 선택용 */
+export function scoreRunningExtraction(extraction: {
+  distance_km?: number | null
+  duration?: string | null
+  pace?: string | null
+  activity_date?: string | null
+  heart_rate?: number | null
+  calories?: number | null
+}): number {
+  let score = 0
+
+  if (extraction.distance_km != null && extraction.distance_km >= 0.1) score += 4
+  if (extraction.duration) score += 3
+  if (extraction.pace) score += 3
+  if (extraction.activity_date) score += 1
+  if (extraction.heart_rate != null) score += 0.5
+  if (extraction.calories != null) score += 0.5
+
+  if (
+    extraction.distance_km != null &&
+    extraction.distance_km >= 0.1 &&
+    extraction.duration &&
+    extraction.pace
+  ) {
+    const implied = impliedDistanceFromMetrics(extraction.duration, extraction.pace)
+    if (implied != null && isDistancePlausibleVsImplied(extraction.distance_km, implied)) {
+      score += 10
+    } else if (implied != null) {
+      score -= 4
+    }
+  }
+
+  return score
 }
 
 /** OCR이 4.46+43:09를 46.43처럼 합치는 경우 — implied 또는 소수점 오류 보정 */
@@ -447,17 +596,18 @@ function extractDistanceKm(text: string, impliedKm: number | null = null): numbe
   const normalized = normalizeOcrTextForParsing(text)
 
   const labeledPatterns = [
-    // Garmin: 값이 라벨 앞에 옴
-    /(\d{1,2}[.,]\d{1,2})\s*(?:km|KM|킬로|키로)?\s*거리/i,
-    /(\d{1,2}[.,]\d{1,2})\s*(?:km|KM)\b[^가-힣]{0,12}거리/i,
     /(?:거리|distance|총\s*거리|운동\s*거리|total)[^\d]{0,24}(\d{1,3}[.,]\d{1,2})/i,
     /(?:거리|distance|총\s*거리|운동\s*거리|total)[^\d]{0,24}(\d{1,2})(?!\s*[.:]\d)/i,
+    /(\d{1,2}[.,]\d{1,2})\s*(?:km|KM|킬로|키로)?\s*거리/i,
+    /(\d{1,2}[.,]\d{1,2})\s*(?:km|KM)\b[^가-힣]{0,12}거리/i,
     /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로미터|킬로|키로)\b/i,
+    /(\d{1,2}[.,]\d{1,2})(?:km|KM)\b/i,
     /(\d{1,2})\s*(?:km|KM|킬로미터|킬로|키로)\b/i,
     /(?:km|KM)\s*(\d{1,3}[.,]\d{1,2})/i,
     /(?:km|KM)\s*(\d{1,2})\b/i,
     /\b(\d{1,2})\s*[kK]\b/,
     /\b(\d{1,2}[.,]\d{1,2})\s*[kK]\b/,
+    /distance[^\d]{0,12}(\d{1,3}[.,]\d{1,2})/i,
   ]
 
   for (const pattern of labeledPatterns) {
@@ -484,10 +634,10 @@ function extractDistanceKm(text: string, impliedKm: number | null = null): numbe
   }
 
   const looseDecimals: number[] = []
-  const loosePattern = /\b(\d{1,2}[.,]\d{1,2})\b/g
+  const loosePattern = /\b(\d{1,3}[.,]\d{1,2})\b/g
   while ((match = loosePattern.exec(normalized)) !== null) {
     const km = parseKmToken(match[1])
-    if (isValidDistance(km) && km >= 1) looseDecimals.push(km)
+    if (isValidDistance(km) && km >= 0.5) looseDecimals.push(km)
   }
   if (looseDecimals.length > 0) {
     return selectDistanceCandidate(looseDecimals, impliedKm)
@@ -499,10 +649,11 @@ function extractDistanceKm(text: string, impliedKm: number | null = null): numbe
 function extractPace(normalized: string): string | null {
   const pacePatterns = [
     /(\d{1,2}\s*:\s*\d{2})\s*\/\s*km/i,
+    /(\d{1,2})[''′](\d{2})["″]?\s*\/?\s*(?:km|KM)?/i,
     /(\d{1,2})[''′](\d{2})["″]?/i,
-    /(\d{1,2})[''′](\d{2})["″]?\s*(?:\/\s*km)?/i,
     /(?:pace|페이스|평균\s*페이스)[^\d:]{0,12}(\d{1,2}\s*:\s*\d{2})/i,
     /(?:pace|페이스|평균\s*페이스)[^\d'′]{0,12}(\d{1,2})[''′](\d{2})/i,
+    /\b([4-9])(\d{2})["″']\b/,
   ]
 
   for (const pattern of pacePatterns) {
@@ -529,20 +680,34 @@ function extractDurationFromMultiline(text: string, excludeTimes: string[] = [])
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (!/총\s*시간|elapsed|duration|^시간$/i.test(line)) continue
+    if (!/총\s*시간|elapsed|duration|^시간$|^time$/i.test(line)) continue
 
-    const nearby = lines.slice(Math.max(0, i - 2), i + 2).join(' ')
+    const nearby = lines.slice(Math.max(0, i - 2), i + 4).join(' ')
+    const human = nearby.match(
+      /(\d{1,2}\s*h(?:ours?|r)?\s*\d{1,2}\s*m(?:in(?:ute)?s?)?|\d{2,3}\s*m(?:in(?:ute)?s?)?)/i,
+    )
+    if (human?.[1]) {
+      const duration = parseHumanDurationToken(human[1].replace(/\s+/g, ' '))
+      if (
+        duration &&
+        isValidDuration(duration) &&
+        !excludes.has(normalizeComparableTime(duration))
+      ) {
+        return duration
+      }
+    }
+
     const hms = nearby.match(/(\d{1,2}\s*:\s*\d{2}\s*:\s*\d{2})/)
     if (hms?.[1]) {
-      const duration = hms[1].replace(/\s+/g, '')
+      const duration = normalizeDurationCandidate(hms[1].replace(/\s+/g, ''))
       if (isValidDuration(duration) && !excludes.has(normalizeComparableTime(duration))) {
         return duration
       }
     }
 
-    const mmss = nearby.match(/(\d{1,2}\s*:\s*\d{2})(?!\s*:\s*\d{2})/)
+    const mmss = nearby.match(/(\d{2,3}\s*:\s*\d{2})(?!\s*:\s*\d{2})/)
     if (mmss?.[1]) {
-      const duration = mmss[1].replace(/\s+/g, '')
+      const duration = normalizeDurationCandidate(mmss[1].replace(/\s+/g, ''))
       if (
         isValidDuration(duration) &&
         !isClockTimeLike(duration) &&
@@ -575,6 +740,14 @@ function extractDuration(
   const multiline = extractDurationFromMultiline(text, excludeTimes)
   if (multiline) return multiline
 
+  const humanDuration = extractHumanDurationFromText(text)
+  if (
+    humanDuration &&
+    !excludes.has(normalizeComparableTime(humanDuration))
+  ) {
+    return humanDuration
+  }
+
   const normalized = normalizeOcrTextForParsing(text)
 
   const labeledPatterns = [
@@ -586,7 +759,7 @@ function extractDuration(
   for (const pattern of labeledPatterns) {
     const match = normalized.match(pattern)
     if (match?.[1]) {
-      const duration = match[1].replace(/\s+/g, '')
+      const duration = normalizeDurationCandidate(match[1].replace(/\s+/g, ''))
       if (isValidDuration(duration) && !excludes.has(normalizeComparableTime(duration))) {
         return duration
       }
@@ -597,7 +770,7 @@ function extractDuration(
   const durationPattern = /(\d{1,2}\s*:\s*\d{2}\s*:\s*\d{2})/g
   let match: RegExpExecArray | null
   while ((match = durationPattern.exec(normalized)) !== null) {
-    const duration = match[1].replace(/\s+/g, '')
+    const duration = normalizeDurationCandidate(match[1].replace(/\s+/g, ''))
     if (!isValidDuration(duration)) continue
     if (pace && duration === pace) continue
     if (excludes.has(normalizeComparableTime(duration))) continue
@@ -614,7 +787,7 @@ function extractDuration(
   const mmssPattern = /(?<![\d:])(\d{2,3}\s*:\s*\d{2})(?!\s*\/\s*km)/gi
   let mmssMatch: RegExpExecArray | null
   while ((mmssMatch = mmssPattern.exec(normalized)) !== null) {
-    const duration = mmssMatch[1].replace(/\s+/g, '')
+    const duration = normalizeDurationCandidate(mmssMatch[1].replace(/\s+/g, ''))
     if (!isValidDuration(duration)) continue
     if (isClockTimeLike(duration)) continue
     if (pace && duration === pace) continue
@@ -634,6 +807,7 @@ function extractDuration(
 function extractHeartRate(normalized: string): number | null {
   const patterns = [
     /(\d{2,3})\s*(?:bpm|BPM|심박|심박수|avg\s*hr)/i,
+    /(\d{2,3})(?:bpm|BPM)\b/i,
     /(?:심박|심박수|heart|평균\s*심박)[^\d]{0,12}(\d{2,3})/i,
     /(?:avg\.?\s*heart\s*rate|average\s*heart\s*rate)[^\d]{0,8}(\d{2,3})/i,
   ]
@@ -646,12 +820,27 @@ function extractHeartRate(normalized: string): number | null {
     }
   }
 
+  const looseCandidates: number[] = []
+  for (const match of normalized.matchAll(/\b(\d{2,3})\b/g)) {
+    const value = Number(match[1])
+    if (isValidHeartRate(value) && value >= 80 && value <= 200) {
+      looseCandidates.push(value)
+    }
+  }
+  if (looseCandidates.length > 0) {
+    const preferred =
+      looseCandidates.find((value) => value >= 100 && value <= 150) ??
+      looseCandidates.find((value) => value >= 100 && value <= 180)
+    return preferred ?? looseCandidates[0]
+  }
+
   return null
 }
 
 function extractCalories(normalized: string): number | null {
   const patterns = [
     /(\d{2,4})\s*(?:kcal|KCAL|칼로리)/i,
+    /(\d{2,4})(?:kcal|KCAL|cal|CAL)\b/i,
     /(?:칼로리|calories|총\s*칼로리)[^\d]{0,8}(\d{2,4})/i,
     /(\d{2,4})[^\d]{0,16}(?:총\s*칼로리|칼로리)/i,
   ]
@@ -670,6 +859,10 @@ function extractCalories(normalized: string): number | null {
 function reconcileRunningMetrics(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtractionRaw {
   const next: RunningScreenshotExtractionRaw = { ...raw }
 
+  if (next.duration) {
+    next.duration = normalizeDurationCandidate(next.duration)
+  }
+
   if (
     next.duration &&
     next.activity_time &&
@@ -687,9 +880,22 @@ function reconcileRunningMetrics(raw: RunningScreenshotExtractionRaw): RunningSc
   if (impliedKm != null) {
     if (
       next.distance_km == null ||
+      !isValidDistance(next.distance_km) ||
       !isDistancePlausibleVsImplied(next.distance_km, impliedKm)
     ) {
       next.distance_km = impliedKm
+    }
+  }
+
+  if (next.distance_km != null && next.pace != null) {
+    const impliedDuration = impliedDurationFromDistance(next.distance_km, next.pace)
+    if (impliedDuration != null) {
+      if (
+        next.duration == null ||
+        !isDurationPlausibleVsImplied(next.duration, impliedDuration)
+      ) {
+        next.duration = impliedDuration
+      }
     }
   }
 
@@ -815,6 +1021,17 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
     }
   }
 
+  if (distance_km != null && pace != null) {
+    const impliedDuration = impliedDurationFromDistance(distance_km, pace)
+    if (
+      impliedDuration != null &&
+      duration != null &&
+      !isDurationPlausibleVsImplied(duration, impliedDuration)
+    ) {
+      duration = impliedDuration
+    }
+  }
+
   if (
     duration &&
     activity_time &&
@@ -860,6 +1077,27 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
 }
 
 import { enrichExtractionWithAnalysis } from '@/lib/running-league/screenshot-analysis-status'
+
+export function rehydrateScreenshotExtraction(
+  extraction: RunningScreenshotExtraction,
+): RunningScreenshotExtraction {
+  return buildExtractionFromRaw(
+    {
+      distance_km: extraction.distance_km,
+      duration: extraction.duration,
+      pace: extraction.pace,
+      heart_rate: extraction.heart_rate,
+      calories: extraction.calories,
+      activity_date: extraction.activity_date,
+      activity_time: extraction.activity_time,
+      activity_type: extraction.activity_type,
+      source_app: extraction.source_app,
+      confidence: extraction.confidence,
+    },
+    extraction.extraction_method ?? 'ocr',
+    { raw_text: extraction.raw_text, raw_json: extraction.raw_json },
+  )
+}
 
 export function buildExtractionFromRaw(
   raw: RunningScreenshotExtractionRaw,

@@ -8,7 +8,7 @@ import { getMember } from '@/lib/actions/members'
 import { getCenterSettings } from '@/lib/actions/center-settings'
 import { toVisibleSnsAccount } from '@/lib/sns-account'
 import { getMemberBodyRecords } from '@/lib/actions/member-body-records'
-import { getMemberAccountEmail } from '@/lib/actions/member-account'
+import { getMemberAccountEmail, getMemberLinkedProfileRole } from '@/lib/actions/member-account'
 import { getDeletedSessionPackagesCount, getSessionPackages } from '@/lib/actions/sessions'
 import {
   buildLessonSessionNumberMap,
@@ -30,12 +30,13 @@ export default async function MemberDetailPage({
 }) {
   const { canManage, role } = await requireMemberViewer()
   const { id } = await params
-  const [member, packagesResult, trashCount, accountEmailInfo, canEditBasicInfo, centerSettings, canAddBodyRecord] =
+  const [member, packagesResult, trashCount, accountEmailInfo, linkedProfileRole, canEditBasicInfo, centerSettings, canAddBodyRecord] =
     await Promise.all([
     getMember(id),
     getSessionPackages({ memberId: id }),
     getDeletedSessionPackagesCount(id),
     getMemberAccountEmail(id),
+    getMemberLinkedProfileRole(id),
     canEditMemberBasicInfoFor(id),
     getCenterSettings(),
     canAddBodyRecordFor(id),
@@ -148,6 +149,7 @@ export default async function MemberDetailPage({
         canAddBodyRecord={canAddBodyRecord}
         instructorAccount={instructorAccount}
         centerAccount={centerAccount}
+        linkedProfileRole={linkedProfileRole}
       />
     </div>
   )
