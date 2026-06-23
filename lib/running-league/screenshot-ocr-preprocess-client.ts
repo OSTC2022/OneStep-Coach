@@ -74,6 +74,71 @@ function applyContrastAndGrayscale(
   ctx.putImageData(imageData, 0, 0)
 }
 
+function applyDarkModeOcrBoost(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+) {
+  const imageData = ctx.getImageData(0, 0, width, height)
+  const { data } = imageData
+
+  for (let i = 0; i < data.length; i += 4) {
+    let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+    gray = 255 - gray
+    gray = Math.min(255, Math.max(0, (gray - 128) * 2.2 + 128))
+    data[i] = gray
+    data[i + 1] = gray
+    data[i + 2] = gray
+    data[i + 3] = 255
+  }
+
+  ctx.putImageData(imageData, 0, 0)
+}
+
+type CropRegion = {
+  xRatio: number
+  yRatio: number
+  widthRatio: number
+  heightRatio: number
+}
+
+/** Garmin·Strava 등 거리(큰 숫자)가 있는 통계 영역 */
+const DISTANCE_METRIC_REGIONS: CropRegion[] = [
+  { xRatio: 0, yRatio: 0.36, widthRatio: 0.52, heightRatio: 0.14 },
+  { xRatio: 0, yRatio: 0.33, widthRatio: 0.55, heightRatio: 0.22 },
+]
+
+/** 통계 그리드 전체 (거리·페이스·총 시간·칼로리) */
+const METRICS_GRID_REGIONS: CropRegion[] = [
+  { xRatio: 0, yRatio: 0.32, widthRatio: 1, heightRatio: 0.28 },
+  { xRatio: 0, yRatio: 0.46, widthRatio: 0.55, heightRatio: 0.1 },
+]
+
+function cropRegionToCanvas(
+  img: HTMLImageElement,
+  region: CropRegion,
+  enhance: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
+): HTMLCanvasElement {
+  const sx = Math.floor(img.naturalWidth * region.xRatio)
+  const sy = Math.floor(img.naturalHeight * region.yRatio)
+  const sw = Math.max(1, Math.floor(img.naturalWidth * region.widthRatio))
+  const sh = Math.max(1, Math.floor(img.naturalHeight * region.heightRatio))
+  const targetWidth = Math.max(420, sw * 3)
+  const scale = targetWidth / sw
+  const targetHeight = Math.max(80, Math.floor(sh * scale))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) {
+    throw new Error('이미지를 처리하지 못했습니다.')
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight)
+  enhance(ctx, targetWidth, targetHeight)
+  return canvas
+}
+
 function drawToCanvas(
   img: HTMLImageElement,
   width: number,
@@ -120,6 +185,14 @@ export async function prepareScreenshotForOcr(file: File): Promise<OcrPreprocess
     ctx.putImageData(imageData, 0, 0)
   })
 
+  const distanceCrops = DISTANCE_METRIC_REGIONS.map((region) =>
+    cropRegionToCanvas(img, region, applyDarkModeOcrBoost),
+  )
+
+  const metricsCrops = METRICS_GRID_REGIONS.map((region) =>
+    cropRegionToCanvas(img, region, applyDarkModeOcrBoost),
+  )
+
   const bands: HTMLCanvasElement[] = []
   const bandSpecs = [
     { topRatio: 0.05, heightRatio: 0.35 },
@@ -145,6 +218,6 @@ export async function prepareScreenshotForOcr(file: File): Promise<OcrPreprocess
     height,
     originalSize: file.size,
     mimeType: file.type || 'image/jpeg',
-    variants: [grey, inverted, softGrey, ...bands],
+    variants: [...distanceCrops, ...metricsCrops, grey, inverted, softGrey, ...bands],
   }
 }

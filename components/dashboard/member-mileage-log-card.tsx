@@ -344,7 +344,7 @@ function AnalysisSummary({
       <p className="font-medium text-emerald-400">인식된 기록</p>
       <div className="mt-1.5 space-y-0.5 text-muted-foreground">
         {form.distanceKm ? <p className={fieldHints.distanceKm === 'filled' ? 'text-emerald-300' : ''}>거리: {form.distanceKm}km</p> : null}
-        {form.duration ? <p className={fieldHints.duration === 'filled' ? 'text-emerald-300' : ''}>시간: {form.duration}</p> : null}
+        {form.duration ? <p className={fieldHints.duration === 'filled' ? 'text-emerald-300' : ''}>총 시간: {form.duration}</p> : null}
         {form.pace ? <p className={fieldHints.pace === 'filled' ? 'text-emerald-300' : ''}>페이스: {form.pace}/km</p> : null}
         {form.loggedAt ? (
           <p className={fieldHints.loggedAt === 'review' ? 'text-amber-300' : fieldHints.loggedAt === 'filled' ? 'text-emerald-300' : ''}>

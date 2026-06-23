@@ -5,6 +5,8 @@ import {
 } from '@/lib/running-league/screenshot-analysis-ui'
 import {
   buildExtractionFromRaw,
+  parseDurationToSeconds,
+  parsePaceToSecondsPerKm,
   parseRunningMetricsFromText,
   type RunningScreenshotExtraction,
 } from '@/lib/running-league/screenshot-extraction'
@@ -96,7 +98,19 @@ function logOcrText(text: string) {
 
 function shouldStopOcrEarly(extraction: RunningScreenshotExtraction): boolean {
   if (hasFullScreenshotExtraction(extraction)) return true
-  if (extraction.distance_km != null && extraction.duration != null) return true
+
+  const durationParts = extraction.duration?.split(':').length ?? 0
+  if (extraction.distance_km != null && durationParts === 3) return true
+
+  if (extraction.distance_km != null && extraction.duration && extraction.pace) {
+    const durSec = parseDurationToSeconds(extraction.duration)
+    const paceSec = parsePaceToSecondsPerKm(extraction.pace)
+    if (durSec != null && paceSec != null && paceSec > 0) {
+      const impliedKm = durSec / paceSec
+      if (extraction.distance_km >= impliedKm * 0.75) return true
+    }
+  }
+
   return false
 }
 
