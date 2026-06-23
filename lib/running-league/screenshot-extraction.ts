@@ -244,6 +244,14 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
     }
   }
 
+  const slashDateFull = normalized.match(/\b(20\d{2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{1,2})\b/)
+  if (slashDateFull) {
+    return {
+      activity_date: `${slashDateFull[1]}-${pad2(Number(slashDateFull[2]))}-${pad2(Number(slashDateFull[3]))}`,
+      activity_time: null,
+    }
+  }
+
   const isoDate = normalized.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/)
   if (isoDate) {
     return {
@@ -390,7 +398,49 @@ function extractDistanceKmFromMultiline(text: string): number | null {
   return null
 }
 
-function extractDistanceKm(text: string): number | null {
+function impliedDistanceFromMetrics(
+  duration: string | null | undefined,
+  pace: string | null | undefined,
+): number | null {
+  if (!duration || !pace) return null
+  const durationSeconds = parseDurationToSeconds(duration)
+  const paceSeconds = parsePaceToSecondsPerKm(pace)
+  if (durationSeconds == null || paceSeconds == null || paceSeconds <= 0) return null
+  const implied = Math.round((durationSeconds / paceSeconds) * 100) / 100
+  return isValidDistance(implied) ? implied : null
+}
+
+function isDistancePlausibleVsImplied(ocrKm: number, impliedKm: number): boolean {
+  if (impliedKm <= 0) return true
+  return Math.abs(ocrKm - impliedKm) / impliedKm <= 0.22
+}
+
+/** OCR이 4.46+43:09를 46.43처럼 합치는 경우 — implied 또는 소수점 오류 보정 */
+function selectDistanceCandidate(candidates: number[], impliedKm: number | null): number | null {
+  if (candidates.length === 0) return null
+
+  if (impliedKm != null) {
+    return candidates.reduce((best, candidate) =>
+      Math.abs(candidate - impliedKm) <= Math.abs(best - impliedKm) ? candidate : best,
+    )
+  }
+
+  const sorted = [...new Set(candidates)].sort((a, b) => a - b)
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] / sorted[i - 1] >= 4) {
+      return sorted[i - 1]
+    }
+  }
+
+  const plausible = sorted.filter((km) => km >= 0.5 && km <= 42)
+  if (plausible.length > 0) {
+    return plausible[plausible.length - 1]
+  }
+
+  return sorted[sorted.length - 1]
+}
+
+function extractDistanceKm(text: string, impliedKm: number | null = null): number | null {
   const multiline = extractDistanceKmFromMultiline(text)
   if (multiline != null) return multiline
 
@@ -430,7 +480,7 @@ function extractDistanceKm(text: string): number | null {
   }
 
   if (kmValues.length > 0) {
-    return Math.max(...kmValues)
+    return selectDistanceCandidate(kmValues, impliedKm)
   }
 
   const looseDecimals: number[] = []
@@ -440,7 +490,7 @@ function extractDistanceKm(text: string): number | null {
     if (isValidDistance(km) && km >= 1) looseDecimals.push(km)
   }
   if (looseDecimals.length > 0) {
-    return Math.max(...looseDecimals)
+    return selectDistanceCandidate(looseDecimals, impliedKm)
   }
 
   return null
@@ -449,15 +499,17 @@ function extractDistanceKm(text: string): number | null {
 function extractPace(normalized: string): string | null {
   const pacePatterns = [
     /(\d{1,2}\s*:\s*\d{2})\s*\/\s*km/i,
+    /(\d{1,2})[''′](\d{2})["″]?/i,
     /(\d{1,2})[''′](\d{2})["″]?\s*(?:\/\s*km)?/i,
     /(?:pace|페이스|평균\s*페이스)[^\d:]{0,12}(\d{1,2}\s*:\s*\d{2})/i,
+    /(?:pace|페이스|평균\s*페이스)[^\d'′]{0,12}(\d{1,2})[''′](\d{2})/i,
   ]
 
   for (const pattern of pacePatterns) {
     const match = normalized.match(pattern)
     if (match?.[1]) {
       let pace = match[1].replace(/\s+/g, '')
-      if (match[2] != null) {
+      if (match[2] != null && !pace.includes(':')) {
         pace = `${match[1]}:${match[2]}`
       }
       if (isValidPace(pace)) return pace
@@ -477,13 +529,25 @@ function extractDurationFromMultiline(text: string, excludeTimes: string[] = [])
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (!/총\s*시간|elapsed|duration/i.test(line)) continue
+    if (!/총\s*시간|elapsed|duration|^시간$/i.test(line)) continue
 
     const nearby = lines.slice(Math.max(0, i - 2), i + 2).join(' ')
     const hms = nearby.match(/(\d{1,2}\s*:\s*\d{2}\s*:\s*\d{2})/)
     if (hms?.[1]) {
       const duration = hms[1].replace(/\s+/g, '')
       if (isValidDuration(duration) && !excludes.has(normalizeComparableTime(duration))) {
+        return duration
+      }
+    }
+
+    const mmss = nearby.match(/(\d{1,2}\s*:\s*\d{2})(?!\s*:\s*\d{2})/)
+    if (mmss?.[1]) {
+      const duration = mmss[1].replace(/\s+/g, '')
+      if (
+        isValidDuration(duration) &&
+        !isClockTimeLike(duration) &&
+        !excludes.has(normalizeComparableTime(duration))
+      ) {
         return duration
       }
     }
@@ -516,6 +580,7 @@ function extractDuration(
   const labeledPatterns = [
     /(?:총\s*시간|elapsed|total\s*time)[^\d:]{0,16}(\d{1,2}\s*:\s*\d{2}\s*:\s*\d{2})/i,
     /(?:총\s*시간|elapsed|total\s*time)[^\d:]{0,16}(\d{1,2}\s*:\s*\d{2})/i,
+    /(?:^|\s)시간[^\d:]{0,8}(\d{1,2}\s*:\s*\d{2})(?!\s*:\s*\d{2})/i,
   ]
 
   for (const pattern of labeledPatterns) {
@@ -617,22 +682,14 @@ function reconcileRunningMetrics(raw: RunningScreenshotExtractionRaw): RunningSc
     next.duration = null
   }
 
-  const durationSeconds = next.duration ? parseDurationToSeconds(next.duration) : null
-  const paceSeconds = next.pace ? parsePaceToSecondsPerKm(next.pace) : null
+  const impliedKm = impliedDistanceFromMetrics(next.duration, next.pace)
 
-  if (durationSeconds != null && paceSeconds != null && paceSeconds > 0) {
-    const impliedKm = Math.round((durationSeconds / paceSeconds) * 100) / 100
-    if (isValidDistance(impliedKm)) {
-      if (next.distance_km == null || next.distance_km < impliedKm * 0.75) {
-        next.distance_km = impliedKm
-      }
-    }
-  }
-
-  if (durationSeconds != null && paceSeconds != null && next.distance_km != null) {
-    const impliedKm = durationSeconds / paceSeconds
-    if (next.distance_km < impliedKm * 0.6) {
-      next.distance_km = Math.round(impliedKm * 100) / 100
+  if (impliedKm != null) {
+    if (
+      next.distance_km == null ||
+      !isDistancePlausibleVsImplied(next.distance_km, impliedKm)
+    ) {
+      next.distance_km = impliedKm
     }
   }
 
@@ -652,7 +709,8 @@ export function parseRunningMetricsFromText(text: string): RunningScreenshotExtr
 
   result.pace = extractPace(normalized)
   result.duration = extractDuration(text, result.pace ?? null, excludeTimes)
-  result.distance_km = extractDistanceKm(text)
+  const impliedKm = impliedDistanceFromMetrics(result.duration, result.pace)
+  result.distance_km = extractDistanceKm(text, impliedKm)
   result.heart_rate = extractHeartRate(normalized)
   result.calories = extractCalories(normalized)
 
@@ -740,13 +798,20 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
   }
 
   if (distance_km == null && duration != null && pace != null) {
-    const durationSeconds = parseDurationToSeconds(duration)
-    const paceSeconds = parsePaceToSecondsPerKm(pace)
-    if (durationSeconds != null && paceSeconds != null && paceSeconds > 0 && !isClockTimeLike(duration)) {
-      const inferred = Math.round((durationSeconds / paceSeconds) * 100) / 100
-      if (isValidDistance(inferred)) {
-        distance_km = inferred
-      }
+    const inferred = impliedDistanceFromMetrics(duration, pace)
+    if (inferred != null && !isClockTimeLike(duration)) {
+      distance_km = inferred
+    }
+  }
+
+  if (
+    distance_km != null &&
+    duration != null &&
+    pace != null
+  ) {
+    const implied = impliedDistanceFromMetrics(duration, pace)
+    if (implied != null && !isDistancePlausibleVsImplied(distance_km, implied)) {
+      distance_km = implied
     }
   }
 

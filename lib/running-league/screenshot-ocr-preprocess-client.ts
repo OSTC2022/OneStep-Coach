@@ -114,6 +114,11 @@ const METRICS_GRID_REGIONS: CropRegion[] = [
   { xRatio: 0, yRatio: 0.46, widthRatio: 0.55, heightRatio: 0.1 },
 ]
 
+/** Nike Run Club 등 최근 액티비티 한 줄 (거리 | 시간 | 페이스) */
+const RECENT_ACTIVITY_REGIONS: CropRegion[] = [
+  { xRatio: 0, yRatio: 0.2, widthRatio: 1, heightRatio: 0.18 },
+]
+
 function cropRegionToCanvas(
   img: HTMLImageElement,
   region: CropRegion,
@@ -193,6 +198,10 @@ export async function prepareScreenshotForOcr(file: File): Promise<OcrPreprocess
     cropRegionToCanvas(img, region, applyDarkModeOcrBoost),
   )
 
+  const recentActivityCrops = RECENT_ACTIVITY_REGIONS.map((region) =>
+    cropRegionToCanvas(img, region, applyDarkModeOcrBoost),
+  )
+
   const bands: HTMLCanvasElement[] = []
   const bandSpecs = [
     { topRatio: 0.05, heightRatio: 0.35 },
@@ -218,6 +227,6 @@ export async function prepareScreenshotForOcr(file: File): Promise<OcrPreprocess
     height,
     originalSize: file.size,
     mimeType: file.type || 'image/jpeg',
-    variants: [...distanceCrops, ...metricsCrops, grey, inverted, softGrey, ...bands],
+    variants: [...distanceCrops, ...recentActivityCrops, ...metricsCrops, grey, inverted, softGrey, ...bands],
   }
 }
