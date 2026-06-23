@@ -12,15 +12,14 @@ import {
   updateMemberMileageLogForm,
 } from '@/lib/actions/running-league'
 import { analyzeRunningScreenshotFile } from '@/lib/running-league/analyze-running-screenshot-client'
+import { preloadScreenshotOcrWorker } from '@/lib/running-league/screenshot-ocr-client'
 import { formatDistanceKmInput } from '@/lib/running-analysis/normalize'
 import {
   hasMinimumScreenshotExtraction,
   resolveScreenshotAnalysisUi,
 } from '@/lib/running-league/screenshot-analysis-ui'
 import {
-  resolveFailureReasonFromDiagnostics,
   screenshotApiErrorMessage,
-  toScreenshotApiErrorCode,
 } from '@/lib/running-league/screenshot-analysis-errors'
 import type { RunningScreenshotExtraction } from '@/lib/running-league/screenshot-extraction'
 import { MILEAGE_SCORE_CAP_KM, mileageScoreFromKm } from '@/lib/running-league/scoring'
@@ -387,6 +386,10 @@ export function MemberMileageLogCard({
   const mileageScore = participant?.mileage_score ?? mileageScoreFromKm(mileageKm)
 
   useEffect(() => {
+    preloadScreenshotOcrWorker()
+  }, [])
+
+  useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
@@ -545,12 +548,11 @@ export function MemberMileageLogCard({
       )
 
       if (!hasMinimumScreenshotExtraction(extraction)) {
-        const reason = resolveFailureReasonFromDiagnostics(result.diagnostics)
-        setAnalysisStatus('failed')
-        setAnalysisMessage(screenshotApiErrorMessage(toScreenshotApiErrorCode(reason)))
+        const ui = resolveAnalysisUi(extraction)
+        setAnalysisStatus(ui.status)
+        setAnalysisMessage(ui.message)
         console.error('[mileage-log-card] extraction empty after ok response', {
           diagnostics: result.diagnostics,
-          reason,
           extraction,
         })
         return

@@ -53,7 +53,7 @@ export type RunningScreenshotAnalysisDiagnostics = {
   ai_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
   ocr_status: 'skipped' | 'success' | 'empty' | 'failed' | 'timeout'
   field_count: number
-  runtime?: 'vercel' | 'local'
+  runtime?: 'vercel' | 'local' | 'client'
   vercel_env?: string | null
   ocr_supported?: boolean
   openai_http_status?: number | null
@@ -272,6 +272,21 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
     }
   }
 
+  const plainTime = normalized.match(/(?<![\d:])(\d{1,2})\s*:\s*(\d{2})(?!\s*:\s*\d{2})/)
+  if (plainTime) {
+    const hour = Number(plainTime[1])
+    const minute = Number(plainTime[2])
+    const matchIndex = plainTime.index ?? 0
+    const tail = normalized.slice(matchIndex, matchIndex + 20)
+    const looksLikePace = hour <= 7 && /\/\s*km/i.test(tail)
+    if (!looksLikePace && hour <= 23 && minute <= 59 && hour >= 8) {
+      return {
+        activity_date: null,
+        activity_time: `${pad2(hour)}:${pad2(minute)}`,
+      }
+    }
+  }
+
   return { activity_date: null, activity_time: null }
 }
 
@@ -280,6 +295,7 @@ function extractDistanceKm(normalized: string): number | null {
     /(?:거리|distance|총\s*거리|운동\s*거리)[^\d]{0,24}(\d{1,3}[.,]\d{1,2})/i,
     /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로미터|킬로|키로)/i,
     /(?:km|KM)\s*(\d{1,3}[.,]\d{1,2})/i,
+    /\b(\d{1,2})\s*[kK]\b/,
   ]
 
   for (const pattern of labeledPatterns) {
@@ -308,13 +324,17 @@ function extractDistanceKm(normalized: string): number | null {
 function extractPace(normalized: string): string | null {
   const pacePatterns = [
     /(\d{1,2}\s*:\s*\d{2})\s*\/\s*km/i,
+    /(\d{1,2})[''′](\d{2})["″]?\s*(?:\/\s*km)?/i,
     /(?:pace|페이스|평균\s*페이스)[^\d:]{0,12}(\d{1,2}\s*:\s*\d{2})/i,
   ]
 
   for (const pattern of pacePatterns) {
     const match = normalized.match(pattern)
     if (match?.[1]) {
-      const pace = match[1].replace(/\s+/g, '')
+      let pace = match[1].replace(/\s+/g, '')
+      if (match[2] != null) {
+        pace = `${match[1]}:${match[2]}`
+      }
       if (isValidPace(pace)) return pace
     }
   }
@@ -352,13 +372,33 @@ function extractDuration(normalized: string, pace: string | null): string | null
     )[0]
   }
 
+  const mmssCandidates: string[] = []
+  const mmssPattern = /(?<![\d:])(\d{2,3}\s*:\s*\d{2})(?!\s*\/\s*km)/gi
+  let mmssMatch: RegExpExecArray | null
+  while ((mmssMatch = mmssPattern.exec(normalized)) !== null) {
+    const duration = mmssMatch[1].replace(/\s+/g, '')
+    if (!isValidDuration(duration)) continue
+    if (pace && duration === pace) continue
+    const seconds = parseDurationToSeconds(duration)
+    if (seconds != null && seconds >= 600) {
+      mmssCandidates.push(duration)
+    }
+  }
+
+  if (mmssCandidates.length > 0) {
+    return mmssCandidates.sort(
+      (a, b) => (parseDurationToSeconds(b) ?? 0) - (parseDurationToSeconds(a) ?? 0),
+    )[0]
+  }
+
   return null
 }
 
 function extractHeartRate(normalized: string): number | null {
   const patterns = [
     /(\d{2,3})\s*(?:bpm|BPM|심박|심박수|avg\s*hr)/i,
-    /(?:심박|심박수|heart)[^\d]{0,8}(\d{2,3})/i,
+    /(?:심박|심박수|heart|평균\s*심박)[^\d]{0,12}(\d{2,3})/i,
+    /(?:avg\.?\s*heart\s*rate|average\s*heart\s*rate)[^\d]{0,8}(\d{2,3})/i,
   ]
 
   for (const pattern of patterns) {

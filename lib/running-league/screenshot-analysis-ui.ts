@@ -3,16 +3,43 @@ import type { RunningScreenshotExtraction } from '@/lib/running-league/screensho
 export type ScreenshotAnalysisUiStatus = 'success' | 'partial' | 'failed'
 
 export const SCREENSHOT_ANALYSIS_MESSAGES = {
-  success: '스크린샷을 자동으로 인식했어요.',
+  success: '기록을 자동으로 인식했어요. 틀린 항목이 있으면 수정해 주세요.',
   partial: '일부 기록을 인식했어요. 빠진 항목만 확인해 주세요.',
-  failed: '스크린샷 자동 인식에 실패했어요. 아래 기록을 직접 입력해 주세요.',
+  failed: '자동 인식이 어려워요. 아래 기록을 직접 입력해 주세요.',
 } as const
 
+function countRecognizedFields(
+  extraction: Pick<
+    RunningScreenshotExtraction,
+    'distance_km' | 'duration' | 'pace' | 'heart_rate' | 'calories' | 'activity_date' | 'activity_time'
+  >,
+): number {
+  return [
+    extraction.distance_km,
+    extraction.duration,
+    extraction.pace,
+    extraction.heart_rate,
+    extraction.calories,
+    extraction.activity_date,
+    extraction.activity_time,
+  ].filter((value) => value != null && value !== '').length
+}
+
 export function hasMinimumScreenshotExtraction(
-  extraction: Pick<RunningScreenshotExtraction, 'distance_km' | 'duration' | 'raw_json'>,
+  extraction: Pick<
+    RunningScreenshotExtraction,
+    | 'distance_km'
+    | 'duration'
+    | 'pace'
+    | 'heart_rate'
+    | 'calories'
+    | 'activity_date'
+    | 'activity_time'
+    | 'raw_json'
+  >,
 ): boolean {
   if (extraction.raw_json?.success === true) return true
-  return extraction.distance_km != null && Boolean(extraction.duration)
+  return countRecognizedFields(extraction) >= 1
 }
 
 export function hasFullScreenshotExtraction(
