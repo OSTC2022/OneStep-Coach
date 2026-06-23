@@ -10,6 +10,19 @@ import {
   recommendRunningLeagueAwards,
   type RunningLeagueAwardSlot,
 } from '@/lib/running-league/awards'
+import { buildPbDistanceLeaderboard, type PbDistanceLeaderboard } from '@/lib/running-league/pb-leaderboard'
+import {
+  filterParticipantsForAdultRunningLeague,
+  filterRecordsForAdultParticipants,
+} from '@/lib/running-league/adult-running-eligibility'
+import {
+  buildMileageDistanceLeaderboard,
+  sumMileageLogsKm,
+  type MileageDistanceLeaderboard,
+} from '@/lib/running-league/mileage-leaderboard'
+import { currentMonthDateRange } from '@/lib/running-league/month-range'
+import { resolveAdultRunningMemberIds } from '@/lib/running-league/resolve-adult-running-member-ids'
+import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import {
   attendanceScoreFromLessonCounts,
   buildLeaderboard,
@@ -17,6 +30,7 @@ import {
   computeTotalScore,
   goalScoreFromAchievementRate,
   mileageScoreFromKm,
+  parseRunningTimeToSeconds,
   recordImprovementScoreFromTimes,
   recoveryScoreFromChecks,
   type RunningLeagueRankRow,
@@ -59,7 +73,7 @@ const LEAGUE_SELECT =
   'id, title, description, starts_at, ends_at, status, audience, target_group, board_post_id, created_by, created_at, updated_at'
 
 const PARTICIPANT_SELECT =
-  'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone)'
+  'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone, gender)'
 
 function mapLeague(row: Record<string, unknown>): RunningLeague {
   return {
@@ -87,6 +101,7 @@ function mapParticipant(row: Record<string, unknown>): RunningLeagueParticipant 
           name: String((memberRaw as Record<string, unknown>).name ?? ''),
           sport: ((memberRaw as Record<string, unknown>).sport as string | null) ?? null,
           phone: ((memberRaw as Record<string, unknown>).phone as string | null) ?? null,
+          gender: normalizeMemberGender((memberRaw as Record<string, unknown>).gender),
         }
       : null
 
@@ -976,7 +991,12 @@ async function fetchMemberRunningLeagueView(memberId: string): Promise<{
   const participants = (allRows ?? []).map((row) =>
     mapParticipant(row as Record<string, unknown>),
   )
-  const leaderboard = buildLeaderboard(participants)
+  const adultMemberIds = await resolveAdultRunningMemberIds(
+    supabase,
+    participants.map((row) => row.member_id),
+  )
+  const adultParticipants = filterParticipantsForAdultRunningLeague(participants, adultMemberIds)
+  const leaderboard = buildLeaderboard(adultParticipants)
   const participant = myRow ? mapParticipant(myRow as Record<string, unknown>) : null
 
   let records: RunningLeagueRecord[] = []
@@ -1094,6 +1114,7 @@ export async function upsertRunningLeagueRecord(input: {
   await requireRole(['admin'])
   const timeText = input.time_text.trim()
   if (!timeText) return { ok: false, error: '기록을 입력해주세요.' }
+  const timeSeconds = parseRunningTimeToSeconds(timeText)
 
   const supabase = await leagueClient()
   const { error } = await supabase.from('running_league_records').upsert(
@@ -1104,6 +1125,7 @@ export async function upsertRunningLeagueRecord(input: {
       distance_event: input.distance_event,
       record_phase: input.record_phase,
       time_text: timeText,
+      time_seconds: timeSeconds,
       measured_at: input.measured_at ?? new Date().toISOString().slice(0, 10),
       updated_at: new Date().toISOString(),
     },
@@ -1531,18 +1553,6 @@ export async function publishRunningLeagueReport(
   return { ok: true }
 }
 
-function currentMonthDateRange(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
-  const monthText = String(month).padStart(2, '0')
-  const lastDay = new Date(year, month, 0).getDate()
-  return {
-    start: `${year}-${monthText}-01`,
-    end: `${year}-${monthText}-${String(lastDay).padStart(2, '0')}`,
-  }
-}
-
 async function assertMemberOwnsParticipant(
   participantId: string,
   memberId: string,
@@ -1583,10 +1593,7 @@ async function syncParticipantMileageFromLogs(
 
   if (error) throw new Error(error.message)
 
-  const mileageKm = (data ?? []).reduce(
-    (sum, row) => sum + Number(row.distance_km ?? 0),
-    0,
-  )
+  const mileageKm = sumMileageLogsKm(data ?? [])
   const mileageScore = mileageScoreFromKm(mileageKm)
 
   const { error: updateError } = await supabase
@@ -1637,16 +1644,60 @@ async function assertStaffAdultRunningPortalAccess(memberId: string) {
   }
 }
 
+export type MemberRunningLeagueRankingBundle = {
+  participants: RunningLeagueParticipant[]
+  pbRecords: RunningLeagueRecord[]
+  mileageLogs: RunningLeagueMileageLog[]
+}
+
 export type MemberRunningLeagueHome = {
   league: RunningLeague | null
   participant: RunningLeagueParticipant | null
   pbRecords: RunningLeagueRecord[]
   mileageLogs: RunningLeagueMileageLog[]
+  pb5kLeaderboard: PbDistanceLeaderboard
+  pb10kLeaderboard: PbDistanceLeaderboard
+  pbHalfLeaderboard: PbDistanceLeaderboard
+  pbFullLeaderboard: PbDistanceLeaderboard
+  mileageLeaderboard: MileageDistanceLeaderboard
+  scoreLeaderboard: RunningLeagueRankRow[]
+  rankingBundle: MemberRunningLeagueRankingBundle | null
   tableReady: boolean
+  rankingsError: string | null
 }
+
+const EMPTY_MILEAGE_LEADERBOARD: MileageDistanceLeaderboard = { ranked: [], unranked: [] }
+
+const EMPTY_PB_LEADERBOARD: PbDistanceLeaderboard = { ranked: [], unranked: [] }
+
+const EMPTY_SCORE_LEADERBOARD: RunningLeagueRankRow[] = []
+
+function emptyMemberRunningLeagueHome(
+  overrides: Partial<MemberRunningLeagueHome> = {},
+): MemberRunningLeagueHome {
+  return {
+    league: null,
+    participant: null,
+    pbRecords: [],
+    mileageLogs: [],
+    pb5kLeaderboard: EMPTY_PB_LEADERBOARD,
+    pb10kLeaderboard: EMPTY_PB_LEADERBOARD,
+    pbHalfLeaderboard: EMPTY_PB_LEADERBOARD,
+    pbFullLeaderboard: EMPTY_PB_LEADERBOARD,
+    mileageLeaderboard: EMPTY_MILEAGE_LEADERBOARD,
+    scoreLeaderboard: EMPTY_SCORE_LEADERBOARD,
+    rankingBundle: null,
+    tableReady: true,
+    rankingsError: null,
+    ...overrides,
+  }
+}
+
+const RANKINGS_LOAD_ERROR = '데이터를 불러오지 못했습니다. 다시 시도해주세요.'
 
 async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRunningLeagueHome> {
   const supabase = await createClient()
+  let rankingsError: string | null = null
 
   let league: RunningLeague | null = null
   try {
@@ -1654,29 +1705,147 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
   } catch (error) {
     const code = (error as { code?: string })?.code
     if (code === '42P01') {
-      return { league: null, participant: null, pbRecords: [], mileageLogs: [], tableReady: false }
+      return emptyMemberRunningLeagueHome({ tableReady: false })
     }
-    throw error
+    console.error('fetchMemberRunningLeagueHome.resolveMemberLeague', error)
+    return emptyMemberRunningLeagueHome({ rankingsError: RANKINGS_LOAD_ERROR })
   }
 
   if (!league) {
-    return { league: null, participant: null, pbRecords: [], mileageLogs: [], tableReady: true }
-  }
-
-  const { data: myRow } = await supabase
-    .from('running_league_participants')
-    .select(PARTICIPANT_SELECT)
-    .eq('league_id', league.id)
-    .eq('member_id', memberId)
-    .maybeSingle()
-
-  const participant = myRow ? mapParticipant(myRow as Record<string, unknown>) : null
-  if (!participant) {
-    return { league, participant: null, pbRecords: [], mileageLogs: [], tableReady: true }
+    return emptyMemberRunningLeagueHome()
   }
 
   const { start, end } = currentMonthDateRange()
-  const [recordResult, mileageResult] = await Promise.all([
+
+  let pb5kLeaderboard = EMPTY_PB_LEADERBOARD
+  let pb10kLeaderboard = EMPTY_PB_LEADERBOARD
+  let pbHalfLeaderboard = EMPTY_PB_LEADERBOARD
+  let pbFullLeaderboard = EMPTY_PB_LEADERBOARD
+  let mileageLeaderboard = EMPTY_MILEAGE_LEADERBOARD
+  let scoreLeaderboard = EMPTY_SCORE_LEADERBOARD
+  let rankingBundle: MemberRunningLeagueRankingBundle | null = null
+  let participant: RunningLeagueParticipant | null = null
+
+  try {
+    const [myResult, allParticipantsResult, leaguePbRecordsResult, leagueMileageLogsResult] =
+      await Promise.all([
+        supabase
+          .from('running_league_participants')
+          .select(PARTICIPANT_SELECT)
+          .eq('league_id', league.id)
+          .eq('member_id', memberId)
+          .maybeSingle(),
+        supabase
+          .from('running_league_participants')
+          .select(PARTICIPANT_SELECT)
+          .eq('league_id', league.id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('running_league_records')
+          .select(
+            'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, time_seconds, measured_at, created_at, updated_at',
+          )
+          .eq('league_id', league.id)
+          .in('distance_event', ['5km', '10km', 'half', 'full']),
+        supabase
+          .from('running_league_mileage_logs')
+          .select('id, participant_id, league_id, member_id, distance_km, logged_at')
+          .eq('league_id', league.id)
+          .gte('logged_at', start)
+          .lte('logged_at', end),
+      ])
+
+    if (isMissingTableError(allParticipantsResult.error)) {
+      return emptyMemberRunningLeagueHome({ league, tableReady: false })
+    }
+
+    participant = myResult.data
+      ? mapParticipant(myResult.data as Record<string, unknown>)
+      : null
+
+    if (allParticipantsResult.error) {
+      console.error('fetchMemberRunningLeagueHome.participants', allParticipantsResult.error)
+      rankingsError = RANKINGS_LOAD_ERROR
+    } else {
+      const participants = (allParticipantsResult.data ?? []).map((row) =>
+        mapParticipant(row as Record<string, unknown>),
+      )
+
+      try {
+        const adultMemberIds = await resolveAdultRunningMemberIds(
+          supabase,
+          participants.map((row) => row.member_id),
+        )
+        const adultParticipants = filterParticipantsForAdultRunningLeague(participants, adultMemberIds)
+        const adultParticipantIds = new Set(adultParticipants.map((row) => row.id))
+
+        const leaguePbRecordsAll = filterRecordsForAdultParticipants(
+          (leaguePbRecordsResult.error && !isMissingTableError(leaguePbRecordsResult.error)
+            ? []
+            : (leaguePbRecordsResult.data ?? [])
+          ).map((row) => mapRecord(row as Record<string, unknown>)),
+          adultParticipantIds,
+        )
+        if (leaguePbRecordsResult.error && !isMissingTableError(leaguePbRecordsResult.error)) {
+          console.error('fetchMemberRunningLeagueHome.pbRecords', leaguePbRecordsResult.error)
+          rankingsError = RANKINGS_LOAD_ERROR
+        }
+
+        const leaguePbRecords = leaguePbRecordsAll.filter((row) => row.record_phase === 'other')
+
+        const leagueMileageLogs = filterRecordsForAdultParticipants(
+          (leagueMileageLogsResult.error && !isMissingTableError(leagueMileageLogsResult.error)
+            ? []
+            : (leagueMileageLogsResult.data ?? [])
+          ).map((row) => mapMileageLog(row as Record<string, unknown>)),
+          adultParticipantIds,
+        )
+        if (leagueMileageLogsResult.error && !isMissingTableError(leagueMileageLogsResult.error)) {
+          console.error('fetchMemberRunningLeagueHome.mileageLogs', leagueMileageLogsResult.error)
+          rankingsError = RANKINGS_LOAD_ERROR
+        }
+
+        pb5kLeaderboard = buildPbDistanceLeaderboard(adultParticipants, leaguePbRecords, '5km')
+        pb10kLeaderboard = buildPbDistanceLeaderboard(adultParticipants, leaguePbRecords, '10km')
+        pbHalfLeaderboard = buildPbDistanceLeaderboard(adultParticipants, leaguePbRecords, 'half')
+        pbFullLeaderboard = buildPbDistanceLeaderboard(adultParticipants, leaguePbRecords, 'full')
+        mileageLeaderboard = buildMileageDistanceLeaderboard(adultParticipants, leagueMileageLogs)
+        scoreLeaderboard = buildLeaderboard(adultParticipants)
+        rankingBundle = {
+          participants: adultParticipants,
+          pbRecords: leaguePbRecordsAll,
+          mileageLogs: leagueMileageLogs,
+        }
+      } catch (error) {
+        console.error('fetchMemberRunningLeagueHome.rankings', error)
+        rankingsError = RANKINGS_LOAD_ERROR
+      }
+    }
+  } catch (error) {
+    console.error('fetchMemberRunningLeagueHome.leagueQueries', error)
+    rankingsError = RANKINGS_LOAD_ERROR
+  }
+
+  if (!participant) {
+    return emptyMemberRunningLeagueHome({
+      league,
+      pb5kLeaderboard,
+      pb10kLeaderboard,
+      pbHalfLeaderboard,
+      pbFullLeaderboard,
+      mileageLeaderboard,
+      scoreLeaderboard,
+      rankingBundle,
+      rankingsError,
+    })
+  }
+
+  let pbRecords: RunningLeagueRecord[] = []
+  let mileageLogs: RunningLeagueMileageLog[] = []
+  let tableReady = true
+
+  try {
+    const [recordResult, mileageResult] = await Promise.all([
     supabase
       .from('running_league_records')
       .select(
@@ -1700,18 +1869,38 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
   const { data: mileageRows, error: mileageError } = mileageResult
 
   if (error && isMissingTableError(error)) {
-    return { league, participant, pbRecords: [], mileageLogs: [], tableReady: false }
+    tableReady = false
+  } else if (error) {
+    console.error('fetchMemberRunningLeagueHome.memberPbRecords', error)
+  } else {
+    pbRecords = (recordRows ?? []).map((row) => mapRecord(row as Record<string, unknown>))
   }
+
   if (mileageError && isMissingTableError(mileageError)) {
-    return { league, participant, pbRecords: [], mileageLogs: [], tableReady: false }
+    tableReady = false
+  } else if (mileageError) {
+    console.error('fetchMemberRunningLeagueHome.memberMileageLogs', mileageError)
+  } else {
+    mileageLogs = (mileageRows ?? []).map((row) => mapMileageLog(row as Record<string, unknown>))
+  }
+  } catch (error) {
+    console.error('fetchMemberRunningLeagueHome.memberRecords', error)
   }
 
   return {
     league,
     participant,
-    pbRecords: (recordRows ?? []).map((row) => mapRecord(row as Record<string, unknown>)),
-    mileageLogs: (mileageRows ?? []).map((row) => mapMileageLog(row as Record<string, unknown>)),
-    tableReady: true,
+    pbRecords,
+    mileageLogs,
+    pb5kLeaderboard,
+    pb10kLeaderboard,
+    pbHalfLeaderboard,
+    pbFullLeaderboard,
+    mileageLeaderboard,
+    scoreLeaderboard,
+    rankingBundle,
+    tableReady,
+    rankingsError,
   }
 }
 
@@ -1723,11 +1912,16 @@ export async function getMemberRunningLeagueHomeForStaff(
 }
 
 export async function getMemberRunningLeagueHome(): Promise<MemberRunningLeagueHome> {
-  const member = await getMemberForCurrentUser()
-  if (!member) {
-    return { league: null, participant: null, pbRecords: [], mileageLogs: [], tableReady: true }
+  try {
+    const member = await getMemberForCurrentUser()
+    if (!member) {
+      return emptyMemberRunningLeagueHome()
+    }
+    return await fetchMemberRunningLeagueHome(member.id)
+  } catch (error) {
+    console.error('getMemberRunningLeagueHome', error)
+    return emptyMemberRunningLeagueHome({ rankingsError: RANKINGS_LOAD_ERROR })
   }
-  return fetchMemberRunningLeagueHome(member.id)
 }
 
 export async function saveMemberMileageLog(input: {
@@ -2061,6 +2255,8 @@ export async function saveMemberRunningPb(input: {
 
   const timeText = input.time_text.trim()
   if (!timeText) return { ok: false, error: '기록을 입력해주세요.' }
+  const timeSeconds = parseRunningTimeToSeconds(timeText)
+  if (timeSeconds == null) return { ok: false, error: '기록 형식이 올바르지 않습니다. (예: 21:35)' }
 
   const participant = home.participant
   const measuredAt = input.measured_at ?? new Date().toISOString().slice(0, 10)
@@ -2073,6 +2269,7 @@ export async function saveMemberRunningPb(input: {
       distance_event: input.distance_event,
       record_phase: 'other',
       time_text: timeText,
+      time_seconds: timeSeconds,
       measured_at: measuredAt,
       notes: '개인 PB',
       updated_at: new Date().toISOString(),

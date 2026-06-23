@@ -593,6 +593,7 @@ export async function createMember(formData: MemberFormData): Promise<{ data?: M
       phone: normalizeOptionalString(formData.phone),
       parent_phone: normalizeOptionalString(formData.parent_phone),
       sport: normalizeOptionalString(formData.sport),
+      gender: formData.gender ?? null,
       height_cm: formData.height_cm ?? null,
       weight_kg: formData.weight_kg ?? null,
       bmi: calculateMemberBmi(formData.height_cm, formData.weight_kg),
@@ -640,6 +641,7 @@ export async function updateMember(id: string, formData: Partial<MemberFormData>
   if (formData.phone !== undefined) updateData.phone = formData.phone || null
   if (formData.parent_phone !== undefined) updateData.parent_phone = formData.parent_phone || null
   if (formData.sport !== undefined) updateData.sport = formData.sport || null
+  if (formData.gender !== undefined) updateData.gender = formData.gender ?? null
   if (formData.height_cm !== undefined) updateData.height_cm = formData.height_cm || null
   if (formData.weight_kg !== undefined) updateData.weight_kg = formData.weight_kg || null
   if (formData.height_cm !== undefined || formData.weight_kg !== undefined) {

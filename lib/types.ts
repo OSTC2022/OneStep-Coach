@@ -66,6 +66,7 @@ export interface Member {
   kakao_id: string | null
   instagram_id: string | null
   sport: string | null
+  gender?: 'male' | 'female' | null
   height_cm: number | null
   weight_kg: number | null
   bmi: number | null
@@ -165,6 +166,7 @@ export interface MemberFormData {
   kakao_id?: string
   instagram_id?: string
   sport?: string
+  gender?: 'male' | 'female' | null
   height_cm?: number
   weight_kg?: number
   goal?: string
@@ -259,7 +261,7 @@ export type RunningLeagueGoalType =
   | 'health'
   | 'race_prep'
 
-export type RunningLeagueDistanceEvent = '1km' | '3km' | '5km' | '10km'
+export type RunningLeagueDistanceEvent = '1km' | '3km' | '5km' | '10km' | 'half' | 'full'
 export type RunningLeagueRecordPhase = 'month_start' | 'month_end' | 'mid_month' | 'other'
 export type RunningLeagueMileageSource = 'manual' | 'lesson' | 'import' | 'other'
 export type RunningLeagueRecoveryCheckType =
@@ -312,7 +314,7 @@ export interface RunningLeagueParticipant {
   coach_comment: string
   created_at: string
   updated_at: string
-  member?: Pick<Member, 'id' | 'name' | 'sport' | 'phone'> | null
+  member?: Pick<Member, 'id' | 'name' | 'sport' | 'phone' | 'gender'> | null
 }
 
 export interface RunningLeagueGoal {

@@ -16,8 +16,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
-import { MemberMileageLogCard } from '@/components/dashboard/member-mileage-log-card'
 import { MemberRunningPbPanel } from '@/components/dashboard/member-running-pb-panel'
+import { MemberRunningLeagueRankings } from '@/components/dashboard/member-running-league-rankings'
+import { MemberMileageLogCard } from '@/components/dashboard/member-mileage-log-card'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
 import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
@@ -138,6 +139,25 @@ export function MemberMyPage({
             : '오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.'}
         </p>
       </div>
+
+      {isAdultMember && runningLeagueHome?.league ? (
+        <MemberRunningLeagueRankings
+          pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}
+          pb10kLeaderboard={runningLeagueHome.pb10kLeaderboard}
+          pbHalfLeaderboard={runningLeagueHome.pbHalfLeaderboard}
+          pbFullLeaderboard={runningLeagueHome.pbFullLeaderboard}
+          mileageLeaderboard={runningLeagueHome.mileageLeaderboard}
+          scoreLeaderboard={runningLeagueHome.scoreLeaderboard}
+          rankingBundle={runningLeagueHome.rankingBundle}
+          participant={runningLeagueHome.participant}
+          pbRecords={runningLeagueHome.pbRecords}
+          mileageLogs={runningLeagueHome.mileageLogs}
+          tableReady={runningLeagueHome.tableReady}
+          readOnly={adminPreview}
+          rankingsError={runningLeagueHome.rankingsError}
+          highlightMemberId={member.id}
+        />
+      ) : null}
 
       <Card className="border-primary/20 bg-primary/5">
         <CardContent className="p-4 sm:p-6">

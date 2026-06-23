@@ -124,10 +124,10 @@ export function goalScoreFromAchievementRate(ratePercent: number): number {
   return 0
 }
 
-/** "32:10", "1:02:30", "5km 32:10" → 초 */
+/** "32:10", "1:02:30", "5km 32:10", "half 3:28:55", "1:42:10" → 초 (문자열 정렬 금지) */
 export function parseRunningTimeToSeconds(input: string | null | undefined): number | null {
   if (!input?.trim()) return null
-  const cleaned = input.trim().replace(/^(1km|3km|5km|10km)\s*/i, '')
+  const cleaned = input.trim().replace(/^(1km|3km|5km|10km|half|full)\s*/i, '')
   const parts = cleaned.split(':').map((part) => Number(part.trim()))
   if (parts.some((part) => !Number.isFinite(part) || part < 0)) return null
   if (parts.length === 2) return parts[0] * 60 + parts[1]
@@ -293,28 +293,64 @@ export function buildLeaderboard<
     recovery_score: number
   },
 >(participants: T[]): RunningLeagueRankRow[] {
-  const rows = participants.map((row) => {
-    const scores: RunningLeagueScoreBreakdown = {
-      attendance_score: normalizeScore(Number(row.attendance_score)),
-      goal_score: normalizeScore(Number(row.goal_score)),
-      record_score: normalizeScore(Number(row.record_score)),
-      mileage_score: normalizeScore(Number(row.mileage_score)),
-      recovery_score: normalizeScore(Number(row.recovery_score)),
-    }
-    return {
-      participantId: row.id,
-      memberId: row.member_id,
-      memberName: row.member?.name?.trim() || '회원',
-      goalLevel: row.goal_level ?? null,
-      personalGoal: row.personal_goal ?? null,
-      mileageKm: Number(row.mileage_km ?? 0),
-      recordBaseline: row.record_baseline ?? null,
-      recordCurrent: row.record_current ?? null,
-      scores,
-      totalScore: computeTotalScore(scores),
-    }
-  })
-
+  const rows = participants.map((row) => mapParticipantToLeaderboardRow(row))
   const sorted = [...rows].sort((a, b) => compareLeaderboardEntries(a, b))
   return assignCompetitionRanks(sorted)
+}
+
+export type CategoryLeaderboardKind = 'record' | 'mileage'
+
+type LeaderboardParticipantInput = {
+  id: string
+  member_id: string
+  member?: { name?: string | null } | null
+  goal_level?: string | null
+  personal_goal?: string | null
+  mileage_km?: number | null
+  record_baseline?: string | null
+  record_current?: string | null
+  attendance_score: number
+  goal_score: number
+  record_score: number
+  mileage_score: number
+  recovery_score: number
+}
+
+function mapParticipantToLeaderboardRow<T extends LeaderboardParticipantInput>(row: T) {
+  const scores: RunningLeagueScoreBreakdown = {
+    attendance_score: normalizeScore(Number(row.attendance_score)),
+    goal_score: normalizeScore(Number(row.goal_score)),
+    record_score: normalizeScore(Number(row.record_score)),
+    mileage_score: normalizeScore(Number(row.mileage_score)),
+    recovery_score: normalizeScore(Number(row.recovery_score)),
+  }
+  return {
+    participantId: row.id,
+    memberId: row.member_id,
+    memberName: row.member?.name?.trim() || '회원',
+    goalLevel: row.goal_level ?? null,
+    personalGoal: row.personal_goal ?? null,
+    mileageKm: Number(row.mileage_km ?? 0),
+    recordBaseline: row.record_baseline ?? null,
+    recordCurrent: row.record_current ?? null,
+    scores,
+    totalScore: computeTotalScore(scores),
+  }
+}
+
+/** PB(기록) 또는 마일리지 점수만으로 순위를 매깁니다. */
+export function buildCategoryLeaderboard<T extends LeaderboardParticipantInput>(
+  participants: T[],
+  kind: CategoryLeaderboardKind,
+): RunningLeagueRankRow[] {
+  const scoreKey = kind === 'record' ? 'record_score' : 'mileage_score'
+  const rows = participants.map((row) => mapParticipantToLeaderboardRow(row))
+  const sorted = [...rows].sort((a, b) => {
+    const diff = b.scores[scoreKey] - a.scores[scoreKey]
+    if (diff !== 0) return diff
+    return a.memberName.localeCompare(b.memberName, 'ko')
+  })
+  return assignCompetitionRanks(
+    sorted.map((row) => ({ ...row, totalScore: row.scores[scoreKey] })),
+  )
 }

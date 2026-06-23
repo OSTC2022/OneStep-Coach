@@ -18,6 +18,13 @@ import { BirthDateInput } from '@/components/members/birth-date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { SportSelectField } from '@/components/members/sport-select-field'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import { toast } from 'sonner'
 import type { Member, Instructor, MemberFormData } from '@/lib/types'
@@ -41,6 +48,7 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
       ? formatKoreanPhoneInput(member.parent_phone)
       : '',
     sport: member?.sport || '',
+    gender: member?.gender ?? null,
     height_cm: member?.height_cm || undefined,
     weight_kg: member?.weight_kg || undefined,
     goal: member?.goal || '',
@@ -156,6 +164,27 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
                 value={formData.sport}
                 onChange={(sport) => setFormData({ ...formData, sport })}
               />
+              <div className="space-y-2">
+                <Label htmlFor="gender">성별 (랭킹용)</Label>
+                <Select
+                  value={formData.gender ?? 'unset'}
+                  onValueChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      gender: value === 'unset' ? null : (value as 'male' | 'female'),
+                    })
+                  }
+                >
+                  <SelectTrigger id="gender" className="bg-input border-border">
+                    <SelectValue placeholder="선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">미입력</SelectItem>
+                    <SelectItem value="male">남자</SelectItem>
+                    <SelectItem value="female">여자</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
