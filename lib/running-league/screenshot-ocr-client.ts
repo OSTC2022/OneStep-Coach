@@ -65,8 +65,11 @@ function logOcrTextInDev(text: string) {
   }
 }
 
-function isExtractionGoodEnough(extraction: RunningScreenshotExtraction): boolean {
-  return hasFullScreenshotExtraction(extraction) || hasMinimumScreenshotExtraction(extraction)
+function shouldStopOcrEarly(extraction: RunningScreenshotExtraction): boolean {
+  if (hasFullScreenshotExtraction(extraction)) return true
+  // 거리가 없으면 다른 필드만 인식돼도 OCR 변형을 더 시도
+  if (extraction.distance_km != null && extraction.duration != null) return true
+  return false
 }
 
 export type ClientOcrExtractionResult = {
@@ -106,7 +109,7 @@ export async function extractRunningMetricsWithClientOcr(file: File): Promise<Cl
       const parsed = parseRunningMetricsFromText(combined)
       const extraction = buildExtractionFromRaw(parsed, 'ocr', { raw_text: combined })
 
-      if (isExtractionGoodEnough(extraction)) {
+      if (shouldStopOcrEarly(extraction)) {
         return {
           extraction,
           rawText: combined,

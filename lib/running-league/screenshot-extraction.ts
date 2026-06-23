@@ -290,12 +290,38 @@ export function parseDateTimeFromText(text: string, today = new Date()): {
   return { activity_date: null, activity_time: null }
 }
 
+function normalizeOcrTextForParsing(text: string): string {
+  let normalized = text.replace(/\r\n/g, '\n')
+
+  // OCR이 소수점 대신 공백을 넣는 경우: "13 50 km" → "13.50 km"
+  normalized = normalized.replace(
+    /\b(\d{1,2})\s+(\d{2})\s*(km|KM|킬로|키로|k)?\b/gi,
+    '$1.$2 $3',
+  )
+
+  // 쉼표 소수: "13,50 km"
+  normalized = normalized.replace(/(\d{1,3}),(\d{1,2})\s*(km|KM|킬로)?/gi, '$1.$2 $3')
+
+  // 숫자 안의 O/o → 0
+  normalized = normalized.replace(
+    /(\d)[Oo](?=\d|[.,]|\s*(?:km|KM|킬로))/g,
+    '$10',
+  )
+  normalized = normalized.replace(/(\d)[Oo]\b/g, '$10')
+
+  return normalized.replace(/\s+/g, ' ').replace(/[|]/g, ' ').trim()
+}
+
 function extractDistanceKm(normalized: string): number | null {
   const labeledPatterns = [
-    /(?:거리|distance|총\s*거리|운동\s*거리)[^\d]{0,24}(\d{1,3}[.,]\d{1,2})/i,
-    /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로미터|킬로|키로)/i,
+    /(?:거리|distance|총\s*거리|운동\s*거리|total)[^\d]{0,24}(\d{1,3}[.,]\d{1,2})/i,
+    /(?:거리|distance|총\s*거리|운동\s*거리|total)[^\d]{0,24}(\d{1,2})(?!\s*[.:]\d)/i,
+    /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로미터|킬로|키로)\b/i,
+    /(\d{1,2})\s*(?:km|KM|킬로미터|킬로|키로)\b/i,
     /(?:km|KM)\s*(\d{1,3}[.,]\d{1,2})/i,
+    /(?:km|KM)\s*(\d{1,2})\b/i,
     /\b(\d{1,2})\s*[kK]\b/,
+    /\b(\d{1,2}[.,]\d{1,2})\s*[kK]\b/,
   ]
 
   for (const pattern of labeledPatterns) {
@@ -307,15 +333,29 @@ function extractDistanceKm(normalized: string): number | null {
   }
 
   const kmValues: number[] = []
-  const distancePattern = /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로|키로)?/gi
+  const distancePattern =
+    /(\d{1,3}[.,]\d{1,2})\s*(?:km|KM|킬로|키로)?|\b(\d{1,2})\s*(?:km|KM|킬로|키로)\b/gi
   let match: RegExpExecArray | null
   while ((match = distancePattern.exec(normalized)) !== null) {
-    const km = parseKmToken(match[1])
+    const token = match[1] ?? match[2]
+    if (!token) continue
+    const km = parseKmToken(token)
     if (isValidDistance(km)) kmValues.push(km)
   }
 
   if (kmValues.length > 0) {
     return Math.max(...kmValues)
+  }
+
+  // km 라벨 없이 큰 숫자(러닝 거리 후보) — 페이스(3~9)보다 큰 값 우선
+  const looseDecimals: number[] = []
+  const loosePattern = /\b(\d{1,2}[.,]\d{1,2})\b/g
+  while ((match = loosePattern.exec(normalized)) !== null) {
+    const km = parseKmToken(match[1])
+    if (isValidDistance(km) && km >= 1) looseDecimals.push(km)
+  }
+  if (looseDecimals.length > 0) {
+    return Math.max(...looseDecimals)
   }
 
   return null
@@ -430,7 +470,7 @@ function extractCalories(normalized: string): number | null {
 }
 
 export function parseRunningMetricsFromText(text: string): RunningScreenshotExtractionRaw {
-  const normalized = text.replace(/\s+/g, ' ').replace(/[|]/g, ' ')
+  const normalized = normalizeOcrTextForParsing(text)
   const result: RunningScreenshotExtractionRaw = {
     confidence: 0.55,
   }
@@ -508,7 +548,7 @@ function normalizeRawInput(raw: RunningScreenshotExtractionRaw): RunningScreensh
 
 function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtraction {
   const normalized = normalizeRawInput(raw)
-  const distance_km = isValidDistance(normalized.distance_km ?? null) ? normalized.distance_km! : null
+  let distance_km = isValidDistance(normalized.distance_km ?? null) ? normalized.distance_km! : null
   const duration = isValidDuration(normalized.duration ?? null) ? normalized.duration! : null
   let pace = isValidPace(normalized.pace ?? null) ? normalized.pace! : null
   const heart_rate = isValidHeartRate(normalized.heart_rate ?? null) ? normalized.heart_rate! : null
@@ -524,6 +564,17 @@ function sanitizeRaw(raw: RunningScreenshotExtractionRaw): RunningScreenshotExtr
       const paceSeconds = durationSeconds / distance_km
       if (paceSeconds >= 120 && paceSeconds <= 900) {
         pace = formatPace(paceSeconds)
+      }
+    }
+  }
+
+  if (distance_km == null && duration != null && pace != null) {
+    const durationSeconds = parseDurationToSeconds(duration)
+    const paceSeconds = parsePaceToSecondsPerKm(pace)
+    if (durationSeconds != null && paceSeconds != null && paceSeconds > 0) {
+      const inferred = Math.round((durationSeconds / paceSeconds) * 100) / 100
+      if (isValidDistance(inferred)) {
+        distance_km = inferred
       }
     }
   }
