@@ -9,27 +9,51 @@ import {
   type RunningScreenshotExtraction,
 } from '@/lib/running-league/screenshot-extraction'
 import { prepareScreenshotForOcr } from '@/lib/running-league/screenshot-ocr-preprocess-client'
+import { getTesseractBrowserOptions } from '@/lib/running-league/tesseract-browser-config'
 
 const MAX_OCR_MS = 45_000
 
 let workerPromise: Promise<Worker> | null = null
 
 export function preloadScreenshotOcrWorker(): void {
-  void getScreenshotOcrWorker()
+  void getScreenshotOcrWorker().catch((error) => {
+    console.error('[screenshot-ocr-client] preload failed', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  })
+}
+
+function resetWorkerPromise() {
+  workerPromise = null
+}
+
+async function createOcrWorker(langs: string): Promise<Worker> {
+  const { createWorker, PSM } = await import('tesseract.js')
+  const options = getTesseractBrowserOptions()
+
+  console.info('[screenshot-ocr-client] creating worker', {
+    langs,
+    workerPath: options.workerPath,
+    corePath: options.corePath,
+    workerBlobURL: options.workerBlobURL,
+  })
+
+  const worker = await createWorker(langs, 1, options)
+  await worker.setParameters({
+    tessedit_pageseg_mode: PSM.AUTO,
+  })
+  return worker
 }
 
 async function getScreenshotOcrWorker(): Promise<Worker> {
   if (!workerPromise) {
-    workerPromise = (async () => {
-      const { createWorker, PSM } = await import('tesseract.js')
-      const worker = await createWorker('eng+kor', 1, {
-        logger: () => undefined,
+    workerPromise = createOcrWorker('eng+kor').catch(async (error) => {
+      console.warn('[screenshot-ocr-client] eng+kor worker failed; retrying eng only', {
+        error: error instanceof Error ? error.message : String(error),
       })
-      await worker.setParameters({
-        tessedit_pageseg_mode: PSM.AUTO,
-      })
-      return worker
-    })()
+      resetWorkerPromise()
+      return createOcrWorker('eng')
+    })
   }
   return workerPromise
 }
@@ -50,16 +74,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 async function recognizeCanvas(canvas: HTMLCanvasElement): Promise<string> {
-  const worker = await getScreenshotOcrWorker()
-  const { data } = await worker.recognize(canvas)
-  return data.text ?? ''
+  try {
+    const worker = await getScreenshotOcrWorker()
+    const { data } = await worker.recognize(canvas)
+    return data.text ?? ''
+  } catch (error) {
+    resetWorkerPromise()
+    throw error
+  }
 }
 
 function mergeOcrTexts(chunks: string[]): string {
   return [...new Set(chunks.map((chunk) => chunk.trim()).filter(Boolean))].join('\n')
 }
 
-function logOcrTextInDev(text: string) {
+function logOcrText(text: string) {
   if (process.env.NODE_ENV === 'development') {
     console.log('[screenshot-ocr-client] ocr_text', text)
   }
@@ -67,7 +96,6 @@ function logOcrTextInDev(text: string) {
 
 function shouldStopOcrEarly(extraction: RunningScreenshotExtraction): boolean {
   if (hasFullScreenshotExtraction(extraction)) return true
-  // 거리가 없으면 다른 필드만 인식돼도 OCR 변형을 더 시도
   if (extraction.distance_km != null && extraction.duration != null) return true
   return false
 }
@@ -105,7 +133,7 @@ export async function extractRunningMetricsWithClientOcr(file: File): Promise<Cl
       const combined = mergeOcrTexts(chunks)
       if (!combined) continue
 
-      logOcrTextInDev(combined)
+      logOcrText(combined)
       const parsed = parseRunningMetricsFromText(combined)
       const extraction = buildExtractionFromRaw(parsed, 'ocr', { raw_text: combined })
 
@@ -121,7 +149,7 @@ export async function extractRunningMetricsWithClientOcr(file: File): Promise<Cl
     }
 
     const rawText = mergeOcrTexts(chunks)
-    logOcrTextInDev(rawText)
+    logOcrText(rawText)
 
     if (!rawText.trim()) {
       return {
@@ -146,7 +174,9 @@ export async function extractRunningMetricsWithClientOcr(file: File): Promise<Cl
   } catch (error) {
     console.error('[screenshot-ocr-client] pipeline failed', {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     })
+    resetWorkerPromise()
     return {
       extraction: buildExtractionFromRaw({}, 'ocr'),
       rawText: '',
