@@ -16,9 +16,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
-import { MemberRunningPbPanel } from '@/components/dashboard/member-running-pb-panel'
 import { MemberRunningLeagueRankings } from '@/components/dashboard/member-running-league-rankings'
-import { MemberMileageLogCard } from '@/components/dashboard/member-mileage-log-card'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
 import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
@@ -135,7 +133,7 @@ export function MemberMyPage({
         </h1>
         <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
           {isAdultMember
-            ? '러닝 챌린지 점수, 순위, 리그 안내를 한곳에서 확인할 수 있습니다.'
+            ? '내 순위·마일리지·PB 변화와 성장 그래프를 한눈에 확인하세요.'
             : '오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.'}
         </p>
       </div>
@@ -156,44 +154,25 @@ export function MemberMyPage({
           readOnly={adminPreview}
           rankingsError={runningLeagueHome.rankingsError}
           highlightMemberId={member.id}
+          runningLeagueDetailHref={runningLeagueHref}
         />
       ) : null}
 
       <Card className="border-primary/20 bg-primary/5">
         <CardContent className="p-4 sm:p-6">
           {isAdultMember ? (
-            <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)] md:items-start md:gap-0">
-              <div className="space-y-1 md:pr-6">
-                <p className="text-xl font-bold leading-tight lg:text-2xl">{member.name}</p>
-                {sportProfile ? (
-                  <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
-                ) : null}
-                {member.school ? (
-                  <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
-                ) : null}
-                <p className="text-sm text-muted-foreground">
-                  담당 코치:{' '}
-                  <span className="font-medium text-foreground">{instructorName}</span>
-                </p>
-              </div>
-              <div className="md:border-l md:border-border/50 md:px-6">
-                <MemberRunningPbPanel
-                  participant={runningLeagueHome?.participant ?? null}
-                  pbRecords={runningLeagueHome?.pbRecords ?? []}
-                  tableReady={runningLeagueHome?.tableReady ?? true}
-                  readOnly={adminPreview}
-                  variant="embedded"
-                />
-              </div>
-              <div className="md:border-l md:border-border/50 md:pl-6">
-                <MemberMileageLogCard
-                  variant="embedded"
-                  participant={runningLeagueHome?.participant ?? null}
-                  mileageLogs={runningLeagueHome?.mileageLogs ?? []}
-                  tableReady={runningLeagueHome?.tableReady ?? true}
-                  readOnly={adminPreview}
-                />
-              </div>
+            <div className="space-y-1">
+              <p className="text-xl font-bold leading-tight lg:text-2xl">{member.name}</p>
+              {sportProfile ? (
+                <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
+              ) : null}
+              {member.school ? (
+                <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
+              ) : null}
+              <p className="text-sm text-muted-foreground">
+                담당 코치:{' '}
+                <span className="font-medium text-foreground">{instructorName}</span>
+              </p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">

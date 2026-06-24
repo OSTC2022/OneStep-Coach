@@ -89,10 +89,11 @@ export function buildTopMonthlyRankRiser(input: {
       })
       change = monthRankDelta(points, input.monthStart, input.monthEnd)
     } else {
-      const points = buildMemberMileageRankHistorySeries(
+      const points = buildMemberMileageRankHistorySeries({
         memberId,
-        input.mileageLogs,
-      ).filter((point) => point.date >= input.monthStart && point.date <= input.monthEnd)
+        participants: input.participants,
+        logs: input.mileageLogs,
+      }).filter((point) => point.date >= input.monthStart && point.date <= input.monthEnd)
       change = monthRankDelta(points, input.monthStart, input.monthEnd)
     }
 

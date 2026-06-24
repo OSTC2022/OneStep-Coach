@@ -104,6 +104,7 @@ const criteria = [
     check: () => {
       assert.match(charts, /순위 추이/)
       assert.match(charts, /기록 추이/)
+      assert.match(charts, /월 마일리지 추이/)
       assert.match(charts, /GraphChartTabs/)
       assert.match(detail, /buildMemberRankingHistorySeries/)
       assert.match(detail, /buildLeagueRankComparisonChart/)
@@ -121,11 +122,12 @@ const criteria = [
     id: 10,
     name: '모바일 반응형',
     check: () => {
-      assert.match(rankings, /grid-cols-1/)
-      assert.match(rankings, /order-1/)
+      assert.match(rankings, /lg:grid-cols-2/)
       assert.match(rankings, /order-2/)
+      assert.match(rankings, /order-5/)
       assert.match(rankings, /overflow-x-hidden/)
       assert.match(rankings, /flex-wrap/)
+      assert.match(rankings, /MemberLeagueStatusCard/)
     },
   },
 ]

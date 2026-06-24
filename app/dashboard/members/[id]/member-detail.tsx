@@ -73,6 +73,8 @@ import {
   groupSessionPackagesForDisplay,
 } from '@/lib/session-package-grouping'
 import { cn } from '@/lib/utils'
+import { MemberStaffLeagueSummary } from '@/components/dashboard/member-staff-league-summary'
+import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 
 const LESSON_RECORD_PAGE_SIZE = 10
 
@@ -94,6 +96,7 @@ interface MemberDetailProps {
   instructorAccount?: VisibleSnsAccount | null
   centerAccount?: VisibleSnsAccount | null
   linkedProfileRole?: string | null
+  runningLeagueHome?: MemberRunningLeagueHome | null
 }
 
 function formatPackageDate(value: string | null | undefined) {
@@ -119,6 +122,7 @@ export function MemberDetail({
   instructorAccount = null,
   centerAccount = null,
   linkedProfileRole = null,
+  runningLeagueHome = null,
 }: MemberDetailProps) {
   const [memberState, setMemberState] = useState(() =>
     mergeMemberWithDetailPatch(member, member.id),
@@ -266,6 +270,13 @@ export function MemberDetail({
               등록일:{' '}
               {new Date(memberState.registered_at).toLocaleDateString('ko-KR')}
             </p>
+            {linkedProfileRole === 'adult_member' ? (
+              <p className="text-sm text-muted-foreground">
+                {memberState.sport ? `${memberState.sport}` : '성인 러닝'}
+                {' · '}
+                담당 코치 {formatPrimaryInstructorName(memberState.primary_instructor)}
+              </p>
+            ) : null}
           </div>
         </div>
         {canManage ? (
@@ -287,6 +298,15 @@ export function MemberDetail({
           </div>
         ) : null}
       </div>
+
+      {linkedProfileRole === 'adult_member' ? (
+        <MemberStaffLeagueSummary
+          memberId={memberState.id}
+          runningLeagueHome={runningLeagueHome}
+          canManage={canManage}
+          runningPortalHref={`/dashboard/members/${memberState.id}/running-portal`}
+        />
+      ) : null}
 
       {/* Info Cards Grid */}
       <div className="grid min-w-0 gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">

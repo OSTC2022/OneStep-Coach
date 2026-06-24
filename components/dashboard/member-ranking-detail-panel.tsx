@@ -40,6 +40,7 @@ interface MemberRankingDetailPanelProps {
   onClose?: () => void
   className?: string
   aspirationInsight?: RankAspirationInsight | null
+  soloComparisonHint?: string | null
 }
 
 function MemberGraphSummaryHeader({
@@ -100,6 +101,7 @@ export function MemberRankingDetailPanel({
   onClose,
   className,
   aspirationInsight = null,
+  soloComparisonHint = null,
 }: MemberRankingDetailPanelProps) {
   const isMe = highlightMemberId != null && memberId === highlightMemberId
 
@@ -146,13 +148,13 @@ export function MemberRankingDetailPanel({
   }, [memberId, rankingBundle])
 
   const mileageRankPoints = useMemo(() => {
-    if (!rankingBundle || rankingView !== 'mileage') return []
+    if (!rankingBundle) return []
     return buildMemberMileageRankHistorySeries({
       memberId,
       participants: filteredParticipants,
       logs: rankingBundle.mileageLogs,
     })
-  }, [filteredParticipants, memberId, rankingBundle, rankingView])
+  }, [filteredParticipants, memberId, rankingBundle])
 
   const graphSummary = useMemo(
     () =>
@@ -235,6 +237,7 @@ export function MemberRankingDetailPanel({
           rankCaption={rankCaption}
           mode={rankingView}
           emphasized={emphasized}
+          soloComparisonHint={soloComparisonHint}
           className="animate-in fade-in-0 duration-300"
         />
       </div>

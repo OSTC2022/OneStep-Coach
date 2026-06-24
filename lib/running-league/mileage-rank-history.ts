@@ -81,11 +81,12 @@ export function buildMemberMileageRankHistorySeries(input: {
   participants: ReadonlyArray<RunningLeagueParticipant>
   logs: ReadonlyArray<RunningLeagueMileageLog>
 }): MileageRankHistoryPoint[] {
-  const dates = collectMileageSnapshotDates(input.memberId, input.logs)
+  const logs = input.logs ?? []
+  const dates = collectMileageSnapshotDates(input.memberId, logs)
   if (dates.length === 0) return []
 
   return dates.map((date) => {
-    const cumulativeKm = sumMileageUpToDate(input.memberId, input.logs, date)
+    const cumulativeKm = sumMileageUpToDate(input.memberId, logs, date)
     return {
       date,
       label: formatChartDate(date),
@@ -93,7 +94,7 @@ export function buildMemberMileageRankHistorySeries(input: {
       rank: computeMileageRankAtDate({
         memberId: input.memberId,
         participants: input.participants,
-        logs: input.logs,
+        logs,
         asOfDate: date,
       }),
     }

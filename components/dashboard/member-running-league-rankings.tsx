@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Search, Trophy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
 import { MemberRunningLeagueRankingsSkeleton } from '@/components/dashboard/member-running-league-rankings-skeleton'
 import { MemberRunningPbDialog } from '@/components/dashboard/member-running-pb-panel'
@@ -35,9 +35,11 @@ import {
   formatNextMonthRankingResetLabel,
 } from '@/lib/running-league/month-range'
 import { buildLeagueMomentumSnapshot } from '@/lib/running-league/league-momentum'
+import { buildMemberLeagueStatusSnapshot } from '@/lib/running-league/league-status-summary'
 import { formatScoreDisplay, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import { MemberRankingDetailPanel } from '@/components/dashboard/member-ranking-detail-panel'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
+import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { MemberRankAspirationPanel } from '@/components/dashboard/member-rank-aspiration-panel'
 import { formatPbDistanceLabel, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
@@ -291,6 +293,7 @@ interface MemberRunningLeagueRankingsProps {
   loading?: boolean
   rankingsError?: string | null
   highlightMemberId?: string | null
+  runningLeagueDetailHref?: string
   className?: string
 }
 
@@ -385,7 +388,7 @@ function MyRankSeparator() {
 
 function MyRankBadge() {
   return (
-    <span className="shrink-0 rounded-md bg-lime-400/15 px-1.5 py-0.5 text-[10px] font-bold text-lime-300">
+    <span className="shrink-0 rounded-full border border-lime-300/50 bg-lime-400/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-lime-50 shadow-[0_0_12px_rgba(163,230,53,0.35)]">
       내 순위
     </span>
   )
@@ -1259,6 +1262,7 @@ export function MemberRunningLeagueRankings({
   loading = false,
   rankingsError = null,
   highlightMemberId = null,
+  runningLeagueDetailHref = '/dashboard/my/running-league',
   className,
 }: MemberRunningLeagueRankingsProps) {
   const [genderFilter, setGenderFilter] = useState<RankingGenderFilter>('all')
@@ -1383,6 +1387,40 @@ export function MemberRunningLeagueRankings({
     rankingsError,
   ])
 
+  const filteredParticipantsForStatus = useMemo(
+    () =>
+      rankingBundle
+        ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
+        : [],
+    [genderFilter, rankingBundle],
+  )
+
+  const leagueStatus = useMemo(() => {
+    if (!highlightMemberId || rankingsError) return null
+    return buildMemberLeagueStatusSnapshot({
+      memberId: highlightMemberId,
+      rankingView,
+      pbDistance,
+      participant,
+      pbLeaderboard: activePbLeaderboard,
+      mileageLeaderboard: activeMileageLeaderboard,
+      mileageLogs,
+      pbRecords,
+      participants: filteredParticipantsForStatus,
+    })
+  }, [
+    activeMileageLeaderboard,
+    activePbLeaderboard,
+    filteredParticipantsForStatus,
+    highlightMemberId,
+    mileageLogs,
+    participant,
+    pbDistance,
+    pbRecords,
+    rankingView,
+    rankingsError,
+  ])
+
   function handleMemberSelect(memberId: string, memberName: string) {
     setSelectedMember({ id: memberId, name: memberName })
     window.requestAnimationFrame(() => {
@@ -1396,110 +1434,34 @@ export function MemberRunningLeagueRankings({
 
   return (
     <section className={cn('flex w-full max-w-full flex-col gap-4 overflow-x-hidden', className)}>
-      <Card className={cn(rankingCardClass, 'border-lime-400/30')}>
-        <CardHeader className={cn(rankingCardHeaderClass, 'space-y-3')}>
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base text-lime-100 sm:text-lg">
-                <Trophy className="h-4 w-4 shrink-0 text-lime-400" />
-                성인 러닝 리그
-              </CardTitle>
-              <p className="text-sm text-zinc-400">
-                전체·성별·거리별 랭킹과 기록 변화를 한곳에서 확인하세요.
-              </p>
-            </div>
-            <Link
-              href="/dashboard/my/running-league"
-              className="shrink-0 text-xs font-medium text-lime-400 underline-offset-4 hover:text-lime-300 hover:underline"
-            >
-              리그 상세 보기
-            </Link>
-          </div>
-          {rankingView === 'mileage' ? <RankingPeriodBanner /> : null}
-        </CardHeader>
+      {leagueStatus && highlightMemberId ? (
+        <MemberLeagueStatusCard
+          snapshot={leagueStatus}
+          rankingView={rankingView}
+          canEdit={canEdit}
+          onAddPb={() => setPbDialogOpen(true)}
+          onAddMileage={() => setMileageDialogOpen(true)}
+        />
+      ) : null}
 
-        <CardContent className={cn(rankingCardContentClass, 'space-y-4')}>
-          <div className="space-y-4 rounded-xl border border-lime-400/25 bg-black/40 p-3 sm:p-4">
+      <Card className={cn(rankingCardClass, 'border-lime-400/30')}>
+        <CardContent className={cn(rankingCardContentClass, 'flex flex-col gap-4 pt-4 sm:pt-5 lg:grid lg:grid-cols-2 lg:items-start')}>
+          <div className="order-4 space-y-4 rounded-xl border border-lime-400/25 bg-black/40 p-3 sm:p-4 lg:order-1 lg:col-span-2">
             <RankingViewTabs value={rankingView} onChange={setRankingView} />
             <GenderFilterTabs value={genderFilter} onChange={setGenderFilter} />
             {rankingView === 'pb' ? (
               <PbDistanceTabs value={pbDistance} onChange={setPbDistance} />
             ) : null}
+            {rankingView === 'mileage' ? <RankingPeriodBanner /> : null}
+            <GenderFilterNotice
+              genderFilter={genderFilter}
+              genderFilterBlocked={genderFilterBlocked}
+              unclassifiedCount={unclassifiedCount}
+            />
           </div>
 
-          <GenderFilterNotice
-            genderFilter={genderFilter}
-            genderFilterBlocked={genderFilterBlocked}
-            unclassifiedCount={unclassifiedCount}
-          />
-
-          {!rankingsError && rankingBundle ? (
-            <MemberLeagueMomentumStrip
-              topRiser={leagueMomentum.topRiser}
-              recentPbUpdates={leagueMomentum.recentPbUpdates}
-              highlightMemberId={highlightMemberId}
-              onMemberSelect={handleMemberSelect}
-              rankingViewLabel={
-                rankingView === 'pb'
-                  ? formatPbDistanceLabel(pbDistance)
-                  : formatCurrentMonthRankingLabel()
-              }
-            />
-          ) : null}
-
-          <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-            <div className="order-1 min-w-0">
-            <RankingListCard
-              rankedCount={rankingsError ? 0 : activeRankedCount}
-              genderFilter={genderFilter}
-              onViewAll={rankingsError ? undefined : () => setFullRankingOpen(true)}
-              aspirationSlot={
-                highlightMemberId && !rankingsError ? (
-                  <MemberRankAspirationPanel insight={myRankAspiration} />
-                ) : null
-              }
-              footerAction={
-                !readOnly ? (
-                  rankingView === 'pb' ? (
-                    <RankingCardAction onClick={() => setPbDialogOpen(true)} disabled={!canEdit}>
-                      PB 등록/수정
-                    </RankingCardAction>
-                  ) : (
-                    <RankingCardAction
-                      onClick={() => setMileageDialogOpen(true)}
-                      disabled={!canEdit}
-                    >
-                      러닝 기록 추가
-                    </RankingCardAction>
-                  )
-                ) : null
-              }
-            >
-              {rankingsError ? (
-                <RankingsLoadErrorState onRetry={() => router.refresh()} />
-              ) : rankingView === 'pb' ? (
-                <PbRankingList
-                  leaderboard={activePbLeaderboard}
-                  highlightMemberId={highlightMemberId}
-                  onMemberSelect={handleMemberSelect}
-                  selectedMemberId={panelMember?.id ?? null}
-                  pbDistance={pbDistance}
-                  rankingBundle={rankingBundle}
-                  genderFilter={genderFilter}
-                />
-              ) : (
-                <MileageRankingList
-                  leaderboard={activeMileageLeaderboard}
-                  highlightMemberId={highlightMemberId}
-                  onMemberSelect={handleMemberSelect}
-                  selectedMemberId={panelMember?.id ?? null}
-                />
-              )}
-            </RankingListCard>
-            </div>
-
-            <div ref={graphPanelRef} className="order-2 min-w-0 space-y-3 scroll-mt-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+          <div ref={graphPanelRef} className="order-2 min-w-0 space-y-3 scroll-mt-4 lg:order-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-lime-300/80">
                 그래프 · 성장 분석
               </p>
               {panelMember ? (
@@ -1526,21 +1488,129 @@ export function MemberRunningLeagueRankings({
                   aspirationInsight={
                     panelMember.id === highlightMemberId ? myRankAspiration : null
                   }
+                  soloComparisonHint={leagueStatus?.soloRankHint ?? leagueStatus?.comparisonHint}
                 />
               ) : (
                 <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-lime-500/20 bg-black/20 px-4 py-8 text-center text-sm text-zinc-500 lg:min-h-[360px]">
                   <p>회원을 선택하면 그래프를 볼 수 있습니다.</p>
-                  <p className="text-xs text-zinc-600">순위 목록에서 이름을 눌러 기록·순위 변화를 확인하세요.</p>
+                  <p className="text-xs text-zinc-600">
+                    순위 목록에서 이름을 눌러 기록·순위 변화를 확인하세요.
+                  </p>
                 </div>
               )}
             </div>
+
+          <div className="order-5 min-w-0 lg:order-1">
+              <RankingListCard
+                rankedCount={rankingsError ? 0 : activeRankedCount}
+                genderFilter={genderFilter}
+                onViewAll={rankingsError ? undefined : () => setFullRankingOpen(true)}
+                aspirationSlot={
+                  highlightMemberId && !rankingsError ? (
+                    <MemberRankAspirationPanel insight={myRankAspiration} />
+                  ) : null
+                }
+                footerAction={
+                  !readOnly ? (
+                    <div className="hidden lg:contents">
+                      {rankingView === 'pb' ? (
+                        <RankingCardAction onClick={() => setPbDialogOpen(true)} disabled={!canEdit}>
+                          PB 등록/수정
+                        </RankingCardAction>
+                      ) : (
+                        <RankingCardAction
+                          onClick={() => setMileageDialogOpen(true)}
+                          disabled={!canEdit}
+                        >
+                          러닝 기록 추가
+                        </RankingCardAction>
+                      )}
+                    </div>
+                  ) : null
+                }
+              >
+                {rankingsError ? (
+                  <RankingsLoadErrorState onRetry={() => router.refresh()} />
+                ) : rankingView === 'pb' ? (
+                  <PbRankingList
+                    leaderboard={activePbLeaderboard}
+                    highlightMemberId={highlightMemberId}
+                    onMemberSelect={handleMemberSelect}
+                    selectedMemberId={panelMember?.id ?? null}
+                    pbDistance={pbDistance}
+                    rankingBundle={rankingBundle}
+                    genderFilter={genderFilter}
+                  />
+                ) : (
+                  <MileageRankingList
+                    leaderboard={activeMileageLeaderboard}
+                    highlightMemberId={highlightMemberId}
+                    onMemberSelect={handleMemberSelect}
+                    selectedMemberId={panelMember?.id ?? null}
+                  />
+                )}
+              </RankingListCard>
+          </div>
+
+          {!readOnly && canEdit ? (
+            <div className="order-6 flex flex-col gap-2 lg:col-span-2 lg:hidden">
+              <Button
+                type="button"
+                className="min-h-11 w-full bg-lime-500 font-semibold text-black hover:bg-lime-400"
+                onClick={() =>
+                  rankingView === 'pb' ? setPbDialogOpen(true) : setMileageDialogOpen(true)
+                }
+              >
+                {rankingView === 'pb' ? 'PB 등록/수정' : '러닝 기록 추가'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 w-full border-lime-500/30 bg-lime-500/5 text-lime-100"
+                onClick={() =>
+                  rankingView === 'pb' ? setMileageDialogOpen(true) : setPbDialogOpen(true)
+                }
+              >
+                {rankingView === 'pb' ? '러닝 기록 추가' : 'PB 등록/수정'}
+              </Button>
+            </div>
+          ) : null}
+
+          <div className="order-7 space-y-4 lg:col-span-2">
+            {!rankingsError && rankingBundle ? (
+              <MemberLeagueMomentumStrip
+                topRiser={leagueMomentum.topRiser}
+                recentPbUpdates={leagueMomentum.recentPbUpdates}
+                highlightMemberId={highlightMemberId}
+                onMemberSelect={handleMemberSelect}
+                rankingViewLabel={
+                  rankingView === 'pb'
+                    ? formatPbDistanceLabel(pbDistance)
+                    : formatCurrentMonthRankingLabel()
+                }
+              />
+            ) : null}
+
+            <div className="rounded-xl border border-lime-500/15 bg-black/30 p-4 text-sm text-zinc-400">
+              <p className="font-medium text-lime-200/90">성인 러닝 리그 안내</p>
+              <p className="mt-1 leading-relaxed">
+                전체·성별·거리별 랭킹과 기록 변화를 확인할 수 있습니다. 남자/여자 필터로 같은
+                그룹 안에서 순위를 비교해보세요.
+              </p>
+              <Link
+                href={runningLeagueDetailHref}
+                className="mt-2 inline-block text-xs font-medium text-lime-400 underline-offset-4 hover:text-lime-300 hover:underline"
+              >
+                리그 상세 보기
+              </Link>
+            </div>
+
+            <p className="text-xs leading-relaxed text-zinc-500">
+              이름은 개인정보 보호를 위해 마스킹됩니다. 본인 행만 실명으로 표시됩니다.
+            </p>
           </div>
         </CardContent>
       </Card>
-
-      <p className="text-xs leading-relaxed text-zinc-500">
-        이름은 개인정보 보호를 위해 마스킹됩니다. 본인 행만 실명으로 표시됩니다.
-      </p>
 
       <FullRankingDialog
         open={fullRankingOpen}

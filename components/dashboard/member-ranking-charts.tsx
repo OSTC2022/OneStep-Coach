@@ -173,7 +173,13 @@ function MileageChartTooltip({
   )
 }
 
-function GraphEmptyState({ className }: { className?: string }) {
+function GraphEmptyState({
+  className,
+  description,
+}: {
+  className?: string
+  description?: string
+}) {
   return (
     <div
       className={cn(
@@ -182,12 +188,14 @@ function GraphEmptyState({ className }: { className?: string }) {
       )}
     >
       <p className="text-sm font-medium text-zinc-200">{RANKING_EMPTY_GRAPH.title}</p>
-      <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">{RANKING_EMPTY_GRAPH.description}</p>
+      <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
+        {description ?? RANKING_EMPTY_GRAPH.description}
+      </p>
     </div>
   )
 }
 
-type GraphChartTab = 'rank' | 'record'
+type GraphChartTab = 'rank' | 'record' | 'mileage'
 
 function GraphChartTabs({
   value,
@@ -201,6 +209,7 @@ function GraphChartTabs({
   const tabs: Array<{ value: GraphChartTab; label: string }> = [
     { value: 'rank', label: '순위 추이' },
     { value: 'record', label: '기록 추이' },
+    { value: 'mileage', label: '월 마일리지 추이' },
   ]
 
   return (
@@ -263,6 +272,7 @@ interface MemberRankingChartsProps {
   distanceLabel?: string
   mode?: 'pb' | 'mileage'
   emphasized?: boolean
+  soloComparisonHint?: string | null
   className?: string
 }
 
@@ -275,6 +285,7 @@ export function MemberRankingCharts({
   rankCaption = null,
   mode = 'pb',
   emphasized = false,
+  soloComparisonHint = null,
   className,
 }: MemberRankingChartsProps) {
   const [activeTab, setActiveTab] = useState<GraphChartTab>('rank')
@@ -330,64 +341,87 @@ export function MemberRankingCharts({
   const chartAxisClass =
     'aspect-[5/2] min-h-[180px] w-full min-w-0 max-w-full [&_.recharts-cartesian-axis-tick_text]:fill-zinc-500 [&_.recharts-surface]:overflow-visible'
 
-  if (mode === 'mileage') {
-    if (mileageData.length === 0 && mileageRankData.length === 0) {
-      return <GraphEmptyState className={className} />
-    }
+  const rankEmptyDescription =
+    soloComparisonHint ??
+    (mode === 'mileage'
+      ? '러닝 기록을 추가하면 마일리지 순위 추이가 표시됩니다.'
+      : 'PB를 등록하면 순위 추이가 표시됩니다.')
 
+  const hasAnyChartData =
+    rankData.length > 0 ||
+    mileageRankData.length > 0 ||
+    (comparisonChart?.rows?.length ?? 0) > 0 ||
+    timeData.length > 0 ||
+    mileageData.length > 0
+
+  if (!hasAnyChartData) {
     return (
-      <div className={cn('grid min-w-0 grid-cols-1 gap-3', className)}>
-        <GraphChartTabs value={activeTab} onChange={setActiveTab} />
-        {activeTab === 'rank' ? (
-          mileageRankData.length === 0 ? (
-            <GraphEmptyState />
-          ) : (
-            <MileageRankTrendChart
-              data={mileageRankData}
-              chartShellClass={chartShellClass}
-              chartAxisClass={chartAxisClass}
-              emphasized={emphasized}
-            />
-          )
-        ) : mileageData.length === 0 ? (
-          <GraphEmptyState />
-        ) : (
-          <MileageRecordTrendChart
-            data={mileageData}
-            chartShellClass={chartShellClass}
-            chartAxisClass={chartAxisClass}
-            emphasized={emphasized}
-          />
-        )}
-      </div>
+      <GraphEmptyState
+        className={className}
+        description={
+          soloComparisonHint ??
+          '첫 기록이 등록되었습니다. 다른 회원이 기록을 추가하면 비교 그래프가 표시됩니다.'
+        }
+      />
     )
   }
 
-  if (points.length === 0) {
-    return <GraphEmptyState className={className} />
-  }
+  const rankPanel =
+    mode === 'mileage' ? (
+      mileageRankData.length === 0 ? (
+        <GraphEmptyState description={rankEmptyDescription} />
+      ) : (
+        <MileageRankTrendChart
+          data={mileageRankData}
+          chartShellClass={chartShellClass}
+          chartAxisClass={chartAxisClass}
+          emphasized={emphasized}
+        />
+      )
+    ) : rankData.length === 0 && !(comparisonChart?.rows?.length ?? 0) ? (
+      <GraphEmptyState description={rankEmptyDescription} />
+    ) : (
+      <RankTrendChart
+        rankData={rankData}
+        comparisonChart={comparisonChart}
+        rankCaption={rankCaption}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        emphasized={emphasized}
+      />
+    )
+
+  const recordPanel =
+    timeData.length === 0 ? (
+      <GraphEmptyState description="PB 기록을 등록하면 기록 추이 그래프가 표시됩니다." />
+    ) : (
+      <RecordTrendChart
+        timeData={timeData}
+        recordSummary={recordSummary}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        emphasized={emphasized}
+      />
+    )
+
+  const mileagePanel =
+    mileageData.length === 0 ? (
+      <GraphEmptyState description="이번 달 러닝 기록을 추가하면 마일리지 추이가 표시됩니다." />
+    ) : (
+      <MileageRecordTrendChart
+        data={mileageData}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        emphasized={emphasized}
+      />
+    )
 
   return (
     <div className={cn('grid min-w-0 grid-cols-1 gap-3', className)}>
       <GraphChartTabs value={activeTab} onChange={setActiveTab} />
-      {activeTab === 'rank' ? (
-        <RankTrendChart
-          rankData={rankData}
-          comparisonChart={comparisonChart}
-          rankCaption={rankCaption}
-          chartShellClass={chartShellClass}
-          chartAxisClass={chartAxisClass}
-          emphasized={emphasized}
-        />
-      ) : (
-        <RecordTrendChart
-          timeData={timeData}
-          recordSummary={recordSummary}
-          chartShellClass={chartShellClass}
-          chartAxisClass={chartAxisClass}
-          emphasized={emphasized}
-        />
-      )}
+      {activeTab === 'rank' ? rankPanel : null}
+      {activeTab === 'record' ? recordPanel : null}
+      {activeTab === 'mileage' ? mileagePanel : null}
     </div>
   )
 }
