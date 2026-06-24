@@ -176,19 +176,29 @@ function MileageChartTooltip({
 function GraphEmptyState({
   className,
   description,
+  compact = false,
 }: {
   className?: string
   description?: string
+  compact?: boolean
 }) {
   return (
     <div
       className={cn(
-        'rounded-xl border border-dashed border-lime-500/25 bg-zinc-950/60 px-4 py-6 text-center',
+        'rounded-xl border border-dashed border-lime-500/25 bg-zinc-950/60 text-center',
+        compact ? 'px-3 py-4' : 'px-4 py-6',
         className,
       )}
     >
-      <p className="text-sm font-medium text-zinc-200">{RANKING_EMPTY_GRAPH.title}</p>
-      <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
+      <p className={cn('font-medium text-zinc-200', compact ? 'text-xs' : 'text-sm')}>
+        {RANKING_EMPTY_GRAPH.title}
+      </p>
+      <p
+        className={cn(
+          'mt-1 leading-relaxed text-zinc-500',
+          compact ? 'text-[11px] line-clamp-2' : 'text-sm',
+        )}
+      >
         {description ?? RANKING_EMPTY_GRAPH.description}
       </p>
     </div>
@@ -201,16 +211,46 @@ function GraphChartTabs({
   value,
   onChange,
   className,
+  compact = false,
 }: {
   value: GraphChartTab
   onChange: (value: GraphChartTab) => void
   className?: string
+  compact?: boolean
 }) {
   const tabs: Array<{ value: GraphChartTab; label: string }> = [
     { value: 'rank', label: '순위 추이' },
     { value: 'record', label: '기록 추이' },
     { value: 'mileage', label: '월 마일리지 추이' },
   ]
+
+  if (compact) {
+    return (
+      <div
+        className={cn('grid grid-cols-3 gap-1 rounded-lg border border-lime-500/20 bg-black/40 p-1', className)}
+        role="tablist"
+        aria-label="그래프 종류"
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={value === tab.value}
+            onClick={() => onChange(tab.value)}
+            className={cn(
+              'min-h-8 rounded-md px-1 text-[11px] font-medium leading-tight transition-colors',
+              value === tab.value
+                ? 'bg-lime-500/20 text-lime-100'
+                : 'text-zinc-500 hover:text-zinc-300',
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div className={cn('flex flex-wrap gap-2', className)} role="tablist" aria-label="그래프 종류">
@@ -273,6 +313,7 @@ interface MemberRankingChartsProps {
   mode?: 'pb' | 'mileage'
   emphasized?: boolean
   soloComparisonHint?: string | null
+  compact?: boolean
   className?: string
 }
 
@@ -286,6 +327,7 @@ export function MemberRankingCharts({
   mode = 'pb',
   emphasized = false,
   soloComparisonHint = null,
+  compact = false,
   className,
 }: MemberRankingChartsProps) {
   const [activeTab, setActiveTab] = useState<GraphChartTab>('rank')
@@ -332,14 +374,23 @@ export function MemberRankingCharts({
   )
 
   const chartShellClass = cn(
-    'min-w-0 rounded-xl border bg-zinc-950/80 p-3 transition-shadow duration-300',
-    emphasized
-      ? 'border-lime-400/40 shadow-[0_0_24px_rgba(163,230,53,0.1)]'
-      : 'border-lime-500/20',
+    'min-w-0 transition-shadow duration-300',
+    compact
+      ? 'rounded-lg bg-transparent p-0'
+      : cn(
+          'rounded-xl border bg-zinc-950/80 p-3',
+          emphasized
+            ? 'border-lime-400/40 shadow-[0_0_24px_rgba(163,230,53,0.1)]'
+            : 'border-lime-500/20',
+        ),
   )
 
-  const chartAxisClass =
-    'aspect-[5/2] min-h-[180px] w-full min-w-0 max-w-full [&_.recharts-cartesian-axis-tick_text]:fill-zinc-500 [&_.recharts-surface]:overflow-visible'
+  const chartAxisClass = cn(
+    'w-full min-w-0 max-w-full [&_.recharts-cartesian-axis-tick_text]:fill-zinc-500 [&_.recharts-surface]:overflow-visible',
+    compact
+      ? 'h-[220px] min-h-[220px] max-h-[260px]'
+      : 'aspect-[5/2] min-h-[180px]',
+  )
 
   const rankEmptyDescription =
     soloComparisonHint ??
@@ -357,7 +408,8 @@ export function MemberRankingCharts({
   if (!hasAnyChartData) {
     return (
       <GraphEmptyState
-        className={className}
+        className={cn(compact && 'px-3 py-4', className)}
+        compact={compact}
         description={
           soloComparisonHint ??
           '첫 기록이 등록되었습니다. 다른 회원이 기록을 추가하면 비교 그래프가 표시됩니다.'
@@ -369,17 +421,18 @@ export function MemberRankingCharts({
   const rankPanel =
     mode === 'mileage' ? (
       mileageRankData.length === 0 ? (
-        <GraphEmptyState description={rankEmptyDescription} />
+        <GraphEmptyState compact={compact} description={rankEmptyDescription} />
       ) : (
         <MileageRankTrendChart
           data={mileageRankData}
           chartShellClass={chartShellClass}
           chartAxisClass={chartAxisClass}
           emphasized={emphasized}
+          compact={compact}
         />
       )
     ) : rankData.length === 0 && !(comparisonChart?.rows?.length ?? 0) ? (
-      <GraphEmptyState description={rankEmptyDescription} />
+      <GraphEmptyState compact={compact} description={rankEmptyDescription} />
     ) : (
       <RankTrendChart
         rankData={rankData}
@@ -388,12 +441,16 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         emphasized={emphasized}
+        compact={compact}
       />
     )
 
   const recordPanel =
     timeData.length === 0 ? (
-      <GraphEmptyState description="PB 기록을 등록하면 기록 추이 그래프가 표시됩니다." />
+      <GraphEmptyState
+        compact={compact}
+        description="PB 기록을 등록하면 기록 추이 그래프가 표시됩니다."
+      />
     ) : (
       <RecordTrendChart
         timeData={timeData}
@@ -401,24 +458,29 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         emphasized={emphasized}
+        compact={compact}
       />
     )
 
   const mileagePanel =
     mileageData.length === 0 ? (
-      <GraphEmptyState description="이번 달 러닝 기록을 추가하면 마일리지 추이가 표시됩니다." />
+      <GraphEmptyState
+        compact={compact}
+        description="이번 달 러닝 기록을 추가하면 마일리지 추이가 표시됩니다."
+      />
     ) : (
       <MileageRecordTrendChart
         data={mileageData}
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         emphasized={emphasized}
+        compact={compact}
       />
     )
 
   return (
-    <div className={cn('grid min-w-0 grid-cols-1 gap-3', className)}>
-      <GraphChartTabs value={activeTab} onChange={setActiveTab} />
+    <div className={cn('grid min-w-0 grid-cols-1', compact ? 'gap-2' : 'gap-3', className)}>
+      <GraphChartTabs value={activeTab} onChange={setActiveTab} compact={compact} />
       {activeTab === 'rank' ? rankPanel : null}
       {activeTab === 'record' ? recordPanel : null}
       {activeTab === 'mileage' ? mileagePanel : null}
@@ -431,15 +493,19 @@ function MileageRankTrendChart({
   chartShellClass,
   chartAxisClass,
   emphasized,
+  compact = false,
 }: {
   data: Array<MileageRankHistoryPoint & { chartLabel: string; rank: number }>
   chartShellClass: string
   chartAxisClass: string
   emphasized: boolean
+  compact?: boolean
 }) {
   return (
     <div className={chartShellClass}>
-      <p className="mb-2 text-xs font-medium text-lime-300">이번 달 마일리지 순위 추이</p>
+      {!compact ? (
+        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 마일리지 순위 추이</p>
+      ) : null}
       <ChartContainer config={rankChartConfig} className={chartAxisClass}>
         <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
@@ -462,7 +528,9 @@ function MileageRankTrendChart({
           />
         </LineChart>
       </ChartContainer>
-      <p className="mt-1 text-[10px] text-zinc-500">1위가 위쪽 · 러닝 기록 추가 시점마다 순위가 갱신됩니다.</p>
+      {!compact ? (
+        <p className="mt-1 text-[10px] text-zinc-500">1위가 위쪽 · 러닝 기록 추가 시점마다 순위가 갱신됩니다.</p>
+      ) : null}
     </div>
   )
 }
@@ -472,15 +540,19 @@ function MileageRecordTrendChart({
   chartShellClass,
   chartAxisClass,
   emphasized,
+  compact = false,
 }: {
   data: Array<MileageHistoryPoint & { chartLabel: string }>
   chartShellClass: string
   chartAxisClass: string
   emphasized: boolean
+  compact?: boolean
 }) {
   return (
     <div className={chartShellClass}>
-      <p className="mb-2 text-xs font-medium text-lime-300">이번 달 누적 마일리지 추이</p>
+      {!compact ? (
+        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 누적 마일리지 추이</p>
+      ) : null}
       <ChartContainer config={mileageChartConfig} className={chartAxisClass}>
         <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
@@ -503,7 +575,9 @@ function MileageRecordTrendChart({
           />
         </LineChart>
       </ChartContainer>
-      <p className="mt-1 text-[10px] text-zinc-500">위로 갈수록 이번 달 누적 거리가 늘어납니다.</p>
+      {!compact ? (
+        <p className="mt-1 text-[10px] text-zinc-500">위로 갈수록 이번 달 누적 거리가 늘어납니다.</p>
+      ) : null}
     </div>
   )
 }
@@ -515,6 +589,7 @@ function RankTrendChart({
   chartShellClass,
   chartAxisClass,
   emphasized,
+  compact = false,
 }: {
   rankData: Array<RankingHistoryPoint & { chartLabel: string; rank: number }>
   comparisonChart: LeagueRankComparisonChart | null
@@ -522,6 +597,7 @@ function RankTrendChart({
   chartShellClass: string
   chartAxisClass: string
   emphasized: boolean
+  compact?: boolean
 }) {
   const comparisonRows = comparisonChart?.rows ?? []
   const comparisonMembers = comparisonChart?.members ?? []
@@ -534,17 +610,19 @@ function RankTrendChart({
 
   return (
     <div className={chartShellClass}>
-      <div className="mb-2 space-y-1">
-        <p className="text-xs font-medium text-lime-300">순위 추이</p>
-        {rankCaption ? (
-          <>
-            <p className="text-[11px] text-zinc-500">{rankCaption.title}</p>
-            {rankCaption.trajectory ? (
-              <p className="text-xs font-medium text-lime-200/90">{rankCaption.trajectory}</p>
-            ) : null}
-          </>
-        ) : null}
-      </div>
+      {!compact ? (
+        <div className="mb-2 space-y-1">
+          <p className="text-xs font-medium text-lime-300">순위 추이</p>
+          {rankCaption ? (
+            <>
+              <p className="text-[11px] text-zinc-500">{rankCaption.title}</p>
+              {rankCaption.trajectory ? (
+                <p className="text-xs font-medium text-lime-200/90">{rankCaption.trajectory}</p>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {hasComparison ? (
         <ChartContainer config={rankChartConfig} className={chartAxisClass}>
@@ -613,7 +691,9 @@ function RankTrendChart({
           </LineChart>
         </ChartContainer>
       )}
-      <p className="mt-1 text-[10px] text-zinc-500">1위가 위쪽 · 선택 회원은 라임색으로 강조됩니다.</p>
+      {!compact ? (
+        <p className="mt-1 text-[10px] text-zinc-500">1위가 위쪽 · 선택 회원은 라임색으로 강조됩니다.</p>
+      ) : null}
     </div>
   )
 }
@@ -624,12 +704,14 @@ function RecordTrendChart({
   chartShellClass,
   chartAxisClass,
   emphasized,
+  compact = false,
 }: {
   timeData: Array<RankingHistoryPoint & { chartLabel: string }>
   recordSummary: RecordChangeChartSummary | null
   chartShellClass: string
   chartAxisClass: string
   emphasized: boolean
+  compact?: boolean
 }) {
   if (timeData.length === 0) {
     return <GraphEmptyState />
@@ -637,24 +719,26 @@ function RecordTrendChart({
 
   return (
     <div className={chartShellClass}>
-      <div className="mb-2 space-y-1">
-        <p className="text-xs font-medium text-lime-300">기록 추이</p>
-        {recordSummary?.timeTrajectory ? (
-          <p className="text-xs font-medium text-lime-100/90">{recordSummary.timeTrajectory}</p>
-        ) : null}
-        <div className="flex flex-wrap gap-2 pt-0.5">
-          {recordSummary?.vsMonthStart ? (
-            <span className="rounded-full border border-lime-500/25 bg-lime-500/10 px-2.5 py-0.5 text-[11px] font-medium text-lime-200">
-              {recordSummary.vsMonthStart}
-            </span>
+      {!compact ? (
+        <div className="mb-2 space-y-1">
+          <p className="text-xs font-medium text-lime-300">기록 추이</p>
+          {recordSummary?.timeTrajectory ? (
+            <p className="text-xs font-medium text-lime-100/90">{recordSummary.timeTrajectory}</p>
           ) : null}
-          {recordSummary?.vsSeasonStart ? (
-            <span className="rounded-full border border-lime-500/15 bg-black/40 px-2.5 py-0.5 text-[11px] font-medium text-zinc-300">
-              {recordSummary.vsSeasonStart}
-            </span>
-          ) : null}
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {recordSummary?.vsMonthStart ? (
+              <span className="rounded-full border border-lime-500/25 bg-lime-500/10 px-2.5 py-0.5 text-[11px] font-medium text-lime-200">
+                {recordSummary.vsMonthStart}
+              </span>
+            ) : null}
+            {recordSummary?.vsSeasonStart ? (
+              <span className="rounded-full border border-lime-500/15 bg-black/40 px-2.5 py-0.5 text-[11px] font-medium text-zinc-300">
+                {recordSummary.vsSeasonStart}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <ChartContainer config={timeChartConfig} className={chartAxisClass}>
         <LineChart data={timeData} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>

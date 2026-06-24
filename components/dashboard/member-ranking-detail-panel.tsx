@@ -19,6 +19,7 @@ import { buildMemberGraphPanelSummary } from '@/lib/running-league/ranking-impro
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import { summarizeRecordChangeChart } from '@/lib/running-league/ranking-improvement-summary'
+import type { MemberGraphPanelSummary } from '@/lib/running-league/ranking-improvement-summary'
 import { cn } from '@/lib/utils'
 import type { RankAspirationInsight } from '@/lib/running-league/rank-aspiration'
 
@@ -41,6 +42,11 @@ interface MemberRankingDetailPanelProps {
   className?: string
   aspirationInsight?: RankAspirationInsight | null
   soloComparisonHint?: string | null
+  variant?: 'default' | 'mobile'
+}
+
+function formatGraphOneLineSummary(summary: MemberGraphPanelSummary): string {
+  return [summary.rankLine, summary.recordLine].filter(Boolean).join(' · ')
 }
 
 function MemberGraphSummaryHeader({
@@ -102,7 +108,9 @@ export function MemberRankingDetailPanel({
   className,
   aspirationInsight = null,
   soloComparisonHint = null,
+  variant = 'default',
 }: MemberRankingDetailPanelProps) {
+  const isMobile = variant === 'mobile'
   const isMe = highlightMemberId != null && memberId === highlightMemberId
 
   const historyPoints = useMemo(() => {
@@ -183,47 +191,76 @@ export function MemberRankingDetailPanel({
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col overflow-hidden rounded-xl border transition-all duration-300',
-        embedded
-          ? cn(
-              'bg-zinc-950/90',
-              emphasized
-                ? 'border-lime-400/45 shadow-[0_0_28px_rgba(163,230,53,0.12)] ring-2 ring-lime-400/20'
-                : 'border-lime-500/25',
-            )
-          : 'border-lime-400/35 bg-zinc-950/80 ring-1 ring-lime-400/15',
+        'flex min-w-0 flex-col overflow-hidden transition-all duration-300',
+        isMobile
+          ? 'rounded-xl border border-lime-400/35 bg-zinc-950/90'
+          : cn(
+              'rounded-xl border',
+              embedded
+                ? cn(
+                    'bg-zinc-950/90',
+                    emphasized
+                      ? 'border-lime-400/45 shadow-[0_0_28px_rgba(163,230,53,0.12)] ring-2 ring-lime-400/20'
+                      : 'border-lime-500/25',
+                  )
+                : 'border-lime-400/35 bg-zinc-950/80 ring-1 ring-lime-400/15',
+            ),
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-lime-500/15 px-4 py-3 sm:px-5">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-lime-300/80">그래프 · 성장 분석</p>
-          {!isMe && isExplicitSelection && onClose ? (
-            <p className="mt-0.5 text-[11px] text-zinc-500">다른 회원 보는 중</p>
+      {isMobile ? (
+        <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
+          <p className="truncate text-[11px] text-zinc-400">{formatGraphOneLineSummary(graphSummary)}</p>
+          {onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 px-2 text-[11px] text-zinc-400 hover:text-lime-200"
+              onClick={onClose}
+            >
+              {isMe ? '닫기' : '내 그래프'}
+            </Button>
           ) : null}
         </div>
-        {onClose ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="shrink-0 text-zinc-400 hover:text-lime-200"
-            onClick={onClose}
-          >
-            <X className="mr-1 h-3.5 w-3.5" />
-            {isMe ? '닫기' : '내 그래프'}
-          </Button>
+      ) : (
+        <div className="flex items-start justify-between gap-3 border-b border-lime-500/15 px-4 py-3 sm:px-5">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-lime-300/80">그래프 · 성장 분석</p>
+            {!isMe && isExplicitSelection && onClose ? (
+              <p className="mt-0.5 text-[11px] text-zinc-500">다른 회원 보는 중</p>
+            ) : null}
+          </div>
+          {onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-zinc-400 hover:text-lime-200"
+              onClick={onClose}
+            >
+              <X className="mr-1 h-3.5 w-3.5" />
+              {isMe ? '닫기' : '내 그래프'}
+            </Button>
+          ) : null}
+        </div>
+      )}
+
+      <div
+        className={cn(
+          'flex flex-1 flex-col',
+          isMobile ? 'gap-2 p-2.5' : 'gap-4 px-4 py-4 sm:px-5',
+        )}
+      >
+        {!isMobile ? (
+          <MemberGraphSummaryHeader
+            summary={graphSummary}
+            isMe={isMe}
+            isExplicitSelection={isExplicitSelection}
+          />
         ) : null}
-      </div>
 
-      <div className="flex flex-1 flex-col gap-4 px-4 py-4 sm:px-5">
-        <MemberGraphSummaryHeader
-          summary={graphSummary}
-          isMe={isMe}
-          isExplicitSelection={isExplicitSelection}
-        />
-
-        {isMe && aspirationInsight ? (
+        {isMe && aspirationInsight && !isMobile ? (
           <MemberRankAspirationPanel insight={aspirationInsight} compact />
         ) : null}
 
@@ -238,6 +275,7 @@ export function MemberRankingDetailPanel({
           mode={rankingView}
           emphasized={emphasized}
           soloComparisonHint={soloComparisonHint}
+          compact={isMobile}
           className="animate-in fade-in-0 duration-300"
         />
       </div>

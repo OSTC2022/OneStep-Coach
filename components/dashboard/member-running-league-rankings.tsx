@@ -35,7 +35,7 @@ import {
   formatNextMonthRankingResetLabel,
 } from '@/lib/running-league/month-range'
 import { buildLeagueMomentumSnapshot } from '@/lib/running-league/league-momentum'
-import { buildMemberLeagueStatusSnapshot } from '@/lib/running-league/league-status-summary'
+import { buildMemberLeagueStatusSnapshot, type MemberLeagueStatusSnapshot } from '@/lib/running-league/league-status-summary'
 import { formatScoreDisplay, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import { MemberRankingDetailPanel } from '@/components/dashboard/member-ranking-detail-panel'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
@@ -101,8 +101,6 @@ function filterRankedBySearch<R extends { memberId: string; memberName: string }
 const EMPTY_PB_LEADERBOARD: PbDistanceLeaderboard = { ranked: [], unranked: [] }
 const FULL_VIEW_PAGE_SIZE = 25
 const TOP_DISPLAY_COUNT = RANKING_TOP_DISPLAY_COUNT
-
-type MobilePortalTab = 'ranking' | 'graph' | 'highlights'
 
 function RankingViewTabs({
   value,
@@ -212,46 +210,6 @@ function PbDistanceTabs({
   )
 }
 
-function MobilePortalTabSwitcher({
-  value,
-  onChange,
-}: {
-  value: MobilePortalTab
-  onChange: (value: MobilePortalTab) => void
-}) {
-  const tabs: Array<{ value: MobilePortalTab; label: string }> = [
-    { value: 'ranking', label: '랭킹' },
-    { value: 'graph', label: '그래프' },
-    { value: 'highlights', label: '하이라이트' },
-  ]
-
-  return (
-    <div
-      className="grid grid-cols-3 gap-1 rounded-xl border border-lime-500/20 bg-black/50 p-1"
-      role="tablist"
-      aria-label="리그 보기"
-    >
-      {tabs.map((tab) => (
-        <button
-          key={tab.value}
-          type="button"
-          role="tab"
-          aria-selected={value === tab.value}
-          onClick={() => onChange(tab.value)}
-          className={cn(
-            'min-h-9 rounded-lg text-sm font-medium transition-colors',
-            value === tab.value
-              ? 'bg-lime-500/20 text-lime-100 shadow-[0_0_12px_rgba(163,230,53,0.12)]'
-              : 'text-zinc-500 hover:text-zinc-300',
-          )}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function RankingFiltersPanel({
   rankingView,
   onRankingViewChange,
@@ -274,38 +232,36 @@ function RankingFiltersPanel({
   compact?: boolean
 }) {
   return (
-    <div className={cn(compact ? 'space-y-2' : 'space-y-4')}>
+    <div className={cn(compact ? 'space-y-1.5' : 'space-y-4')}>
       <RankingViewTabs
         value={rankingView}
         onChange={onRankingViewChange}
         compact={compact}
       />
-      <div className={cn(compact ? 'flex flex-col gap-2 sm:flex-row sm:items-center' : 'space-y-4')}>
+      <div className={cn(compact ? 'space-y-1.5' : 'space-y-4')}>
         <GenderFilterTabs
           value={genderFilter}
           onChange={onGenderFilterChange}
           compact={compact}
-          className={compact ? 'min-w-0 flex-1' : undefined}
         />
         {rankingView === 'pb' ? (
           <PbDistanceTabs
             value={pbDistance}
             onChange={onPbDistanceChange}
             compact={compact}
-            className={compact ? 'min-w-0 flex-1' : undefined}
           />
+        ) : compact ? (
+          <p className="text-[10px] text-zinc-500">
+            {formatCurrentMonthRankingLabel()} · 매월 1일 초기화
+          </p>
         ) : null}
       </div>
       {rankingView === 'mileage' && !compact ? <RankingPeriodBanner /> : null}
-      {rankingView === 'mileage' && compact ? (
-        <p className="text-[10px] leading-snug text-zinc-500">
-          {formatCurrentMonthRankingLabel()} 누적 · 매월 1일 초기화
-        </p>
-      ) : null}
       <GenderFilterNotice
         genderFilter={genderFilter}
         genderFilterBlocked={genderFilterBlocked}
         unclassifiedCount={unclassifiedCount}
+        compact={compact}
       />
     </div>
   )
@@ -340,10 +296,10 @@ function MobileRunRecordCta({
   }
 
   return (
-    <div className="flex flex-col gap-1.5 lg:hidden">
+    <div className="grid grid-cols-[1fr_auto] gap-2 lg:hidden">
       <Button
         type="button"
-        className="min-h-12 w-full bg-lime-500 text-base font-bold text-black shadow-[0_0_20px_rgba(163,230,53,0.2)] hover:bg-lime-400"
+        className="min-h-12 bg-lime-500 text-base font-bold text-black shadow-[0_0_20px_rgba(163,230,53,0.2)] hover:bg-lime-400"
         onClick={onAddMileage}
       >
         <Plus className="mr-1.5 h-5 w-5" />
@@ -351,9 +307,8 @@ function MobileRunRecordCta({
       </Button>
       <Button
         type="button"
-        variant="ghost"
-        size="sm"
-        className="h-9 text-xs text-zinc-400 hover:text-lime-200"
+        variant="outline"
+        className="min-h-12 shrink-0 border-lime-500/30 bg-black/40 px-3 text-xs font-medium text-lime-200 hover:bg-lime-500/10"
         onClick={onAddPb}
       >
         PB 등록/수정
@@ -366,12 +321,17 @@ function GenderFilterNotice({
   genderFilter,
   genderFilterBlocked,
   unclassifiedCount,
+  compact = false,
 }: {
   genderFilter: RankingGenderFilter
   genderFilterBlocked: boolean
   unclassifiedCount: number
+  compact?: boolean
 }) {
   if (genderFilterBlocked) {
+    if (compact) {
+      return <p className="text-[10px] leading-snug text-amber-200">{GENDER_FILTER_UNAVAILABLE_MESSAGE}</p>
+    }
     return (
       <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
         {GENDER_FILTER_UNAVAILABLE_MESSAGE}
@@ -380,6 +340,11 @@ function GenderFilterNotice({
   }
 
   if (genderFilter !== 'all' && unclassifiedCount > 0) {
+    if (compact) {
+      return (
+        <p className="text-[10px] text-zinc-500">성별 미등록 {unclassifiedCount}명</p>
+      )
+    }
     return (
       <div className="rounded-lg border border-zinc-700/80 bg-black/20 px-3 py-2.5 text-xs leading-relaxed text-zinc-400">
         {GENDER_UNCLASSIFIED_HINT}
@@ -642,6 +607,117 @@ function RankingCardAction({
     >
       {children}
     </Button>
+  )
+}
+
+function RankingPreview({
+  rankingView,
+  pbDistance,
+  activePbLeaderboard,
+  activeMileageLeaderboard,
+  rankedCount,
+  highlightMemberId,
+  selectedMemberId,
+  onMemberSelect,
+  onViewAll,
+  rankingsError,
+  rankingBundle,
+  genderFilter,
+  leagueStatus,
+  onRetry,
+}: {
+  rankingView: RankingView
+  pbDistance: PbLeaderboardDistance
+  activePbLeaderboard: PbDistanceLeaderboard
+  activeMileageLeaderboard: MileageDistanceLeaderboard
+  rankedCount: number
+  highlightMemberId?: string | null
+  selectedMemberId?: string | null
+  onMemberSelect?: (memberId: string, memberName: string) => void
+  onViewAll?: () => void
+  rankingsError?: string | null
+  rankingBundle?: MemberRunningLeagueRankingBundle | null
+  genderFilter: RankingGenderFilter
+  leagueStatus?: MemberLeagueStatusSnapshot | null
+  onRetry?: () => void
+}) {
+  const leaderboard = rankingView === 'pb' ? activePbLeaderboard : activeMileageLeaderboard
+  const firstRow = leaderboard.ranked[0]
+  const distanceLabel = formatPbDistanceLabel(pbDistance)
+  const viewLabel =
+    rankingView === 'pb' ? `${distanceLabel} PB` : formatCurrentMonthRankingLabel()
+
+  const filteredParticipants = rankingBundle
+    ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
+    : []
+
+  function resolveChangeHint(memberId: string): string | null {
+    if (!rankingBundle || rankingView !== 'pb') return null
+    return formatMemberRankChangeHint(
+      memberId,
+      pbDistance,
+      filteredParticipants,
+      rankingBundle.pbRecords,
+    )
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-lime-400/30 bg-zinc-950/90">
+      <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
+        <p className="text-sm font-semibold text-lime-100">랭킹 미리보기</p>
+        <span className="text-[10px] text-zinc-500">{viewLabel}</span>
+      </div>
+      <div className="space-y-2 p-2.5">
+        {rankingsError ? (
+          <RankingsLoadErrorState onRetry={onRetry} />
+        ) : firstRow ? (
+          <>
+            {rankingView === 'pb' ? (
+              <PbRankingRow
+                row={firstRow}
+                isMe={highlightMemberId != null && firstRow.memberId === highlightMemberId}
+                distanceLabel={distanceLabel}
+                changeHint={resolveChangeHint(firstRow.memberId)}
+                onMemberSelect={onMemberSelect}
+                isSelected={selectedMemberId === firstRow.memberId}
+              />
+            ) : (
+              <MileageRankingRow
+                row={firstRow}
+                isMe={highlightMemberId != null && firstRow.memberId === highlightMemberId}
+                onMemberSelect={onMemberSelect}
+                isSelected={selectedMemberId === firstRow.memberId}
+              />
+            )}
+            {leagueStatus?.isSoloRanked ? (
+              <p className="text-center text-xs font-medium text-lime-200/90">현재 리그 1위입니다</p>
+            ) : leagueStatus && highlightMemberId ? (
+              <p className="text-center text-[11px] text-zinc-400">
+                {leagueStatus.rankHeadline}
+                {leagueStatus.rankSubline ? ` · ${leagueStatus.rankSubline}` : ''}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <RankingEmptyState
+            title={rankingView === 'pb' ? RANKING_EMPTY_PB.title : RANKING_EMPTY_MILEAGE.title}
+            description={
+              rankingView === 'pb' ? RANKING_EMPTY_PB.description : RANKING_EMPTY_MILEAGE.description
+            }
+          />
+        )}
+        {rankedCount > 0 && onViewAll ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-10 w-full border-lime-500/30 bg-lime-500/5 text-sm text-lime-100 hover:bg-lime-500/10 hover:text-lime-50"
+            onClick={onViewAll}
+          >
+            {formatRankingFullViewButtonLabel({ genderFilter, rankedCount })}
+          </Button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
@@ -1453,7 +1529,6 @@ export function MemberRunningLeagueRankings({
   const [selectedMember, setSelectedMember] = useState<{ id: string; name: string } | null>(null)
   const [pbDialogOpen, setPbDialogOpen] = useState(false)
   const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
-  const [mobilePortalTab, setMobilePortalTab] = useState<MobilePortalTab>('ranking')
   const router = useRouter()
   const canEdit = tableReady && !readOnly && participant != null
 
@@ -1604,9 +1679,6 @@ export function MemberRunningLeagueRankings({
 
   function handleMemberSelect(memberId: string, memberName: string) {
     setSelectedMember({ id: memberId, name: memberName })
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches) {
-      setMobilePortalTab('graph')
-    }
     window.requestAnimationFrame(() => {
       graphPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
@@ -1633,6 +1705,35 @@ export function MemberRunningLeagueRankings({
     />
   )
 
+  const mobileGraphBody = panelMember ? (
+    <MemberRankingDetailPanel
+      key={panelMember.id}
+      embedded
+      emphasized
+      variant="mobile"
+      memberId={panelMember.id}
+      memberName={panelMember.name}
+      distance={pbDistance}
+      rankingView={rankingView}
+      genderFilter={genderFilter}
+      rankingBundle={rankingBundle}
+      highlightMemberId={highlightMemberId}
+      currentRank={panelMemberRank}
+      totalRanked={activeRankedCount}
+      isExplicitSelection={isExplicitSelection}
+      onClose={
+        isExplicitSelection
+          ? () => setSelectedMember(null)
+          : undefined
+      }
+      soloComparisonHint={leagueStatus?.soloRankHint ?? leagueStatus?.comparisonHint}
+    />
+  ) : (
+    <div className="flex min-h-[220px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-lime-500/20 bg-black/20 px-3 py-4 text-center">
+      <p className="text-xs text-zinc-400">기록을 추가하면 그래프가 표시됩니다.</p>
+    </div>
+  )
+
   const graphPanelBody = panelMember ? (
     <MemberRankingDetailPanel
       key={panelMember.id}
@@ -1653,14 +1754,14 @@ export function MemberRunningLeagueRankings({
           ? () => setSelectedMember(null)
           : undefined
       }
-      className="h-full min-h-[240px] lg:min-h-[360px]"
+      className="h-full min-h-[360px]"
       aspirationInsight={
         panelMember.id === highlightMemberId ? myRankAspiration : null
       }
       soloComparisonHint={leagueStatus?.soloRankHint ?? leagueStatus?.comparisonHint}
     />
   ) : (
-    <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-lime-500/20 bg-black/20 px-4 py-6 text-center text-sm text-zinc-500 lg:min-h-[360px]">
+    <div className="flex min-h-[360px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-lime-500/20 bg-black/20 px-4 py-6 text-center text-sm text-zinc-500">
       <p>회원을 선택하면 그래프를 볼 수 있습니다.</p>
       <p className="text-xs text-zinc-600">순위 목록에서 이름을 눌러 기록·순위 변화를 확인하세요.</p>
     </div>
@@ -1699,6 +1800,33 @@ export function MemberRunningLeagueRankings({
     </div>
   )
 
+  const mobileHighlightsBody = (
+    <div className="space-y-2">
+      {!rankingsError && rankingBundle ? (
+        <MemberLeagueMomentumStrip
+          topRiser={leagueMomentum.topRiser}
+          recentPbUpdates={leagueMomentum.recentPbUpdates}
+          highlightMemberId={highlightMemberId}
+          onMemberSelect={handleMemberSelect}
+          rankingViewLabel={
+            rankingView === 'pb'
+              ? formatPbDistanceLabel(pbDistance)
+              : formatCurrentMonthRankingLabel()
+          }
+        />
+      ) : null}
+      <p className="text-[10px] leading-relaxed text-zinc-500">
+        이름은 마스킹됩니다. 본인만 실명 표시.{' '}
+        <Link
+          href={runningLeagueDetailHref}
+          className="font-medium text-lime-400 underline-offset-2 hover:underline"
+        >
+          리그 상세
+        </Link>
+      </p>
+    </div>
+  )
+
   if (loading) {
     return <MemberRunningLeagueRankingsSkeleton className={className} />
   }
@@ -1711,25 +1839,68 @@ export function MemberRunningLeagueRankings({
         className,
       )}
     >
+      {/* Desktop: status + league card */}
       {leagueStatus && highlightMemberId ? (
-        <MemberLeagueStatusCard snapshot={leagueStatus} />
+        <div className="hidden lg:block">
+          <MemberLeagueStatusCard snapshot={leagueStatus} />
+        </div>
       ) : null}
 
-      <MobileRunRecordCta
-        canEdit={canEdit && !readOnly}
-        onAddMileage={() => setMileageDialogOpen(true)}
-        onAddPb={() => setPbDialogOpen(true)}
-        variant="inline"
-      />
+      {/* Mobile: graph → status → actions → filters → preview → highlights */}
+      <div className="flex flex-col gap-2.5 lg:hidden">
+        <div ref={graphPanelRef} className="scroll-mt-4">
+          {mobileGraphBody}
+        </div>
 
-      <Card className={cn(rankingCardClass, 'border-lime-400/30')}>
-        <CardContent className={cn(rankingCardContentClass, 'flex flex-col gap-3 pt-3 sm:gap-4 sm:pt-4 lg:pt-5')}>
-          <div className="lg:hidden">
-            <MobilePortalTabSwitcher value={mobilePortalTab} onChange={setMobilePortalTab} />
-          </div>
+        {leagueStatus && highlightMemberId ? (
+          <MemberLeagueStatusCard snapshot={leagueStatus} compact />
+        ) : null}
 
-          {/* Desktop filters */}
-          <div className="hidden rounded-xl border border-lime-400/25 bg-black/40 p-4 lg:col-span-2 lg:block">
+        <MobileRunRecordCta
+          canEdit={canEdit && !readOnly}
+          onAddMileage={() => setMileageDialogOpen(true)}
+          onAddPb={() => setPbDialogOpen(true)}
+          variant="inline"
+        />
+
+        <div className="rounded-xl border border-lime-400/20 bg-black/35 p-2">
+          <RankingFiltersPanel
+            rankingView={rankingView}
+            onRankingViewChange={setRankingView}
+            genderFilter={genderFilter}
+            onGenderFilterChange={setGenderFilter}
+            pbDistance={pbDistance}
+            onPbDistanceChange={setPbDistance}
+            genderFilterBlocked={genderFilterBlocked}
+            unclassifiedCount={unclassifiedCount}
+            compact
+          />
+        </div>
+
+        <RankingPreview
+          rankingView={rankingView}
+          pbDistance={pbDistance}
+          activePbLeaderboard={activePbLeaderboard}
+          activeMileageLeaderboard={activeMileageLeaderboard}
+          rankedCount={rankingsError ? 0 : activeRankedCount}
+          highlightMemberId={highlightMemberId}
+          selectedMemberId={panelMember?.id ?? null}
+          onMemberSelect={handleMemberSelect}
+          onViewAll={rankingsError ? undefined : () => setFullRankingOpen(true)}
+          rankingsError={rankingsError}
+          rankingBundle={rankingBundle}
+          genderFilter={genderFilter}
+          leagueStatus={leagueStatus}
+          onRetry={() => router.refresh()}
+        />
+
+        {mobileHighlightsBody}
+      </div>
+
+      {/* Desktop: filters + 2-column ranking/graph + highlights */}
+      <Card className={cn(rankingCardClass, 'hidden border-lime-400/30 lg:block')}>
+        <CardContent className={cn(rankingCardContentClass, 'flex flex-col gap-4 pt-5')}>
+          <div className="rounded-xl border border-lime-400/25 bg-black/40 p-4">
             <RankingFiltersPanel
               rankingView={rankingView}
               onRankingViewChange={setRankingView}
@@ -1742,52 +1913,7 @@ export function MemberRunningLeagueRankings({
             />
           </div>
 
-          {/* Mobile: tabbed content */}
-          <div className="lg:hidden">
-            {mobilePortalTab === 'ranking' ? (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-lime-400/20 bg-black/35 p-2.5">
-                  <RankingFiltersPanel
-                    rankingView={rankingView}
-                    onRankingViewChange={setRankingView}
-                    genderFilter={genderFilter}
-                    onGenderFilterChange={setGenderFilter}
-                    pbDistance={pbDistance}
-                    onPbDistanceChange={setPbDistance}
-                    genderFilterBlocked={genderFilterBlocked}
-                    unclassifiedCount={unclassifiedCount}
-                    compact
-                  />
-                </div>
-                <RankingListCard
-                  rankedCount={rankingsError ? 0 : activeRankedCount}
-                  genderFilter={genderFilter}
-                  onViewAll={rankingsError ? undefined : () => setFullRankingOpen(true)}
-                  aspirationSlot={
-                    highlightMemberId && !rankingsError ? (
-                      <MemberRankAspirationPanel insight={myRankAspiration} />
-                    ) : null
-                  }
-                >
-                  {rankingListBody}
-                </RankingListCard>
-              </div>
-            ) : null}
-
-            {mobilePortalTab === 'graph' ? (
-              <div ref={graphPanelRef} className="scroll-mt-4 space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-lime-300/80">
-                  그래프 · 성장 분석
-                </p>
-                {graphPanelBody}
-              </div>
-            ) : null}
-
-            {mobilePortalTab === 'highlights' ? highlightsBody : null}
-          </div>
-
-          {/* Desktop: 2-column ranking + graph */}
-          <div className="hidden gap-4 lg:grid lg:grid-cols-2 lg:items-start">
+          <div className="grid grid-cols-2 items-start gap-4">
             <div className="min-w-0">
               <RankingListCard
                 rankedCount={rankingsError ? 0 : activeRankedCount}
@@ -1819,7 +1945,7 @@ export function MemberRunningLeagueRankings({
               </RankingListCard>
             </div>
 
-            <div ref={graphPanelRef} className="min-w-0 space-y-3 scroll-mt-4">
+            <div ref={graphPanelRef} className="min-w-0 scroll-mt-4 space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-lime-300/80">
                 그래프 · 성장 분석
               </p>
@@ -1827,9 +1953,7 @@ export function MemberRunningLeagueRankings({
             </div>
           </div>
 
-          <div className="hidden space-y-4 lg:block lg:col-span-2">
-            {highlightsBody}
-          </div>
+          <div className="space-y-4">{highlightsBody}</div>
         </CardContent>
       </Card>
 

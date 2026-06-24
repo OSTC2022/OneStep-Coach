@@ -132,7 +132,7 @@ export function MemberMyPage({
           {isAdultMember ? '내 러닝 포털' : '내 선수 리포트'}
         </h1>
         {isAdultMember ? (
-          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
+          <p className="hidden max-w-2xl text-xs leading-relaxed text-muted-foreground sm:block sm:text-sm">
             내 순위·마일리지·PB를 먼저 확인하고 기록을 추가하세요.
           </p>
         ) : (
