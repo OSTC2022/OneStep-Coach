@@ -715,6 +715,7 @@ function RankingPreview({
   onOpenList,
   rankingsError,
   rankingBundle,
+  genderFilter,
   leagueStatus,
   onRetry,
 }: {
@@ -729,6 +730,7 @@ function RankingPreview({
   onOpenList?: () => void
   rankingsError?: string | null
   rankingBundle?: MemberRunningLeagueRankingBundle | null
+  genderFilter: RankingGenderFilter
   leagueStatus?: MemberLeagueStatusSnapshot | null
   onRetry?: () => void
 }) {
@@ -1973,6 +1975,7 @@ export function MemberRunningLeagueRankings({
           onOpenList={rankingsError ? undefined : () => setFullRankingOpen(true)}
           rankingsError={rankingsError}
           rankingBundle={rankingBundle}
+          genderFilter={genderFilter}
           leagueStatus={leagueStatus}
           onRetry={() => router.refresh()}
         />
