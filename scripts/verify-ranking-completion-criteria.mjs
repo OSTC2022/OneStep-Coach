@@ -123,7 +123,7 @@ const criteria = [
     name: '모바일 반응형',
     check: () => {
       assert.match(rankings, /lg:grid-cols-2|grid-cols-2 items-start/)
-      assert.match(rankings, /variant="mobile"/)
+      assert.match(rankings, /랭킹 목록 보기/)
       assert.match(rankings, /RankingPreview/)
       assert.match(rankings, /오늘 러닝 기록 추가/)
       assert.match(rankings, /overflow-x-hidden/)

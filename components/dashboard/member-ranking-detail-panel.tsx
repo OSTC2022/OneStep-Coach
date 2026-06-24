@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { MemberRankAspirationPanel } from '@/components/dashboard/member-rank-aspiration-panel'
 import { MemberRankingCharts } from '@/components/dashboard/member-ranking-charts'
@@ -43,6 +43,7 @@ interface MemberRankingDetailPanelProps {
   aspirationInsight?: RankAspirationInsight | null
   soloComparisonHint?: string | null
   variant?: 'default' | 'mobile'
+  mobileFilterSlot?: ReactNode
 }
 
 function formatGraphOneLineSummary(summary: MemberGraphPanelSummary): string {
@@ -109,6 +110,7 @@ export function MemberRankingDetailPanel({
   aspirationInsight = null,
   soloComparisonHint = null,
   variant = 'default',
+  mobileFilterSlot = null,
 }: MemberRankingDetailPanelProps) {
   const isMobile = variant === 'mobile'
   const isMe = highlightMemberId != null && memberId === highlightMemberId
@@ -245,6 +247,8 @@ export function MemberRankingDetailPanel({
           ) : null}
         </div>
       )}
+
+      {isMobile && mobileFilterSlot ? mobileFilterSlot : null}
 
       <div
         className={cn(

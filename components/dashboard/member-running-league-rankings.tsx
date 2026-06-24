@@ -267,6 +267,93 @@ function RankingFiltersPanel({
   )
 }
 
+function MobileGraphFilterStrip({
+  rankingView,
+  onRankingViewChange,
+  genderFilter,
+  onGenderFilterChange,
+  pbDistance,
+  onPbDistanceChange,
+  genderFilterBlocked,
+}: {
+  rankingView: RankingView
+  onRankingViewChange: (value: RankingView) => void
+  genderFilter: RankingGenderFilter
+  onGenderFilterChange: (value: RankingGenderFilter) => void
+  pbDistance: PbLeaderboardDistance
+  onPbDistanceChange: (value: PbLeaderboardDistance) => void
+  genderFilterBlocked: boolean
+}) {
+  const viewLabels: Record<RankingView, string> = {
+    pb: 'PB',
+    mileage: '마일리지',
+  }
+
+  return (
+    <div className="border-b border-lime-500/10 px-2.5 py-1.5">
+      <div
+        className="flex items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        role="toolbar"
+        aria-label="랭킹 필터"
+      >
+        <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-lime-500/20 bg-black/40 p-0.5">
+          {RANKING_VIEW_OPTIONS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => onRankingViewChange(item.value)}
+              className={cn(
+                'shrink-0 rounded px-2 py-1 text-[10px] font-medium leading-none transition-colors',
+                rankingView === item.value
+                  ? 'bg-lime-500/25 text-lime-100'
+                  : 'text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              {viewLabels[item.value]}
+            </button>
+          ))}
+        </div>
+
+        <span className="shrink-0 text-[10px] text-zinc-700" aria-hidden>
+          |
+        </span>
+
+        {RANKING_GENDER_FILTERS.map((item) => (
+          <RankingFilterChip
+            key={item.value}
+            active={genderFilter === item.value}
+            onClick={() => onGenderFilterChange(item.value)}
+            inline
+            className={cn(
+              genderFilterBlocked && item.value !== 'all' && 'pointer-events-none opacity-40',
+            )}
+          >
+            {item.label}
+          </RankingFilterChip>
+        ))}
+
+        {rankingView === 'pb' ? (
+          <>
+            <span className="shrink-0 text-[10px] text-zinc-700" aria-hidden>
+              |
+            </span>
+            {PB_RANKING_DISTANCES.map((distance) => (
+              <RankingFilterChip
+                key={distance}
+                active={pbDistance === distance}
+                onClick={() => onPbDistanceChange(distance)}
+                inline
+              >
+                {formatPbDistanceLabel(distance)}
+              </RankingFilterChip>
+            ))}
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function MobileRunRecordCta({
   canEdit,
   onAddMileage,
@@ -369,12 +456,14 @@ function RankingFilterChip({
   children,
   className,
   compact = false,
+  inline = false,
 }: {
   active: boolean
   onClick: () => void
   children: ReactNode
   className?: string
   compact?: boolean
+  inline?: boolean
 }) {
   return (
     <button
@@ -382,7 +471,11 @@ function RankingFilterChip({
       onClick={onClick}
       className={cn(
         'shrink-0 rounded-full border transition-colors',
-        compact ? 'min-h-8 px-2.5 py-1 text-xs' : 'min-h-9 px-3.5 py-1.5 text-sm',
+        inline
+          ? 'min-h-7 px-2 py-0.5 text-[10px] leading-none'
+          : compact
+            ? 'min-h-8 px-2.5 py-1 text-xs'
+            : 'min-h-9 px-3.5 py-1.5 text-sm',
         active
           ? 'border-lime-400/55 bg-lime-500/15 font-medium text-lime-100 shadow-[0_0_14px_rgba(163,230,53,0.1)]'
           : 'border-lime-500/20 bg-black/50 text-zinc-400 hover:border-lime-500/35 hover:text-zinc-200',
@@ -619,10 +712,9 @@ function RankingPreview({
   highlightMemberId,
   selectedMemberId,
   onMemberSelect,
-  onViewAll,
+  onOpenList,
   rankingsError,
   rankingBundle,
-  genderFilter,
   leagueStatus,
   onRetry,
 }: {
@@ -634,10 +726,9 @@ function RankingPreview({
   highlightMemberId?: string | null
   selectedMemberId?: string | null
   onMemberSelect?: (memberId: string, memberName: string) => void
-  onViewAll?: () => void
+  onOpenList?: () => void
   rankingsError?: string | null
   rankingBundle?: MemberRunningLeagueRankingBundle | null
-  genderFilter: RankingGenderFilter
   leagueStatus?: MemberLeagueStatusSnapshot | null
   onRetry?: () => void
 }) {
@@ -664,10 +755,23 @@ function RankingPreview({
   return (
     <div className="overflow-hidden rounded-xl border border-lime-400/30 bg-zinc-950/90">
       <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
-        <p className="text-sm font-semibold text-lime-100">랭킹 미리보기</p>
-        <span className="text-[10px] text-zinc-500">{viewLabel}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="text-sm font-semibold text-lime-100">랭킹</p>
+          <span className="truncate text-[10px] text-zinc-500">{viewLabel}</span>
+        </div>
+        {rankedCount > 0 && onOpenList ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0 border-lime-500/30 bg-lime-500/5 px-2.5 text-[11px] text-lime-100 hover:bg-lime-500/10"
+            onClick={onOpenList}
+          >
+            랭킹 목록 보기
+          </Button>
+        ) : null}
       </div>
-      <div className="space-y-2 p-2.5">
+      <div className="space-y-1.5 p-2.5">
         {rankingsError ? (
           <RankingsLoadErrorState onRetry={onRetry} />
         ) : firstRow ? (
@@ -690,9 +794,9 @@ function RankingPreview({
               />
             )}
             {leagueStatus?.isSoloRanked ? (
-              <p className="text-center text-xs font-medium text-lime-200/90">현재 리그 1위입니다</p>
+              <p className="text-center text-[11px] font-medium text-lime-200/90">현재 리그 1위입니다</p>
             ) : leagueStatus && highlightMemberId ? (
-              <p className="text-center text-[11px] text-zinc-400">
+              <p className="text-center text-[10px] text-zinc-400">
                 {leagueStatus.rankHeadline}
                 {leagueStatus.rankSubline ? ` · ${leagueStatus.rankSubline}` : ''}
               </p>
@@ -706,16 +810,6 @@ function RankingPreview({
             }
           />
         )}
-        {rankedCount > 0 && onViewAll ? (
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-10 w-full border-lime-500/30 bg-lime-500/5 text-sm text-lime-100 hover:bg-lime-500/10 hover:text-lime-50"
-            onClick={onViewAll}
-          >
-            {formatRankingFullViewButtonLabel({ genderFilter, rankedCount })}
-          </Button>
-        ) : null}
       </div>
     </div>
   )
@@ -1705,6 +1799,18 @@ export function MemberRunningLeagueRankings({
     />
   )
 
+  const mobileGraphFilterStrip = (
+    <MobileGraphFilterStrip
+      rankingView={rankingView}
+      onRankingViewChange={setRankingView}
+      genderFilter={genderFilter}
+      onGenderFilterChange={setGenderFilter}
+      pbDistance={pbDistance}
+      onPbDistanceChange={setPbDistance}
+      genderFilterBlocked={genderFilterBlocked}
+    />
+  )
+
   const mobileGraphBody = panelMember ? (
     <MemberRankingDetailPanel
       key={panelMember.id}
@@ -1727,10 +1833,17 @@ export function MemberRunningLeagueRankings({
           : undefined
       }
       soloComparisonHint={leagueStatus?.soloRankHint ?? leagueStatus?.comparisonHint}
+      mobileFilterSlot={mobileGraphFilterStrip}
     />
   ) : (
-    <div className="flex min-h-[220px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-lime-500/20 bg-black/20 px-3 py-4 text-center">
-      <p className="text-xs text-zinc-400">기록을 추가하면 그래프가 표시됩니다.</p>
+    <div className="overflow-hidden rounded-xl border border-lime-400/35 bg-zinc-950/90">
+      <div className="border-b border-lime-500/15 px-3 py-2">
+        <p className="text-[11px] text-zinc-400">기록을 추가하면 그래프가 표시됩니다.</p>
+      </div>
+      {mobileGraphFilterStrip}
+      <div className="flex min-h-[200px] flex-col items-center justify-center px-3 py-4 text-center">
+        <p className="text-xs text-zinc-500">러닝 기록 또는 PB를 등록해보세요.</p>
+      </div>
     </div>
   )
 
@@ -1846,8 +1959,24 @@ export function MemberRunningLeagueRankings({
         </div>
       ) : null}
 
-      {/* Mobile: graph → status → actions → filters → preview → highlights */}
+      {/* Mobile: ranking → graph → status → actions → highlights */}
       <div className="flex flex-col gap-2.5 lg:hidden">
+        <RankingPreview
+          rankingView={rankingView}
+          pbDistance={pbDistance}
+          activePbLeaderboard={activePbLeaderboard}
+          activeMileageLeaderboard={activeMileageLeaderboard}
+          rankedCount={rankingsError ? 0 : activeRankedCount}
+          highlightMemberId={highlightMemberId}
+          selectedMemberId={panelMember?.id ?? null}
+          onMemberSelect={handleMemberSelect}
+          onOpenList={rankingsError ? undefined : () => setFullRankingOpen(true)}
+          rankingsError={rankingsError}
+          rankingBundle={rankingBundle}
+          leagueStatus={leagueStatus}
+          onRetry={() => router.refresh()}
+        />
+
         <div ref={graphPanelRef} className="scroll-mt-4">
           {mobileGraphBody}
         </div>
@@ -1861,37 +1990,6 @@ export function MemberRunningLeagueRankings({
           onAddMileage={() => setMileageDialogOpen(true)}
           onAddPb={() => setPbDialogOpen(true)}
           variant="inline"
-        />
-
-        <div className="rounded-xl border border-lime-400/20 bg-black/35 p-2">
-          <RankingFiltersPanel
-            rankingView={rankingView}
-            onRankingViewChange={setRankingView}
-            genderFilter={genderFilter}
-            onGenderFilterChange={setGenderFilter}
-            pbDistance={pbDistance}
-            onPbDistanceChange={setPbDistance}
-            genderFilterBlocked={genderFilterBlocked}
-            unclassifiedCount={unclassifiedCount}
-            compact
-          />
-        </div>
-
-        <RankingPreview
-          rankingView={rankingView}
-          pbDistance={pbDistance}
-          activePbLeaderboard={activePbLeaderboard}
-          activeMileageLeaderboard={activeMileageLeaderboard}
-          rankedCount={rankingsError ? 0 : activeRankedCount}
-          highlightMemberId={highlightMemberId}
-          selectedMemberId={panelMember?.id ?? null}
-          onMemberSelect={handleMemberSelect}
-          onViewAll={rankingsError ? undefined : () => setFullRankingOpen(true)}
-          rankingsError={rankingsError}
-          rankingBundle={rankingBundle}
-          genderFilter={genderFilter}
-          leagueStatus={leagueStatus}
-          onRetry={() => router.refresh()}
         />
 
         {mobileHighlightsBody}
