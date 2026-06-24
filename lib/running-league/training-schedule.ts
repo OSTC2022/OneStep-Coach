@@ -8,6 +8,7 @@ export type RunningLeagueTrainingScheduleDayInput = {
   location_label: string
   naver_map_url: string
   is_hidden: boolean
+  schedule_date: string | null
 }
 
 export type RunningLeagueTrainingScheduleSignup = {
@@ -21,6 +22,8 @@ export type RunningLeagueTrainingScheduleDayView = {
   league_id: string
   weekday: TrainingWeekday
   weekday_label: string
+  schedule_date: string | null
+  schedule_date_label: string | null
   training_summary: string
   location_label: string
   naver_map_url: string | null
@@ -35,6 +38,42 @@ export function trainingWeekdayLabel(weekday: number): string {
   return TRAINING_WEEKDAY_LABELS[weekday] ?? `${weekday}`
 }
 
+export function formatTrainingScheduleDateLabel(
+  scheduleDate: string | null | undefined,
+): string | null {
+  const raw = scheduleDate?.trim().slice(0, 10)
+  if (!raw) return null
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  if (!match) return null
+  return `${match[2]}/${match[3]}`
+}
+
+/** 월요일(weekday 0) 날짜를 기준으로 화~일 날짜를 채웁니다. */
+export function propagateTrainingWeekDatesFromMonday(
+  days: RunningLeagueTrainingScheduleDayInput[],
+  mondayDate: string | null,
+): RunningLeagueTrainingScheduleDayInput[] {
+  const raw = mondayDate?.trim().slice(0, 10)
+  if (!raw) {
+    return days.map((day) => ({ ...day, schedule_date: null }))
+  }
+
+  const monday = new Date(`${raw}T12:00:00`)
+  if (Number.isNaN(monday.getTime())) return days
+
+  return days.map((day) => {
+    const next = new Date(monday)
+    next.setDate(monday.getDate() + day.weekday)
+    const yyyy = next.getFullYear()
+    const mm = String(next.getMonth() + 1).padStart(2, '0')
+    const dd = String(next.getDate()).padStart(2, '0')
+    return {
+      ...day,
+      schedule_date: `${yyyy}-${mm}-${dd}`,
+    }
+  })
+}
+
 export function createEmptyTrainingScheduleDays(): RunningLeagueTrainingScheduleDayInput[] {
   return TRAINING_WEEKDAY_LABELS.map((_, weekday) => ({
     weekday: weekday as TrainingWeekday,
@@ -42,6 +81,7 @@ export function createEmptyTrainingScheduleDays(): RunningLeagueTrainingSchedule
     location_label: '',
     naver_map_url: '',
     is_hidden: false,
+    schedule_date: null,
   }))
 }
 

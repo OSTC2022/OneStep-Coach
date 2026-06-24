@@ -1,10 +1,15 @@
 'use server'
 
-import { getMemberForCurrentUser, requireRole } from '@/lib/actions/auth'
+import {
+  clearCenterTrainingScheduleAttendance,
+  recordCenterTrainingScheduleAttendance,
+} from '@/lib/actions/center-training-schedule-attendance'
+import { getCurrentUser, getMemberForCurrentUser, requireRole } from '@/lib/actions/auth'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import {
   createEmptyTrainingScheduleDays,
+  formatTrainingScheduleDateLabel,
   resolveTrainingScheduleMapHref,
   trainingWeekdayLabel,
   type RunningLeagueTrainingScheduleDayInput,
@@ -15,7 +20,32 @@ import {
 import { revalidatePath } from 'next/cache'
 
 const CENTER_SCHEDULE_DAY_SELECT =
+  'weekday, training_summary, location_label, naver_map_url, is_hidden, schedule_date, created_at, updated_at'
+
+const CENTER_SCHEDULE_DAY_SELECT_LEGACY =
   'weekday, training_summary, location_label, naver_map_url, is_hidden, created_at, updated_at'
+
+function isMissingColumnError(error: { code?: string } | null): boolean {
+  return error?.code === '42703'
+}
+
+async function fetchCenterScheduleDayRows(
+  supabase: Awaited<ReturnType<typeof scheduleClient>>,
+) {
+  const primary = await supabase
+    .from('center_running_training_schedule_days')
+    .select(CENTER_SCHEDULE_DAY_SELECT)
+    .order('weekday', { ascending: true })
+
+  if (!isMissingColumnError(primary.error)) {
+    return primary
+  }
+
+  return supabase
+    .from('center_running_training_schedule_days')
+    .select(CENTER_SCHEDULE_DAY_SELECT_LEGACY)
+    .order('weekday', { ascending: true })
+}
 
 type CenterScheduleDayRow = {
   weekday: number
@@ -23,6 +53,7 @@ type CenterScheduleDayRow = {
   location_label: string
   naver_map_url: string | null
   is_hidden: boolean
+  schedule_date?: string | null
 }
 
 type CenterSignupRow = {
@@ -83,11 +114,14 @@ function buildCenterDayView(
   currentMemberId: string | null,
 ): RunningLeagueTrainingScheduleDayView {
   const weekday = row.weekday as TrainingWeekday
+  const scheduleDate = row.schedule_date?.slice(0, 10) ?? null
   return {
     id: centerDayId(weekday),
     league_id: '',
     weekday,
     weekday_label: trainingWeekdayLabel(weekday),
+    schedule_date: scheduleDate,
+    schedule_date_label: formatTrainingScheduleDateLabel(scheduleDate),
     training_summary: row.training_summary ?? '',
     location_label: row.location_label ?? '',
     naver_map_url: row.naver_map_url,
@@ -119,10 +153,7 @@ export async function fetchCenterRunningTrainingSchedule(
   const supabase = await scheduleClient()
   const includeHidden = options.includeHidden ?? false
 
-  const { data: dayRows, error: dayError } = await supabase
-    .from('center_running_training_schedule_days')
-    .select(CENTER_SCHEDULE_DAY_SELECT)
-    .order('weekday', { ascending: true })
+  const { data: dayRows, error: dayError } = await fetchCenterScheduleDayRows(supabase)
 
   if (isMissingTableError(dayError)) {
     return { days: [], tableReady: false }
@@ -186,6 +217,7 @@ export async function getCenterRunningTrainingScheduleForAdmin(): Promise<{
       location_label: day.location_label,
       naver_map_url: day.naver_map_url ?? '',
       is_hidden: day.is_hidden,
+      schedule_date: day.schedule_date,
     })),
   }
 }
@@ -203,6 +235,7 @@ export async function saveCenterRunningTrainingSchedule(
       location_label: found?.location_label?.trim() ?? '',
       naver_map_url: found?.naver_map_url?.trim() || null,
       is_hidden: Boolean(found?.is_hidden),
+      schedule_date: found?.schedule_date?.trim().slice(0, 10) || null,
       updated_at: new Date().toISOString(),
     }
   })
@@ -239,19 +272,30 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   | { ok: true; signedUp: boolean; signupCount: number }
   | { ok: false; error: string }
 > {
-  const member = await getMemberForCurrentUser()
+  const [member, user] = await Promise.all([getMemberForCurrentUser(), getCurrentUser()])
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
   const weekday = parseCenterDayId(scheduleDayId)
   if (weekday == null) return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
 
   const supabase = await scheduleClient()
+  const isAdultMember = user?.role === 'adult_member'
 
-  const { data: dayRow, error: dayError } = await supabase
+  let dayResult = await supabase
     .from('center_running_training_schedule_days')
-    .select('weekday, is_hidden, training_summary')
+    .select('weekday, is_hidden, training_summary, schedule_date')
     .eq('weekday', weekday)
     .maybeSingle()
+
+  if (isMissingColumnError(dayResult.error)) {
+    dayResult = await supabase
+      .from('center_running_training_schedule_days')
+      .select('weekday, is_hidden, training_summary')
+      .eq('weekday', weekday)
+      .maybeSingle()
+  }
+
+  const { data: dayRow, error: dayError } = dayResult
 
   if (isMissingTableError(dayError)) {
     return { ok: false, error: '러닝 스케줄 기능이 준비되지 않았습니다.' }
@@ -262,6 +306,9 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   if (!isVotableCenterDay(dayRow)) {
     return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
   }
+
+  const scheduleDate =
+    (dayRow as { schedule_date?: string | null }).schedule_date ?? null
 
   const { data: existing, error: existingError } = await supabase
     .from('center_running_training_schedule_signups')
@@ -285,6 +332,20 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       console.error('toggleCenterRunningTrainingScheduleSignup.delete', deleteError)
       return { ok: false, error: '참여 취소에 실패했습니다.' }
     }
+
+    if (isAdultMember) {
+      const attendanceResult = await clearCenterTrainingScheduleAttendance({
+        memberId: member.id,
+        weekday,
+        scheduleDate,
+      })
+      if (!attendanceResult.ok) {
+        console.error(
+          'toggleCenterRunningTrainingScheduleSignup.clearAttendance',
+          attendanceResult.error,
+        )
+      }
+    }
   } else {
     const { error: insertError } = await supabase
       .from('center_running_training_schedule_signups')
@@ -296,6 +357,24 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     if (insertError) {
       console.error('toggleCenterRunningTrainingScheduleSignup.insert', insertError)
       return { ok: false, error: '참여 신청에 실패했습니다.' }
+    }
+
+    if (isAdultMember && user) {
+      const attendanceResult = await recordCenterTrainingScheduleAttendance({
+        member,
+        weekday,
+        scheduleDate,
+        checkedInBy: user.id,
+      })
+
+      if (!attendanceResult.ok) {
+        await supabase
+          .from('center_running_training_schedule_signups')
+          .delete()
+          .eq('weekday', weekday)
+          .eq('member_id', member.id)
+        return { ok: false, error: attendanceResult.error }
+      }
     }
   }
 

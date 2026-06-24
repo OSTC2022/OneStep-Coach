@@ -10,11 +10,14 @@ import {
 import {
   TRAINING_WEEKDAY_LABELS,
   createEmptyTrainingScheduleDays,
+  formatTrainingScheduleDateLabel,
+  propagateTrainingWeekDatesFromMonday,
   type RunningLeagueTrainingScheduleDayInput,
 } from '@/lib/running-league/training-schedule'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
@@ -49,6 +52,10 @@ export function CenterRunningTrainingSchedulePanel() {
     )
   }
 
+  function updateMondayScheduleDate(mondayDate: string) {
+    setDays((current) => propagateTrainingWeekDatesFromMonday(current, mondayDate))
+  }
+
   function save() {
     startTransition(async () => {
       const result = await saveCenterRunningTrainingSchedule(days)
@@ -59,6 +66,8 @@ export function CenterRunningTrainingSchedulePanel() {
       toast.success('주간 러닝 스케줄을 저장했습니다.')
     })
   }
+
+  const mondayDate = days.find((day) => day.weekday === 0)?.schedule_date ?? ''
 
   if (loading) {
     return (
@@ -87,11 +96,24 @@ export function CenterRunningTrainingSchedulePanel() {
       <CardHeader className="pb-3">
         <CardTitle className="text-base">주간 훈련 스케줄</CardTitle>
         <p className="text-sm text-muted-foreground">
-          성인 회원 마이페이지 상단(ONE STEP RUNNING LEAGUE)에 요일별 훈련이 표시되고, 주간 훈련
-          참여 투표 버튼이 자동으로 노출됩니다. 눈 아이콘으로 휴강·미운영 요일을 숨길 수 있습니다.
+          성인 회원 「내 러닝 포털」에 요일별 훈련이 표시됩니다. 월요일 날짜를 입력하면 화~일
+          날짜가 자동으로 채워집니다. 눈 아이콘으로 휴강·미운영 요일을 숨길 수 있습니다.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
+        <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 p-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">이번 주 월요일 날짜</p>
+          <KoreanDatePicker
+            value={mondayDate}
+            onChange={updateMondayScheduleDate}
+            compact
+            placeholder="월요일 날짜 선택"
+          />
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            예: 5월 5일 선택 → 05/05(월) · 05/06(화) · … · 05/11(일)
+          </p>
+        </div>
+
         {days.map((day) => (
           <div
             key={day.weekday}
@@ -101,7 +123,14 @@ export function CenterRunningTrainingSchedulePanel() {
             )}
           >
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">{TRAINING_WEEKDAY_LABELS[day.weekday]}요일</p>
+              <div className="flex min-w-0 items-center gap-2">
+                <p className="text-sm font-semibold">{TRAINING_WEEKDAY_LABELS[day.weekday]}요일</p>
+                {day.schedule_date ? (
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {formatTrainingScheduleDateLabel(day.schedule_date)}
+                  </span>
+                ) : null}
+              </div>
               <Button
                 type="button"
                 variant="ghost"

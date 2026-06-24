@@ -1805,6 +1805,7 @@ const RANKINGS_LOAD_ERROR = '데이터를 불러오지 못했습니다. 다시 �
 
 async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRunningLeagueHome> {
   const supabase = await createClient()
+  const leaderboardSupabase = await leagueClient()
   let rankingsError: string | null = null
 
   let league: RunningLeague | null = null
@@ -1841,25 +1842,25 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
   try {
     const [myResult, allParticipantsResult, leaguePbRecordsResult, leagueMileageLogsResult] =
       await Promise.all([
-        supabase
+        leaderboardSupabase
           .from('running_league_participants')
           .select(PARTICIPANT_SELECT)
           .eq('league_id', league.id)
           .eq('member_id', memberId)
           .maybeSingle(),
-        supabase
+        leaderboardSupabase
           .from('running_league_participants')
           .select(PARTICIPANT_SELECT)
           .eq('league_id', league.id)
           .order('created_at', { ascending: true }),
-        supabase
+        leaderboardSupabase
           .from('running_league_records')
           .select(
             'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, time_seconds, measured_at, created_at, updated_at',
           )
           .eq('league_id', league.id)
           .in('distance_event', ['5km', '10km', 'half', 'full']),
-        supabase
+        leaderboardSupabase
           .from('running_league_mileage_logs')
           .select('id, participant_id, league_id, member_id, distance_km, logged_at')
           .eq('league_id', league.id)
@@ -1885,7 +1886,7 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
 
       try {
         const adultMemberIds = await resolveAdultRunningMemberIds(
-          supabase,
+          leaderboardSupabase,
           participants.map((row) => row.member_id),
         )
         const adultParticipants = filterParticipantsForAdultRunningLeague(participants, adultMemberIds)
@@ -2379,6 +2380,34 @@ export async function saveMemberRunningPb(input: {
     },
     { onConflict: 'participant_id,distance_event,record_phase' },
   )
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      return { ok: false, error: '기록 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.' }
+    }
+    return { ok: false, error: error.message }
+  }
+
+  revalidateMemberMileagePaths()
+  return { ok: true }
+}
+
+export async function deleteMemberRunningPb(input: {
+  distance_event: RunningLeagueDistanceEvent
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const member = await getMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const supabase = await leagueClient()
+  const { error } = await supabase
+    .from('running_league_records')
+    .delete()
+    .eq('participant_id', ensured.participant.id)
+    .eq('distance_event', input.distance_event)
+    .eq('record_phase', 'other')
 
   if (error) {
     if (isMissingTableError(error)) {

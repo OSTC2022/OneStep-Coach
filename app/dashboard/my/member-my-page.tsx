@@ -1,6 +1,12 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import {
+  Children,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
@@ -17,7 +23,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
-import { MemberRunningLeagueRankings } from '@/components/dashboard/member-running-league-rankings'
+import { MemberRunningLeagueRankings, MemberPortalBrandHeader } from '@/components/dashboard/member-running-league-rankings'
 import {
   MemberRunningLeagueTrainingSchedule,
 } from '@/components/dashboard/member-running-league-training-schedule'
@@ -28,6 +34,7 @@ import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
 import { portalStatusToneClass } from '@/lib/member-portal-status'
 import type { Member } from '@/lib/types'
 import { formatPackageExpiryDateLabel } from '@/lib/session-package-utils'
+import { MEMBER_PORTAL_SHELL_CLASS } from '@/lib/running-league/member-portal-layout'
 import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
@@ -145,40 +152,38 @@ export function MemberMyPage({
         </div>
       ) : null}
 
-      {isAdultMember && runningLeagueHome ? (
-        <MemberRunningLeagueRankings
-          pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}
-          pb10kLeaderboard={runningLeagueHome.pb10kLeaderboard}
-          pbHalfLeaderboard={runningLeagueHome.pbHalfLeaderboard}
-          pbFullLeaderboard={runningLeagueHome.pbFullLeaderboard}
-          mileageLeaderboard={runningLeagueHome.mileageLeaderboard}
-          scoreLeaderboard={runningLeagueHome.scoreLeaderboard}
-          rankingBundle={runningLeagueHome.rankingBundle}
-          participant={runningLeagueHome.participant}
-          pbRecords={runningLeagueHome.pbRecords}
-          mileageLogs={runningLeagueHome.mileageLogs}
-          tableReady={runningLeagueHome.tableReady}
-          readOnly={adminPreview}
-          rankingsError={runningLeagueHome.rankingsError}
-          highlightMemberId={member.id}
-          runningLeagueDetailHref={runningLeagueHref}
-          brandHeaderBelow={
-            <MemberRunningLeagueTrainingSchedule
-              days={trainingScheduleDays}
-              tableReady={trainingScheduleReady}
-              canParticipate={!adminPreview}
+      {isAdultMember ? (
+        <section className={cn(MEMBER_PORTAL_SHELL_CLASS, 'flex flex-col gap-2.5 sm:gap-4')}>
+          <MemberPortalBrandHeader />
+          <MemberRunningLeagueTrainingSchedule
+            days={trainingScheduleDays}
+            tableReady={trainingScheduleReady}
+            canParticipate={!adminPreview}
+            readOnly={adminPreview}
+            embedded
+          />
+          {runningLeagueHome ? (
+            <MemberRunningLeagueRankings
+              pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}
+              pb10kLeaderboard={runningLeagueHome.pb10kLeaderboard}
+              pbHalfLeaderboard={runningLeagueHome.pbHalfLeaderboard}
+              pbFullLeaderboard={runningLeagueHome.pbFullLeaderboard}
+              mileageLeaderboard={runningLeagueHome.mileageLeaderboard}
+              scoreLeaderboard={runningLeagueHome.scoreLeaderboard}
+              rankingBundle={runningLeagueHome.rankingBundle}
+              participant={runningLeagueHome.participant}
+              pbRecords={runningLeagueHome.pbRecords}
+              mileageLogs={runningLeagueHome.mileageLogs}
+              tableReady={runningLeagueHome.tableReady}
               readOnly={adminPreview}
-              embedded
+              rankingsError={runningLeagueHome.rankingsError}
+              highlightMemberId={member.id}
+              runningLeagueDetailHref={runningLeagueHref}
+              showBrandHeader={false}
+              showPortalShell={false}
             />
-          }
-        />
-      ) : isAdultMember ? (
-        <MemberRunningLeagueTrainingSchedule
-          days={trainingScheduleDays}
-          tableReady={trainingScheduleReady}
-          canParticipate={!adminPreview}
-          readOnly={adminPreview}
-        />
+          ) : null}
+        </section>
       ) : null}
 
       {isAdultMember ? (
@@ -190,13 +195,7 @@ export function MemberMyPage({
             </p>
           </div>
 
-          <div
-            className={cn(
-              'flex gap-2.5 overflow-x-auto pb-0.5 pr-1 snap-x snap-mandatory',
-              '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-              'lg:grid lg:grid-cols-5 lg:gap-3 lg:overflow-visible lg:snap-none lg:pr-0',
-            )}
-          >
+          <MemberSummaryCardCarousel>
             <ProfileSummaryCard
               name={member.name}
               sportProfile={sportProfile}
@@ -253,11 +252,10 @@ export function MemberMyPage({
                 summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
               }
               hint={formatTodayRecordHint(summary.todayRecorded)}
-              highlighted={!summary.todayRecorded}
               compact
               className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
-          </div>
+          </MemberSummaryCardCarousel>
 
           <Card className="border-primary/20 bg-gradient-to-br from-primary/10 to-transparent">
             <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -378,7 +376,6 @@ export function MemberMyPage({
                 summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
               }
               hint={formatTodayRecordHint(summary.todayRecorded)}
-              highlighted={!summary.todayRecorded}
             />
           </div>
         </>
@@ -485,6 +482,83 @@ export function MemberMyPage({
   )
 }
 
+function MemberSummaryCardCarousel({ children }: { children: ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const itemCount = Children.count(children)
+
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container || itemCount === 0) return
+
+    const updateActiveIndex = () => {
+      const firstItem = container.children[0] as HTMLElement | undefined
+      if (!firstItem) return
+
+      const gapValue = getComputedStyle(container).gap.split(' ')[0]
+      const gap = Number.parseFloat(gapValue) || 10
+      const step = firstItem.offsetWidth + gap
+      if (step <= 0) return
+
+      const nextIndex = Math.round(container.scrollLeft / step)
+      setActiveIndex(Math.min(Math.max(nextIndex, 0), itemCount - 1))
+    }
+
+    updateActiveIndex()
+    container.addEventListener('scroll', updateActiveIndex, { passive: true })
+    window.addEventListener('resize', updateActiveIndex)
+
+    return () => {
+      container.removeEventListener('scroll', updateActiveIndex)
+      window.removeEventListener('resize', updateActiveIndex)
+    }
+  }, [itemCount])
+
+  function scrollToIndex(index: number) {
+    const container = scrollRef.current
+    if (!container) return
+
+    const target = container.children[index] as HTMLElement | undefined
+    target?.scrollIntoView({
+      behavior: 'smooth',
+      inline: 'start',
+      block: 'nearest',
+    })
+  }
+
+  return (
+    <div className="space-y-2 lg:space-y-0">
+      <div
+        ref={scrollRef}
+        className={cn(
+          'flex gap-2.5 overflow-x-auto pb-0.5 pr-1 snap-x snap-mandatory',
+          '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+          'lg:grid lg:grid-cols-5 lg:gap-3 lg:overflow-visible lg:snap-none lg:pr-0',
+        )}
+      >
+        {children}
+      </div>
+
+      <div className="flex items-center justify-center gap-1.5 pt-0.5 lg:hidden">
+        {Array.from({ length: itemCount }, (_, index) => (
+          <button
+            key={index}
+            type="button"
+            onClick={() => scrollToIndex(index)}
+            className={cn(
+              'h-1.5 rounded-full transition-all duration-200',
+              index === activeIndex
+                ? 'w-3.5 bg-zinc-400'
+                : 'w-1.5 bg-zinc-600/70',
+            )}
+            aria-label={`회원 정보 ${index + 1}번째 카드`}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ProfileSummaryCard({
   name,
   sportProfile,
@@ -512,7 +586,6 @@ function ProfileSummaryCard({
     <Card
       className={cn(
         compact ? 'h-full' : 'h-full md:h-[158px]',
-        'border-primary/20 bg-primary/5',
         className,
       )}
     >
@@ -550,7 +623,6 @@ function SummaryCard({
   value,
   valueClassName,
   hint,
-  highlighted = false,
   compact = false,
   className,
 }: {
@@ -559,7 +631,6 @@ function SummaryCard({
   value: string
   valueClassName?: string
   hint: string
-  highlighted?: boolean
   compact?: boolean
   className?: string
 }) {
@@ -567,7 +638,6 @@ function SummaryCard({
     <Card
       className={cn(
         compact ? 'h-full' : 'h-full md:h-[158px]',
-        highlighted && 'border-primary/30 bg-primary/[0.04] ring-1 ring-primary/10',
         className,
       )}
     >

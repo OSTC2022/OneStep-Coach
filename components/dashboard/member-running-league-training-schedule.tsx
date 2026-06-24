@@ -14,7 +14,6 @@ import {
 import { toast } from 'sonner'
 import { toggleCenterRunningTrainingScheduleSignup } from '@/lib/actions/center-running-training-schedule'
 import type { RunningLeagueTrainingScheduleDayView } from '@/lib/running-league/training-schedule'
-import { hasVisibleTrainingSchedule } from '@/lib/running-league/training-schedule'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -88,7 +87,6 @@ export function MemberRunningLeagueTrainingSchedule({
   )
   const previewDays = listExpanded ? visibleDays : visibleDays.slice(0, 3)
   const hasMore = visibleDays.length > 3
-  const hasSchedule = hasVisibleTrainingSchedule(scheduleDays)
   const signedUpCount = visibleDays.filter((day) => signupDraft[day.id] ?? day.is_signed_up).length
 
   function toggleSignup(day: RunningLeagueTrainingScheduleDayView) {
@@ -133,9 +131,16 @@ export function MemberRunningLeagueTrainingSchedule({
     setActiveDay(latest)
   }
 
-  if (!tableReady || !hasSchedule) {
+  if (!embedded && !tableReady) {
     return null
   }
+
+  const collapsedSummary =
+    visibleDays.length > 0
+      ? `${visibleDays.length}일${signedUpCount > 0 ? ` · ${signedUpCount}일 참여` : ''}`
+      : tableReady
+        ? '등록된 일정 없음'
+        : '준비 중'
 
   return (
     <section
@@ -152,10 +157,7 @@ export function MemberRunningLeagueTrainingSchedule({
             <CalendarDays className="h-4 w-4 shrink-0 text-lime-400" />
             <h2 className="text-base font-bold text-lime-50 sm:text-lg">이번 주 훈련 스케줄</h2>
             {!sectionOpen ? (
-              <span className="truncate text-xs text-zinc-500">
-                {visibleDays.length}일
-                {signedUpCount > 0 ? ` · ${signedUpCount}일 참여` : ''}
-              </span>
+              <span className="truncate text-xs text-zinc-500">{collapsedSummary}</span>
             ) : null}
           </div>
           <ChevronDown
@@ -169,40 +171,50 @@ export function MemberRunningLeagueTrainingSchedule({
 
         {sectionOpen ? (
           <div className="space-y-1.5 p-2.5 sm:p-3">
-            {previewDays.map((day) => (
-              <ScheduleDayRow
-                key={day.id}
-                day={day}
-                pending={pending && pendingDayId === day.id}
-                readOnly={readOnly}
-                canParticipate={canParticipate}
-                isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
-                onOpenParticipants={() => openParticipants(day)}
-                onToggleSignup={() => toggleSignup(day)}
-              />
-            ))}
+            {previewDays.length > 0 ? (
+              <>
+                {previewDays.map((day) => (
+                  <ScheduleDayRow
+                    key={day.id}
+                    day={day}
+                    pending={pending && pendingDayId === day.id}
+                    readOnly={readOnly}
+                    canParticipate={canParticipate}
+                    isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
+                    onOpenParticipants={() => openParticipants(day)}
+                    onToggleSignup={() => toggleSignup(day)}
+                  />
+                ))}
 
-            {hasMore ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 w-full text-xs text-zinc-400 hover:text-lime-200"
-                onClick={() => setListExpanded((value) => !value)}
-              >
-                {listExpanded ? (
-                  <>
-                    <ChevronUp className="mr-1 h-3.5 w-3.5" />
-                    접기
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="mr-1 h-3.5 w-3.5" />
-                    전체 요일 펼쳐보기 ({visibleDays.length}일)
-                  </>
-                )}
-              </Button>
-            ) : null}
+                {hasMore ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-full text-xs text-zinc-400 hover:text-lime-200"
+                    onClick={() => setListExpanded((value) => !value)}
+                  >
+                    {listExpanded ? (
+                      <>
+                        <ChevronUp className="mr-1 h-3.5 w-3.5" />
+                        접기
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                        전체 요일 펼쳐보기 ({visibleDays.length}일)
+                      </>
+                    )}
+                  </Button>
+                ) : null}
+              </>
+            ) : (
+              <p className="px-2 py-6 text-center text-sm text-zinc-500">
+                {tableReady
+                  ? '이번 주 등록된 훈련 일정이 없습니다.'
+                  : '훈련 스케줄 기능을 준비 중입니다.'}
+              </p>
+            )}
           </div>
         ) : null}
 
@@ -317,8 +329,15 @@ function ScheduleDayRow({
         onClick={onOpenParticipants}
         className="flex min-w-0 flex-1 items-start gap-2 text-left transition-colors hover:opacity-90"
       >
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-lime-500/15 text-xs font-bold text-lime-200">
-          {day.weekday_label}
+        <span className="mt-0.5 flex shrink-0 flex-col items-center gap-0.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-lime-500/15 text-xs font-bold text-lime-200">
+            {day.weekday_label}
+          </span>
+          {day.schedule_date_label ? (
+            <span className="text-[10px] font-medium tabular-nums leading-none text-zinc-500">
+              {day.schedule_date_label}
+            </span>
+          ) : null}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium leading-snug text-zinc-100">
@@ -387,6 +406,11 @@ function ParticipantsDialog({
             <DialogHeader>
               <DialogTitle className="text-lime-100">
                 {day.weekday_label}요일 참여 명단
+                {day.schedule_date_label ? (
+                  <span className="ml-1.5 text-sm font-normal text-zinc-400">
+                    {day.schedule_date_label}
+                  </span>
+                ) : null}
               </DialogTitle>
               <DialogDescription className="text-left text-zinc-400">
                 {day.training_summary}

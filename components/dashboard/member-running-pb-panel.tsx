@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { toast } from 'sonner'
-import { saveMemberRunningPb } from '@/lib/actions/running-league'
+import { saveMemberRunningPb, deleteMemberRunningPb } from '@/lib/actions/running-league'
 import type {
   RunningLeagueDistanceEvent,
   RunningLeagueParticipant,
@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Trash2 } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -77,17 +78,56 @@ function resolvePortalDistance(distance: RunningLeagueDistanceEvent): (typeof DI
     : '10km'
 }
 
+function findPortalPbRecord(
+  pbRecords: RunningLeagueRecord[],
+  event: (typeof DISTANCE_EVENTS)[number],
+): RunningLeagueRecord | null {
+  const record = pbRecords.find(
+    (row) => row.distance_event === event && row.record_phase === 'other',
+  )
+  return record?.time_text?.trim() ? record : null
+}
+
+function applyPbRecordToForm(
+  pbRecords: RunningLeagueRecord[],
+  event: (typeof DISTANCE_EVENTS)[number],
+  setTimeText: (value: string) => void,
+  setMeasuredAt: (value: string) => void,
+) {
+  const record = findPortalPbRecord(pbRecords, event)
+  setTimeText(record?.time_text?.trim() ?? '')
+  setMeasuredAt(
+    record?.measured_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+  )
+}
+
 function useMemberRunningPbForm(
   participant: RunningLeagueParticipant | null,
+  pbRecords: RunningLeagueRecord[],
   initialDistance: RunningLeagueDistanceEvent = '10km',
 ) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [distance, setDistance] = useState<(typeof DISTANCE_EVENTS)[number]>(() =>
+  const [deletePending, startDeleteTransition] = useTransition()
+  const [distance, setDistanceState] = useState<(typeof DISTANCE_EVENTS)[number]>(() =>
     resolvePortalDistance(initialDistance),
   )
   const [timeText, setTimeText] = useState('')
   const [measuredAt, setMeasuredAt] = useState(new Date().toISOString().slice(0, 10))
+
+  function setDistance(value: (typeof DISTANCE_EVENTS)[number]) {
+    setDistanceState(value)
+    applyPbRecordToForm(pbRecords, value, setTimeText, setMeasuredAt)
+  }
+
+  const resetToDistance = useCallback(
+    (value: RunningLeagueDistanceEvent) => {
+      const resolved = resolvePortalDistance(value)
+      setDistanceState(resolved)
+      applyPbRecordToForm(pbRecords, resolved, setTimeText, setMeasuredAt)
+    },
+    [pbRecords],
+  )
 
   function handleSave(onSuccess?: () => void) {
     if (!timeText.trim()) {
@@ -112,16 +152,111 @@ function useMemberRunningPbForm(
     })
   }
 
+  function handleDelete(
+    event: (typeof DISTANCE_EVENTS)[number],
+    onSuccess?: () => void,
+  ) {
+    const record = findPortalPbRecord(pbRecords, event)
+    if (!record) {
+      toast.error('삭제할 기록이 없습니다.')
+      return
+    }
+
+    startDeleteTransition(async () => {
+      const result = await deleteMemberRunningPb({ distance_event: event })
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('PB 기록을 삭제했습니다.')
+      if (distance === event) {
+        applyPbRecordToForm(pbRecords.filter((row) => row.id !== record.id), event, setTimeText, setMeasuredAt)
+      }
+      onSuccess?.()
+      router.refresh()
+    })
+  }
+
   return {
     distance,
     setDistance,
+    resetToDistance,
     timeText,
     setTimeText,
     measuredAt,
     setMeasuredAt,
     pending,
+    deletePending,
     handleSave,
+    handleDelete,
   }
+}
+
+function MemberPbSavedRecords({
+  pbRecords,
+  selectedDistance,
+  pending,
+  deletePending,
+  onDelete,
+}: {
+  pbRecords: RunningLeagueRecord[]
+  selectedDistance: (typeof DISTANCE_EVENTS)[number]
+  pending: boolean
+  deletePending: boolean
+  onDelete: (event: (typeof DISTANCE_EVENTS)[number]) => void
+}) {
+  const savedRecords = DISTANCE_EVENTS.map((event) => {
+    const record = findPortalPbRecord(pbRecords, event)
+    return record ? { event, record } : null
+  }).filter((item): item is { event: (typeof DISTANCE_EVENTS)[number]; record: RunningLeagueRecord } => item != null)
+
+  if (savedRecords.length === 0) return null
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 bg-muted/10 p-3">
+      <p className="text-[11px] font-medium text-muted-foreground">내 등록 기록</p>
+      <ul className="space-y-2">
+        {savedRecords.map(({ event, record }) => {
+          const isSelected = event === selectedDistance
+          return (
+            <li
+              key={event}
+              className={cn(
+                'flex items-start justify-between gap-3 rounded-md border px-3 py-2.5',
+                isSelected
+                  ? 'border-primary/35 bg-primary/5'
+                  : 'border-border/50 bg-background/40',
+              )}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">
+                  {DISTANCE_LABELS[event]}
+                  {isSelected ? (
+                    <span className="ml-1.5 text-[10px] font-medium text-primary">선택 중</span>
+                  ) : null}
+                </p>
+                <p className="mt-0.5 text-lg font-bold tabular-nums text-primary">{record.time_text}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {format(parseISO(record.measured_at), 'yyyy.M.d (EEE)', { locale: ko })} 측정
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                disabled={pending || deletePending}
+                onClick={() => onDelete(event)}
+              >
+                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                삭제
+              </Button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
 }
 
 function RunningPbFormFields({
@@ -132,6 +267,9 @@ function RunningPbFormFields({
   measuredAt,
   setMeasuredAt,
   pending,
+  deletePending,
+  pbRecords,
+  onDelete,
   onSave,
   onCancel,
   saveLabel = 'PB 저장',
@@ -143,6 +281,9 @@ function RunningPbFormFields({
   measuredAt: string
   setMeasuredAt: (value: string) => void
   pending: boolean
+  deletePending: boolean
+  pbRecords: RunningLeagueRecord[]
+  onDelete: (event: (typeof DISTANCE_EVENTS)[number]) => void
   onSave: () => void
   onCancel?: () => void
   saveLabel?: string
@@ -179,12 +320,19 @@ function RunningPbFormFields({
         <Label className="text-[11px] text-muted-foreground">측정일</Label>
         <KoreanDatePicker value={measuredAt} onChange={setMeasuredAt} compact placeholder="날짜 선택" />
       </div>
+      <MemberPbSavedRecords
+        pbRecords={pbRecords}
+        selectedDistance={distance}
+        pending={pending}
+        deletePending={deletePending}
+        onDelete={onDelete}
+      />
       <div className="flex gap-2">
-        <Button type="button" size="sm" className="h-9 flex-1" disabled={pending} onClick={onSave}>
+        <Button type="button" size="sm" className="h-9 flex-1" disabled={pending || deletePending} onClick={onSave}>
           {pending ? '저장 중…' : saveLabel}
         </Button>
         {onCancel ? (
-          <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending} onClick={onCancel}>
+          <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending || deletePending} onClick={onCancel}>
             닫기
           </Button>
         ) : null}
@@ -203,15 +351,18 @@ export function MemberRunningPbDialog({
   portalRecordReady = false,
   initialDistance = '10km',
 }: MemberRunningPbDialogProps) {
-  const form = useMemberRunningPbForm(participant, initialDistance)
+  const form = useMemberRunningPbForm(participant, pbRecords, initialDistance)
+  const { resetToDistance, ...formFields } = form
+  const wasOpenRef = useRef(false)
   const hasPb = pbRecords.some((record) => record.time_text?.trim())
   const canRecord = Boolean(participant) || portalRecordReady
 
   useEffect(() => {
-    if (open) {
-      form.setDistance(resolvePortalDistance(initialDistance))
+    if (open && !wasOpenRef.current) {
+      resetToDistance(initialDistance)
     }
-  }, [open, initialDistance, form])
+    wasOpenRef.current = open
+  }, [open, initialDistance, resetToDistance])
 
   if (!tableReady || readOnly) return null
 
@@ -225,7 +376,9 @@ export function MemberRunningPbDialog({
           <p className="text-sm text-muted-foreground">PB를 등록할 수 없습니다.</p>
         ) : (
           <RunningPbFormFields
-            {...form}
+            {...formFields}
+            pbRecords={pbRecords}
+            onDelete={(event) => form.handleDelete(event)}
             onSave={() => form.handleSave(() => onOpenChange(false))}
             onCancel={() => onOpenChange(false)}
           />
@@ -244,7 +397,7 @@ export function MemberRunningPbPanel({
 }: MemberRunningPbPanelProps) {
   const embedded = variant === 'embedded'
   const [open, setOpen] = useState(false)
-  const form = useMemberRunningPbForm(participant)
+  const form = useMemberRunningPbForm(participant, pbRecords)
 
   const pbByDistance = useMemo(() => {
     const map = new Map<RunningLeagueDistanceEvent, RunningLeagueRecord>()
@@ -316,6 +469,8 @@ export function MemberRunningPbPanel({
         <div className="space-y-2 rounded-lg border border-border/60 bg-background/40 p-2.5">
           <RunningPbFormFields
             {...form}
+            pbRecords={pbRecords}
+            onDelete={(event) => form.handleDelete(event)}
             onSave={() => form.handleSave(() => setOpen(false))}
             onCancel={() => setOpen(false)}
           />

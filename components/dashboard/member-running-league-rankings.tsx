@@ -198,7 +198,10 @@ function PbDistanceTabs({
             active={value === distance}
             onClick={() => onChange(distance)}
             compact={compact}
-            className={cn(compact ? 'shrink-0 text-xs' : 'text-xs sm:text-sm')}
+            className={cn(
+              compact ? 'shrink-0 text-xs' : 'text-xs sm:text-sm',
+              getPbDistanceAccentClass(distance),
+            )}
           >
             {formatPbDistanceLabel(distance)}
           </RankingFilterChip>
@@ -371,9 +374,7 @@ function InlineRankingFilterStrip({
                 active={pbDistance === distance}
                 onClick={() => onPbDistanceChange(distance)}
                 inline
-                className={cn(
-                  pbDistance === distance && getPbDistanceAccentClass(distance),
-                )}
+                className={getPbDistanceAccentClass(distance)}
               >
                 {formatPbDistanceLabel(distance)}
               </RankingFilterChip>
@@ -608,6 +609,8 @@ interface MemberRunningLeagueRankingsProps {
   className?: string
   brandHeaderAction?: ReactNode
   brandHeaderBelow?: ReactNode
+  showBrandHeader?: boolean
+  showPortalShell?: boolean
 }
 
 type MemberRankSummary =
@@ -807,6 +810,8 @@ function MemberPortalBrandHeader({ action }: { action?: ReactNode }) {
   )
 }
 
+export { MemberPortalBrandHeader }
+
 function RankingPreview({
   rankingView,
   pbDistance,
@@ -842,7 +847,7 @@ function RankingPreview({
   const previewRows = buildNeighborRankRows(leaderboard.ranked, highlightMemberId)
   const viewLabel =
     rankingView === 'pb'
-      ? `${formatPbDistanceLabel(pbDistance)} PB`
+      ? formatPbDistanceLabel(pbDistance)
       : formatCurrentMonthRankingLabel()
 
   const filteredParticipants = rankingBundle
@@ -871,7 +876,7 @@ function RankingPreview({
                 getPbDistanceAccentClass(pbDistance),
               )}
             >
-              {formatPbDistanceLabel(pbDistance)} PB
+              {formatPbDistanceLabel(pbDistance)}
             </span>
           ) : viewLabel ? (
             <span className="truncate text-sm font-medium text-zinc-400">{viewLabel}</span>
@@ -1579,7 +1584,7 @@ function FullRankingDialog({
 
   const rankingLabel =
     rankingView === 'pb'
-      ? `${formatPbDistanceLabel(pbDistance)} PB 랭킹`
+      ? `${formatPbDistanceLabel(pbDistance)} 랭킹`
       : '월 마일리지 랭킹'
   const genderScopeLabel = getGenderFilterScopeLabel(genderFilter)
 
@@ -1763,6 +1768,8 @@ export function MemberRunningLeagueRankings({
   className,
   brandHeaderAction,
   brandHeaderBelow,
+  showBrandHeader = true,
+  showPortalShell = true,
 }: MemberRunningLeagueRankingsProps) {
   const [genderFilter, setGenderFilter] = useState<RankingGenderFilter>('all')
   const [rankingView, setRankingView] = useState<RankingView>('pb')
@@ -2013,12 +2020,12 @@ export function MemberRunningLeagueRankings({
   return (
     <section
       className={cn(
-        MEMBER_PORTAL_SHELL_CLASS,
+        showPortalShell && MEMBER_PORTAL_SHELL_CLASS,
         'flex flex-col gap-2.5 sm:gap-4',
         className,
       )}
     >
-      <MemberPortalBrandHeader action={brandHeaderAction} />
+      {showBrandHeader ? <MemberPortalBrandHeader action={brandHeaderAction} /> : null}
       {brandHeaderBelow}
 
       <div className="flex flex-col gap-2.5 sm:gap-4">

@@ -40,7 +40,7 @@ export const PB_DISTANCE_ACCENT_CLASS: Record<PbLeaderboardDistance, string> = {
   '5km': 'text-emerald-400',
   '10km': 'text-sky-400',
   half: 'text-amber-300',
-  full: 'text-violet-300',
+  full: 'text-red-400',
 }
 
 export function getPbDistanceAccentClass(distance: PbLeaderboardDistance): string {
