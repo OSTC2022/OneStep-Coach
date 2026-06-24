@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Building2, CalendarSync, HardDrive, Megaphone, Trophy, Users } from 'lucide-react'
+import { Building2, CalendarDays, CalendarSync, HardDrive, Megaphone, Trophy, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const SETTINGS_TABS = [
@@ -16,8 +16,15 @@ const SETTINGS_TABS = [
       !path.startsWith('/dashboard/settings/google-calendar') &&
       !path.startsWith('/dashboard/settings/center-board') &&
       !path.startsWith('/dashboard/settings/adult-center-board') &&
+      !path.startsWith('/dashboard/settings/running-schedule') &&
       !path.startsWith('/dashboard/settings/running-league') &&
       !path.startsWith('/dashboard/settings/backup'),
+  },
+  {
+    href: '/dashboard/settings/running-schedule',
+    label: '러닝 스케줄',
+    icon: CalendarDays,
+    isActive: (path: string) => path.startsWith('/dashboard/settings/running-schedule'),
   },
   {
     href: '/dashboard/settings/center-board',

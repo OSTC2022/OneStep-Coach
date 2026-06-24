@@ -3,7 +3,7 @@
 import { useMemo, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { MemberRankAspirationPanel } from '@/components/dashboard/member-rank-aspiration-panel'
-import { MemberRankingCharts } from '@/components/dashboard/member-ranking-charts'
+import { MemberRankingCharts, type GraphChartTab } from '@/components/dashboard/member-ranking-charts'
 import { Button } from '@/components/ui/button'
 import { formatPbDistanceLabel } from '@/lib/running-league/pb-distance-labels'
 import {
@@ -44,10 +44,8 @@ interface MemberRankingDetailPanelProps {
   soloComparisonHint?: string | null
   variant?: 'default' | 'mobile'
   mobileFilterSlot?: ReactNode
-}
-
-function formatGraphOneLineSummary(summary: MemberGraphPanelSummary): string {
-  return [summary.rankLine, summary.recordLine].filter(Boolean).join(' · ')
+  graphChartTab?: GraphChartTab
+  onGraphChartTabChange?: (tab: GraphChartTab) => void
 }
 
 function MemberGraphSummaryHeader({
@@ -111,6 +109,8 @@ export function MemberRankingDetailPanel({
   soloComparisonHint = null,
   variant = 'default',
   mobileFilterSlot = null,
+  graphChartTab,
+  onGraphChartTabChange,
 }: MemberRankingDetailPanelProps) {
   const isMobile = variant === 'mobile'
   const isMe = highlightMemberId != null && memberId === highlightMemberId
@@ -210,22 +210,23 @@ export function MemberRankingDetailPanel({
         className,
       )}
     >
-      {isMobile ? (
-        <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
-          <p className="truncate text-[11px] text-zinc-400">{formatGraphOneLineSummary(graphSummary)}</p>
-          {onClose ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 shrink-0 px-2 text-[11px] text-zinc-400 hover:text-lime-200"
-              onClick={onClose}
-            >
-              {isMe ? '닫기' : '내 그래프'}
-            </Button>
-          ) : null}
+      {isMobile && onClose ? (
+        <div className="flex justify-end px-2.5 pt-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-[11px] text-zinc-400 hover:text-lime-200"
+            onClick={onClose}
+          >
+            {isMe ? '닫기' : '내 그래프'}
+          </Button>
         </div>
-      ) : (
+      ) : null}
+
+      {isMobile && mobileFilterSlot ? mobileFilterSlot : null}
+
+      {!isMobile ? (
         <div className="flex items-start justify-between gap-3 border-b border-lime-500/15 px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <p className="text-xs font-medium text-lime-300/80">그래프 · 성장 분석</p>
@@ -246,9 +247,7 @@ export function MemberRankingDetailPanel({
             </Button>
           ) : null}
         </div>
-      )}
-
-      {isMobile && mobileFilterSlot ? mobileFilterSlot : null}
+      ) : null}
 
       <div
         className={cn(
@@ -280,6 +279,8 @@ export function MemberRankingDetailPanel({
           emphasized={emphasized}
           soloComparisonHint={soloComparisonHint}
           compact={isMobile}
+          activeTab={graphChartTab}
+          onActiveTabChange={onGraphChartTabChange}
           className="animate-in fade-in-0 duration-300"
         />
       </div>

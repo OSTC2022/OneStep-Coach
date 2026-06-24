@@ -151,7 +151,7 @@ export function buildMemberLeagueStatusSnapshot(input: {
         ? `${distanceLabel} PB를 등록하면 순위에 반영됩니다`
         : '이번 달 러닝 기록을 추가하면 순위에 반영됩니다'
   } else if (isSoloRanked) {
-    rankHeadline = '현재 1위'
+    rankHeadline = '1위'
     rankSubline = '첫 기록이 등록되었습니다 · 다른 회원이 참여하면 비교가 시작됩니다'
   } else {
     rankHeadline = `${rank}위`

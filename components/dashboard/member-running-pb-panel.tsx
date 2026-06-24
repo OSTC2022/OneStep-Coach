@@ -30,12 +30,9 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
-const DISTANCE_EVENTS: RunningLeagueDistanceEvent[] = ['1km', '3km', '5km', '10km', 'half', 'full']
+const DISTANCE_EVENTS: RunningLeagueDistanceEvent[] = ['10km', 'half', 'full']
 
-const DISTANCE_LABELS: Record<RunningLeagueDistanceEvent, string> = {
-  '1km': '1km',
-  '3km': '3km',
-  '5km': '5km',
+const DISTANCE_LABELS: Record<(typeof DISTANCE_EVENTS)[number], string> = {
   '10km': '10km',
   half: 'Half (하프)',
   full: 'Full (풀)',
@@ -73,13 +70,21 @@ function PbSectionLabel({ embedded }: { embedded?: boolean }) {
   )
 }
 
+function resolvePortalDistance(distance: RunningLeagueDistanceEvent): (typeof DISTANCE_EVENTS)[number] {
+  return (DISTANCE_EVENTS as readonly RunningLeagueDistanceEvent[]).includes(distance)
+    ? (distance as (typeof DISTANCE_EVENTS)[number])
+    : '10km'
+}
+
 function useMemberRunningPbForm(
   participant: RunningLeagueParticipant | null,
-  initialDistance: RunningLeagueDistanceEvent = '5km',
+  initialDistance: RunningLeagueDistanceEvent = '10km',
 ) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [distance, setDistance] = useState<RunningLeagueDistanceEvent>(initialDistance)
+  const [distance, setDistance] = useState<(typeof DISTANCE_EVENTS)[number]>(() =>
+    resolvePortalDistance(initialDistance),
+  )
   const [timeText, setTimeText] = useState('')
   const [measuredAt, setMeasuredAt] = useState(new Date().toISOString().slice(0, 10))
 
@@ -134,8 +139,8 @@ function RunningPbFormFields({
   onCancel,
   saveLabel = 'PB 저장',
 }: {
-  distance: RunningLeagueDistanceEvent
-  setDistance: (value: RunningLeagueDistanceEvent) => void
+  distance: (typeof DISTANCE_EVENTS)[number]
+  setDistance: (value: (typeof DISTANCE_EVENTS)[number]) => void
   timeText: string
   setTimeText: (value: string) => void
   measuredAt: string
@@ -150,7 +155,7 @@ function RunningPbFormFields({
       <div className="space-y-2">
         <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground">종목</Label>
-          <Select value={distance} onValueChange={(value) => setDistance(value as RunningLeagueDistanceEvent)}>
+          <Select value={distance} onValueChange={(value) => setDistance(value as (typeof DISTANCE_EVENTS)[number])}>
             <SelectTrigger className="h-9">
               <SelectValue />
             </SelectTrigger>
@@ -198,14 +203,14 @@ export function MemberRunningPbDialog({
   open,
   onOpenChange,
   readOnly = false,
-  initialDistance = '5km',
+  initialDistance = '10km',
 }: MemberRunningPbDialogProps) {
   const form = useMemberRunningPbForm(participant, initialDistance)
   const hasPb = pbRecords.some((record) => record.time_text?.trim())
 
   useEffect(() => {
     if (open) {
-      form.setDistance(initialDistance)
+      form.setDistance(resolvePortalDistance(initialDistance))
     }
   }, [open, initialDistance, form])
 
@@ -250,7 +255,12 @@ export function MemberRunningPbPanel({
     return map
   }, [pbRecords])
 
-  const primaryPb = pbByDistance.get('5km') ?? pbRecords[0] ?? null
+  const primaryPb =
+    pbByDistance.get('10km') ??
+    pbByDistance.get('half') ??
+    pbByDistance.get('full') ??
+    pbRecords[0] ??
+    null
 
   if (!tableReady) {
     return (

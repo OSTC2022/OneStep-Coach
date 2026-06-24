@@ -38,11 +38,12 @@ const criteria = [
   },
   {
     id: 2,
-    name: '왼쪽 순위칸 / 오른쪽 그래프',
+    name: '포털 통합 레이아웃 (랭킹·그래프·요약)',
     check: () => {
-      assert.match(rankings, /grid-cols-2 items-start/)
-      assert.match(rankings, /RankingListCard/)
+      assert.match(rankings, /portalGraphBody/)
+      assert.match(rankings, /RankingPreview/)
       assert.match(rankings, /MemberRankingDetailPanel/)
+      assert.match(rankings, /variant="mobile"/)
     },
   },
   {
@@ -102,9 +103,10 @@ const criteria = [
     id: 8,
     name: '순위 변화 / 기록 향상 그래프',
     check: () => {
-      assert.match(charts, /순위 추이/)
-      assert.match(charts, /기록 추이/)
-      assert.match(charts, /월 마일리지 추이/)
+      assert.match(charts, /label: '순위'/)
+      assert.match(charts, /label: '기록'/)
+      assert.match(charts, /label: '월 마일리지'/)
+      assert.match(charts, /graphChartTabForRankingView/)
       assert.match(charts, /GraphChartTabs/)
       assert.match(detail, /buildMemberRankingHistorySeries/)
       assert.match(detail, /buildLeagueRankComparisonChart/)
@@ -120,9 +122,10 @@ const criteria = [
   },
   {
     id: 10,
-    name: '모바일 반응형',
+    name: '모바일·PC 통합 반응형',
     check: () => {
-      assert.match(rankings, /lg:grid-cols-2|grid-cols-2 items-start/)
+      assert.match(rankings, /lg:max-w-2xl/)
+      assert.match(rankings, /MobileGraphFilterStrip/)
       assert.match(rankings, /랭킹 목록 보기/)
       assert.match(rankings, /RankingPreview/)
       assert.match(rankings, /오늘 러닝 기록 추가/)

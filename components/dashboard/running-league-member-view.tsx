@@ -1,10 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import {
+  ArrowLeft,
   Flag,
   HeartPulse,
   MessageSquareQuote,
@@ -57,6 +59,7 @@ interface RunningLeagueMemberViewProps {
   mileageLogs: RunningLeagueMileageLog[]
   tableReady: boolean
   readOnly?: boolean
+  backHref?: string | null
 }
 
 function formatDate(value: string): string {
@@ -476,34 +479,54 @@ export function RunningLeagueMemberView({
   mileageLogs,
   tableReady,
   readOnly = false,
+  backHref = '/dashboard/my',
 }: RunningLeagueMemberViewProps) {
   const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
+  const resolvedBackHref = readOnly ? null : backHref
 
   const openMileageManual = () => {
     setMileageDialogOpen(true)
   }
+
+  const backButton =
+    resolvedBackHref ? (
+      <Button asChild variant="ghost" size="icon" className="-ml-2 h-9 w-9 shrink-0">
+        <Link href={resolvedBackHref} aria-label="내 포털로 돌아가기">
+          <ArrowLeft className="h-5 w-5" />
+        </Link>
+      </Button>
+    ) : null
+
   if (!tableReady) {
     return (
-      <Card>
+      <div className="mx-auto w-full max-w-xl space-y-4">
+        {backButton}
+        <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
           러닝 리그 기능 준비 중입니다. 센터에 문의해주세요.
         </CardContent>
       </Card>
+      </div>
     )
   }
 
   if (!league) {
     return (
-      <Card>
+      <div className="mx-auto w-full max-w-xl space-y-4">
+        {backButton}
+        <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
           현재 확인할 수 있는 러닝 리그가 없습니다.
         </CardContent>
       </Card>
+      </div>
     )
   }
 
   return (
     <div className="mx-auto w-full max-w-xl space-y-4">
+      {backButton}
+
       <LeagueHeroCard league={league} participant={participant} />
 
       {!participant ? (

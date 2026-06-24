@@ -12,12 +12,15 @@ import {
   CreditCard,
   LineChart,
   Trophy,
+  User,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import { MemberRunningLeagueRankings } from '@/components/dashboard/member-running-league-rankings'
+import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/member-running-league-training-schedule'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
+import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
 import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
 import { portalStatusToneClass } from '@/lib/member-portal-status'
@@ -29,6 +32,7 @@ interface MemberMyPageProps {
   data: MemberPortalData
   role?: string | null
   runningLeagueHome?: MemberRunningLeagueHome | null
+  centerTrainingSchedule?: CenterRunningTrainingScheduleBundle | null
   adminPreview?: boolean
   runningLeagueHref?: string
 }
@@ -109,6 +113,7 @@ export function MemberMyPage({
   data,
   role,
   runningLeagueHome,
+  centerTrainingSchedule,
   adminPreview = false,
   runningLeagueHref = '/dashboard/my/running-league',
 }: MemberMyPageProps) {
@@ -124,23 +129,25 @@ export function MemberMyPage({
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-4 sm:space-y-6">
-      <div className="space-y-1 sm:space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-[11px]">
-          {isAdultMember ? 'ONE STEP RUNNING LEAGUE' : 'ONESTEP ATHLETE REPORT'}
-        </p>
-        <h1 className="text-xl font-bold sm:text-2xl lg:text-3xl">
-          {isAdultMember ? '내 러닝 포털' : '내 선수 리포트'}
-        </h1>
-        {isAdultMember ? (
-          <p className="hidden max-w-2xl text-xs leading-relaxed text-muted-foreground sm:block sm:text-sm">
-            내 순위·마일리지·PB를 먼저 확인하고 기록을 추가하세요.
+      {isAdultMember ? (
+        <MemberRunningLeagueTrainingSchedule
+          headlineTitle={runningLeagueHome?.league?.title}
+          days={centerTrainingSchedule?.days ?? []}
+          tableReady={centerTrainingSchedule?.tableReady ?? true}
+          canParticipate={!adminPreview}
+          readOnly={adminPreview}
+        />
+      ) : (
+        <div className="space-y-1 sm:space-y-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-[11px]">
+            ONESTEP ATHLETE REPORT
           </p>
-        ) : (
+          <h1 className="text-xl font-bold sm:text-2xl lg:text-3xl">내 선수 리포트</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
             오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {isAdultMember && runningLeagueHome?.league ? (
         <MemberRunningLeagueRankings
@@ -171,25 +178,21 @@ export function MemberMyPage({
             </p>
           </div>
 
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="p-4 sm:p-6">
-              <div className="space-y-1">
-                <p className="text-lg font-bold leading-tight sm:text-xl lg:text-2xl">{member.name}</p>
-                {sportProfile ? (
-                  <p className="text-sm text-foreground/90">{sportProfile}</p>
-                ) : null}
-                {member.school ? (
-                  <p className="text-sm text-muted-foreground">{member.school}</p>
-                ) : null}
-                <p className="text-sm text-muted-foreground">
-                  담당 코치:{' '}
-                  <span className="font-medium text-foreground">{instructorName}</span>
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-4">
+          <div
+            className={cn(
+              'flex gap-2.5 overflow-x-auto pb-0.5 pr-1 snap-x snap-mandatory',
+              '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+              'lg:grid lg:grid-cols-5 lg:gap-3 lg:overflow-visible lg:snap-none lg:pr-0',
+            )}
+          >
+            <ProfileSummaryCard
+              name={member.name}
+              sportProfile={sportProfile}
+              school={member.school}
+              instructorName={instructorName}
+              compact
+              className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
+            />
             <SummaryCard
               title={sessionStatus.kind === 'monthly' ? '수업권 남은 기간' : '남은 수업'}
               icon={<CreditCard className="h-3.5 w-3.5 shrink-0 opacity-70" />}
@@ -207,6 +210,7 @@ export function MemberMyPage({
               }
               hint={formatRemainingSessionsHint(sessionStatus)}
               compact
+              className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
             <SummaryCard
               title="최근 출석일"
@@ -218,6 +222,7 @@ export function MemberMyPage({
               }
               hint="마지막 수업"
               compact
+              className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
             <SummaryCard
               title="최근 컨디션"
@@ -226,6 +231,7 @@ export function MemberMyPage({
               valueClassName={portalStatusToneClass(summary.recentCondition.tone)}
               hint={summary.recentCondition.hint}
               compact
+              className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
             <SummaryCard
               title="오늘 기록"
@@ -237,6 +243,7 @@ export function MemberMyPage({
               hint={formatTodayRecordHint(summary.todayRecorded)}
               highlighted={!summary.todayRecorded}
               compact
+              className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
           </div>
 
@@ -466,6 +473,65 @@ export function MemberMyPage({
   )
 }
 
+function ProfileSummaryCard({
+  name,
+  sportProfile,
+  school,
+  instructorName,
+  compact = false,
+  className,
+}: {
+  name: string
+  sportProfile: string | null
+  school?: string | null
+  instructorName: string
+  compact?: boolean
+  className?: string
+}) {
+  const metaLine = [
+    sportProfile,
+    school?.trim() || null,
+    `담당 코치: ${instructorName}`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <Card
+      className={cn(
+        compact ? 'h-full' : 'h-full md:h-[158px]',
+        'border-primary/20 bg-primary/5',
+        className,
+      )}
+    >
+      <CardContent
+        className={cn(
+          'grid h-full gap-0',
+          compact
+            ? 'min-h-[108px] grid-rows-[auto_1fr_auto] px-3 py-3'
+            : 'min-h-[132px] grid-rows-[auto_1fr_auto] px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0',
+        )}
+      >
+        <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <User className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          <span className="truncate">내 정보</span>
+        </p>
+        <p
+          className={cn(
+            'flex items-center truncate font-bold leading-none',
+            compact ? 'text-xl' : 'text-2xl md:text-[26px]',
+          )}
+        >
+          {name}
+        </p>
+        <p className="line-clamp-2 text-xs leading-snug text-muted-foreground md:text-[13px]">
+          {metaLine}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function SummaryCard({
   title,
   icon,
@@ -474,6 +540,7 @@ function SummaryCard({
   hint,
   highlighted = false,
   compact = false,
+  className,
 }: {
   title: string
   icon: ReactNode
@@ -482,12 +549,14 @@ function SummaryCard({
   hint: string
   highlighted?: boolean
   compact?: boolean
+  className?: string
 }) {
   return (
     <Card
       className={cn(
         compact ? 'h-full' : 'h-full md:h-[158px]',
         highlighted && 'border-primary/30 bg-primary/[0.04] ring-1 ring-primary/10',
+        className,
       )}
     >
       <CardContent

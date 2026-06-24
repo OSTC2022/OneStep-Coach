@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -207,6 +207,18 @@ function GraphEmptyState({
 
 type GraphChartTab = 'rank' | 'record' | 'mileage'
 
+export type { GraphChartTab }
+
+export function graphChartTabForRankingView(view: 'pb' | 'mileage'): GraphChartTab {
+  return view === 'pb' ? 'record' : 'mileage'
+}
+
+const GRAPH_CHART_TABS: Array<{ value: GraphChartTab; label: string }> = [
+  { value: 'record', label: '기록' },
+  { value: 'mileage', label: '월 마일리지' },
+  { value: 'rank', label: '순위' },
+]
+
 function GraphChartTabs({
   value,
   onChange,
@@ -218,11 +230,7 @@ function GraphChartTabs({
   className?: string
   compact?: boolean
 }) {
-  const tabs: Array<{ value: GraphChartTab; label: string }> = [
-    { value: 'rank', label: '순위 추이' },
-    { value: 'record', label: '기록 추이' },
-    { value: 'mileage', label: '월 마일리지 추이' },
-  ]
+  const tabs = GRAPH_CHART_TABS
 
   if (compact) {
     return (
@@ -315,6 +323,8 @@ interface MemberRankingChartsProps {
   soloComparisonHint?: string | null
   compact?: boolean
   className?: string
+  activeTab?: GraphChartTab
+  onActiveTabChange?: (tab: GraphChartTab) => void
 }
 
 export function MemberRankingCharts({
@@ -329,8 +339,19 @@ export function MemberRankingCharts({
   soloComparisonHint = null,
   compact = false,
   className,
+  activeTab: activeTabProp,
+  onActiveTabChange,
 }: MemberRankingChartsProps) {
-  const [activeTab, setActiveTab] = useState<GraphChartTab>('rank')
+  const [internalTab, setInternalTab] = useState<GraphChartTab>(() =>
+    graphChartTabForRankingView(mode),
+  )
+  const activeTab = activeTabProp ?? internalTab
+  const setActiveTab = onActiveTabChange ?? setInternalTab
+
+  useEffect(() => {
+    if (activeTabProp !== undefined) return
+    setInternalTab(graphChartTabForRankingView(mode))
+  }, [activeTabProp, mode])
   const timeData = useMemo(
     () =>
       points.map((point) => ({
@@ -395,8 +416,8 @@ export function MemberRankingCharts({
   const rankEmptyDescription =
     soloComparisonHint ??
     (mode === 'mileage'
-      ? '러닝 기록을 추가하면 마일리지 순위 추이가 표시됩니다.'
-      : 'PB를 등록하면 순위 추이가 표시됩니다.')
+      ? '러닝 기록을 추가하면 마일리지 순위 그래프가 표시됩니다.'
+      : 'PB를 등록하면 순위 그래프가 표시됩니다.')
 
   const hasAnyChartData =
     rankData.length > 0 ||
@@ -449,7 +470,7 @@ export function MemberRankingCharts({
     timeData.length === 0 ? (
       <GraphEmptyState
         compact={compact}
-        description="PB 기록을 등록하면 기록 추이 그래프가 표시됩니다."
+        description="PB 기록을 등록하면 기록 그래프가 표시됩니다."
       />
     ) : (
       <RecordTrendChart
@@ -466,7 +487,7 @@ export function MemberRankingCharts({
     mileageData.length === 0 ? (
       <GraphEmptyState
         compact={compact}
-        description="이번 달 러닝 기록을 추가하면 마일리지 추이가 표시됩니다."
+        description="이번 달 러닝 기록을 추가하면 마일리지 그래프가 표시됩니다."
       />
     ) : (
       <MileageRecordTrendChart
@@ -504,7 +525,7 @@ function MileageRankTrendChart({
   return (
     <div className={chartShellClass}>
       {!compact ? (
-        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 마일리지 순위 추이</p>
+        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 마일리지 순위</p>
       ) : null}
       <ChartContainer config={rankChartConfig} className={chartAxisClass}>
         <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
@@ -551,7 +572,7 @@ function MileageRecordTrendChart({
   return (
     <div className={chartShellClass}>
       {!compact ? (
-        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 누적 마일리지 추이</p>
+        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 누적 마일리지</p>
       ) : null}
       <ChartContainer config={mileageChartConfig} className={chartAxisClass}>
         <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
@@ -612,7 +633,7 @@ function RankTrendChart({
     <div className={chartShellClass}>
       {!compact ? (
         <div className="mb-2 space-y-1">
-          <p className="text-xs font-medium text-lime-300">순위 추이</p>
+          <p className="text-xs font-medium text-lime-300">순위</p>
           {rankCaption ? (
             <>
               <p className="text-[11px] text-zinc-500">{rankCaption.title}</p>
@@ -721,7 +742,7 @@ function RecordTrendChart({
     <div className={chartShellClass}>
       {!compact ? (
         <div className="mb-2 space-y-1">
-          <p className="text-xs font-medium text-lime-300">기록 추이</p>
+          <p className="text-xs font-medium text-lime-300">기록</p>
           {recordSummary?.timeTrajectory ? (
             <p className="text-xs font-medium text-lime-100/90">{recordSummary.timeTrajectory}</p>
           ) : null}

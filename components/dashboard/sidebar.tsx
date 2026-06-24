@@ -73,12 +73,16 @@ const MENU_ICONS: Record<string, LucideIcon> = {
   '/dashboard/instructors': UserCog,
   '/dashboard/reports': BarChart3,
   '/dashboard/settings/center-contact': MessageCircle,
+  '/dashboard/settings/running-schedule': CalendarDays,
   '/dashboard/settings': Settings,
 }
 
 function isMenuItemActive(pathname: string, url: string) {
   if (url === '/dashboard/settings') {
     return pathname === '/dashboard/settings'
+  }
+  if (url === '/dashboard/settings/running-schedule') {
+    return pathname.startsWith('/dashboard/settings/running-schedule')
   }
   return (
     pathname === url ||

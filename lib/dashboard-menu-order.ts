@@ -83,6 +83,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin'],
   },
   {
+    id: '/dashboard/settings/running-schedule',
+    title: '러닝 스케줄',
+    url: '/dashboard/settings/running-schedule',
+    roles: ['admin'],
+  },
+  {
     id: '/dashboard/settings',
     title: '설정',
     url: '/dashboard/settings',
@@ -115,26 +121,72 @@ export function getDefaultSidebarMenuHidden(role: SidebarMenuRole): string[] {
   return []
 }
 
+const RUNNING_SCHEDULE_MENU_ID = '/dashboard/settings/running-schedule'
+const SETTINGS_MENU_ID = '/dashboard/settings'
+
+function pinRunningScheduleAboveSettings(order: string[]): string[] {
+  const scheduleIndex = order.indexOf(RUNNING_SCHEDULE_MENU_ID)
+  const settingsIndex = order.indexOf(SETTINGS_MENU_ID)
+  if (scheduleIndex < 0 || settingsIndex < 0) return order
+  if (scheduleIndex === settingsIndex - 1) return order
+
+  const next = order.filter((id) => id !== RUNNING_SCHEDULE_MENU_ID)
+  const nextSettingsIndex = next.indexOf(SETTINGS_MENU_ID)
+  if (nextSettingsIndex < 0) return order
+  next.splice(nextSettingsIndex, 0, RUNNING_SCHEDULE_MENU_ID)
+  return next
+}
+
+function insertMissingMenuItemsAtDefaultPositions(
+  savedOrder: string[],
+  defaultOrder: string[],
+): string[] {
+  const savedSet = new Set(savedOrder)
+  const result = [...savedOrder]
+
+  for (const id of defaultOrder) {
+    if (savedSet.has(id)) continue
+
+    const defaultIndex = defaultOrder.indexOf(id)
+    let insertAt = result.length
+
+    for (let index = defaultIndex - 1; index >= 0; index -= 1) {
+      const anchorId = defaultOrder[index]
+      const anchorIndex = result.indexOf(anchorId)
+      if (anchorIndex >= 0) {
+        insertAt = anchorIndex + 1
+        break
+      }
+    }
+
+    result.splice(insertAt, 0, id)
+    savedSet.add(id)
+  }
+
+  return result
+}
+
 export function normalizeSidebarMenuOrder(
   role: SidebarMenuRole,
   order: string[] | null | undefined,
 ): string[] {
-  const allowed = getDefaultSidebarMenuOrder(role)
-  const allowedSet = new Set(allowed)
+  const defaultOrder = getDefaultSidebarMenuOrder(role)
+  const allowedSet = new Set(defaultOrder)
   const seen = new Set<string>()
-  const next: string[] = []
+  const saved: string[] = []
 
   for (const id of order ?? []) {
     if (!allowedSet.has(id) || seen.has(id)) continue
     seen.add(id)
-    next.push(id)
+    saved.push(id)
   }
 
-  for (const id of allowed) {
-    if (!seen.has(id)) next.push(id)
-  }
+  const next =
+    saved.length === 0
+      ? defaultOrder
+      : insertMissingMenuItemsAtDefaultPositions(saved, defaultOrder)
 
-  return next
+  return pinRunningScheduleAboveSettings(next)
 }
 
 export function readSidebarMenuOrder(role: SidebarMenuRole): string[] {
