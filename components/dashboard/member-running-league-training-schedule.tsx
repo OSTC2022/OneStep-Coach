@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   Loader2,
   MapPin,
@@ -73,7 +72,6 @@ export function MemberRunningLeagueTrainingSchedule({
   const [scheduleDays, setScheduleDays] = useState(days)
   const [activeDay, setActiveDay] = useState<RunningLeagueTrainingScheduleDayView | null>(null)
   const [sectionOpen, setSectionOpen] = useState(false)
-  const [listExpanded, setListExpanded] = useState(false)
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() => buildSignupDraft(days))
 
   useEffect(() => {
@@ -93,9 +91,13 @@ export function MemberRunningLeagueTrainingSchedule({
     () => fullWeekDays.filter(isVotableDay),
     [fullWeekDays],
   )
-  const displayDays = listExpanded ? fullWeekDays : visibleDays.slice(0, 3)
-  const hasMore =
-    visibleDays.length > 3 || fullWeekDays.some((day) => !isVotableDay(day))
+  const hasWeekSchedule = fullWeekDays.some(
+    (day) =>
+      isVotableDay(day) ||
+      day.is_hidden ||
+      Boolean(day.schedule_date) ||
+      Boolean(day.training_summary.trim()),
+  )
   const signedUpCount = visibleDays.filter((day) => signupDraft[day.id] ?? day.is_signed_up).length
 
   function toggleSignup(day: RunningLeagueTrainingScheduleDayView) {
@@ -180,68 +182,30 @@ export function MemberRunningLeagueTrainingSchedule({
 
         {sectionOpen ? (
           <div className="space-y-1.5 p-2.5 sm:p-3">
-            {visibleDays.length === 0 && !listExpanded ? (
-              <>
-                <p className="px-2 py-6 text-center text-sm text-zinc-500">
-                  {tableReady
-                    ? '이번 주 등록된 훈련 일정이 없습니다.'
-                    : '훈련 스케줄 기능을 준비 중입니다.'}
-                </p>
-                {hasMore ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-full text-xs text-zinc-400 hover:text-lime-200"
-                    onClick={() => setListExpanded(true)}
-                  >
-                    <ChevronDown className="mr-1 h-3.5 w-3.5" />
-                    전체 요일 펼쳐보기 (월~일)
-                  </Button>
-                ) : null}
-              </>
-            ) : displayDays.length > 0 ? (
-              <>
-                {displayDays.map((day) =>
-                  isVotableDay(day) ? (
-                    <ScheduleDayRow
-                      key={day.id}
-                      day={day}
-                      pending={pending && pendingDayId === day.id}
-                      readOnly={readOnly}
-                      canParticipate={canParticipate}
-                      isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
-                      onOpenParticipants={() => openParticipants(day)}
-                      onToggleSignup={() => toggleSignup(day)}
-                    />
-                  ) : (
-                    <ScheduleRestDayRow key={day.id} day={day} />
-                  ),
-                )}
-
-                {hasMore ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-full text-xs text-zinc-400 hover:text-lime-200"
-                    onClick={() => setListExpanded((value) => !value)}
-                  >
-                    {listExpanded ? (
-                      <>
-                        <ChevronUp className="mr-1 h-3.5 w-3.5" />
-                        접기
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="mr-1 h-3.5 w-3.5" />
-                        전체 요일 펼쳐보기 (월~일)
-                      </>
-                    )}
-                  </Button>
-                ) : null}
-              </>
-            ) : null}
+            {!hasWeekSchedule ? (
+              <p className="px-2 py-6 text-center text-sm text-zinc-500">
+                {tableReady
+                  ? '이번 주 등록된 훈련 일정이 없습니다.'
+                  : '훈련 스케줄 기능을 준비 중입니다.'}
+              </p>
+            ) : (
+              fullWeekDays.map((day) =>
+                isVotableDay(day) ? (
+                  <ScheduleDayRow
+                    key={day.id}
+                    day={day}
+                    pending={pending && pendingDayId === day.id}
+                    readOnly={readOnly}
+                    canParticipate={canParticipate}
+                    isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
+                    onOpenParticipants={() => openParticipants(day)}
+                    onToggleSignup={() => toggleSignup(day)}
+                  />
+                ) : (
+                  <ScheduleRestDayRow key={day.id} day={day} />
+                ),
+              )
+            )}
           </div>
         ) : null}
 
