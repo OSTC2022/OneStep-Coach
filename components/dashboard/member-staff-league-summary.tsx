@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Plus } from 'lucide-react'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
 import { MemberRunningPbDialog } from '@/components/dashboard/member-running-pb-panel'
@@ -64,13 +64,29 @@ export function MemberStaffLeagueSummary({
         </Button>
       </div>
 
-      <MemberLeagueStatusCard
-        snapshot={snapshot}
-        showMyRankBadge={false}
-        canEdit={canEdit}
-        onAddPb={() => setPbDialogOpen(true)}
-        onAddMileage={() => setMileageDialogOpen(true)}
-      />
+      <MemberLeagueStatusCard snapshot={snapshot} showMyRankBadge={false} />
+
+      {canEdit ? (
+        <div className="flex flex-col gap-1.5">
+          <Button
+            type="button"
+            className="min-h-12 w-full bg-lime-500 text-base font-bold text-black hover:bg-lime-400"
+            onClick={() => setMileageDialogOpen(true)}
+          >
+            <Plus className="mr-1.5 h-5 w-5" />
+            오늘 러닝 기록 추가
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-9 text-xs text-zinc-400 hover:text-lime-200"
+            onClick={() => setPbDialogOpen(true)}
+          >
+            PB 등록/수정
+          </Button>
+        </div>
+      ) : null}
 
       <MemberRunningPbDialog
         participant={runningLeagueHome.participant}

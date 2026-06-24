@@ -123,19 +123,23 @@ export function MemberMyPage({
     : resolveProfileAside(data)
 
   return (
-    <div className="mx-auto w-full max-w-[1120px] space-y-6">
-      <div className="space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+    <div className="mx-auto w-full max-w-[1120px] space-y-4 sm:space-y-6">
+      <div className="space-y-1 sm:space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-[11px]">
           {isAdultMember ? 'ONE STEP RUNNING LEAGUE' : 'ONESTEP ATHLETE REPORT'}
         </p>
-        <h1 className="text-2xl font-bold lg:text-3xl">
+        <h1 className="text-xl font-bold sm:text-2xl lg:text-3xl">
           {isAdultMember ? '내 러닝 포털' : '내 선수 리포트'}
         </h1>
-        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          {isAdultMember
-            ? '내 순위·마일리지·PB 변화와 성장 그래프를 한눈에 확인하세요.'
-            : '오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.'}
-        </p>
+        {isAdultMember ? (
+          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
+            내 순위·마일리지·PB를 먼저 확인하고 기록을 추가하세요.
+          </p>
+        ) : (
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.
+          </p>
+        )}
       </div>
 
       {isAdultMember && runningLeagueHome?.league ? (
@@ -158,144 +162,208 @@ export function MemberMyPage({
         />
       ) : null}
 
-      <Card className="border-primary/20 bg-primary/5">
-        <CardContent className="p-4 sm:p-6">
-          {isAdultMember ? (
-            <div className="space-y-1">
-              <p className="text-xl font-bold leading-tight lg:text-2xl">{member.name}</p>
-              {sportProfile ? (
-                <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
-              ) : null}
-              {member.school ? (
-                <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
-              ) : null}
-              <p className="text-sm text-muted-foreground">
-                담당 코치:{' '}
-                <span className="font-medium text-foreground">{instructorName}</span>
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">
-              <div className="space-y-1.5">
-                <p className="text-xl font-bold lg:text-2xl">
-                  {member.name}
-                  {' 선수'}
-                </p>
+      {isAdultMember ? (
+        <section className="space-y-4 border-t border-border/40 pt-4 sm:space-y-5 sm:pt-6">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold sm:text-lg">내 회원 정보</h2>
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              수업권·출석·컨디션 등 센터 이용 정보입니다.
+            </p>
+          </div>
+
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="p-4 sm:p-6">
+              <div className="space-y-1">
+                <p className="text-lg font-bold leading-tight sm:text-xl lg:text-2xl">{member.name}</p>
                 {sportProfile ? (
-                  <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
+                  <p className="text-sm text-foreground/90">{sportProfile}</p>
                 ) : null}
                 {member.school ? (
-                  <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
+                  <p className="text-sm text-muted-foreground">{member.school}</p>
                 ) : null}
                 <p className="text-sm text-muted-foreground">
                   담당 코치:{' '}
                   <span className="font-medium text-foreground">{instructorName}</span>
                 </p>
               </div>
-              <div className="rounded-lg border border-border/50 bg-background/30 px-3.5 py-3 md:border-l md:border-y-0 md:border-r-0 md:bg-transparent md:pl-8">
-                {profileAside ? (
-                  <>
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {profileAside.label}
-                    </p>
-                    <p
-                      className={cn(
-                        'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
-                        profileAside.valueClassName,
-                      )}
-                    >
-                      {profileAside.value}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
-                    {!sessionStatus.isUsable ? (
-                      <Button
-                        asChild
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
-                      >
-                        <Link href="/dashboard/my/sessions#lesson-records">
-                          수업권 확인하러 가기
-                          <ChevronRight className="ml-1 h-4 w-4" />
-                        </Link>
-                      </Button>
-                    ) : null}
-                  </>
-                ) : null}
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-4">
+            <SummaryCard
+              title={sessionStatus.kind === 'monthly' ? '수업권 남은 기간' : '남은 수업'}
+              icon={<CreditCard className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={
+                sessionStatus.kind === 'monthly'
+                  ? sessionStatus.remainingPeriodLabel
+                  : `${sessionStatus.remainingSessions ?? 0}회`
+              }
+              valueClassName={
+                sessionStatus.kind === 'monthly'
+                  ? monthlySessionStatusToneClass(sessionStatus)
+                  : !sessionStatus.isUsable
+                    ? 'text-amber-300'
+                    : undefined
+              }
+              hint={formatRemainingSessionsHint(sessionStatus)}
+              compact
+            />
+            <SummaryCard
+              title="최근 출석일"
+              icon={<CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={
+                summary.recentAttendanceDate
+                  ? format(parseISO(summary.recentAttendanceDate), 'M/d')
+                  : '기록 없음'
+              }
+              hint="마지막 수업"
+              compact
+            />
+            <SummaryCard
+              title="최근 컨디션"
+              icon={<Activity className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={summary.recentCondition.label}
+              valueClassName={portalStatusToneClass(summary.recentCondition.tone)}
+              hint={summary.recentCondition.hint}
+              compact
+            />
+            <SummaryCard
+              title="오늘 기록"
+              icon={<ClipboardCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={todayRecordLabel}
+              valueClassName={
+                summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
+              }
+              hint={formatTodayRecordHint(summary.todayRecorded)}
+              highlighted={!summary.todayRecorded}
+              compact
+            />
+          </div>
+
+          <Card className="border-primary/20 bg-gradient-to-br from-primary/10 to-transparent">
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div className="space-y-1">
+                <p className="flex items-center gap-2 text-sm font-semibold">
+                  <Trophy className="h-4 w-4 text-primary" />
+                  러닝 챌린지
+                </p>
+                <p className="text-xs text-muted-foreground sm:text-sm">
+                  출석·목표·기록·마일리지·회복관리 점수와 순위를 확인하세요.
+                </p>
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              <Button asChild className="min-h-11 w-full shrink-0 sm:w-auto">
+                <Link href={runningLeagueHref}>
+                  리그 보기
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      ) : (
+        <>
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="p-4 sm:p-6">
+              <div className="grid gap-4 md:grid-cols-2 md:items-center md:gap-8">
+                <div className="space-y-1.5">
+                  <p className="text-xl font-bold lg:text-2xl">
+                    {member.name}
+                    {' 선수'}
+                  </p>
+                  {sportProfile ? (
+                    <p className="text-sm text-foreground/90 lg:text-base">{sportProfile}</p>
+                  ) : null}
+                  {member.school ? (
+                    <p className="text-sm text-muted-foreground lg:text-base">{member.school}</p>
+                  ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    담당 코치:{' '}
+                    <span className="font-medium text-foreground">{instructorName}</span>
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-background/30 px-3.5 py-3 md:border-l md:border-y-0 md:border-r-0 md:bg-transparent md:pl-8">
+                  {profileAside ? (
+                    <>
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {profileAside.label}
+                      </p>
+                      <p
+                        className={cn(
+                          'mt-0.5 text-lg font-semibold text-foreground lg:text-xl',
+                          profileAside.valueClassName,
+                        )}
+                      >
+                        {profileAside.value}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
+                      {!sessionStatus.isUsable ? (
+                        <Button
+                          asChild
+                          variant="outline"
+                          size="sm"
+                          className="mt-3 min-h-10 w-full border-primary/30 bg-background/50 sm:w-auto"
+                        >
+                          <Link href="/dashboard/my/sessions#lesson-records">
+                            수업권 확인하러 가기
+                            <ChevronRight className="ml-1 h-4 w-4" />
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
-        <SummaryCard
-          title={isAdultMember && sessionStatus.kind === 'monthly' ? '수업권 남은 기간' : sessionStatus.kind === 'monthly' ? '남은 기간' : '남은 수업'}
-          icon={<CreditCard className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-          value={
-            sessionStatus.kind === 'monthly'
-              ? sessionStatus.remainingPeriodLabel
-              : `${sessionStatus.remainingSessions ?? 0}회`
-          }
-          valueClassName={
-            sessionStatus.kind === 'monthly'
-              ? monthlySessionStatusToneClass(sessionStatus)
-              : !sessionStatus.isUsable
-                ? 'text-amber-300'
-                : undefined
-          }
-          hint={formatRemainingSessionsHint(sessionStatus)}
-        />
-        <SummaryCard
-          title="최근 출석일"
-          icon={<CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-          value={
-            summary.recentAttendanceDate
-              ? format(parseISO(summary.recentAttendanceDate), 'M/d')
-              : '기록 없음'
-          }
-          hint="마지막 수업"
-        />
-        <SummaryCard
-          title="최근 컨디션"
-          icon={<Activity className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-          value={summary.recentCondition.label}
-          valueClassName={portalStatusToneClass(summary.recentCondition.tone)}
-          hint={summary.recentCondition.hint}
-        />
-        <SummaryCard
-          title="오늘 기록"
-          icon={<ClipboardCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />}
-          value={todayRecordLabel}
-          valueClassName={
-            summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
-          }
-          hint={formatTodayRecordHint(summary.todayRecorded)}
-          highlighted={!summary.todayRecorded}
-        />
-      </div>
-
-      {isAdultMember ? (
-        <Card className="border-primary/20 bg-gradient-to-br from-primary/10 to-transparent">
-          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-            <div className="space-y-1">
-              <p className="flex items-center gap-2 text-sm font-semibold">
-                <Trophy className="h-4 w-4 text-primary" />
-                러닝 챌린지
-              </p>
-              <p className="text-sm text-muted-foreground">
-                출석·목표·기록·마일리지·회복관리 점수와 순위를 확인하세요.
-              </p>
-            </div>
-            <Button asChild className="min-h-11 w-full shrink-0 sm:w-auto">
-              <Link href={runningLeagueHref}>
-                리그 보기
-                <ChevronRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
+            <SummaryCard
+              title={sessionStatus.kind === 'monthly' ? '남은 기간' : '남은 수업'}
+              icon={<CreditCard className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={
+                sessionStatus.kind === 'monthly'
+                  ? sessionStatus.remainingPeriodLabel
+                  : `${sessionStatus.remainingSessions ?? 0}회`
+              }
+              valueClassName={
+                sessionStatus.kind === 'monthly'
+                  ? monthlySessionStatusToneClass(sessionStatus)
+                  : !sessionStatus.isUsable
+                    ? 'text-amber-300'
+                    : undefined
+              }
+              hint={formatRemainingSessionsHint(sessionStatus)}
+            />
+            <SummaryCard
+              title="최근 출석일"
+              icon={<CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={
+                summary.recentAttendanceDate
+                  ? format(parseISO(summary.recentAttendanceDate), 'M/d')
+                  : '기록 없음'
+              }
+              hint="마지막 수업"
+            />
+            <SummaryCard
+              title="최근 컨디션"
+              icon={<Activity className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={summary.recentCondition.label}
+              valueClassName={portalStatusToneClass(summary.recentCondition.tone)}
+              hint={summary.recentCondition.hint}
+            />
+            <SummaryCard
+              title="오늘 기록"
+              icon={<ClipboardCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />}
+              value={todayRecordLabel}
+              valueClassName={
+                summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
+              }
+              hint={formatTodayRecordHint(summary.todayRecorded)}
+              highlighted={!summary.todayRecorded}
+            />
+          </div>
+        </>
+      )}
 
       <Card className="border-primary/15">
         <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -405,6 +473,7 @@ function SummaryCard({
   valueClassName,
   hint,
   highlighted = false,
+  compact = false,
 }: {
   title: string
   icon: ReactNode
@@ -412,22 +481,31 @@ function SummaryCard({
   valueClassName?: string
   hint: string
   highlighted?: boolean
+  compact?: boolean
 }) {
   return (
     <Card
       className={cn(
-        'h-full md:h-[158px]',
+        compact ? 'h-full' : 'h-full md:h-[158px]',
         highlighted && 'border-primary/30 bg-primary/[0.04] ring-1 ring-primary/10',
       )}
     >
-      <CardContent className="grid h-full min-h-[132px] grid-rows-[auto_1fr_auto] gap-0 px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0">
+      <CardContent
+        className={cn(
+          'grid h-full gap-0',
+          compact
+            ? 'min-h-[108px] grid-rows-[auto_1fr_auto] px-3 py-3'
+            : 'min-h-[132px] grid-rows-[auto_1fr_auto] px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0',
+        )}
+      >
         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           {icon}
           <span className="truncate">{title}</span>
         </p>
         <p
           className={cn(
-            'flex items-center text-2xl font-bold leading-none tabular-nums md:text-[26px]',
+            'flex items-center font-bold leading-none tabular-nums',
+            compact ? 'text-xl' : 'text-2xl md:text-[26px]',
             valueClassName,
           )}
         >

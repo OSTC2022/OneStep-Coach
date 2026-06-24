@@ -27,6 +27,7 @@ export type MemberLeagueStatusSnapshot = {
   personalPbLabel: string | null
   recentPbHeadline: string
   recentPbSubline: string
+  recentPbShortValue: string
   remainingToGoalLabel: string | null
   isSoloRanked: boolean
   soloRankHint: string | null
@@ -180,15 +181,23 @@ export function buildMemberLeagueStatusSnapshot(input: {
 
   let recentPbHeadline: string
   let recentPbSubline: string
+  let recentPbShortValue: string
   if (recentPb) {
     recentPbHeadline = '최근 PB 갱신'
     recentPbSubline = `${recentPb.headline} ${recentPb.detail}`
+    recentPbShortValue = '갱신됨'
   } else if (personalPbLabel) {
     recentPbHeadline = 'PB 등록됨'
     recentPbSubline = `${distanceLabel} ${personalPbLabel}`
+    recentPbShortValue = personalPbLabel
   } else {
     recentPbHeadline = 'PB 미등록'
     recentPbSubline = '기록을 등록하면 PB 랭킹에 반영됩니다'
+    recentPbShortValue = '—'
+  }
+
+  if (isSoloRanked && rank === 1) {
+    rankSubline = '첫 기록이 등록되었습니다 · 현재 리그 1위입니다'
   }
 
   return {
@@ -205,6 +214,7 @@ export function buildMemberLeagueStatusSnapshot(input: {
     personalPbLabel,
     recentPbHeadline,
     recentPbSubline,
+    recentPbShortValue,
     remainingToGoalLabel,
     isSoloRanked,
     soloRankHint: isSoloRanked
