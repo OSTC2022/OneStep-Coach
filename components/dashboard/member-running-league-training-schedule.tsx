@@ -14,6 +14,10 @@ import {
 import { toast } from 'sonner'
 import { toggleCenterRunningTrainingScheduleSignup } from '@/lib/actions/center-running-training-schedule'
 import type { RunningLeagueTrainingScheduleDayView } from '@/lib/running-league/training-schedule'
+import {
+  buildFullWeekScheduleDays,
+  isVotableTrainingScheduleDay,
+} from '@/lib/running-league/training-schedule'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -38,7 +42,7 @@ type MemberRunningLeagueTrainingScheduleProps = {
 }
 
 function isVotableDay(day: RunningLeagueTrainingScheduleDayView): boolean {
-  return !day.is_hidden && day.training_summary.trim().length > 0
+  return isVotableTrainingScheduleDay(day)
 }
 
 function buildSignupDraft(
@@ -81,12 +85,17 @@ export function MemberRunningLeagueTrainingSchedule({
     })
   }, [days])
 
-  const visibleDays = useMemo(
-    () => scheduleDays.filter(isVotableDay),
+  const fullWeekDays = useMemo(
+    () => buildFullWeekScheduleDays(scheduleDays),
     [scheduleDays],
   )
-  const previewDays = listExpanded ? visibleDays : visibleDays.slice(0, 3)
-  const hasMore = visibleDays.length > 3
+  const visibleDays = useMemo(
+    () => fullWeekDays.filter(isVotableDay),
+    [fullWeekDays],
+  )
+  const displayDays = listExpanded ? fullWeekDays : visibleDays.slice(0, 3)
+  const hasMore =
+    visibleDays.length > 3 || fullWeekDays.some((day) => !isVotableDay(day))
   const signedUpCount = visibleDays.filter((day) => signupDraft[day.id] ?? day.is_signed_up).length
 
   function toggleSignup(day: RunningLeagueTrainingScheduleDayView) {
@@ -171,20 +180,44 @@ export function MemberRunningLeagueTrainingSchedule({
 
         {sectionOpen ? (
           <div className="space-y-1.5 p-2.5 sm:p-3">
-            {previewDays.length > 0 ? (
+            {visibleDays.length === 0 && !listExpanded ? (
               <>
-                {previewDays.map((day) => (
-                  <ScheduleDayRow
-                    key={day.id}
-                    day={day}
-                    pending={pending && pendingDayId === day.id}
-                    readOnly={readOnly}
-                    canParticipate={canParticipate}
-                    isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
-                    onOpenParticipants={() => openParticipants(day)}
-                    onToggleSignup={() => toggleSignup(day)}
-                  />
-                ))}
+                <p className="px-2 py-6 text-center text-sm text-zinc-500">
+                  {tableReady
+                    ? '이번 주 등록된 훈련 일정이 없습니다.'
+                    : '훈련 스케줄 기능을 준비 중입니다.'}
+                </p>
+                {hasMore ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-full text-xs text-zinc-400 hover:text-lime-200"
+                    onClick={() => setListExpanded(true)}
+                  >
+                    <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                    전체 요일 펼쳐보기 (월~일)
+                  </Button>
+                ) : null}
+              </>
+            ) : displayDays.length > 0 ? (
+              <>
+                {displayDays.map((day) =>
+                  isVotableDay(day) ? (
+                    <ScheduleDayRow
+                      key={day.id}
+                      day={day}
+                      pending={pending && pendingDayId === day.id}
+                      readOnly={readOnly}
+                      canParticipate={canParticipate}
+                      isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
+                      onOpenParticipants={() => openParticipants(day)}
+                      onToggleSignup={() => toggleSignup(day)}
+                    />
+                  ) : (
+                    <ScheduleRestDayRow key={day.id} day={day} />
+                  ),
+                )}
 
                 {hasMore ? (
                   <Button
@@ -202,19 +235,13 @@ export function MemberRunningLeagueTrainingSchedule({
                     ) : (
                       <>
                         <ChevronDown className="mr-1 h-3.5 w-3.5" />
-                        전체 요일 펼쳐보기 ({visibleDays.length}일)
+                        전체 요일 펼쳐보기 (월~일)
                       </>
                     )}
                   </Button>
                 ) : null}
               </>
-            ) : (
-              <p className="px-2 py-6 text-center text-sm text-zinc-500">
-                {tableReady
-                  ? '이번 주 등록된 훈련 일정이 없습니다.'
-                  : '훈련 스케줄 기능을 준비 중입니다.'}
-              </p>
-            )}
+            ) : null}
           </div>
         ) : null}
 
@@ -302,6 +329,26 @@ function ParticipationToggle({
         </span>
       ) : null}
     </button>
+  )
+}
+
+function ScheduleRestDayRow({ day }: { day: RunningLeagueTrainingScheduleDayView }) {
+  const label = day.is_hidden ? '휴강' : '일정 없음'
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-dashed border-zinc-800/80 bg-black/20 px-2.5 py-2">
+      <span className="flex shrink-0 flex-col items-center gap-0.5">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-800/80 text-xs font-bold text-zinc-500">
+          {day.weekday_label}
+        </span>
+        {day.schedule_date_label ? (
+          <span className="text-[10px] font-medium tabular-nums leading-none text-zinc-600">
+            {day.schedule_date_label}
+          </span>
+        ) : null}
+      </span>
+      <span className="text-sm text-zinc-500">{label}</span>
+    </div>
   )
 }
 

@@ -7,9 +7,13 @@ CREATE TABLE IF NOT EXISTS public.center_running_training_schedule_days (
   location_label TEXT NOT NULL DEFAULT '',
   naver_map_url TEXT,
   is_hidden BOOLEAN NOT NULL DEFAULT false,
+  schedule_date DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.center_running_training_schedule_days
+  ADD COLUMN IF NOT EXISTS schedule_date DATE;
 
 CREATE TABLE IF NOT EXISTS public.center_running_training_schedule_signups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -108,3 +108,42 @@ export function hasVisibleTrainingSchedule(
 ): boolean {
   return days.some((day) => !day.is_hidden && day.training_summary.trim().length > 0)
 }
+
+/** 월~일 7요일 순서로 맞춥니다. 누락 요일은 휴무 플레이스홀더로 채웁니다. */
+export function buildFullWeekScheduleDays(
+  days: RunningLeagueTrainingScheduleDayView[],
+): RunningLeagueTrainingScheduleDayView[] {
+  const byWeekday = new Map(days.map((day) => [day.weekday, day]))
+  const mondayDate = days.find((day) => day.weekday === 0)?.schedule_date ?? null
+  const datedInputs = propagateTrainingWeekDatesFromMonday(
+    createEmptyTrainingScheduleDays(),
+    mondayDate,
+  )
+
+  return TRAINING_WEEKDAY_LABELS.map((_, weekday) => {
+    const existing = byWeekday.get(weekday as TrainingWeekday)
+    if (existing) return existing
+
+    const scheduleDate = datedInputs[weekday]?.schedule_date ?? null
+    return {
+      id: `center-weekday-${weekday}`,
+      league_id: '',
+      weekday: weekday as TrainingWeekday,
+      weekday_label: trainingWeekdayLabel(weekday),
+      schedule_date: scheduleDate,
+      schedule_date_label: formatTrainingScheduleDateLabel(scheduleDate),
+      training_summary: '',
+      location_label: '',
+      naver_map_url: null,
+      map_href: null,
+      is_hidden: true,
+      signup_count: 0,
+      signups: [],
+      is_signed_up: false,
+    }
+  })
+}
+
+export function isVotableTrainingScheduleDay(day: RunningLeagueTrainingScheduleDayView): boolean {
+  return !day.is_hidden && day.training_summary.trim().length > 0
+}

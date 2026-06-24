@@ -17,6 +17,9 @@ import {
   type RunningLeagueTrainingScheduleSignup,
   type TrainingWeekday,
 } from '@/lib/running-league/training-schedule'
+import {
+  saveCenterTrainingScheduleWeekSnapshot,
+} from '@/lib/actions/center-running-training-schedule-library'
 import { revalidatePath } from 'next/cache'
 
 const CENTER_SCHEDULE_DAY_SELECT =
@@ -25,8 +28,48 @@ const CENTER_SCHEDULE_DAY_SELECT =
 const CENTER_SCHEDULE_DAY_SELECT_LEGACY =
   'weekday, training_summary, location_label, naver_map_url, is_hidden, created_at, updated_at'
 
-function isMissingColumnError(error: { code?: string } | null): boolean {
-  return error?.code === '42703'
+function isMissingColumnError(
+  error: { code?: string; message?: string } | null,
+  column = 'schedule_date',
+): boolean {
+  if (!error) return false
+  if (error.code === '42703' || error.code === 'PGRST204') return true
+  const message = error.message?.toLowerCase() ?? ''
+  return (
+    message.includes('could not find') &&
+    message.includes('column') &&
+    (column === '*' || message.includes(column.toLowerCase()))
+  )
+}
+
+type CenterScheduleDayUpsertRow = {
+  weekday: number
+  training_summary: string
+  location_label: string
+  naver_map_url: string | null
+  is_hidden: boolean
+  schedule_date: string | null
+  updated_at: string
+}
+
+function stripScheduleDateFromRows(
+  rows: CenterScheduleDayUpsertRow[],
+): Omit<CenterScheduleDayUpsertRow, 'schedule_date'>[] {
+  return rows.map(({ schedule_date: _scheduleDate, ...row }) => row)
+}
+
+function formatSaveScheduleError(error: { message?: string }): string {
+  const message = error.message?.toLowerCase() ?? ''
+  if (
+    message.includes('row-level security') ||
+    message.includes('permission denied')
+  ) {
+    return '저장 권한이 없습니다. 관리자 계정인지 확인하거나 SUPABASE_SERVICE_ROLE_KEY 설정을 확인해주세요.'
+  }
+  if (isMissingColumnError(error)) {
+    return '요일 날짜 컬럼이 DB에 없습니다. Supabase SQL Editor에서 add-center-running-training-schedule-dates.sql을 실행한 뒤 다시 저장해주세요.'
+  }
+  return '스케줄 저장에 실패했습니다.'
 }
 
 async function fetchCenterScheduleDayRows(
@@ -224,26 +267,46 @@ export async function getCenterRunningTrainingScheduleForAdmin(): Promise<{
 
 export async function saveCenterRunningTrainingSchedule(
   days: RunningLeagueTrainingScheduleDayInput[],
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   await requireRole(['admin'])
 
-  const normalized = createEmptyTrainingScheduleDays().map((emptyDay) => {
-    const found = days.find((day) => day.weekday === emptyDay.weekday)
-    return {
-      weekday: emptyDay.weekday,
-      training_summary: found?.training_summary?.trim() ?? '',
-      location_label: found?.location_label?.trim() ?? '',
-      naver_map_url: found?.naver_map_url?.trim() || null,
-      is_hidden: Boolean(found?.is_hidden),
-      schedule_date: found?.schedule_date?.trim().slice(0, 10) || null,
-      updated_at: new Date().toISOString(),
-    }
-  })
+  const normalized: CenterScheduleDayUpsertRow[] = createEmptyTrainingScheduleDays().map(
+    (emptyDay) => {
+      const found = days.find((day) => day.weekday === emptyDay.weekday)
+      return {
+        weekday: emptyDay.weekday,
+        training_summary: found?.training_summary?.trim() ?? '',
+        location_label: found?.location_label?.trim() ?? '',
+        naver_map_url: found?.naver_map_url?.trim() || null,
+        is_hidden: Boolean(found?.is_hidden),
+        schedule_date: found?.schedule_date?.trim().slice(0, 10) || null,
+        updated_at: new Date().toISOString(),
+      }
+    },
+  )
 
   const supabase = await scheduleClient()
-  const { error } = await supabase
+
+  let warning: string | undefined
+  let result = await supabase
     .from('center_running_training_schedule_days')
     .upsert(normalized, { onConflict: 'weekday' })
+
+  if (isMissingColumnError(result.error)) {
+    const retry = await supabase
+      .from('center_running_training_schedule_days')
+      .upsert(stripScheduleDateFromRows(normalized), { onConflict: 'weekday' })
+
+    if (!retry.error) {
+      result = retry
+      warning =
+        '훈련 내용은 저장됐지만 요일 날짜는 DB 컬럼이 없어 저장되지 않았습니다. Supabase에서 add-center-running-training-schedule-dates.sql을 실행한 뒤 다시 저장해주세요.'
+    } else {
+      result = retry
+    }
+  }
+
+  const { error } = result
 
   if (isMissingTableError(error)) {
     return {
@@ -254,16 +317,18 @@ export async function saveCenterRunningTrainingSchedule(
   }
   if (error) {
     console.error('saveCenterRunningTrainingSchedule', error)
-    return { ok: false, error: '스케줄 저장에 실패했습니다.' }
+    return { ok: false, error: formatSaveScheduleError(error) }
   }
 
   revalidateCenterTrainingSchedulePaths()
-  return { ok: true }
+  revalidatePath('/dashboard/settings/running-schedule')
+  await saveCenterTrainingScheduleWeekSnapshot(days)
+  return warning ? { ok: true, warning } : { ok: true }
 }
 
 export async function getCenterRunningTrainingScheduleForMember(): Promise<CenterRunningTrainingScheduleBundle> {
   const member = await getMemberForCurrentUser()
-  return fetchCenterRunningTrainingSchedule(member?.id ?? null)
+  return fetchCenterRunningTrainingSchedule(member?.id ?? null, { includeHidden: true })
 }
 
 export async function toggleCenterRunningTrainingScheduleSignup(
