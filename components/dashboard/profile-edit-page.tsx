@@ -5,15 +5,24 @@ import { ArrowLeft } from 'lucide-react'
 import { ProfileSettingsForm } from '@/components/dashboard/profile-settings-form'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import type { MemberGender } from '@/lib/running-league/ranking-gender'
 import type { User } from '@/lib/types'
 
 interface ProfileEditPageProps {
   user: User
   backHref: string
   backLabel: string
+  memberGender?: MemberGender | null
+  showMemberGender?: boolean
 }
 
-export function ProfileEditPage({ user, backHref, backLabel }: ProfileEditPageProps) {
+export function ProfileEditPage({
+  user,
+  backHref,
+  backLabel,
+  memberGender = null,
+  showMemberGender = false,
+}: ProfileEditPageProps) {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <div className="flex items-center gap-2">
@@ -25,7 +34,7 @@ export function ProfileEditPage({ user, backHref, backLabel }: ProfileEditPagePr
         <div>
           <h1 className="text-xl font-bold lg:text-2xl">프로필 수정</h1>
           <p className="text-sm text-muted-foreground">
-            사진·이름·연락처·SNS 정보를 변경합니다.
+            사진·이름·연락처{showMemberGender ? '·성별' : ''}·SNS 정보를 변경합니다.
           </p>
         </div>
       </div>
@@ -39,7 +48,12 @@ export function ProfileEditPage({ user, backHref, backLabel }: ProfileEditPagePr
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ProfileSettingsForm user={user} idPrefix="profile-page" />
+          <ProfileSettingsForm
+            user={user}
+            idPrefix="profile-page"
+            memberGender={memberGender}
+            showMemberGender={showMemberGender}
+          />
         </CardContent>
       </Card>
     </div>

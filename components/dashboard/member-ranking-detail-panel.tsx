@@ -21,6 +21,7 @@ import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/runn
 import { summarizeRecordChangeChart } from '@/lib/running-league/ranking-improvement-summary'
 import type { MemberGraphPanelSummary } from '@/lib/running-league/ranking-improvement-summary'
 import { cn } from '@/lib/utils'
+import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-layout'
 import type { RankAspirationInsight } from '@/lib/running-league/rank-aspiration'
 
 type RankingDetailView = 'pb' | 'mileage'
@@ -193,9 +194,9 @@ export function MemberRankingDetailPanel({
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col overflow-hidden transition-all duration-300',
+        'flex min-w-0 w-full flex-col overflow-hidden transition-all duration-300',
         isMobile
-          ? 'rounded-xl border border-lime-400/35 bg-zinc-950/90'
+          ? cn(MEMBER_PORTAL_CARD_CLASS, className)
           : cn(
               'rounded-xl border',
               embedded
@@ -206,8 +207,8 @@ export function MemberRankingDetailPanel({
                       : 'border-lime-500/25',
                   )
                 : 'border-lime-400/35 bg-zinc-950/80 ring-1 ring-lime-400/15',
+              className,
             ),
-        className,
       )}
     >
       {isMobile && onClose ? (

@@ -18,7 +18,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import { MemberRunningLeagueRankings } from '@/components/dashboard/member-running-league-rankings'
-import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/member-running-league-training-schedule'
+import {
+  MemberRunningLeagueTrainingSchedule,
+} from '@/components/dashboard/member-running-league-training-schedule'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
@@ -126,18 +128,12 @@ export function MemberMyPage({
   const profileAside = isAdultMember
     ? null
     : resolveProfileAside(data)
+  const trainingScheduleDays = centerTrainingSchedule?.days ?? []
+  const trainingScheduleReady = centerTrainingSchedule?.tableReady ?? true
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-4 sm:space-y-6">
-      {isAdultMember ? (
-        <MemberRunningLeagueTrainingSchedule
-          headlineTitle={runningLeagueHome?.league?.title}
-          days={centerTrainingSchedule?.days ?? []}
-          tableReady={centerTrainingSchedule?.tableReady ?? true}
-          canParticipate={!adminPreview}
-          readOnly={adminPreview}
-        />
-      ) : (
+      {!isAdultMember ? (
         <div className="space-y-1 sm:space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-[11px]">
             ONESTEP ATHLETE REPORT
@@ -147,9 +143,9 @@ export function MemberMyPage({
             오늘 상태를 기록하면 코치가 훈련 강도와 회복 상태를 더 정확히 확인할 수 있습니다.
           </p>
         </div>
-      )}
+      ) : null}
 
-      {isAdultMember && runningLeagueHome?.league ? (
+      {isAdultMember && runningLeagueHome ? (
         <MemberRunningLeagueRankings
           pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}
           pb10kLeaderboard={runningLeagueHome.pb10kLeaderboard}
@@ -166,6 +162,22 @@ export function MemberMyPage({
           rankingsError={runningLeagueHome.rankingsError}
           highlightMemberId={member.id}
           runningLeagueDetailHref={runningLeagueHref}
+          brandHeaderBelow={
+            <MemberRunningLeagueTrainingSchedule
+              days={trainingScheduleDays}
+              tableReady={trainingScheduleReady}
+              canParticipate={!adminPreview}
+              readOnly={adminPreview}
+              embedded
+            />
+          }
+        />
+      ) : isAdultMember ? (
+        <MemberRunningLeagueTrainingSchedule
+          days={trainingScheduleDays}
+          tableReady={trainingScheduleReady}
+          canParticipate={!adminPreview}
+          readOnly={adminPreview}
         />
       ) : null}
 

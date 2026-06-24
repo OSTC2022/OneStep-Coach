@@ -50,6 +50,10 @@ import {
 import { getMemberLinkedProfileRole } from '@/lib/actions/member-account'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { requireMemberViewer } from '@/lib/auth/member-access'
+import {
+  ensureCenterPortalRankingLeague,
+  isCenterPortalRankingLeague,
+} from '@/lib/running-league/center-portal-ranking-league'
 import type {
   RunningLeague,
   RunningLeagueAward,
@@ -395,6 +399,108 @@ async function resolveMemberLeague(
   return null
 }
 
+/** 포털 랭킹·그래프용 리그 — 센터 메인 랭킹 전용 (이벤트 시즌과 무관). */
+async function resolvePortalRankingLeague(
+  _supabase: Awaited<ReturnType<typeof createClient>>,
+  _memberId: string,
+): Promise<RunningLeague | null> {
+  try {
+    return await ensureCenterPortalRankingLeague()
+  } catch (error) {
+    if (isMissingTableError(error as { code?: string })) return null
+    throw error
+  }
+}
+
+/** 포털 기록 저장 시 리그 참가 행을 자동 확보합니다 (리그 참가 등록과 무관). */
+async function ensurePortalParticipantForMember(
+  memberId: string,
+): Promise<{ ok: true; participant: RunningLeagueParticipant } | { ok: false; error: string }> {
+  const supabase = await leagueClient()
+
+  let league: RunningLeague | null = null
+  try {
+    league = await ensureCenterPortalRankingLeague()
+  } catch (error) {
+    if (isMissingTableError(error as { code?: string })) {
+      return {
+        ok: false,
+        error: '마일리지 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.',
+      }
+    }
+    console.error('[running-league] ensureCenterPortalRankingLeague', error)
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : '랭킹 DB를 준비하지 못했습니다. add-center-portal-member-mileage-rls.sql을 실행해주세요.',
+    }
+  }
+
+  if (!league) {
+    return {
+      ok: false,
+      error:
+        '랭킹 DB가 준비되지 않았습니다. Supabase에서 add-running-league-tables.sql과 add-center-portal-member-mileage-rls.sql을 실행해주세요.',
+    }
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from('running_league_participants')
+    .select(PARTICIPANT_SELECT)
+    .eq('league_id', league.id)
+    .eq('member_id', memberId)
+    .maybeSingle()
+
+  if (existingError) {
+    if (isMissingTableError(existingError)) {
+      return {
+        ok: false,
+        error: '마일리지 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.',
+      }
+    }
+    return { ok: false, error: existingError.message }
+  }
+
+  if (existing) {
+    return { ok: true, participant: mapParticipant(existing as Record<string, unknown>) }
+  }
+
+  const { data: inserted, error: insertError } = await supabase
+    .from('running_league_participants')
+    .insert({
+      league_id: league.id,
+      member_id: memberId,
+    })
+    .select(PARTICIPANT_SELECT)
+    .single()
+
+  if (insertError) {
+    if (insertError.code === '23505') {
+      const { data: retry } = await supabase
+        .from('running_league_participants')
+        .select(PARTICIPANT_SELECT)
+        .eq('league_id', league.id)
+        .eq('member_id', memberId)
+        .maybeSingle()
+      if (retry) {
+        return { ok: true, participant: mapParticipant(retry as Record<string, unknown>) }
+      }
+    }
+    console.error('[running-league] ensurePortalParticipantForMember.insert', insertError)
+    return {
+      ok: false,
+      error:
+        insertError.message ||
+        '랭킹 등록에 실패했습니다. add-center-portal-member-mileage-rls.sql을 실행했는지 확인해주세요.',
+    }
+  }
+
+  revalidateRunningLeaguePaths(league.id)
+  return { ok: true, participant: mapParticipant(inserted as Record<string, unknown>) }
+}
+
 export async function getRunningLeaguesForAdmin(status?: RunningLeagueStatus | 'all'): Promise<{
   leagues: RunningLeague[]
   tableReady: boolean
@@ -414,7 +520,9 @@ export async function getRunningLeaguesForAdmin(status?: RunningLeagueStatus | '
   if (error) throw error
 
   return {
-    leagues: (data ?? []).map((row) => mapLeague(row as Record<string, unknown>)),
+    leagues: (data ?? [])
+      .map((row) => mapLeague(row as Record<string, unknown>))
+      .filter((league) => !isCenterPortalRankingLeague(league)),
     tableReady: true,
   }
 }
@@ -1701,18 +1809,21 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
 
   let league: RunningLeague | null = null
   try {
-    league = await resolveMemberLeague(supabase, memberId)
+    league = await ensureCenterPortalRankingLeague()
   } catch (error) {
     const code = (error as { code?: string })?.code
     if (code === '42P01') {
       return emptyMemberRunningLeagueHome({ tableReady: false })
     }
-    console.error('fetchMemberRunningLeagueHome.resolveMemberLeague', error)
+    console.error('fetchMemberRunningLeagueHome.ensureCenterPortalRankingLeague', error)
     return emptyMemberRunningLeagueHome({ rankingsError: RANKINGS_LOAD_ERROR })
   }
 
-  if (!league) {
-    return emptyMemberRunningLeagueHome()
+  if (league) {
+    const enrollment = await ensurePortalParticipantForMember(memberId)
+    if (!enrollment.ok) {
+      console.error('fetchMemberRunningLeagueHome.ensurePortalParticipant', enrollment.error)
+    }
   }
 
   const { start, end } = currentMonthDateRange()
@@ -1726,6 +1837,7 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
   let rankingBundle: MemberRunningLeagueRankingBundle | null = null
   let participant: RunningLeagueParticipant | null = null
 
+  if (league) {
   try {
     const [myResult, allParticipantsResult, leaguePbRecordsResult, leagueMileageLogsResult] =
       await Promise.all([
@@ -1824,6 +1936,7 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
   } catch (error) {
     console.error('fetchMemberRunningLeagueHome.leagueQueries', error)
     rankingsError = RANKINGS_LOAD_ERROR
+  }
   }
 
   if (!participant) {
@@ -1948,13 +2061,8 @@ export async function saveMemberMileageLog(input: {
   const member = await getMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
-  const home = await getMemberRunningLeagueHome()
-  if (!home.tableReady) {
-    return { ok: false, error: '마일리지 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.' }
-  }
-  if (!home.participant) {
-    return { ok: false, error: '러닝 리그 참가 후 기록할 수 있습니다.' }
-  }
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
 
   const distanceKm = Number(input.distance_km)
   if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
@@ -1963,7 +2071,7 @@ export async function saveMemberMileageLog(input: {
 
   const loggedAt = input.logged_at ?? new Date().toISOString().slice(0, 10)
   const supabase = await leagueClient()
-  const participant = home.participant
+  const participant = ensured.participant
   const roundedDistance = Math.round(distanceKm * 100) / 100
 
   if (!input.skip_duplicate_check) {
@@ -2128,7 +2236,7 @@ export async function updateMemberMileageLog(
     let duplicateQuery = supabase
       .from('running_league_mileage_logs')
       .select('id')
-      .eq('member_id', memberId)
+      .eq('member_id', member.id)
       .eq('league_id', access.log.league_id)
       .eq('logged_at', loggedAt)
       .eq('distance_km', Math.round(distanceKm * 100) / 100)
@@ -2245,20 +2353,15 @@ export async function saveMemberRunningPb(input: {
   const member = await getMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
-  const home = await getMemberRunningLeagueHome()
-  if (!home.tableReady) {
-    return { ok: false, error: '기록 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.' }
-  }
-  if (!home.participant) {
-    return { ok: false, error: '러닝 리그 참가 후 기록할 수 있습니다.' }
-  }
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
 
   const timeText = input.time_text.trim()
   if (!timeText) return { ok: false, error: '기록을 입력해주세요.' }
   const timeSeconds = parseRunningTimeToSeconds(timeText)
   if (timeSeconds == null) return { ok: false, error: '기록 형식이 올바르지 않습니다. (예: 21:35)' }
 
-  const participant = home.participant
+  const participant = ensured.participant
   const measuredAt = input.measured_at ?? new Date().toISOString().slice(0, 10)
   const supabase = await leagueClient()
   const { error } = await supabase.from('running_league_records').upsert(

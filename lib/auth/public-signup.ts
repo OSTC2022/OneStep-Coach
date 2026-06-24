@@ -11,6 +11,8 @@ import {
   resolveMemberAgeAndBirthDate,
 } from '@/lib/member-utils'
 import { formatKoreanPhoneInput } from '@/lib/phone-format'
+import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
+import type { MemberGender } from '@/lib/running-league/ranking-gender'
 
 export type PublicSignUpMemberType = 'student' | 'adult'
 export type PublicSignUpRole = 'member'
@@ -41,24 +43,31 @@ async function createSignupMemberProfile(
     phone: string
     parent_phone: string
     member_type: PublicSignUpMemberType
+    gender?: MemberGender | null
   },
 ): Promise<{ memberId?: string; error?: string }> {
   const { birth_date, age } = resolveMemberAgeAndBirthDate(payload.birth_date)
   const typeLabel = payload.member_type === 'student' ? '학생' : '성인'
 
+  const insertRow: Record<string, unknown> = {
+    name: payload.name,
+    birth_date,
+    age,
+    phone: payload.phone,
+    parent_phone: payload.parent_phone || null,
+    auth_user_id: userId,
+    invite_email: payload.email,
+    is_active: true,
+    memo: `로그인 화면 가입 신청 (${typeLabel}, 승인 대기)`,
+  }
+
+  if (payload.gender) {
+    insertRow.gender = payload.gender
+  }
+
   const { data, error } = await admin
     .from('members')
-    .insert({
-      name: payload.name,
-      birth_date,
-      age,
-      phone: payload.phone,
-      parent_phone: payload.parent_phone || null,
-      auth_user_id: userId,
-      invite_email: payload.email,
-      is_active: true,
-      memo: `로그인 화면 가입 신청 (${typeLabel}, 승인 대기)`,
-    })
+    .insert(insertRow)
     .select('id')
     .single()
 
@@ -134,6 +143,12 @@ async function runPublicSignup(
     return { error: '회원 유형을 선택해주세요.' }
   }
 
+  const genderRaw = (formData.get('gender') as string | null)?.trim() ?? ''
+  const gender = normalizeMemberGender(genderRaw)
+  if (!isStudent && !gender) {
+    return { error: '성별을 선택해주세요.' }
+  }
+
   const phone = phoneResult.phone
 
   const emailResult = parseRequiredEmail(formData.get('email') as string)
@@ -176,6 +191,7 @@ async function runPublicSignup(
         phone,
         parent_phone,
         member_type: memberType,
+        ...(gender ? { gender } : {}),
       },
     })
 
@@ -214,6 +230,7 @@ async function runPublicSignup(
     phone,
     parent_phone,
     member_type: memberType,
+    gender,
   })
   if (memberResult.error) {
     return { error: memberResult.error }

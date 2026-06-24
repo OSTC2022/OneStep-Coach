@@ -105,7 +105,7 @@ const criteria = [
     check: () => {
       assert.match(charts, /label: '순위'/)
       assert.match(charts, /label: '기록'/)
-      assert.match(charts, /label: '월 마일리지'/)
+      assert.match(charts, /label: '마일리지'/)
       assert.match(charts, /graphChartTabForRankingView/)
       assert.match(charts, /GraphChartTabs/)
       assert.match(detail, /buildMemberRankingHistorySeries/)
@@ -117,7 +117,6 @@ const criteria = [
     name: '타인 이름 마스킹',
     check: () => {
       assert.match(rankings, /formatRankingMemberName/)
-      assert.match(rankings, /이름은 개인정보 보호/)
     },
   },
   {
@@ -126,7 +125,7 @@ const criteria = [
     check: () => {
       assert.match(rankings, /lg:max-w-2xl/)
       assert.match(rankings, /MobileGraphFilterStrip/)
-      assert.match(rankings, /랭킹 목록 보기/)
+      assert.match(rankings, /전체 랭킹/)
       assert.match(rankings, /RankingPreview/)
       assert.match(rankings, /오늘 러닝 기록 추가/)
       assert.match(rankings, /overflow-x-hidden/)

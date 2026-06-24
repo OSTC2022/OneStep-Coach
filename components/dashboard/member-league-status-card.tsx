@@ -12,14 +12,14 @@ function formatCompactMileageValue(km: number, label: string): string {
 
 export function MemberLeagueStatusCard({
   snapshot,
-  showMyRankBadge = true,
   compact = false,
   className,
+  actionSlot,
 }: {
   snapshot: MemberLeagueStatusSnapshot
-  showMyRankBadge?: boolean
   compact?: boolean
   className?: string
+  actionSlot?: ReactNode
 }) {
   return (
     <div
@@ -28,13 +28,8 @@ export function MemberLeagueStatusCard({
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-1.5 sm:px-4 sm:py-2.5">
-        <p className="text-[11px] font-semibold text-lime-100 sm:text-sm">내 현재 리그 상태</p>
-        {showMyRankBadge ? (
-          <span className="rounded-full border border-lime-300/50 bg-lime-400/20 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-lime-50 shadow-[0_0_12px_rgba(163,230,53,0.28)] sm:text-[10px]">
-            내 순위
-          </span>
-        ) : null}
+      <div className="border-b border-lime-500/15 px-3 py-1.5 sm:px-4 sm:py-2.5">
+        <p className="text-[11px] font-semibold text-lime-100 sm:text-sm">내 현재 러닝 상태</p>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 p-2 sm:gap-3 sm:p-4 lg:grid-cols-4 lg:gap-3 lg:p-5">
@@ -83,6 +78,10 @@ export function MemberLeagueStatusCard({
           {snapshot.soloRankHint ? <p className={snapshot.isSoloRanked ? 'mt-0.5' : undefined}>{snapshot.soloRankHint}</p> : null}
           {snapshot.comparisonHint && !snapshot.isSoloRanked ? <p>{snapshot.comparisonHint}</p> : null}
         </div>
+      ) : null}
+
+      {actionSlot ? (
+        <div className="border-t border-lime-500/10 p-2.5 sm:p-3">{actionSlot}</div>
       ) : null}
     </div>
   )

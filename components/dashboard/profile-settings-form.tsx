@@ -15,6 +15,8 @@ import {
   uploadProfileAvatar,
 } from '@/lib/profile-avatar-upload'
 import { getRoleLabel } from '@/lib/roles'
+import type { MemberGender } from '@/lib/running-league/ranking-gender'
+import { MemberGenderField } from '@/components/members/member-gender-field'
 import type { User } from '@/lib/types'
 
 interface ProfileSettingsFormProps {
@@ -22,15 +24,18 @@ interface ProfileSettingsFormProps {
   idPrefix?: string
   onCancel?: () => void
   onSaved?: () => void
+  memberGender?: MemberGender | null
+  showMemberGender?: boolean
 }
 
-function settingsFromUser(user: User) {
+function settingsFromUser(user: User, memberGender: MemberGender | null | undefined) {
   return {
     fullName: user.full_name ?? '',
     phone: user.phone ?? '',
     kakaoId: user.kakao_id ?? '',
     instagramId: user.instagram_id ?? '',
     avatarUrl: user.avatar_url ?? null,
+    gender: memberGender ?? null,
   }
 }
 
@@ -39,24 +44,28 @@ export function ProfileSettingsForm({
   idPrefix = 'profile',
   onCancel,
   onSaved,
+  memberGender = null,
+  showMemberGender = false,
 }: ProfileSettingsFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPending, startTransition] = useTransition()
   const [isUploading, setIsUploading] = useState(false)
-  const [fullName, setFullName] = useState(() => settingsFromUser(user).fullName)
-  const [phone, setPhone] = useState(() => settingsFromUser(user).phone)
-  const [kakaoId, setKakaoId] = useState(() => settingsFromUser(user).kakaoId)
-  const [instagramId, setInstagramId] = useState(() => settingsFromUser(user).instagramId)
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(() => settingsFromUser(user).avatarUrl)
+  const [fullName, setFullName] = useState(() => settingsFromUser(user, memberGender).fullName)
+  const [phone, setPhone] = useState(() => settingsFromUser(user, memberGender).phone)
+  const [kakaoId, setKakaoId] = useState(() => settingsFromUser(user, memberGender).kakaoId)
+  const [instagramId, setInstagramId] = useState(() => settingsFromUser(user, memberGender).instagramId)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(() => settingsFromUser(user, memberGender).avatarUrl)
+  const [gender, setGender] = useState<MemberGender | null>(() => settingsFromUser(user, memberGender).gender)
 
   useEffect(() => {
-    const next = settingsFromUser(user)
+    const next = settingsFromUser(user, memberGender)
     setFullName(next.fullName)
     setPhone(next.phone)
     setKakaoId(next.kakaoId)
     setInstagramId(next.instagramId)
     setAvatarUrl(next.avatarUrl)
-  }, [user])
+    setGender(next.gender)
+  }, [user, memberGender])
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -93,6 +102,11 @@ export function ProfileSettingsForm({
   }
 
   function handleSave() {
+    if (showMemberGender && !gender) {
+      toast.error('성별을 선택해주세요.')
+      return
+    }
+
     startTransition(async () => {
       const result = await updateMyProfile({
         full_name: fullName,
@@ -100,6 +114,7 @@ export function ProfileSettingsForm({
         phone,
         kakao_id: kakaoId,
         instagram_id: instagramId,
+        ...(showMemberGender ? { gender } : {}),
       })
       if (result.error) {
         toast.error('프로필 저장 실패', { description: result.error })
@@ -187,6 +202,17 @@ export function ProfileSettingsForm({
           />
         </div>
 
+        {showMemberGender ? (
+          <div className="space-y-1.5 sm:col-span-2">
+            <MemberGenderField
+              value={gender}
+              onChange={setGender}
+              required
+              disabled={disabled}
+            />
+          </div>
+        ) : null}
+
         <div className="space-y-1.5">
           <Label htmlFor={`${idPrefix}-kakao`}>카카오톡 아이디</Label>
           <Input
@@ -241,7 +267,7 @@ export function ProfileSettingsForm({
         <Button
           type="button"
           onClick={handleSave}
-          disabled={disabled || !fullName.trim()}
+          disabled={disabled || !fullName.trim() || (showMemberGender && !gender)}
           className="sm:min-w-[120px]"
         >
           {isPending ? (

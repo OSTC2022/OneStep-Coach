@@ -35,4 +35,16 @@ export function getPbDistanceFilterDescription(distance: PbLeaderboardDistance):
   return `${distance} PB 랭킹 · 기록이 짧을수록 상위`
 }
 
+/** 랭킹 헤더·필터 칩 등 거리별 강조 색 */
+export const PB_DISTANCE_ACCENT_CLASS: Record<PbLeaderboardDistance, string> = {
+  '5km': 'text-emerald-400',
+  '10km': 'text-sky-400',
+  half: 'text-amber-300',
+  full: 'text-violet-300',
+}
+
+export function getPbDistanceAccentClass(distance: PbLeaderboardDistance): string {
+  return PB_DISTANCE_ACCENT_CLASS[distance]
+}
+
 export const PB_DISTANCE_LEGEND = 'Half = 21.0975km · Full = 42.195km · 정렬은 초 단위 기준'

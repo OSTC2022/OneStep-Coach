@@ -215,7 +215,7 @@ export function graphChartTabForRankingView(view: 'pb' | 'mileage'): GraphChartT
 
 const GRAPH_CHART_TABS: Array<{ value: GraphChartTab; label: string }> = [
   { value: 'record', label: '기록' },
-  { value: 'mileage', label: '월 마일리지' },
+  { value: 'mileage', label: '마일리지' },
   { value: 'rank', label: '순위' },
 ]
 

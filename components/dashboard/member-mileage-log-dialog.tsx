@@ -16,7 +16,9 @@ export type MemberMileageLogDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   startWithScreenshot?: boolean
+  portalRecordReady?: boolean
   readOnly?: boolean
+  onSaved?: () => void
 }
 
 export function MemberMileageLogDialog({
@@ -26,7 +28,9 @@ export function MemberMileageLogDialog({
   open,
   onOpenChange,
   startWithScreenshot = false,
+  portalRecordReady = false,
   readOnly = false,
+  onSaved,
 }: MemberMileageLogDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,7 +50,9 @@ export function MemberMileageLogDialog({
           active={open}
           onClose={() => onOpenChange(false)}
           startWithScreenshot={startWithScreenshot}
+          portalRecordReady={portalRecordReady}
           readOnly={readOnly}
+          onSaved={onSaved}
         />
       </DialogContent>
     </Dialog>

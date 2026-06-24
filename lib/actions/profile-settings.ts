@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/server'
 import { getCurrentUser, getMemberForCurrentUser, requireAuth } from '@/lib/actions/auth'
 import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { formatKoreanPhoneInput } from '@/lib/phone-format'
+import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
+import type { MemberGender } from '@/lib/running-league/ranking-gender'
 import type { UserRole } from '@/lib/types'
 
 const PROFILE_SETTINGS_SELECT =
@@ -28,17 +30,23 @@ async function syncContactToLinkedRecords(
     phone: string | null
     kakao_id: string | null
     instagram_id: string | null
+    gender?: MemberGender | null
   },
 ) {
   const supabase = await createClient()
 
+  const memberPatch: Record<string, string | null> = {
+    phone: contact.phone,
+    kakao_id: contact.kakao_id,
+    instagram_id: contact.instagram_id,
+  }
+  if (contact.gender !== undefined) {
+    memberPatch.gender = contact.gender
+  }
+
   await supabase
     .from('members')
-    .update({
-      phone: contact.phone,
-      kakao_id: contact.kakao_id,
-      instagram_id: contact.instagram_id,
-    })
+    .update(memberPatch)
     .or(`auth_user_id.eq.${userId},user_id.eq.${userId}`)
 
   try {
@@ -64,6 +72,7 @@ export type MyProfileSettings = {
   phone: string
   kakao_id: string
   instagram_id: string
+  gender: MemberGender | null
 }
 
 export async function getMyProfileSettings(): Promise<MyProfileSettings | null> {
@@ -80,14 +89,14 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
   let phone = profile?.phone ?? user.phone ?? ''
   let kakaoId = profile?.kakao_id ?? user.kakao_id ?? ''
   let instagramId = profile?.instagram_id ?? user.instagram_id ?? ''
+  let gender: MemberGender | null = null
 
-  if (!phone || !kakaoId || !instagramId) {
-    const member = await getMemberForCurrentUser()
-    if (member) {
-      phone = phone || member.phone || ''
-      kakaoId = kakaoId || member.kakao_id || ''
-      instagramId = instagramId || member.instagram_id || ''
-    }
+  const member = await getMemberForCurrentUser()
+  if (member) {
+    phone = phone || member.phone || ''
+    kakaoId = kakaoId || member.kakao_id || ''
+    instagramId = instagramId || member.instagram_id || ''
+    gender = normalizeMemberGender(member.gender)
   }
 
   return {
@@ -98,6 +107,7 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
     phone,
     kakao_id: kakaoId,
     instagram_id: instagramId,
+    gender,
   }
 }
 
@@ -107,6 +117,7 @@ export async function updateMyProfile(input: {
   phone?: string
   kakao_id?: string
   instagram_id?: string
+  gender?: MemberGender | null
 }): Promise<{ error?: string }> {
   const user = await requireAuth()
   const fullName = input.full_name.trim()
@@ -115,6 +126,8 @@ export async function updateMyProfile(input: {
   )
   const kakaoId = normalizeOptionalText(input.kakao_id)
   const instagramId = normalizeOptionalText(input.instagram_id)
+  const gender =
+    input.gender === undefined ? undefined : normalizeMemberGender(input.gender)
   const avatarUrl =
     input.avatar_url === undefined
       ? undefined
@@ -123,6 +136,18 @@ export async function updateMyProfile(input: {
   if (!fullName) {
     return { error: '이름을 입력해주세요.' }
   }
+
+  if (user.role === 'adult_member') {
+    const resolvedGender = normalizeMemberGender(input.gender)
+    if (!resolvedGender) {
+      return { error: '성별을 선택해주세요.' }
+    }
+  }
+
+  const genderToSync =
+    user.role === 'adult_member'
+      ? normalizeMemberGender(input.gender)
+      : gender
 
   if (fullName.length > 40) {
     return { error: '이름은 40자 이내로 입력해주세요.' }
@@ -162,6 +187,7 @@ export async function updateMyProfile(input: {
     phone,
     kakao_id: kakaoId,
     instagram_id: instagramId,
+    ...(genderToSync !== undefined ? { gender: genderToSync } : {}),
   })
 
   await supabase.from('users').upsert(
@@ -202,6 +228,7 @@ export async function updateMyProfile(input: {
 
   revalidatePath('/dashboard/profile', 'page')
   revalidatePath('/dashboard/my/profile', 'page')
+  revalidatePath('/dashboard/my', 'page')
   revalidatePath('/dashboard', 'layout')
   return { success: true as const }
 }

@@ -53,6 +53,7 @@ export type MemberRunningPbDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   readOnly?: boolean
+  portalRecordReady?: boolean
   initialDistance?: RunningLeagueDistanceEvent
 }
 
@@ -89,10 +90,6 @@ function useMemberRunningPbForm(
   const [measuredAt, setMeasuredAt] = useState(new Date().toISOString().slice(0, 10))
 
   function handleSave(onSuccess?: () => void) {
-    if (!participant) {
-      toast.error('러닝 리그 참가 후 기록할 수 있습니다.')
-      return
-    }
     if (!timeText.trim()) {
       toast.error('기록을 입력해주세요.')
       return
@@ -203,10 +200,12 @@ export function MemberRunningPbDialog({
   open,
   onOpenChange,
   readOnly = false,
+  portalRecordReady = false,
   initialDistance = '10km',
 }: MemberRunningPbDialogProps) {
   const form = useMemberRunningPbForm(participant, initialDistance)
   const hasPb = pbRecords.some((record) => record.time_text?.trim())
+  const canRecord = Boolean(participant) || portalRecordReady
 
   useEffect(() => {
     if (open) {
@@ -222,8 +221,8 @@ export function MemberRunningPbDialog({
         <DialogHeader>
           <DialogTitle>PB {hasPb ? '수정' : '등록'}</DialogTitle>
         </DialogHeader>
-        {!participant ? (
-          <p className="text-sm text-muted-foreground">러닝 리그 참가 후 기록할 수 있습니다.</p>
+        {!canRecord ? (
+          <p className="text-sm text-muted-foreground">PB를 등록할 수 없습니다.</p>
         ) : (
           <RunningPbFormFields
             {...form}

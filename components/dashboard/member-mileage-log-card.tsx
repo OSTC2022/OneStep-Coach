@@ -47,9 +47,12 @@ type MemberMileageLogCardProps = {
   tableReady: boolean
   variant?: 'card' | 'embedded' | 'form-only'
   readOnly?: boolean
+  /** 포털에서 리그 참가 없이도 기록 가능 */
+  portalRecordReady?: boolean
   /** form-only: 팝업 열림 여부 */
   active?: boolean
   onClose?: () => void
+  onSaved?: () => void
   startWithScreenshot?: boolean
 }
 
@@ -405,8 +408,10 @@ export function MemberMileageLogCard({
   tableReady,
   variant = 'card',
   readOnly = false,
+  portalRecordReady = false,
   active = false,
   onClose,
+  onSaved,
   startWithScreenshot = false,
 }: MemberMileageLogCardProps) {
   const router = useRouter()
@@ -525,6 +530,7 @@ export function MemberMileageLogCard({
       toast.success(
         editingLogId ? '기록이 수정되었습니다.' : `${parsedDistance}km 기록이 저장되었습니다.`,
       )
+      onSaved?.()
       closeForm()
       void router.refresh()
     } catch (error) {
@@ -684,7 +690,9 @@ export function MemberMileageLogCard({
     )
   }
 
-  if (!participant) {
+  const canRecord = Boolean(participant) || portalRecordReady
+
+  if (!canRecord) {
     if (isFormOnly) return null
     return (
       <div className={embedded ? 'space-y-2' : 'rounded-xl border border-border/60 bg-card p-4 shadow-sm'}>
@@ -692,7 +700,7 @@ export function MemberMileageLogCard({
           <Route className="h-4 w-4 shrink-0" />
           <span>월 누적 마일리지</span>
         </div>
-        <p className="text-sm text-muted-foreground">러닝 리그 참가 후 기록할 수 있습니다.</p>
+        <p className="text-sm text-muted-foreground">러닝 기록을 등록할 수 없습니다.</p>
       </div>
     )
   }

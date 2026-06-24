@@ -64,7 +64,7 @@ export function MemberStaffLeagueSummary({
         </Button>
       </div>
 
-      <MemberLeagueStatusCard snapshot={snapshot} showMyRankBadge={false} />
+      <MemberLeagueStatusCard snapshot={snapshot} />
 
       {canEdit ? (
         <div className="flex flex-col gap-1.5">

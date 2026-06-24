@@ -63,6 +63,13 @@ export function canApplyClientGenderFilter(
   return rankingBundle != null
 }
 
+/** UI에서 남자/여자 칩 비활성 여부 — 현재 선택값과 무관하게 bundle 유무만 본다 */
+export function isGenderFilterUnavailable(
+  rankingBundle: { participants: ReadonlyArray<RunningLeagueParticipant> } | null,
+): boolean {
+  return rankingBundle == null
+}
+
 export function getGenderFilterDescription(filter: RankingGenderFilter): string {
   if (filter === 'all') {
     return '성인 회원 전체 · 남자/여자로 같은 그룹 안에서 순위를 비교할 수 있어요'

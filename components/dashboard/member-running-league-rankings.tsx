@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
 import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
 import { MemberRunningLeagueRankingsSkeleton } from '@/components/dashboard/member-running-league-rankings-skeleton'
@@ -44,13 +43,12 @@ import {
 } from '@/components/dashboard/member-ranking-charts'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
-import { formatPbDistanceLabel, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
+import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { buildFilteredPortalRankings } from '@/lib/running-league/ranking-hub'
 import { formatMemberRankChangeHint } from '@/lib/running-league/ranking-history'
 import {
   RANKING_GENDER_FILTERS,
-  canApplyClientGenderFilter,
   countUnclassifiedParticipants,
   filterParticipantsByGender,
   getGenderFilterDescription,
@@ -58,6 +56,7 @@ import {
   GENDER_UNCLASSIFIED_HINT,
   formatRankingFullViewButtonLabel,
   getGenderFilterScopeLabel,
+  isGenderFilterUnavailable,
   type RankingGenderFilter,
 } from '@/lib/running-league/ranking-gender'
 import {
@@ -83,6 +82,10 @@ import type {
 } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { RANKING_TOP_DISPLAY_COUNT } from '@/lib/running-league/ranking-portal-guards'
+import {
+  MEMBER_PORTAL_CARD_CLASS,
+  MEMBER_PORTAL_SHELL_CLASS,
+} from '@/lib/running-league/member-portal-layout'
 
 function filterRankedBySearch<R extends { memberId: string; memberName: string }>(
   ranked: R[],
@@ -280,6 +283,9 @@ function InlineRankingFilterStrip({
   pbDistances = PORTAL_PB_DISTANCES,
   className,
   bordered = true,
+  showRecordActions = false,
+  onAddMileage,
+  onAddPb,
 }: {
   rankingView: RankingView
   onRankingViewChange: (value: RankingView) => void
@@ -292,6 +298,9 @@ function InlineRankingFilterStrip({
   pbDistances?: readonly PbLeaderboardDistance[]
   className?: string
   bordered?: boolean
+  showRecordActions?: boolean
+  onAddMileage?: () => void
+  onAddPb?: () => void
 }) {
   const viewLabels: Record<RankingView, string> = {
     pb: 'PB',
@@ -299,18 +308,13 @@ function InlineRankingFilterStrip({
   }
 
   return (
-    <div
-      className={cn(
-        bordered && 'border-b border-lime-500/10',
-        'px-2.5 py-1.5',
-        className,
-      )}
-    >
-      <div
-        className="flex items-center gap-1 overflow-x-auto pr-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        role="toolbar"
-        aria-label="랭킹 필터"
-      >
+    <div className={cn(bordered && 'border-b border-lime-500/10', className)}>
+      <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 sm:px-3">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pr-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="toolbar"
+          aria-label="랭킹 필터"
+        >
         <div className="grid w-[8.25rem] shrink-0 grid-cols-2 gap-0.5 rounded-md border border-lime-500/20 bg-black/40 p-0.5">
           {RANKING_VIEW_OPTIONS.map((item) => (
             <button
@@ -351,9 +355,6 @@ function InlineRankingFilterStrip({
             active={genderFilter === item.value}
             onClick={() => onGenderFilterChange(item.value)}
             inline
-            className={cn(
-              genderFilterBlocked && item.value !== 'all' && 'pointer-events-none opacity-40',
-            )}
           >
             {item.label}
           </RankingFilterChip>
@@ -370,13 +371,62 @@ function InlineRankingFilterStrip({
                 active={pbDistance === distance}
                 onClick={() => onPbDistanceChange(distance)}
                 inline
+                className={cn(
+                  pbDistance === distance && getPbDistanceAccentClass(distance),
+                )}
               >
                 {formatPbDistanceLabel(distance)}
               </RankingFilterChip>
             ))}
           </>
         ) : null}
+        </div>
+
+        {showRecordActions && onAddMileage && onAddPb ? (
+          <>
+            <span className="hidden shrink-0 text-[10px] text-zinc-700 sm:inline" aria-hidden>
+              |
+            </span>
+            <PortalGraphCompactActions
+              onAddMileage={onAddMileage}
+              onAddPb={onAddPb}
+            />
+          </>
+        ) : null}
       </div>
+    </div>
+  )
+}
+
+function PortalGraphCompactActions({
+  onAddMileage,
+  onAddPb,
+}: {
+  onAddMileage: () => void
+  onAddPb: () => void
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <Button
+        type="button"
+        size="sm"
+        className="h-7 gap-0.5 bg-lime-500 px-2 text-[10px] font-semibold text-black shadow-[0_0_10px_rgba(163,230,53,0.18)] hover:bg-lime-400 sm:h-8 sm:px-2.5 sm:text-[11px]"
+        onClick={onAddMileage}
+        aria-label="오늘 러닝 기록 추가"
+      >
+        <Plus className="h-3 w-3 shrink-0" />
+        <span className="whitespace-nowrap">오늘 기록 추가</span>
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 shrink-0 border-lime-500/30 bg-black/40 px-1.5 text-[9px] font-medium text-lime-200 hover:bg-lime-500/10 sm:h-8 sm:px-2 sm:text-[10px]"
+        onClick={onAddPb}
+        aria-label="PB 등록 및 수정"
+      >
+        <span className="whitespace-nowrap">PB 등록/수정</span>
+      </Button>
     </div>
   )
 }
@@ -390,6 +440,9 @@ function MobileGraphFilterStrip({
   onPbDistanceChange,
   genderFilterBlocked,
   onGraphChartTabChange,
+  showRecordActions = false,
+  onAddMileage,
+  onAddPb,
 }: {
   rankingView: RankingView
   onRankingViewChange: (value: RankingView) => void
@@ -399,6 +452,9 @@ function MobileGraphFilterStrip({
   onPbDistanceChange: (value: PbLeaderboardDistance) => void
   genderFilterBlocked: boolean
   onGraphChartTabChange: (tab: GraphChartTab) => void
+  showRecordActions?: boolean
+  onAddMileage?: () => void
+  onAddPb?: () => void
 }) {
   return (
     <InlineRankingFilterStrip
@@ -410,57 +466,10 @@ function MobileGraphFilterStrip({
       onPbDistanceChange={onPbDistanceChange}
       genderFilterBlocked={genderFilterBlocked}
       onGraphChartTabChange={onGraphChartTabChange}
+      showRecordActions={showRecordActions}
+      onAddMileage={onAddMileage}
+      onAddPb={onAddPb}
     />
-  )
-}
-
-function MobileRunRecordCta({
-  canEdit,
-  onAddMileage,
-  onAddPb,
-  variant = 'inline',
-}: {
-  canEdit: boolean
-  onAddMileage: () => void
-  onAddPb: () => void
-  variant?: 'inline' | 'sticky'
-}) {
-  if (!canEdit) return null
-
-  if (variant === 'sticky') {
-    return (
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-lime-500/25 bg-zinc-950/95 px-3 py-2.5 shadow-[0_-8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md pb-[max(0.625rem,env(safe-area-inset-bottom))] lg:hidden">
-        <Button
-          type="button"
-          className="min-h-12 w-full bg-lime-500 text-base font-bold text-black shadow-[0_0_20px_rgba(163,230,53,0.25)] hover:bg-lime-400"
-          onClick={onAddMileage}
-        >
-          <Plus className="mr-1.5 h-5 w-5" />
-          오늘 러닝 기록 추가
-        </Button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid grid-cols-[1fr_auto] gap-2">
-      <Button
-        type="button"
-        className="min-h-12 bg-lime-500 text-base font-bold text-black shadow-[0_0_20px_rgba(163,230,53,0.2)] hover:bg-lime-400"
-        onClick={onAddMileage}
-      >
-        <Plus className="mr-1.5 h-5 w-5" />
-        오늘 러닝 기록 추가
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className="min-h-12 shrink-0 border-lime-500/30 bg-black/40 px-3 text-xs font-medium text-lime-200 hover:bg-lime-500/10"
-        onClick={onAddPb}
-      >
-        PB 등록/수정
-      </Button>
-    </div>
   )
 }
 
@@ -517,6 +526,7 @@ function RankingFilterChip({
   className,
   compact = false,
   inline = false,
+  disabled = false,
 }: {
   active: boolean
   onClick: () => void
@@ -524,11 +534,13 @@ function RankingFilterChip({
   className?: string
   compact?: boolean
   inline?: boolean
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         'shrink-0 rounded-full border transition-colors',
         inline
@@ -539,6 +551,7 @@ function RankingFilterChip({
         active
           ? 'border-lime-400/55 bg-lime-500/15 font-medium text-lime-100 shadow-[0_0_14px_rgba(163,230,53,0.1)]'
           : 'border-lime-500/20 bg-black/50 text-zinc-400 hover:border-lime-500/35 hover:text-zinc-200',
+        disabled && 'pointer-events-none opacity-40',
         className,
       )}
     >
@@ -593,6 +606,8 @@ interface MemberRunningLeagueRankingsProps {
   highlightMemberId?: string | null
   runningLeagueDetailHref?: string
   className?: string
+  brandHeaderAction?: ReactNode
+  brandHeaderBelow?: ReactNode
 }
 
 type MemberRankSummary =
@@ -778,6 +793,20 @@ function RankingCardAction({
   )
 }
 
+function MemberPortalBrandHeader({ action }: { action?: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-[11px]">
+          ONE STEP RUNNING LEAGUE
+        </p>
+        <h1 className="text-xl font-bold text-foreground sm:text-2xl">내 러닝 포털</h1>
+      </div>
+      {action}
+    </div>
+  )
+}
+
 function RankingPreview({
   rankingView,
   pbDistance,
@@ -812,7 +841,9 @@ function RankingPreview({
   const leaderboard = rankingView === 'pb' ? activePbLeaderboard : activeMileageLeaderboard
   const previewRows = buildNeighborRankRows(leaderboard.ranked, highlightMemberId)
   const viewLabel =
-    rankingView === 'pb' ? null : formatCurrentMonthRankingLabel()
+    rankingView === 'pb'
+      ? `${formatPbDistanceLabel(pbDistance)} PB`
+      : formatCurrentMonthRankingLabel()
 
   const filteredParticipants = rankingBundle
     ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
@@ -829,15 +860,24 @@ function RankingPreview({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-lime-400/30 bg-zinc-950/90">
+    <div className={MEMBER_PORTAL_CARD_CLASS}>
       <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <p className="text-sm font-semibold text-lime-100">랭킹</p>
-          {viewLabel ? (
-            <span className="truncate text-[10px] text-zinc-500">{viewLabel}</span>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="shrink-0 text-sm font-semibold text-lime-100">랭킹</span>
+          {rankingView === 'pb' ? (
+            <span
+              className={cn(
+                'truncate text-sm font-semibold',
+                getPbDistanceAccentClass(pbDistance),
+              )}
+            >
+              {formatPbDistanceLabel(pbDistance)} PB
+            </span>
+          ) : viewLabel ? (
+            <span className="truncate text-sm font-medium text-zinc-400">{viewLabel}</span>
           ) : null}
         </div>
-        {rankedCount > 0 && onOpenList ? (
+        {onOpenList && !rankingsError ? (
           <Button
             type="button"
             variant="outline"
@@ -845,7 +885,7 @@ function RankingPreview({
             className="h-7 shrink-0 border-lime-500/30 bg-lime-500/5 px-2.5 text-[11px] text-lime-100 hover:bg-lime-500/10"
             onClick={onOpenList}
           >
-            랭킹 목록 보기
+            전체 랭킹
           </Button>
         ) : null}
       </div>
@@ -1721,6 +1761,8 @@ export function MemberRunningLeagueRankings({
   highlightMemberId = null,
   runningLeagueDetailHref = '/dashboard/my/running-league',
   className,
+  brandHeaderAction,
+  brandHeaderBelow,
 }: MemberRunningLeagueRankingsProps) {
   const [genderFilter, setGenderFilter] = useState<RankingGenderFilter>('all')
   const [rankingView, setRankingView] = useState<RankingView>('pb')
@@ -1732,7 +1774,22 @@ export function MemberRunningLeagueRankings({
   const [pbDialogOpen, setPbDialogOpen] = useState(false)
   const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
   const router = useRouter()
-  const canEdit = tableReady && !readOnly && participant != null
+  const canShowRecordActions = tableReady && !readOnly
+  const portalRecordReady = canShowRecordActions
+
+  function handleMileageSaved() {
+    handlePortalRankingViewChange('mileage')
+    if (highlightMemberId) {
+      const selfName =
+        rankingBundle?.participants.find((row) => row.member_id === highlightMemberId)?.member
+          ?.name ?? '나'
+      setSelectedMember({ id: highlightMemberId, name: selfName })
+    }
+  }
+
+  function openMileageDialog() {
+    setMileageDialogOpen(true)
+  }
 
   const portalPbDistance = PORTAL_PB_DISTANCES.includes(pbDistance)
     ? pbDistance
@@ -1748,7 +1805,6 @@ export function MemberRunningLeagueRankings({
     if (rankingBundle) {
       return buildFilteredPortalRankings(rankingBundle, genderFilter)
     }
-    if (!canApplyClientGenderFilter(null, genderFilter)) return null
     return {
       pbByDistance: {
         '5km': pb5kLeaderboard,
@@ -1778,7 +1834,7 @@ export function MemberRunningLeagueRankings({
     rankingView === 'pb'
       ? activePbLeaderboard.ranked.length
       : activeMileageLeaderboard.ranked.length
-  const genderFilterBlocked = !canApplyClientGenderFilter(rankingBundle, genderFilter)
+  const genderFilterBlocked = isGenderFilterUnavailable(rankingBundle)
   const unclassifiedCount = useMemo(
     () => (rankingBundle ? countUnclassifiedParticipants(rankingBundle.participants) : 0),
     [rankingBundle],
@@ -1892,6 +1948,9 @@ export function MemberRunningLeagueRankings({
       onPbDistanceChange={setPbDistance}
       genderFilterBlocked={genderFilterBlocked}
       onGraphChartTabChange={setGraphChartTab}
+      showRecordActions={canShowRecordActions}
+      onAddMileage={openMileageDialog}
+      onAddPb={() => setPbDialogOpen(true)}
     />
   )
 
@@ -1899,7 +1958,7 @@ export function MemberRunningLeagueRankings({
     <MemberRankingDetailPanel
       key={panelMember.id}
       embedded
-      emphasized
+      emphasized={false}
       variant="mobile"
       memberId={panelMember.id}
       memberName={panelMember.name}
@@ -1920,12 +1979,10 @@ export function MemberRunningLeagueRankings({
       mobileFilterSlot={graphFilterStrip}
       graphChartTab={graphChartTab}
       onGraphChartTabChange={setGraphChartTab}
+      className={MEMBER_PORTAL_CARD_CLASS}
     />
   ) : (
-    <div className="overflow-hidden rounded-xl border border-lime-400/35 bg-zinc-950/90">
-      <div className="border-b border-lime-500/15 px-3 py-2">
-        <p className="text-[11px] text-zinc-400 sm:text-xs">기록을 추가하면 그래프가 표시됩니다.</p>
-      </div>
+    <div className={MEMBER_PORTAL_CARD_CLASS}>
       {graphFilterStrip}
       <div className="flex min-h-[200px] flex-col items-center justify-center px-3 py-4 text-center sm:min-h-[240px]">
         <p className="text-xs text-zinc-500">러닝 기록 또는 PB를 등록해보세요.</p>
@@ -1933,32 +1990,21 @@ export function MemberRunningLeagueRankings({
     </div>
   )
 
-  const portalHighlightsBody = (
-    <div className="space-y-2">
-      {!rankingsError && rankingBundle ? (
-        <MemberLeagueMomentumStrip
-          topRiser={leagueMomentum.topRiser}
-          recentPbUpdates={leagueMomentum.recentPbUpdates}
-          highlightMemberId={highlightMemberId}
-          onMemberSelect={handleMemberSelect}
-          rankingViewLabel={
-            rankingView === 'pb'
-              ? formatPbDistanceLabel(portalPbDistance)
-              : formatCurrentMonthRankingLabel()
-          }
-        />
-      ) : null}
-      <p className="text-[10px] leading-relaxed text-zinc-500 sm:text-xs">
-        이름은 개인정보 보호를 위해 마스킹됩니다. 본인 행만 실명으로 표시됩니다.{' '}
-        <Link
-          href={runningLeagueDetailHref}
-          className="font-medium text-lime-400 underline-offset-2 hover:underline"
-        >
-          리그 상세
-        </Link>
-      </p>
-    </div>
-  )
+  const portalHighlightsBody =
+    !rankingsError && rankingBundle ? (
+      <MemberLeagueMomentumStrip
+        topRiser={leagueMomentum.topRiser}
+        recentPbUpdates={leagueMomentum.recentPbUpdates}
+        highlightMemberId={highlightMemberId}
+        onMemberSelect={handleMemberSelect}
+        rankingViewLabel={
+          rankingView === 'pb'
+            ? formatPbDistanceLabel(portalPbDistance)
+            : formatCurrentMonthRankingLabel()
+        }
+        className={MEMBER_PORTAL_CARD_CLASS}
+      />
+    ) : null
 
   if (loading) {
     return <MemberRunningLeagueRankingsSkeleton className={className} />
@@ -1967,11 +2013,14 @@ export function MemberRunningLeagueRankings({
   return (
     <section
       className={cn(
-        'flex w-full max-w-full flex-col gap-2.5 overflow-x-hidden sm:mx-auto sm:max-w-xl sm:gap-4 lg:max-w-2xl',
-        canEdit && 'pb-[4.75rem] lg:pb-0',
+        MEMBER_PORTAL_SHELL_CLASS,
+        'flex flex-col gap-2.5 sm:gap-4',
         className,
       )}
     >
+      <MemberPortalBrandHeader action={brandHeaderAction} />
+      {brandHeaderBelow}
+
       <div className="flex flex-col gap-2.5 sm:gap-4">
         <RankingPreview
           rankingView={rankingView}
@@ -1995,25 +2044,15 @@ export function MemberRunningLeagueRankings({
         </div>
 
         {leagueStatus && highlightMemberId ? (
-          <MemberLeagueStatusCard snapshot={leagueStatus} compact />
+          <MemberLeagueStatusCard
+            snapshot={leagueStatus}
+            compact
+            className={cn(MEMBER_PORTAL_CARD_CLASS, 'border-lime-400/30')}
+          />
         ) : null}
-
-        <MobileRunRecordCta
-          canEdit={canEdit && !readOnly}
-          onAddMileage={() => setMileageDialogOpen(true)}
-          onAddPb={() => setPbDialogOpen(true)}
-          variant="inline"
-        />
 
         {portalHighlightsBody}
       </div>
-
-      <MobileRunRecordCta
-        canEdit={canEdit && !readOnly}
-        onAddMileage={() => setMileageDialogOpen(true)}
-        onAddPb={() => setPbDialogOpen(true)}
-        variant="sticky"
-      />
 
       <FullRankingDialog
         open={fullRankingOpen}
@@ -2044,6 +2083,7 @@ export function MemberRunningLeagueRankings({
         open={pbDialogOpen}
         onOpenChange={setPbDialogOpen}
         readOnly={readOnly}
+        portalRecordReady={portalRecordReady}
         initialDistance={portalPbDistance as RunningLeagueDistanceEvent}
       />
       <MemberMileageLogDialog
@@ -2052,7 +2092,9 @@ export function MemberRunningLeagueRankings({
         tableReady={tableReady}
         open={mileageDialogOpen}
         onOpenChange={setMileageDialogOpen}
+        portalRecordReady={portalRecordReady}
         readOnly={readOnly}
+        onSaved={handleMileageSaved}
       />
     </section>
   )

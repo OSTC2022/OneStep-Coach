@@ -19,8 +19,10 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { MemberGenderField } from '@/components/members/member-gender-field'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import type { PublicSignUpMemberType } from '@/lib/auth/public-signup'
+import type { MemberGender } from '@/lib/running-league/ranking-gender'
 
 type SignUpResult = {
   error?: string
@@ -36,6 +38,7 @@ export default function LoginPage() {
     useState<PublicSignUpMemberType>('student')
   const [signUpPhone, setSignUpPhone] = useState('')
   const [signUpParentPhone, setSignUpParentPhone] = useState('')
+  const [signUpGender, setSignUpGender] = useState<MemberGender | null>(null)
   const [loginEmail, setLoginEmail] = useState('')
   const [resetEmail, setResetEmail] = useState('')
   const [loginState, setLoginState] = useState<{
@@ -118,6 +121,12 @@ export default function LoginPage() {
       })
       return
     }
+    if (signUpMemberType === 'adult' && !signUpGender) {
+      toast.error('회원가입 실패', {
+        description: '성별을 선택해주세요.',
+      })
+      return
+    }
 
     setSignUpPending(true)
     try {
@@ -126,6 +135,9 @@ export default function LoginPage() {
       formData.set('phone', signUpPhone)
       formData.set('parent_phone', signUpParentPhone)
       formData.set('member_type', signUpMemberType)
+      if (signUpGender) {
+        formData.set('gender', signUpGender)
+      }
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
         body: formData,
@@ -388,9 +400,12 @@ export default function LoginPage() {
                   <Label>회원 유형</Label>
                   <RadioGroup
                     value={signUpMemberType}
-                    onValueChange={(value) =>
+                    onValueChange={(value) => {
                       setSignUpMemberType(value as PublicSignUpMemberType)
-                    }
+                      if (value === 'student') {
+                        setSignUpGender(null)
+                      }
+                    }}
                     className="grid grid-cols-2 gap-2"
                     disabled={signUpPending}
                   >
@@ -410,6 +425,15 @@ export default function LoginPage() {
                     </label>
                   </RadioGroup>
                 </div>
+                {signUpMemberType === 'adult' ? (
+                  <MemberGenderField
+                    value={signUpGender}
+                    onChange={setSignUpGender}
+                    required
+                    disabled={signUpPending}
+                    name="gender"
+                  />
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="signup-phone">
                     개인 연락처 <span className="text-destructive">*</span>
