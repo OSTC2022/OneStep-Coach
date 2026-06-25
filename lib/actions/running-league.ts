@@ -1803,7 +1803,11 @@ function emptyMemberRunningLeagueHome(
 
 const RANKINGS_LOAD_ERROR = '데이터를 불러오지 못했습니다. 다시 시도해주세요.'
 
-async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRunningLeagueHome> {
+async function fetchMemberRunningLeagueHome(
+  memberId: string | null,
+  options?: { rankingsOnly?: boolean },
+): Promise<MemberRunningLeagueHome> {
+  const rankingsOnly = options?.rankingsOnly === true
   const supabase = await createClient()
   const leaderboardSupabase = await leagueClient()
   let rankingsError: string | null = null
@@ -1820,7 +1824,7 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
     return emptyMemberRunningLeagueHome({ rankingsError: RANKINGS_LOAD_ERROR })
   }
 
-  if (league) {
+  if (league && memberId && !rankingsOnly) {
     const enrollment = await ensurePortalParticipantForMember(memberId)
     if (!enrollment.ok) {
       console.error('fetchMemberRunningLeagueHome.ensurePortalParticipant', enrollment.error)
@@ -1840,14 +1844,21 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
 
   if (league) {
   try {
+    const participantQueries =
+      memberId && !rankingsOnly
+        ? [
+            leaderboardSupabase
+              .from('running_league_participants')
+              .select(PARTICIPANT_SELECT)
+              .eq('league_id', league.id)
+              .eq('member_id', memberId)
+              .maybeSingle(),
+          ]
+        : [Promise.resolve({ data: null, error: null })]
+
     const [myResult, allParticipantsResult, leaguePbRecordsResult, leagueMileageLogsResult] =
       await Promise.all([
-        leaderboardSupabase
-          .from('running_league_participants')
-          .select(PARTICIPANT_SELECT)
-          .eq('league_id', league.id)
-          .eq('member_id', memberId)
-          .maybeSingle(),
+        ...participantQueries,
         leaderboardSupabase
           .from('running_league_participants')
           .select(PARTICIPANT_SELECT)
@@ -1940,7 +1951,7 @@ async function fetchMemberRunningLeagueHome(memberId: string): Promise<MemberRun
   }
   }
 
-  if (!participant) {
+  if (!participant || rankingsOnly) {
     return emptyMemberRunningLeagueHome({
       league,
       pb5kLeaderboard,
@@ -2023,6 +2034,12 @@ export async function getMemberRunningLeagueHomeForStaff(
 ): Promise<MemberRunningLeagueHome> {
   await assertStaffAdultRunningPortalAccess(memberId)
   return fetchMemberRunningLeagueHome(memberId)
+}
+
+/** 설정 화면 — 성인회원 포털 미리보기(랭킹·스케줄) */
+export async function getAdultRunningPortalAdminPreview(): Promise<MemberRunningLeagueHome> {
+  await requireRole(['admin'])
+  return fetchMemberRunningLeagueHome(null, { rankingsOnly: true })
 }
 
 export async function getMemberRunningLeagueHome(): Promise<MemberRunningLeagueHome> {

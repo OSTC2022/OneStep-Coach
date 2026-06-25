@@ -114,7 +114,7 @@ const criteria = [
   },
   {
     id: 9,
-    name: '타인 이름 마스킹',
+    name: '랭킹 이름 표시',
     check: () => {
       assert.match(rankings, /formatRankingMemberName/)
     },

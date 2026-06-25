@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -41,6 +42,11 @@ export function CalendarSearch({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [dropdownLayout, setDropdownLayout] = useState<{
+    top: number
+    left: number
+    width: number
+  } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -125,6 +131,8 @@ export function CalendarSearch({
 
     function handlePointerDown(e: PointerEvent) {
       if (containerRef.current?.contains(e.target as Node)) return
+      const dropdown = document.querySelector('[data-calendar-search-dropdown]')
+      if (dropdown?.contains(e.target as Node)) return
       setOpen(false)
       setQuery('')
     }
@@ -132,6 +140,42 @@ export function CalendarSearch({
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [open, onLoadSearchPool])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setDropdownLayout(null)
+      return
+    }
+
+    const viewportPadding = 8
+    const maxDropdownWidth = 320
+
+    function updateDropdownLayout() {
+      const anchor = containerRef.current
+      if (!anchor) return
+
+      const rect = anchor.getBoundingClientRect()
+      const width = Math.min(maxDropdownWidth, window.innerWidth - viewportPadding * 2)
+      const left = Math.max(
+        viewportPadding,
+        Math.min(rect.right - width, window.innerWidth - width - viewportPadding),
+      )
+
+      setDropdownLayout({
+        top: rect.bottom + 4,
+        left,
+        width,
+      })
+    }
+
+    updateDropdownLayout()
+    window.addEventListener('resize', updateDropdownLayout)
+    window.addEventListener('scroll', updateDropdownLayout, true)
+    return () => {
+      window.removeEventListener('resize', updateDropdownLayout)
+      window.removeEventListener('scroll', updateDropdownLayout, true)
+    }
+  }, [open, query, visibleResults.length])
 
   function openSearch() {
     setOpen(true)
@@ -143,12 +187,99 @@ export function CalendarSearch({
     setQuery('')
   }
 
+  const dropdownPanel = (
+    <div
+      data-calendar-search-dropdown
+      className="overflow-hidden rounded-md border border-border bg-popover shadow-lg"
+      style={
+        dropdownLayout
+          ? {
+              position: 'fixed',
+              top: dropdownLayout.top,
+              left: dropdownLayout.left,
+              width: dropdownLayout.width,
+              zIndex: 60,
+            }
+          : { visibility: 'hidden' }
+      }
+    >
+      <div className="border-b border-border px-3 py-2">
+        <p className="text-xs font-medium text-foreground">
+          {hasQuery
+            ? '검색 결과'
+            : `${format(currentDate, 'M월', { locale: ko })} 회원 전체 (${monthResults.length}명)`}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          회원 이름·종목·초성(ㅈ)으로 검색
+        </p>
+      </div>
+
+      {visibleResults.length > 0 ? (
+        <ul className="max-h-80 overflow-y-auto py-1">
+          {visibleResults.map((result, index) => {
+            const color = getInstructorCalendarColor(result.targetLesson?.instructor)
+            const isActive = index === activeIndex
+
+            return (
+              <li key={`${result.member.id}-${result.targetLesson?.id ?? 'none'}`}>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors',
+                    !isActive && 'hover:bg-accent/50',
+                    !result.targetLesson && 'opacity-70',
+                  )}
+                  style={
+                    isActive
+                      ? { backgroundColor: hexToRgba(color, 0.22) }
+                      : undefined
+                  }
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => handleSelect(result)}
+                >
+                  <span
+                    className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {result.member.name}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      {formatMemberSearchSubtitle(
+                        result.member,
+                        result.targetLesson,
+                      )}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p className="px-3 py-4 text-center text-sm text-muted-foreground">
+          {hasQuery
+            ? `'${query.trim()}' 검색 결과가 없습니다.`
+            : '이달 등록된 회원 일정이 없습니다.'}
+        </p>
+      )}
+    </div>
+  )
+
   return (
-    <div ref={containerRef} className={cn('relative flex items-center', className)}>
+    <div
+      ref={containerRef}
+      className={cn(
+        'relative flex items-center',
+        open && 'w-full min-w-0 flex-1 sm:w-auto sm:flex-none',
+        className,
+      )}
+    >
       <div
         className={cn(
           'flex items-center overflow-hidden rounded-md border border-border bg-background transition-all duration-200',
-          open ? 'w-56 sm:w-64' : 'w-9',
+          open ? 'w-full min-w-[10rem] sm:w-64' : 'w-9',
         )}
       >
         {open ? (
@@ -186,71 +317,9 @@ export function CalendarSearch({
         )}
       </div>
 
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-md border border-border bg-popover shadow-lg sm:w-80">
-          <div className="border-b border-border px-3 py-2">
-            <p className="text-xs font-medium text-foreground">
-              {hasQuery
-                ? '검색 결과'
-                : `${format(currentDate, 'M월', { locale: ko })} 회원 전체 (${monthResults.length}명)`}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              회원 이름·종목·초성(ㅈ)으로 검색
-            </p>
-          </div>
-
-          {visibleResults.length > 0 ? (
-            <ul className="max-h-80 overflow-y-auto py-1">
-              {visibleResults.map((result, index) => {
-                const color = getInstructorCalendarColor(result.targetLesson?.instructor)
-                const isActive = index === activeIndex
-
-                return (
-                  <li key={`${result.member.id}-${result.targetLesson?.id ?? 'none'}`}>
-                    <button
-                      type="button"
-                      className={cn(
-                        'flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors',
-                        !isActive && 'hover:bg-accent/50',
-                        !result.targetLesson && 'opacity-70',
-                      )}
-                      style={
-                        isActive
-                          ? { backgroundColor: hexToRgba(color, 0.22) }
-                          : undefined
-                      }
-                      onMouseEnter={() => setActiveIndex(index)}
-                      onClick={() => handleSelect(result)}
-                    >
-                      <span
-                        className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20"
-                        style={{ backgroundColor: color }}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {result.member.name}
-                        </span>
-                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                          {formatMemberSearchSubtitle(
-                            result.member,
-                            result.targetLesson,
-                          )}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-              {hasQuery
-                ? `'${query.trim()}' 검색 결과가 없습니다.`
-                : '이달 등록된 회원 일정이 없습니다.'}
-            </p>
-          )}
-        </div>
-      )}
+      {open && typeof document !== 'undefined'
+        ? createPortal(dropdownPanel, document.body)
+        : null}
     </div>
   )
 }

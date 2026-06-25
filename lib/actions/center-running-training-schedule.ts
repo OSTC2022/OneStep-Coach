@@ -331,6 +331,11 @@ export async function getCenterRunningTrainingScheduleForMember(): Promise<Cente
   return fetchCenterRunningTrainingSchedule(member?.id ?? null, { includeHidden: true })
 }
 
+export async function getCenterRunningTrainingScheduleAdminPreview(): Promise<CenterRunningTrainingScheduleBundle> {
+  await requireRole(['admin'])
+  return fetchCenterRunningTrainingSchedule(null, { includeHidden: true })
+}
+
 export async function toggleCenterRunningTrainingScheduleSignup(
   scheduleDayId: string,
 ): Promise<

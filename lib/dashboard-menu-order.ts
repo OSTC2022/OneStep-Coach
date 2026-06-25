@@ -83,6 +83,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin'],
   },
   {
+    id: '/dashboard/settings/adult-running-portal',
+    title: '성인 러닝 포털',
+    url: '/dashboard/settings/adult-running-portal',
+    roles: ['admin'],
+  },
+  {
     id: '/dashboard/settings/running-schedule',
     title: '러닝 스케줄',
     url: '/dashboard/settings/running-schedule',
