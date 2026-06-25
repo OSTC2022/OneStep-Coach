@@ -16,11 +16,16 @@ import {
   ChartTooltipContent,
 } from '@/components/ui/chart'
 import type { LeagueRankComparisonChart } from '@/lib/running-league/league-rank-comparison'
+import type { LeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
 import type { MileageHistoryPoint } from '@/lib/running-league/mileage-history'
 import type { MileageRankHistoryPoint } from '@/lib/running-league/mileage-rank-history'
 import type { RecordChangeChartSummary } from '@/lib/running-league/ranking-improvement-summary'
 import type { RankingHistoryPoint } from '@/lib/running-league/ranking-history'
 import { RANKING_EMPTY_GRAPH } from '@/lib/running-league/ranking-empty-states'
+import {
+  buildMemberChartColorMap,
+  getMemberChartColor,
+} from '@/lib/running-league/chart-member-colors'
 import { cn } from '@/lib/utils'
 
 const LIME_EMPHASIS = '#a3e635'
@@ -28,6 +33,32 @@ const LIME_BRIGHT = '#d9f99d'
 const LIME_MUTED = '#4d7c0f'
 const FADED_MEMBER_COLOR = '#3f4f5f'
 const FADED_MEMBER_OPACITY = 0.22
+
+function TooltipMemberRow({
+  color,
+  name,
+  value,
+  emphasized = false,
+}: {
+  color: string
+  name: string
+  value: ReactNode
+  emphasized?: boolean
+}) {
+  return (
+    <p className={cn('flex items-center gap-2', emphasized && 'font-semibold')}>
+      <span
+        className="h-2 w-2 shrink-0 rounded-full ring-1 ring-white/15"
+        style={{ backgroundColor: color }}
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1 truncate text-zinc-200">{name}</span>
+      <span className="shrink-0 tabular-nums" style={{ color }}>
+        {value}
+      </span>
+    </p>
+  )
+}
 
 const timeChartConfig = {
   timeSeconds: {
@@ -109,11 +140,15 @@ function RankComparisonTooltip({
   payload,
   label,
   members,
+  memberColorMap,
+  isAggregate = false,
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number; color?: string }>
   label?: string
   members: LeagueRankComparisonChart['members']
+  memberColorMap: Map<string, string>
+  isAggregate?: boolean
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -132,14 +167,62 @@ function RankComparisonTooltip({
 
   return (
     <ChartTooltipShell label={label}>
+      {rows.map((row) => {
+        const color = isAggregate
+          ? getMemberChartColor(row.memberId, memberColorMap)
+          : row.isSelected
+            ? LIME_EMPHASIS
+            : '#71717a'
+        return (
+          <TooltipMemberRow
+            key={row.memberId}
+            color={color}
+            name={row.name}
+            value={`${row.rank}위`}
+            emphasized={!isAggregate && row.isSelected}
+          />
+        )
+      })}
+    </ChartTooltipShell>
+  )
+}
+
+function MileageComparisonTooltip({
+  active,
+  payload,
+  label,
+  members,
+  memberColorMap,
+}: {
+  active?: boolean
+  payload?: Array<{ name?: string; value?: number; color?: string }>
+  label?: string
+  members: LeagueMileageComparisonChart['members']
+  memberColorMap: Map<string, string>
+}) {
+  if (!active || !payload?.length) return null
+  const rows = payload
+    .filter((item) => item.value != null && item.name?.startsWith('km_'))
+    .map((item) => {
+      const memberId = String(item.name).replace('km_', '')
+      const member = members.find((row) => row.memberId === memberId)
+      return {
+        memberId,
+        name: member?.memberName ?? '회원',
+        km: item.value as number,
+      }
+    })
+    .sort((a, b) => b.km - a.km)
+
+  return (
+    <ChartTooltipShell label={label}>
       {rows.map((row) => (
-        <p
+        <TooltipMemberRow
           key={row.memberId}
-          className={cn(row.isSelected ? 'font-semibold text-lime-200' : 'text-zinc-400')}
-        >
-          {row.name}{' '}
-          <span className="tabular-nums">{row.rank}위</span>
-        </p>
+          color={getMemberChartColor(row.memberId, memberColorMap)}
+          name={row.name}
+          value={`${row.km.toFixed(1)}km`}
+        />
       ))}
     </ChartTooltipShell>
   )
@@ -315,12 +398,14 @@ interface MemberRankingChartsProps {
   mileagePoints?: MileageHistoryPoint[]
   mileageRankPoints?: MileageRankHistoryPoint[]
   comparisonChart?: LeagueRankComparisonChart | null
+  mileageComparisonChart?: LeagueMileageComparisonChart | null
   recordSummary?: RecordChangeChartSummary | null
   rankCaption?: { title: string; trajectory: string | null } | null
   distanceLabel?: string
   mode?: 'pb' | 'mileage'
   emphasized?: boolean
   soloComparisonHint?: string | null
+  aggregateMode?: boolean
   compact?: boolean
   className?: string
   activeTab?: GraphChartTab
@@ -332,11 +417,13 @@ export function MemberRankingCharts({
   mileagePoints = [],
   mileageRankPoints = [],
   comparisonChart = null,
+  mileageComparisonChart = null,
   recordSummary = null,
   rankCaption = null,
   mode = 'pb',
   emphasized = false,
   soloComparisonHint = null,
+  aggregateMode = false,
   compact = false,
   className,
   activeTab: activeTabProp,
@@ -415,14 +502,17 @@ export function MemberRankingCharts({
 
   const rankEmptyDescription =
     soloComparisonHint ??
-    (mode === 'mileage'
-      ? '러닝 기록을 추가하면 마일리지 순위 그래프가 표시됩니다.'
-      : 'PB를 등록하면 순위 그래프가 표시됩니다.')
+    (aggregateMode
+      ? '등록된 기록이 있으면 전체 회원 순위 그래프가 표시됩니다.'
+      : mode === 'mileage'
+        ? '러닝 기록을 추가하면 마일리지 순위 그래프가 표시됩니다.'
+        : 'PB를 등록하면 순위 그래프가 표시됩니다.')
 
   const hasAnyChartData =
     rankData.length > 0 ||
     mileageRankData.length > 0 ||
     (comparisonChart?.rows?.length ?? 0) > 0 ||
+    (mileageComparisonChart?.rows?.length ?? 0) > 0 ||
     timeData.length > 0 ||
     mileageData.length > 0
 
@@ -433,7 +523,9 @@ export function MemberRankingCharts({
         compact={compact}
         description={
           soloComparisonHint ??
-          '첫 기록이 등록되었습니다. 다른 회원이 기록을 추가하면 비교 그래프가 표시됩니다.'
+          (aggregateMode
+            ? '회원 이름을 누르면 개인 그래프로 전환할 수 있습니다.'
+            : '첫 기록이 등록되었습니다. 다른 회원이 기록을 추가하면 비교 그래프가 표시됩니다.')
         }
       />
     )
@@ -441,15 +533,26 @@ export function MemberRankingCharts({
 
   const rankPanel =
     mode === 'mileage' ? (
-      mileageRankData.length === 0 ? (
+      mileageRankData.length === 0 && !(comparisonChart?.rows?.length ?? 0) ? (
         <GraphEmptyState compact={compact} description={rankEmptyDescription} />
-      ) : (
+      ) : mileageRankData.length > 0 ? (
         <MileageRankTrendChart
           data={mileageRankData}
           chartShellClass={chartShellClass}
           chartAxisClass={chartAxisClass}
           emphasized={emphasized}
           compact={compact}
+        />
+      ) : (
+        <RankTrendChart
+          rankData={[]}
+          comparisonChart={comparisonChart}
+          rankCaption={null}
+          chartShellClass={chartShellClass}
+          chartAxisClass={chartAxisClass}
+          emphasized={emphasized}
+          compact={compact}
+          aggregateMode={aggregateMode}
         />
       )
     ) : rankData.length === 0 && !(comparisonChart?.rows?.length ?? 0) ? (
@@ -463,11 +566,17 @@ export function MemberRankingCharts({
         chartAxisClass={chartAxisClass}
         emphasized={emphasized}
         compact={compact}
+        aggregateMode={aggregateMode}
       />
     )
 
   const recordPanel =
-    timeData.length === 0 ? (
+    aggregateMode ? (
+      <GraphEmptyState
+        compact={compact}
+        description="회원 이름을 누르면 개인 PB 기록 그래프를 볼 수 있습니다."
+      />
+    ) : timeData.length === 0 ? (
       <GraphEmptyState
         compact={compact}
         description="PB 기록을 등록하면 기록 그래프가 표시됩니다."
@@ -484,7 +593,14 @@ export function MemberRankingCharts({
     )
 
   const mileagePanel =
-    mileageData.length === 0 ? (
+    mileageComparisonChart && mileageComparisonChart.rows.length > 0 ? (
+      <MileageAggregateTrendChart
+        chart={mileageComparisonChart}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        compact={compact}
+      />
+    ) : mileageData.length === 0 ? (
       <GraphEmptyState
         compact={compact}
         description="이번 달 러닝 기록을 추가하면 마일리지 그래프가 표시됩니다."
@@ -611,6 +727,7 @@ function RankTrendChart({
   chartAxisClass,
   emphasized,
   compact = false,
+  aggregateMode = false,
 }: {
   rankData: Array<RankingHistoryPoint & { chartLabel: string; rank: number }>
   comparisonChart: LeagueRankComparisonChart | null
@@ -619,11 +736,17 @@ function RankTrendChart({
   chartAxisClass: string
   emphasized: boolean
   compact?: boolean
+  aggregateMode?: boolean
 }) {
   const comparisonRows = comparisonChart?.rows ?? []
   const comparisonMembers = comparisonChart?.members ?? []
-  const selectedMemberId = comparisonChart?.selectedMemberId
+  const selectedMemberId = comparisonChart?.selectedMemberId ?? null
+  const isAggregate = aggregateMode || selectedMemberId == null
   const hasComparison = comparisonRows.length > 0 && comparisonMembers.length > 0
+  const memberColorMap = useMemo(
+    () => buildMemberChartColorMap(comparisonMembers.map((member) => member.memberId)),
+    [comparisonMembers],
+  )
 
   if (!hasComparison && rankData.length === 0) {
     return <GraphEmptyState />
@@ -633,8 +756,10 @@ function RankTrendChart({
     <div className={chartShellClass}>
       {!compact ? (
         <div className="mb-2 space-y-1">
-          <p className="text-xs font-medium text-lime-300">순위</p>
-          {rankCaption ? (
+          <p className="text-xs font-medium text-lime-300">
+            {isAggregate ? '전체 회원 순위' : '순위'}
+          </p>
+          {rankCaption && !isAggregate ? (
             <>
               <p className="text-[11px] text-zinc-500">{rankCaption.title}</p>
               {rankCaption.trajectory ? (
@@ -657,35 +782,66 @@ function RankTrendChart({
               minTickGap={24}
             />
             <YAxis tickLine={false} axisLine={false} width={28} reversed allowDecimals={false} />
-            <Tooltip content={<RankComparisonTooltip members={comparisonMembers} />} />
-            {comparisonMembers
-              .filter((member) => !member.isSelected)
-              .map((member) => (
-                <Line
-                  key={member.memberId}
-                  type="monotone"
-                  dataKey={`rank_${member.memberId}`}
-                  name={`rank_${member.memberId}`}
-                  stroke={FADED_MEMBER_COLOR}
-                  strokeOpacity={FADED_MEMBER_OPACITY}
-                  strokeWidth={1}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
+            <Tooltip
+              content={
+                <RankComparisonTooltip
+                  members={comparisonMembers}
+                  memberColorMap={memberColorMap}
+                  isAggregate={isAggregate}
                 />
-              ))}
-            {selectedMemberId ? (
-              <Line
-                type="monotone"
-                dataKey={`rank_${selectedMemberId}`}
-                name={`rank_${selectedMemberId}`}
-                stroke={LIME_EMPHASIS}
-                strokeWidth={emphasized ? 3.5 : 3}
-                dot={{ r: emphasized ? 5 : 4, fill: LIME_EMPHASIS, stroke: LIME_BRIGHT, strokeWidth: 1 }}
-                activeDot={{ r: 7, fill: LIME_BRIGHT, stroke: LIME_EMPHASIS, strokeWidth: 2 }}
-                connectNulls
-              />
-            ) : null}
+              }
+            />
+            {isAggregate
+              ? comparisonMembers.map((member) => (
+                  <Line
+                    key={member.memberId}
+                    type="monotone"
+                    dataKey={`rank_${member.memberId}`}
+                    name={`rank_${member.memberId}`}
+                    stroke={getMemberChartColor(member.memberId, memberColorMap)}
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                ))
+              : (
+                <>
+                  {comparisonMembers
+                    .filter((member) => !member.isSelected)
+                    .map((member) => (
+                      <Line
+                        key={member.memberId}
+                        type="monotone"
+                        dataKey={`rank_${member.memberId}`}
+                        name={`rank_${member.memberId}`}
+                        stroke={FADED_MEMBER_COLOR}
+                        strokeOpacity={FADED_MEMBER_OPACITY}
+                        strokeWidth={1}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  {selectedMemberId ? (
+                    <Line
+                      type="monotone"
+                      dataKey={`rank_${selectedMemberId}`}
+                      name={`rank_${selectedMemberId}`}
+                      stroke={LIME_EMPHASIS}
+                      strokeWidth={emphasized ? 3.5 : 3}
+                      dot={{
+                        r: emphasized ? 5 : 4,
+                        fill: LIME_EMPHASIS,
+                        stroke: LIME_BRIGHT,
+                        strokeWidth: 1,
+                      }}
+                      activeDot={{ r: 7, fill: LIME_BRIGHT, stroke: LIME_EMPHASIS, strokeWidth: 2 }}
+                      connectNulls
+                    />
+                  ) : null}
+                </>
+              )}
           </LineChart>
         </ChartContainer>
       ) : (
@@ -713,7 +869,70 @@ function RankTrendChart({
         </ChartContainer>
       )}
       {!compact ? (
-        <p className="mt-1 text-[10px] text-zinc-500">1위가 위쪽 · 선택 회원은 라임색으로 강조됩니다.</p>
+        <p className="mt-1 text-[10px] text-zinc-500">
+          {isAggregate
+            ? '1위가 위쪽 · 회원별 색상으로 표시됩니다.'
+            : '1위가 위쪽 · 선택 회원은 라임색으로 강조됩니다.'}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function MileageAggregateTrendChart({
+  chart,
+  chartShellClass,
+  chartAxisClass,
+  compact = false,
+}: {
+  chart: LeagueMileageComparisonChart
+  chartShellClass: string
+  chartAxisClass: string
+  compact?: boolean
+}) {
+  const memberColorMap = useMemo(
+    () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
+    [chart.members],
+  )
+
+  return (
+    <div className={chartShellClass}>
+      {!compact ? (
+        <p className="mb-2 text-xs font-medium text-lime-300">전체 회원 누적 마일리지</p>
+      ) : null}
+      <ChartContainer config={mileageChartConfig} className={chartAxisClass}>
+        <LineChart data={chart.rows} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
+          <XAxis
+            dataKey="label"
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+            minTickGap={24}
+          />
+          <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `${v}km`} />
+          <Tooltip
+            content={
+              <MileageComparisonTooltip members={chart.members} memberColorMap={memberColorMap} />
+            }
+          />
+          {chart.members.map((member) => (
+            <Line
+              key={member.memberId}
+              type="monotone"
+              dataKey={`km_${member.memberId}`}
+              name={`km_${member.memberId}`}
+              stroke={getMemberChartColor(member.memberId, memberColorMap)}
+              strokeWidth={2}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+          ))}
+        </LineChart>
+      </ChartContainer>
+      {!compact ? (
+        <p className="mt-1 text-[10px] text-zinc-500">위로 갈수록 이번 달 누적 거리가 늘어납니다.</p>
       ) : null}
     </div>
   )

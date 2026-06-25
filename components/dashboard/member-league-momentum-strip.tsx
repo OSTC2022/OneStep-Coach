@@ -9,19 +9,28 @@ function MomentumMemberButton({
   item,
   highlightMemberId,
   onMemberSelect,
+  onPbUpdateSelect,
   className,
 }: {
   item: LeagueMomentumMember
   highlightMemberId?: string | null
   onMemberSelect?: (memberId: string, memberName: string) => void
+  onPbUpdateSelect?: (item: LeagueMomentumMember) => void
   className?: string
 }) {
   const isMe = highlightMemberId != null && item.memberId === highlightMemberId
+  const isPbUpdate = item.kind === 'pb_update'
 
   return (
     <button
       type="button"
-      onClick={() => onMemberSelect?.(item.memberId, item.memberName)}
+      onClick={() => {
+        if (isPbUpdate) {
+          onPbUpdateSelect?.(item)
+          return
+        }
+        onMemberSelect?.(item.memberId, item.memberName)
+      }}
       className={cn(
         'flex min-w-0 w-full flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
         isMe
@@ -47,6 +56,7 @@ export function MemberLeagueMomentumStrip({
   recentPbUpdates,
   highlightMemberId,
   onMemberSelect,
+  onPbUpdateSelect,
   rankingViewLabel,
   className,
 }: {
@@ -54,6 +64,7 @@ export function MemberLeagueMomentumStrip({
   recentPbUpdates: LeagueMomentumMember[]
   highlightMemberId?: string | null
   onMemberSelect?: (memberId: string, memberName: string) => void
+  onPbUpdateSelect?: (item: LeagueMomentumMember) => void
   rankingViewLabel?: string
   className?: string
 }) {
@@ -97,10 +108,10 @@ export function MemberLeagueMomentumStrip({
             <div className="space-y-2">
               {recentPbUpdates.map((item) => (
                 <MomentumMemberButton
-                  key={item.memberId}
+                  key={`${item.memberId}-${item.detail}`}
                   item={item}
                   highlightMemberId={highlightMemberId}
-                  onMemberSelect={onMemberSelect}
+                  onPbUpdateSelect={onPbUpdateSelect}
                 />
               ))}
             </div>

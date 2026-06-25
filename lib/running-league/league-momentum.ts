@@ -21,6 +21,8 @@ export type LeagueMomentumMember = {
   memberName: string
   headline: string
   detail: string
+  kind?: 'rank_riser' | 'pb_update'
+  pbDistance?: PbLeaderboardDistance
 }
 
 export type LeagueMomentumSnapshot = {
@@ -114,6 +116,7 @@ export function buildTopMonthlyRankRiser(input: {
     memberName: best.memberName,
     headline: `${best.startRank}위 → ${best.endRank}위`,
     detail: `▲${best.delta} 계단 상승`,
+    kind: 'rank_riser',
   }
 }
 
@@ -170,6 +173,8 @@ export function buildRecentPbUpdates(input: {
       memberName: resolveParticipantName(participant),
       headline: distanceLabel,
       detail: `${formatSecondsToRunningTime(seconds)} · ${formatShortDate(record.measured_at)}`,
+      kind: 'pb_update',
+      pbDistance: record.distance_event as PbLeaderboardDistance,
     })
 
     if (results.length >= limit) break

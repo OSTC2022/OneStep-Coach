@@ -220,7 +220,7 @@ export function MemberRankingDetailPanel({
             className="h-7 shrink-0 px-2 text-[11px] text-zinc-400 hover:text-lime-200"
             onClick={onClose}
           >
-            {isMe ? '닫기' : '내 그래프'}
+            {isExplicitSelection ? '전체 그래프' : isMe ? '닫기' : '내 그래프'}
           </Button>
         </div>
       ) : null}
@@ -244,7 +244,7 @@ export function MemberRankingDetailPanel({
               onClick={onClose}
             >
               <X className="mr-1 h-3.5 w-3.5" />
-              {isMe ? '닫기' : '내 그래프'}
+              {isExplicitSelection ? '전체 그래프' : isMe ? '닫기' : '내 그래프'}
             </Button>
           ) : null}
         </div>

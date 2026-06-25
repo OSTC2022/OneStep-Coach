@@ -33,10 +33,14 @@ import {
   formatCurrentMonthRankingLabel,
   formatNextMonthRankingResetLabel,
 } from '@/lib/running-league/month-range'
-import { buildLeagueMomentumSnapshot } from '@/lib/running-league/league-momentum'
+import {
+  buildLeagueMomentumSnapshot,
+  type LeagueMomentumMember,
+} from '@/lib/running-league/league-momentum'
 import { buildMemberLeagueStatusSnapshot, type MemberLeagueStatusSnapshot } from '@/lib/running-league/league-status-summary'
 import { formatScoreDisplay, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import { MemberRankingDetailPanel } from '@/components/dashboard/member-ranking-detail-panel'
+import { PortalAggregateGraphPanel } from '@/components/dashboard/portal-aggregate-graph-panel'
 import {
   graphChartTabForRankingView,
   type GraphChartTab,
@@ -686,22 +690,6 @@ function buildNeighborRankRows<T extends { memberId: string }>(
   const start = Math.max(0, myIndex - 1)
   const end = Math.min(ranked.length, myIndex + 2)
   return ranked.slice(start, end)
-}
-
-function resolveMemberDisplayName(
-  memberId: string,
-  pbLeaderboard: PbDistanceLeaderboard,
-  mileageLeaderboard: MileageDistanceLeaderboard,
-): string {
-  const fromPb =
-    pbLeaderboard.ranked.find((row) => row.memberId === memberId) ??
-    pbLeaderboard.unranked.find((row) => row.memberId === memberId)
-  if (fromPb) return fromPb.memberName
-
-  const fromMileage =
-    mileageLeaderboard.ranked.find((row) => row.memberId === memberId) ??
-    mileageLeaderboard.unranked.find((row) => row.memberId === memberId)
-  return fromMileage?.memberName ?? '회원'
 }
 
 function MyRankSeparator() {
@@ -1847,18 +1835,7 @@ export function MemberRunningLeagueRankings({
     [rankingBundle],
   )
 
-  const panelMember = useMemo(() => {
-    if (selectedMember) return selectedMember
-    if (!highlightMemberId) return null
-    return {
-      id: highlightMemberId,
-      name: resolveMemberDisplayName(
-        highlightMemberId,
-        activePbLeaderboard,
-        activeMileageLeaderboard,
-      ),
-    }
-  }, [activeMileageLeaderboard, activePbLeaderboard, highlightMemberId, selectedMember])
+  const panelMember = selectedMember
 
   const panelMemberRank = panelMember
     ? resolveMemberCurrentRank(
@@ -1869,8 +1846,7 @@ export function MemberRunningLeagueRankings({
       )
     : null
 
-  const isExplicitSelection =
-    selectedMember != null && highlightMemberId != null && selectedMember.id !== highlightMemberId
+  const isExplicitSelection = selectedMember != null
 
   const leagueMomentum = useMemo(() => {
     if (!rankingBundle || rankingsError) {
@@ -1938,8 +1914,32 @@ export function MemberRunningLeagueRankings({
     setGraphChartTab(graphChartTabForRankingView(view))
   }
 
+  function handleGenderFilterChange(value: RankingGenderFilter) {
+    setGenderFilter(value)
+    setSelectedMember(null)
+  }
+
   function handleMemberSelect(memberId: string, memberName: string) {
+    if (selectedMember?.id === memberId) {
+      setSelectedMember(null)
+      return
+    }
     setSelectedMember({ id: memberId, name: memberName })
+    window.requestAnimationFrame(() => {
+      graphPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }
+
+  function handlePbUpdateSelect(item: LeagueMomentumMember) {
+    handlePortalRankingViewChange('pb')
+    setGraphChartTab('record')
+    if (
+      item.pbDistance &&
+      PORTAL_PB_DISTANCES.includes(item.pbDistance as (typeof PORTAL_PB_DISTANCES)[number])
+    ) {
+      setPbDistance(item.pbDistance)
+    }
+    setSelectedMember({ id: item.memberId, name: item.memberName })
     window.requestAnimationFrame(() => {
       graphPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
@@ -1950,7 +1950,7 @@ export function MemberRunningLeagueRankings({
       rankingView={rankingView}
       onRankingViewChange={handlePortalRankingViewChange}
       genderFilter={genderFilter}
-      onGenderFilterChange={setGenderFilter}
+      onGenderFilterChange={handleGenderFilterChange}
       pbDistance={pbDistance}
       onPbDistanceChange={setPbDistance}
       genderFilterBlocked={genderFilterBlocked}
@@ -1977,15 +1977,22 @@ export function MemberRunningLeagueRankings({
       currentRank={panelMemberRank}
       totalRanked={activeRankedCount}
       isExplicitSelection={isExplicitSelection}
-      onClose={
-        isExplicitSelection
-          ? () => setSelectedMember(null)
-          : undefined
-      }
+      onClose={isExplicitSelection ? () => setSelectedMember(null) : undefined}
       soloComparisonHint={leagueStatus?.soloRankHint ?? leagueStatus?.comparisonHint}
       mobileFilterSlot={graphFilterStrip}
       graphChartTab={graphChartTab}
       onGraphChartTabChange={setGraphChartTab}
+      className={MEMBER_PORTAL_CARD_CLASS}
+    />
+  ) : rankingBundle ? (
+    <PortalAggregateGraphPanel
+      rankingView={rankingView}
+      genderFilter={genderFilter}
+      pbDistance={portalPbDistance}
+      rankingBundle={rankingBundle}
+      graphChartTab={graphChartTab}
+      onGraphChartTabChange={setGraphChartTab}
+      mobileFilterSlot={graphFilterStrip}
       className={MEMBER_PORTAL_CARD_CLASS}
     />
   ) : (
@@ -2004,6 +2011,7 @@ export function MemberRunningLeagueRankings({
         recentPbUpdates={leagueMomentum.recentPbUpdates}
         highlightMemberId={highlightMemberId}
         onMemberSelect={handleMemberSelect}
+        onPbUpdateSelect={handlePbUpdateSelect}
         rankingViewLabel={
           rankingView === 'pb'
             ? formatPbDistanceLabel(portalPbDistance)
@@ -2067,7 +2075,7 @@ export function MemberRunningLeagueRankings({
         rankingView={rankingView}
         onRankingViewChange={handlePortalRankingViewChange}
         genderFilter={genderFilter}
-        onGenderFilterChange={setGenderFilter}
+        onGenderFilterChange={handleGenderFilterChange}
         pbDistance={pbDistance}
         onPbDistanceChange={setPbDistance}
         activePbLeaderboard={activePbLeaderboard}

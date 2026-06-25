@@ -25,7 +25,8 @@ export type LeagueRankComparisonRow = {
 export type LeagueRankComparisonChart = {
   rows: LeagueRankComparisonRow[]
   members: LeagueRankMemberSeries[]
-  selectedMemberId: string
+  /** null이면 전체 회원 동시 표시(집계) 모드 */
+  selectedMemberId: string | null
 }
 
 function formatChartDate(value: string): string {
@@ -140,6 +141,72 @@ export function buildLeagueRankComparisonChart(input: {
     rows,
     members,
     selectedMemberId: input.selectedMemberId,
+  }
+}
+
+/**
+ * 성별·필터 범위 내 전체 회원 순위 궤적(집계 그래프)
+ */
+export function buildLeagueAggregateRankComparisonChart(input: {
+  distance: PbLeaderboardDistance
+  participants: ReadonlyArray<RunningLeagueParticipant>
+  records: ReadonlyArray<RunningLeagueRecord>
+  maxMembers?: number
+}): LeagueRankComparisonChart | null {
+  const dates = collectPbRankSnapshotDates({
+    distance: input.distance,
+    records: input.records,
+    memberPoints: [],
+  })
+  if (dates.length === 0) return null
+
+  const latestDate = dates[dates.length - 1]
+  const maxMembers = input.maxMembers ?? 20
+  const rankedAtLatest = input.participants
+    .map((participant) => ({
+      memberId: participant.member_id,
+      memberName: participant.member?.name?.trim() || '회원',
+      rank: computeMemberPbRankAtDate({
+        memberId: participant.member_id,
+        distance: input.distance,
+        participants: input.participants,
+        records: input.records,
+        asOfDate: latestDate,
+      }),
+    }))
+    .filter((row) => row.rank != null)
+    .sort((a, b) => (a.rank as number) - (b.rank as number))
+    .slice(0, maxMembers)
+
+  if (rankedAtLatest.length === 0) return null
+
+  const members: LeagueRankMemberSeries[] = rankedAtLatest.map((row) => ({
+    memberId: row.memberId,
+    memberName: maskMemberNameForRanking(row.memberName),
+    isSelected: false,
+  }))
+
+  const rows: LeagueRankComparisonRow[] = dates.map((date) => {
+    const row: LeagueRankComparisonRow = {
+      date,
+      label: formatChartDate(date),
+    }
+    for (const member of members) {
+      row[`rank_${member.memberId}`] = computeMemberPbRankAtDate({
+        memberId: member.memberId,
+        distance: input.distance,
+        participants: input.participants,
+        records: input.records,
+        asOfDate: date,
+      })
+    }
+    return row
+  })
+
+  return {
+    rows,
+    members,
+    selectedMemberId: null,
   }
 }
 
