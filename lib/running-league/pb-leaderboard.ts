@@ -99,24 +99,32 @@ export function resolveParticipantPb(
   pbRecords: RunningLeagueRecord[],
 ): { timeSeconds: number | null; timeText: string | null } {
   const source = getPbDistanceSource(distance)
-  const record = pbRecords.find(
-    (row) =>
-      row.participant_id === participant.id &&
-      row.distance_event === source.distanceEvent &&
-      row.record_phase === source.rankingRecordPhase,
-  )
+  const portalPhases = new Set<RunningLeagueRecord['record_phase']>([
+    source.rankingRecordPhase,
+    'pb_history',
+  ])
 
-  if (record) {
+  let bestSeconds: number | null = null
+  let bestText: string | null = null
+
+  for (const row of pbRecords) {
+    if (row.participant_id !== participant.id) continue
+    if (row.distance_event !== source.distanceEvent) continue
+    if (!portalPhases.has(row.record_phase)) continue
+
     const timeSeconds = resolvePbTimeSeconds({
-      time_seconds: record.time_seconds,
-      time_text: record.time_text,
+      time_seconds: row.time_seconds,
+      time_text: row.time_text,
     })
-    if (timeSeconds != null) {
-      return {
-        timeSeconds,
-        timeText: formatSecondsToRunningTime(timeSeconds),
-      }
+    if (timeSeconds == null) continue
+    if (bestSeconds == null || timeSeconds < bestSeconds) {
+      bestSeconds = timeSeconds
+      bestText = formatSecondsToRunningTime(timeSeconds)
     }
+  }
+
+  if (bestSeconds != null) {
+    return { timeSeconds: bestSeconds, timeText: bestText }
   }
 
   return resolvePbFromParticipantFields(participant, distance)

@@ -32,6 +32,7 @@ function phaseLabel(phase: string): string {
   if (phase === 'month_start') return '월초'
   if (phase === 'month_end') return '월말'
   if (phase === 'mid_month') return '중간'
+  if (phase === 'pb_history') return '이전 PB'
   return 'PB'
 }
 

@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/chart'
 import type { LeagueRankComparisonChart } from '@/lib/running-league/league-rank-comparison'
 import type { LeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
+import type { LeaguePbRecordComparisonChart } from '@/lib/running-league/league-pb-record-comparison'
 import type { MileageHistoryPoint } from '@/lib/running-league/mileage-history'
 import type { MileageRankHistoryPoint } from '@/lib/running-league/mileage-rank-history'
 import type { RecordChangeChartSummary } from '@/lib/running-league/ranking-improvement-summary'
@@ -26,6 +27,7 @@ import {
   buildMemberChartColorMap,
   getMemberChartColor,
 } from '@/lib/running-league/chart-member-colors'
+import { formatSecondsToRunningTime } from '@/lib/running-league/records'
 import { cn } from '@/lib/utils'
 
 const LIME_EMPHASIS = '#a3e635'
@@ -228,6 +230,47 @@ function MileageComparisonTooltip({
   )
 }
 
+function PbRecordComparisonTooltip({
+  active,
+  payload,
+  label,
+  members,
+  memberColorMap,
+}: {
+  active?: boolean
+  payload?: Array<{ name?: string; value?: number }>
+  label?: string
+  members: LeaguePbRecordComparisonChart['members']
+  memberColorMap: Map<string, string>
+}) {
+  if (!active || !payload?.length) return null
+  const rows = payload
+    .filter((item) => item.value != null && item.name?.startsWith('time_'))
+    .map((item) => {
+      const memberId = String(item.name).replace('time_', '')
+      const member = members.find((row) => row.memberId === memberId)
+      return {
+        memberId,
+        name: member?.memberName ?? '회원',
+        seconds: item.value as number,
+      }
+    })
+    .sort((a, b) => a.seconds - b.seconds)
+
+  return (
+    <ChartTooltipShell label={label}>
+      {rows.map((row) => (
+        <TooltipMemberRow
+          key={row.memberId}
+          color={getMemberChartColor(row.memberId, memberColorMap)}
+          name={row.name}
+          value={formatSecondsToRunningTime(row.seconds)}
+        />
+      ))}
+    </ChartTooltipShell>
+  )
+}
+
 function MileageChartTooltip({
   active,
   payload,
@@ -399,6 +442,7 @@ interface MemberRankingChartsProps {
   mileageRankPoints?: MileageRankHistoryPoint[]
   comparisonChart?: LeagueRankComparisonChart | null
   mileageComparisonChart?: LeagueMileageComparisonChart | null
+  pbRecordComparisonChart?: LeaguePbRecordComparisonChart | null
   recordSummary?: RecordChangeChartSummary | null
   rankCaption?: { title: string; trajectory: string | null } | null
   distanceLabel?: string
@@ -418,6 +462,7 @@ export function MemberRankingCharts({
   mileageRankPoints = [],
   comparisonChart = null,
   mileageComparisonChart = null,
+  pbRecordComparisonChart = null,
   recordSummary = null,
   rankCaption = null,
   mode = 'pb',
@@ -513,6 +558,7 @@ export function MemberRankingCharts({
     mileageRankData.length > 0 ||
     (comparisonChart?.rows?.length ?? 0) > 0 ||
     (mileageComparisonChart?.rows?.length ?? 0) > 0 ||
+    (pbRecordComparisonChart?.rows?.length ?? 0) > 0 ||
     timeData.length > 0 ||
     mileageData.length > 0
 
@@ -571,7 +617,14 @@ export function MemberRankingCharts({
     )
 
   const recordPanel =
-    aggregateMode ? (
+    pbRecordComparisonChart && pbRecordComparisonChart.rows.length > 0 ? (
+      <PbRecordAggregateTrendChart
+        chart={pbRecordComparisonChart}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        compact={compact}
+      />
+    ) : aggregateMode ? (
       <GraphEmptyState
         compact={compact}
         description="회원 이름을 누르면 개인 PB 기록 그래프를 볼 수 있습니다."
@@ -873,6 +926,73 @@ function RankTrendChart({
           {isAggregate
             ? '1위가 위쪽 · 회원별 색상으로 표시됩니다.'
             : '1위가 위쪽 · 선택 회원은 라임색으로 강조됩니다.'}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function PbRecordAggregateTrendChart({
+  chart,
+  chartShellClass,
+  chartAxisClass,
+  compact = false,
+}: {
+  chart: LeaguePbRecordComparisonChart
+  chartShellClass: string
+  chartAxisClass: string
+  compact?: boolean
+}) {
+  const memberColorMap = useMemo(
+    () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
+    [chart.members],
+  )
+
+  return (
+    <div className={chartShellClass}>
+      <p className={cn('font-medium text-lime-300', compact ? 'mb-1 text-xs' : 'mb-2 text-xs')}>
+        {compact ? '기록 추이' : '전체 회원 PB 기록 추이'}
+      </p>
+      <ChartContainer config={timeChartConfig} className={chartAxisClass}>
+        <LineChart data={chart.rows} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
+          <XAxis
+            dataKey="label"
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+            minTickGap={24}
+          />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            width={44}
+            reversed
+            tickFormatter={(value) => formatMinutesSeconds(Number(value))}
+          />
+          <Tooltip
+            content={
+              <PbRecordComparisonTooltip members={chart.members} memberColorMap={memberColorMap} />
+            }
+          />
+          {chart.members.map((member) => (
+            <Line
+              key={member.memberId}
+              type="stepAfter"
+              dataKey={`time_${member.memberId}`}
+              name={`time_${member.memberId}`}
+              stroke={getMemberChartColor(member.memberId, memberColorMap)}
+              strokeWidth={2}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+          ))}
+        </LineChart>
+      </ChartContainer>
+      {!compact ? (
+        <p className="mt-1 text-[10px] text-zinc-500">
+          아래로 갈수록 더 빠른 PB · 회원별 색상으로 표시됩니다.
         </p>
       ) : null}
     </div>

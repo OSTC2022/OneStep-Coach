@@ -977,17 +977,21 @@ function resolveMemberCurrentRank(
   return mileageLeaderboard.ranked.find((row) => row.memberId === memberId)?.rank ?? null
 }
 
-function rankingRowClass(highlighted: boolean, isSelected: boolean, isMe: boolean) {
+function rankingRowClass(isSelected: boolean) {
   if (isSelected) {
-    return cn(
-      'border-lime-400/55 bg-lime-500/14 ring-2 shadow-[0_0_16px_rgba(163,230,53,0.12)]',
-      isMe ? 'ring-lime-400/60' : 'ring-lime-400/40',
-    )
-  }
-  if (highlighted) {
-    return 'border-lime-400/45 bg-lime-500/12 ring-1 ring-lime-400/20'
+    return 'border-lime-400/55 bg-lime-500/14 ring-2 ring-lime-400/40 shadow-[0_0_16px_rgba(163,230,53,0.12)]'
   }
   return 'border-white/5 bg-black/20 hover:bg-black/30 hover:ring-1 hover:ring-lime-500/15'
+}
+
+function rankingMemberNameClass(isMe: boolean, isSelected: boolean) {
+  if (isMe) return 'text-lime-400'
+  if (isSelected) return 'text-lime-50'
+  return 'text-foreground'
+}
+
+function rankingValueClass(isSelected: boolean) {
+  return isSelected ? 'text-lime-300' : 'text-lime-400/90'
 }
 
 function PbRankingRow({
@@ -1009,7 +1013,7 @@ function PbRankingRow({
   scrollAnchor?: boolean
   showDistanceLabel?: boolean
 }) {
-  const highlighted = isMe || Boolean(isSelected)
+  const isRowSelected = Boolean(isSelected)
 
   return (
     <button
@@ -1022,14 +1026,14 @@ function PbRankingRow({
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
         topRankRowAccent(row.rank),
-        rankingRowClass(highlighted, Boolean(isSelected), isMe),
+        rankingRowClass(isRowSelected),
       )}
     >
       <RankMedalDisplay rank={row.rank} />
       <span
         className={cn(
           'min-w-0 flex-1 truncate font-medium',
-          highlighted ? 'text-lime-50' : 'text-foreground',
+          rankingMemberNameClass(isMe, isRowSelected),
         )}
       >
         {formatRankingMemberName(row.memberName, { isMe })}
@@ -1038,10 +1042,7 @@ function PbRankingRow({
         <span className="shrink-0 text-xs text-zinc-500">{distanceLabel}</span>
       ) : null}
       <span
-        className={cn(
-          'shrink-0 font-semibold tabular-nums',
-          highlighted ? 'text-lime-300' : 'text-lime-400/90',
-        )}
+        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
       >
         {row.timeText}
       </span>
@@ -1069,7 +1070,7 @@ function MileageRankingRow({
   scrollAnchor?: boolean
   showPeriodLabel?: boolean
 }) {
-  const highlighted = isMe || Boolean(isSelected)
+  const isRowSelected = Boolean(isSelected)
 
   return (
     <button
@@ -1082,14 +1083,14 @@ function MileageRankingRow({
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
         topRankRowAccent(row.rank),
-        rankingRowClass(highlighted, Boolean(isSelected), isMe),
+        rankingRowClass(isRowSelected),
       )}
     >
       <RankMedalDisplay rank={row.rank} />
       <span
         className={cn(
           'min-w-0 flex-1 truncate font-medium',
-          highlighted ? 'text-lime-50' : 'text-foreground',
+          rankingMemberNameClass(isMe, isRowSelected),
         )}
       >
         {formatRankingMemberName(row.memberName, { isMe })}
@@ -1098,10 +1099,7 @@ function MileageRankingRow({
         <span className="shrink-0 text-xs text-zinc-500">이번 달</span>
       ) : null}
       <span
-        className={cn(
-          'shrink-0 font-semibold tabular-nums',
-          highlighted ? 'text-lime-300' : 'text-lime-400/90',
-        )}
+        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
       >
         {formatMileageKmDisplay(row.mileageKm)}
       </span>
@@ -1359,7 +1357,7 @@ function ScoreRankingRow({
   onMemberSelect?: (memberId: string, memberName: string) => void
   isSelected?: boolean
 }) {
-  const highlighted = isMe || Boolean(isSelected)
+  const isRowSelected = Boolean(isSelected)
 
   return (
     <button
@@ -1368,25 +1366,20 @@ function ScoreRankingRow({
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
         topRankRowAccent(row.rank),
-        highlighted
-          ? 'border-lime-400/45 bg-lime-500/12 ring-1 ring-lime-400/20'
-          : 'border-white/5 bg-black/20 hover:bg-black/30',
+        rankingRowClass(isRowSelected),
       )}
     >
       <RankMedalDisplay rank={row.rank} />
       <span
         className={cn(
           'min-w-0 flex-1 truncate font-medium',
-          highlighted ? 'text-lime-50' : 'text-foreground',
+          rankingMemberNameClass(isMe, isRowSelected),
         )}
       >
         {formatRankingMemberName(row.memberName, { isMe })}
       </span>
       <span
-        className={cn(
-          'shrink-0 font-semibold tabular-nums',
-          highlighted ? 'text-lime-300' : 'text-lime-400/90',
-        )}
+        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
       >
         {formatScoreDisplay(row.totalScore)}점
       </span>

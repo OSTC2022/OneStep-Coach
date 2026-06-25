@@ -17,6 +17,7 @@ import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { buildMemberRankingHistorySeries } from '@/lib/running-league/ranking-history'
 import { buildMemberGraphPanelSummary } from '@/lib/running-league/ranking-improvement-summary'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
+import { filterPortalPbTrendRecords } from '@/lib/running-league/ranking-hub'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import { summarizeRecordChangeChart } from '@/lib/running-league/ranking-improvement-summary'
 import type { MemberGraphPanelSummary } from '@/lib/running-league/ranking-improvement-summary'
@@ -116,6 +117,11 @@ export function MemberRankingDetailPanel({
   const isMobile = variant === 'mobile'
   const isMe = highlightMemberId != null && memberId === highlightMemberId
 
+  const portalPbRecords = useMemo(
+    () => (rankingBundle ? filterPortalPbTrendRecords(rankingBundle.pbRecords) : []),
+    [rankingBundle],
+  )
+
   const historyPoints = useMemo(() => {
     if (!rankingBundle) return []
     const participants = filterParticipantsByGender(rankingBundle.participants, genderFilter)
@@ -123,9 +129,9 @@ export function MemberRankingDetailPanel({
       memberId,
       distance,
       participants,
-      records: rankingBundle.pbRecords,
+      records: portalPbRecords,
     })
-  }, [distance, genderFilter, memberId, rankingBundle])
+  }, [distance, genderFilter, memberId, portalPbRecords, rankingBundle])
 
   const filteredParticipants = useMemo(() => {
     if (!rankingBundle) return []
@@ -138,10 +144,10 @@ export function MemberRankingDetailPanel({
       selectedMemberId: memberId,
       distance,
       participants: filteredParticipants,
-      records: rankingBundle.pbRecords,
+      records: portalPbRecords,
       highlightMemberId,
     })
-  }, [distance, filteredParticipants, highlightMemberId, memberId, rankingBundle])
+  }, [distance, filteredParticipants, highlightMemberId, memberId, portalPbRecords, rankingBundle])
 
   const recordSummary = useMemo(
     () => summarizeRecordChangeChart(historyPoints),

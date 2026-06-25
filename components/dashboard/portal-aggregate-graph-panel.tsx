@@ -7,6 +7,8 @@ import {
   buildLeagueAggregateMileageRankComparisonChart,
   buildLeagueMileageComparisonChart,
 } from '@/lib/running-league/league-mileage-comparison'
+import { buildLeaguePbRecordComparisonChart } from '@/lib/running-league/league-pb-record-comparison'
+import { filterPortalPbTrendRecords } from '@/lib/running-league/ranking-hub'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
@@ -41,20 +43,25 @@ export function PortalAggregateGraphPanel({
     return filterParticipantsByGender(rankingBundle.participants, genderFilter)
   }, [genderFilter, rankingBundle])
 
+  const portalPbRecords = useMemo(
+    () => (rankingBundle ? filterPortalPbTrendRecords(rankingBundle.pbRecords) : []),
+    [rankingBundle],
+  )
+
   const comparisonChart = useMemo(() => {
     if (!rankingBundle) return null
     if (rankingView === 'pb') {
       return buildLeagueAggregateRankComparisonChart({
         distance: pbDistance,
         participants: filteredParticipants,
-        records: rankingBundle.pbRecords,
+        records: portalPbRecords,
       })
     }
     return buildLeagueAggregateMileageRankComparisonChart({
       participants: filteredParticipants,
       logs: rankingBundle.mileageLogs,
     })
-  }, [filteredParticipants, pbDistance, rankingBundle, rankingView])
+  }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle, rankingView])
 
   const mileageComparisonChart = useMemo(() => {
     if (!rankingBundle || rankingView !== 'mileage') return null
@@ -63,6 +70,15 @@ export function PortalAggregateGraphPanel({
       logs: rankingBundle.mileageLogs,
     })
   }, [filteredParticipants, rankingBundle, rankingView])
+
+  const pbRecordComparisonChart = useMemo(() => {
+    if (!rankingBundle || rankingView !== 'pb') return null
+    return buildLeaguePbRecordComparisonChart({
+      distance: pbDistance,
+      participants: filteredParticipants,
+      records: portalPbRecords,
+    })
+  }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle, rankingView])
 
   return (
     <div className={cn(MEMBER_PORTAL_CARD_CLASS, className)}>
@@ -78,6 +94,7 @@ export function PortalAggregateGraphPanel({
           mileageRankPoints={[]}
           comparisonChart={comparisonChart}
           mileageComparisonChart={mileageComparisonChart}
+          pbRecordComparisonChart={pbRecordComparisonChart}
           mode={rankingView}
           aggregateMode
           compact

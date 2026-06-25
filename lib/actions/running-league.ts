@@ -10,7 +10,27 @@ import {
   recommendRunningLeagueAwards,
   type RunningLeagueAwardSlot,
 } from '@/lib/running-league/awards'
-import { buildPbDistanceLeaderboard, type PbDistanceLeaderboard } from '@/lib/running-league/pb-leaderboard'
+import { buildPbDistanceLeaderboard, resolvePbTimeSeconds, type PbDistanceLeaderboard } from '@/lib/running-league/pb-leaderboard'
+import {
+  expandPortalPbRecordsWithNotesHistory,
+  parseNoteHistoryRecordId,
+  parseCurrentPortalRecordId,
+  parsePbPortalNotes,
+  serializePbPortalNotes,
+  buildPortalPbRecordListForDistance,
+  mergePortalPbRecordLists,
+  mergeAllDistancePbRecordLists,
+  ALL_PB_LIST_DISTANCES,
+  type PbPortalHistoryEntry,
+  type PortalPbRecordListItem,
+} from '@/lib/running-league/pb-portal-history'
+import {
+  mapPbSnapshotRow,
+  pbSnapshotHistoryRecords,
+  pbSnapshotsToRecordList,
+  expandPbTrendRecordsWithSnapshots,
+  type PbSnapshotRow,
+} from '@/lib/running-league/pb-snapshots'
 import {
   filterParticipantsForAdultRunningLeague,
   filterRecordsForAdultParticipants,
@@ -1856,7 +1876,7 @@ async function fetchMemberRunningLeagueHome(
           ]
         : [Promise.resolve({ data: null, error: null })]
 
-    const [myResult, allParticipantsResult, leaguePbRecordsResult, leagueMileageLogsResult] =
+    const [myResult, allParticipantsResult, leaguePbRecordsResult, leagueMileageLogsResult, leaguePbSnapshotsResult] =
       await Promise.all([
         ...participantQueries,
         leaderboardSupabase
@@ -1867,7 +1887,7 @@ async function fetchMemberRunningLeagueHome(
         leaderboardSupabase
           .from('running_league_records')
           .select(
-            'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, time_seconds, measured_at, created_at, updated_at',
+            'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, time_seconds, measured_at, notes, created_at, updated_at',
           )
           .eq('league_id', league.id)
           .in('distance_event', ['5km', '10km', 'half', 'full']),
@@ -1877,6 +1897,12 @@ async function fetchMemberRunningLeagueHome(
           .eq('league_id', league.id)
           .gte('logged_at', start)
           .lte('logged_at', end),
+        leaderboardSupabase
+          .from('running_league_pb_snapshots')
+          .select(
+            'id, participant_id, league_id, member_id, distance_event, time_text, time_seconds, measured_at, created_at',
+          )
+          .eq('league_id', league.id),
       ])
 
     if (isMissingTableError(allParticipantsResult.error)) {
@@ -1915,7 +1941,27 @@ async function fetchMemberRunningLeagueHome(
           rankingsError = RANKINGS_LOAD_ERROR
         }
 
-        const leaguePbRecords = leaguePbRecordsAll.filter((row) => row.record_phase === 'other')
+        const leaguePbSnapshots =
+          leaguePbSnapshotsResult.error && !isMissingTableError(leaguePbSnapshotsResult.error)
+            ? []
+            : filterRecordsForAdultParticipants(
+                (leaguePbSnapshotsResult.data ?? []).map((row) =>
+                  mapPbSnapshotRow(row as Record<string, unknown>),
+                ),
+                adultParticipantIds,
+              )
+        if (leaguePbSnapshotsResult.error && !isMissingTableError(leaguePbSnapshotsResult.error)) {
+          console.error('fetchMemberRunningLeagueHome.pbSnapshots', leaguePbSnapshotsResult.error)
+        }
+
+        const leaguePbRecordsWithSnapshots = expandPbTrendRecordsWithSnapshots(
+          leaguePbRecordsAll,
+          leaguePbSnapshots,
+        )
+
+        const leaguePbRecords = leaguePbRecordsWithSnapshots.filter((row) =>
+          row.record_phase === 'other' || row.record_phase === 'pb_history',
+        )
 
         const leagueMileageLogs = filterRecordsForAdultParticipants(
           (leagueMileageLogsResult.error && !isMissingTableError(leagueMileageLogsResult.error)
@@ -1937,7 +1983,7 @@ async function fetchMemberRunningLeagueHome(
         scoreLeaderboard = buildLeaderboard(adultParticipants)
         rankingBundle = {
           participants: adultParticipants,
-          pbRecords: leaguePbRecordsAll,
+          pbRecords: leaguePbRecordsWithSnapshots,
           mileageLogs: leagueMileageLogs,
         }
       } catch (error) {
@@ -1974,10 +2020,10 @@ async function fetchMemberRunningLeagueHome(
     supabase
       .from('running_league_records')
       .select(
-        'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, measured_at, created_at, updated_at',
+        'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, time_seconds, measured_at, notes, created_at, updated_at',
       )
       .eq('participant_id', participant.id)
-      .eq('record_phase', 'other'),
+      .in('record_phase', ['other', 'pb_history']),
     supabase
       .from('running_league_mileage_logs')
       .select(
@@ -2363,11 +2409,289 @@ export async function updateMemberMileageLogForm(
   return updateMemberMileageLog(logId, payload)
 }
 
+async function fetchPortalPbRecordsForParticipant(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participantId: string,
+): Promise<RunningLeagueRecord[]> {
+  const { data, error } = await supabase
+    .from('running_league_records')
+    .select(
+      'id, league_id, participant_id, member_id, distance_event, record_phase, time_text, time_seconds, measured_at, notes, created_at, updated_at',
+    )
+    .eq('participant_id', participantId)
+    .in('record_phase', ['other', 'pb_history'])
+    .order('measured_at', { ascending: false })
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    console.error('fetchPortalPbRecordsForParticipant', error)
+    return []
+  }
+
+  return (data ?? []).map((row) => mapRecord(row as Record<string, unknown>))
+}
+
+async function fetchPortalPbSnapshotsForParticipant(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participantId: string,
+): Promise<PbSnapshotRow[] | null> {
+  const { data, error } = await supabase
+    .from('running_league_pb_snapshots')
+    .select(
+      'id, participant_id, league_id, member_id, distance_event, time_text, time_seconds, measured_at, created_at',
+    )
+    .eq('participant_id', participantId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    if (isMissingTableError(error)) return null
+    console.error('fetchPortalPbSnapshotsForParticipant', error)
+    return []
+  }
+
+  return (data ?? []).map((row) => mapPbSnapshotRow(row as Record<string, unknown>))
+}
+
+async function insertPortalPbSnapshot(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  input: {
+    participant_id: string
+    league_id: string
+    member_id: string
+    distance_event: RunningLeagueDistanceEvent
+    time_text: string
+    time_seconds: number | null
+    measured_at: string
+  },
+): Promise<boolean> {
+  const { error } = await supabase.from('running_league_pb_snapshots').insert({
+    participant_id: input.participant_id,
+    league_id: input.league_id,
+    member_id: input.member_id,
+    distance_event: input.distance_event,
+    time_text: input.time_text,
+    time_seconds: input.time_seconds,
+    measured_at: input.measured_at,
+  })
+
+  if (error) {
+    if (isMissingTableError(error)) return false
+    console.error('insertPortalPbSnapshot', error)
+    return false
+  }
+
+  return true
+}
+
+async function ensurePortalPbSnapshotBackfill(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participant: RunningLeagueParticipant,
+  records: RunningLeagueRecord[],
+  snapshots: PbSnapshotRow[],
+) {
+  const portalDistances: RunningLeagueDistanceEvent[] = ['10km', 'half', 'full']
+
+  for (const distance of portalDistances) {
+    const hasSnapshot = snapshots.some((row) => row.distance_event === distance)
+    if (hasSnapshot) continue
+
+    const other = records.find(
+      (row) => row.distance_event === distance && row.record_phase === 'other' && row.time_text?.trim(),
+    )
+    if (!other?.time_text?.trim()) continue
+
+    const inserted = await insertPortalPbSnapshot(supabase, {
+      participant_id: participant.id,
+      league_id: participant.league_id,
+      member_id: participant.member_id,
+      distance_event: distance,
+      time_text: other.time_text.trim(),
+      time_seconds: other.time_seconds,
+      measured_at: other.measured_at,
+    })
+    if (inserted) {
+      snapshots.push({
+        id: other.id,
+        participant_id: participant.id,
+        league_id: participant.league_id,
+        member_id: participant.member_id,
+        distance_event: distance,
+        time_text: other.time_text.trim(),
+        time_seconds: other.time_seconds,
+        measured_at: other.measured_at,
+        created_at: other.updated_at ?? other.created_at,
+      })
+    }
+  }
+}
+
+async function buildPortalPbRecordList(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participant: RunningLeagueParticipant,
+  distance: RunningLeagueDistanceEvent,
+): Promise<PortalPbRecordListItem[]> {
+  const records = await fetchPortalPbRecordsForParticipant(supabase, participant.id)
+  const expanded = expandPortalPbRecordsWithNotesHistory(records)
+  const fromRecords = buildPortalPbRecordListForDistance(expanded, distance)
+  const other =
+    records.find(
+      (row) =>
+        row.distance_event === distance &&
+        row.record_phase === 'other' &&
+        row.time_text?.trim(),
+    ) ?? null
+
+  let fromSnapshots: PortalPbRecordListItem[] = []
+  const snapshots = await fetchPortalPbSnapshotsForParticipant(supabase, participant.id)
+  if (snapshots !== null) {
+    const workingSnapshots = [...snapshots]
+    if (workingSnapshots.length === 0) {
+      await ensurePortalPbSnapshotBackfill(supabase, participant, records, workingSnapshots)
+    }
+    const fresh =
+      workingSnapshots.length === 0
+        ? await fetchPortalPbSnapshotsForParticipant(supabase, participant.id)
+        : workingSnapshots
+    if (fresh && fresh.length > 0) {
+      fromSnapshots = pbSnapshotsToRecordList(fresh, distance, other)
+    }
+  }
+
+  const current =
+    other != null
+      ? {
+          id: other.id,
+          distance_event: other.distance_event,
+          measured_at: other.measured_at,
+          time_text: other.time_text ?? '',
+        }
+      : (fromRecords.find((item) => item.isCurrent) ?? fromRecords[0] ?? null)
+
+  return mergePortalPbRecordLists([fromSnapshots, fromRecords], current)
+}
+
+async function buildPortalPbRecordListAll(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participant: RunningLeagueParticipant,
+): Promise<PortalPbRecordListItem[]> {
+  const lists = await Promise.all(
+    ALL_PB_LIST_DISTANCES.map((distance) =>
+      buildPortalPbRecordList(supabase, participant, distance),
+    ),
+  )
+  return mergeAllDistancePbRecordLists(lists)
+}
+
+async function loadPortalPbBundle(
+  supabase: Awaited<ReturnType<typeof leagueClient>>,
+  participant: RunningLeagueParticipant,
+) {
+  const records = await fetchPortalPbRecordsForParticipant(supabase, participant.id)
+  const snapshots = await fetchPortalPbSnapshotsForParticipant(supabase, participant.id)
+
+  if (snapshots !== null) {
+    if (snapshots.length === 0) {
+      await ensurePortalPbSnapshotBackfill(supabase, participant, records, snapshots)
+    }
+    const fresh = await fetchPortalPbSnapshotsForParticipant(supabase, participant.id)
+    if (fresh && fresh.length > 0) {
+      return {
+        pbRecords: pbSnapshotHistoryRecords(fresh, null).concat(
+          records.filter((row) => row.record_phase === 'other'),
+        ),
+        snapshots: fresh,
+      }
+    }
+  }
+
+  return {
+    pbRecords: expandPortalPbRecordsWithNotesHistory(records),
+    snapshots: snapshots ?? [],
+  }
+}
+
+/** PB 수정 창 — 종목별 기록 목록 */
+export async function fetchMyPortalPbRecordList(input: {
+  distance_event: RunningLeagueDistanceEvent
+}): Promise<
+  { ok: true; items: PortalPbRecordListItem[] } | { ok: false; error: string }
+> {
+  const member = await getMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const supabase = await leagueClient()
+  const items = await buildPortalPbRecordList(
+    supabase,
+    ensured.participant,
+    input.distance_event,
+  )
+  return { ok: true, items }
+}
+
+/** PB 수정 창 — 전체 종목 기록 목록 */
+export async function fetchMyPortalPbRecordListAll(): Promise<
+  { ok: true; items: PortalPbRecordListItem[] } | { ok: false; error: string }
+> {
+  const member = await getMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const supabase = await leagueClient()
+  const items = await buildPortalPbRecordListAll(supabase, ensured.participant)
+  return { ok: true, items }
+}
+
+/** PB 수정 창 열 때 최신 등록·이력 기록 조회 */
+export async function fetchMyPortalPbRecords(): Promise<
+  { ok: true; pbRecords: RunningLeagueRecord[] } | { ok: false; error: string }
+> {
+  const member = await getMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const supabase = await leagueClient()
+  const bundle = await loadPortalPbBundle(supabase, ensured.participant)
+  return { ok: true, pbRecords: bundle.pbRecords }
+}
+
 export async function saveMemberRunningPb(input: {
   distance_event: RunningLeagueDistanceEvent
   time_text: string
   measured_at?: string
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+  editing_record_id?: string
+  editing_is_current?: boolean
+}): Promise<
+  | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
+  | { ok: false; error: string }
+> {
+  if (input.editing_record_id?.trim()) {
+    return updateMemberRunningPbRecord({
+      record_id: input.editing_record_id,
+      distance_event: input.distance_event,
+      time_text: input.time_text,
+      measured_at: input.measured_at,
+      is_current: input.editing_is_current === true,
+    })
+  }
+
+  return insertMemberRunningPbRecord(input)
+}
+
+async function insertMemberRunningPbRecord(input: {
+  distance_event: RunningLeagueDistanceEvent
+  time_text: string
+  measured_at?: string
+}): Promise<
+  | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
+  | { ok: false; error: string }
+> {
   const member = await getMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
@@ -2382,36 +2706,349 @@ export async function saveMemberRunningPb(input: {
   const participant = ensured.participant
   const measuredAt = input.measured_at ?? new Date().toISOString().slice(0, 10)
   const supabase = await leagueClient()
-  const { error } = await supabase.from('running_league_records').upsert(
-    {
+
+  const { data: currentRow, error: currentError } = await supabase
+    .from('running_league_records')
+    .select('id, time_text, time_seconds, measured_at, notes')
+    .eq('participant_id', participant.id)
+    .eq('distance_event', input.distance_event)
+    .eq('record_phase', 'other')
+    .maybeSingle()
+
+  if (currentError && !isMissingTableError(currentError)) {
+    return { ok: false, error: currentError.message }
+  }
+
+  const currentTimeSeconds = currentRow
+    ? resolvePbTimeSeconds({
+        time_seconds: currentRow.time_seconds,
+        time_text: currentRow.time_text,
+      })
+    : null
+  const normalizeMeasuredDate = (value: string) => value.slice(0, 10)
+  const isSameAsCurrent =
+    currentRow != null &&
+    currentTimeSeconds === timeSeconds &&
+    normalizeMeasuredDate(currentRow.measured_at) === normalizeMeasuredDate(measuredAt)
+
+  if (isSameAsCurrent) {
+    const bundle = await loadPortalPbBundle(supabase, participant)
+    const recordList = await buildPortalPbRecordList(
+      supabase,
+      participant,
+      input.distance_event,
+    )
+    return { ok: true, pbRecords: bundle.pbRecords, recordList }
+  }
+
+  let notesHistory: PbPortalHistoryEntry[] = currentRow
+    ? parsePbPortalNotes(currentRow.notes).history
+    : []
+
+  if (currentRow && !isSameAsCurrent) {
+    const archiveEntry: PbPortalHistoryEntry = {
+      time_text: currentRow.time_text ?? '',
+      time_seconds: currentTimeSeconds,
+      measured_at: currentRow.measured_at,
+      archived_at: new Date().toISOString(),
+    }
+    const archiveKey = `${archiveEntry.measured_at}:${archiveEntry.time_text}`
+    const alreadyInNotes = notesHistory.some(
+      (entry) => `${entry.measured_at}:${entry.time_text}` === archiveKey,
+    )
+    if (!alreadyInNotes) {
+      notesHistory = [...notesHistory, archiveEntry]
+    }
+
+    const { error: archiveError } = await supabase.from('running_league_records').insert({
       participant_id: participant.id,
       league_id: participant.league_id,
       member_id: participant.member_id,
       distance_event: input.distance_event,
-      record_phase: 'other',
-      time_text: timeText,
-      time_seconds: timeSeconds,
-      measured_at: measuredAt,
-      notes: '개인 PB',
+      record_phase: 'pb_history',
+      time_text: currentRow.time_text,
+      time_seconds: currentTimeSeconds,
+      measured_at: currentRow.measured_at,
+      notes: '이전 PB',
       updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'participant_id,distance_event,record_phase' },
-  )
+    })
 
-  if (error) {
-    if (isMissingTableError(error)) {
+    if (archiveError) {
+      if (isMissingTableError(archiveError)) {
+        return {
+          ok: false,
+          error: '기록 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.',
+        }
+      }
+      if (
+        archiveError.code === '23514' ||
+        archiveError.message.includes('record_phase')
+      ) {
+        // pb_history 미지원 DB — notes 이력으로 대체
+        console.warn('saveMemberRunningPb.pb_history_archive_skipped', archiveError.message)
+      } else if (
+        archiveError.code === '23505' ||
+        archiveError.message.includes('duplicate key')
+      ) {
+        console.warn('saveMemberRunningPb.pb_history_duplicate_skipped', archiveError.message)
+      } else {
+        return { ok: false, error: archiveError.message }
+      }
+    }
+  }
+
+  const recordPayload = {
+    participant_id: participant.id,
+    league_id: participant.league_id,
+    member_id: participant.member_id,
+    distance_event: input.distance_event,
+    record_phase: 'other' as const,
+    time_text: timeText,
+    time_seconds: timeSeconds,
+    measured_at: measuredAt,
+    notes: serializePbPortalNotes('개인 PB', notesHistory),
+    updated_at: new Date().toISOString(),
+  }
+
+  const writeError = currentRow
+    ? (
+        await supabase
+          .from('running_league_records')
+          .update(recordPayload)
+          .eq('id', currentRow.id)
+          .eq('participant_id', participant.id)
+          .eq('record_phase', 'other')
+      ).error
+    : (await supabase.from('running_league_records').insert(recordPayload)).error
+
+  if (writeError) {
+    if (isMissingTableError(writeError)) {
       return { ok: false, error: '기록 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.' }
     }
-    return { ok: false, error: error.message }
+    return { ok: false, error: writeError.message }
+  }
+
+  const snapshotTable = await fetchPortalPbSnapshotsForParticipant(supabase, participant.id)
+  if (snapshotTable !== null) {
+    if (currentRow && !isSameAsCurrent) {
+      const hasOldSnapshot = snapshotTable.some(
+        (row) =>
+          row.distance_event === input.distance_event &&
+          row.time_text.trim() === (currentRow.time_text ?? '').trim() &&
+          normalizeMeasuredDate(row.measured_at) === normalizeMeasuredDate(currentRow.measured_at),
+      )
+      if (!hasOldSnapshot && currentRow.time_text?.trim()) {
+        await insertPortalPbSnapshot(supabase, {
+          participant_id: participant.id,
+          league_id: participant.league_id,
+          member_id: participant.member_id,
+          distance_event: input.distance_event,
+          time_text: currentRow.time_text.trim(),
+          time_seconds: currentTimeSeconds,
+          measured_at: normalizeMeasuredDate(currentRow.measured_at),
+        })
+      }
+    }
+
+    const hasDistanceSnapshot = snapshotTable.some(
+      (row) => row.distance_event === input.distance_event,
+    )
+    if (!isSameAsCurrent || !hasDistanceSnapshot) {
+      await insertPortalPbSnapshot(supabase, {
+        participant_id: participant.id,
+        league_id: participant.league_id,
+        member_id: participant.member_id,
+        distance_event: input.distance_event,
+        time_text: timeText,
+        time_seconds: timeSeconds,
+        measured_at: normalizeMeasuredDate(measuredAt),
+      })
+    }
   }
 
   revalidateMemberMileagePaths()
-  return { ok: true }
+  const bundle = await loadPortalPbBundle(supabase, participant)
+  const recordList = await buildPortalPbRecordList(
+    supabase,
+    participant,
+    input.distance_event,
+  )
+  return { ok: true, pbRecords: bundle.pbRecords, recordList }
 }
 
-export async function deleteMemberRunningPb(input: {
+export async function updateMemberRunningPbRecord(input: {
+  record_id: string
   distance_event: RunningLeagueDistanceEvent
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+  time_text: string
+  measured_at?: string
+  is_current?: boolean
+}): Promise<
+  | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
+  | { ok: false; error: string }
+> {
+  const member = await getMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const timeText = input.time_text.trim()
+  if (!timeText) return { ok: false, error: '기록을 입력해주세요.' }
+  const timeSeconds = parseRunningTimeToSeconds(timeText)
+  if (timeSeconds == null) {
+    return { ok: false, error: '기록 형식이 올바르지 않습니다. (예: 21:35)' }
+  }
+
+  const participant = ensured.participant
+  const measuredAt = (input.measured_at ?? new Date().toISOString()).slice(0, 10)
+  const supabase = await leagueClient()
+  let updated = false
+
+  const { data: snapshotRow, error: snapshotUpdateError } = await supabase
+    .from('running_league_pb_snapshots')
+    .update({
+      time_text: timeText,
+      time_seconds: timeSeconds,
+      measured_at: measuredAt,
+    })
+    .eq('id', input.record_id)
+    .eq('participant_id', participant.id)
+    .select('id')
+    .maybeSingle()
+
+  if (snapshotUpdateError && !isMissingTableError(snapshotUpdateError)) {
+    return { ok: false, error: snapshotUpdateError.message }
+  }
+  if (snapshotRow) {
+    updated = true
+  }
+
+  const noteRef = parseNoteHistoryRecordId(input.record_id)
+  if (!updated && noteRef) {
+    const { data: otherRow, error: readError } = await supabase
+      .from('running_league_records')
+      .select('id, notes')
+      .eq('participant_id', participant.id)
+      .eq('distance_event', noteRef.distance)
+      .eq('record_phase', 'other')
+      .maybeSingle()
+
+    if (readError) return { ok: false, error: readError.message }
+    if (!otherRow) return { ok: false, error: '수정할 기록을 찾을 수 없습니다.' }
+
+    const payload = parsePbPortalNotes(otherRow.notes)
+    const nextHistory = payload.history.map((entry) =>
+      entry.measured_at === noteRef.measured_at && entry.time_text === noteRef.time_text
+        ? {
+            ...entry,
+            time_text: timeText,
+            time_seconds: timeSeconds,
+            measured_at: measuredAt,
+          }
+        : entry,
+    )
+
+    const { error: updateError } = await supabase
+      .from('running_league_records')
+      .update({
+        notes: serializePbPortalNotes(payload.label, nextHistory),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', otherRow.id)
+      .eq('participant_id', participant.id)
+      .eq('record_phase', 'other')
+
+    if (updateError) return { ok: false, error: updateError.message }
+    updated = true
+  }
+
+  if (!updated) {
+    const { data: historyRow, error: historyUpdateError } = await supabase
+      .from('running_league_records')
+      .update({
+        time_text: timeText,
+        time_seconds: timeSeconds,
+        measured_at: measuredAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.record_id)
+      .eq('participant_id', participant.id)
+      .eq('record_phase', 'pb_history')
+      .select('id')
+      .maybeSingle()
+
+    if (historyUpdateError) {
+      if (isMissingTableError(historyUpdateError)) {
+        return { ok: false, error: '기록 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.' }
+      }
+      return { ok: false, error: historyUpdateError.message }
+    }
+    if (historyRow) {
+      updated = true
+    }
+  }
+
+  if (!updated) {
+    const { data: otherUpdated, error: otherUpdateError } = await supabase
+      .from('running_league_records')
+      .update({
+        time_text: timeText,
+        time_seconds: timeSeconds,
+        measured_at: measuredAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.record_id)
+      .eq('participant_id', participant.id)
+      .eq('record_phase', 'other')
+      .select('id')
+      .maybeSingle()
+
+    if (otherUpdateError) {
+      return { ok: false, error: otherUpdateError.message }
+    }
+    if (otherUpdated) {
+      updated = true
+    }
+  }
+
+  if (!updated) {
+    return { ok: false, error: '수정할 기록을 찾을 수 없습니다.' }
+  }
+
+  if (input.is_current) {
+    const { error: syncOtherError } = await supabase
+      .from('running_league_records')
+      .update({
+        time_text: timeText,
+        time_seconds: timeSeconds,
+        measured_at: measuredAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('participant_id', participant.id)
+      .eq('distance_event', input.distance_event)
+      .eq('record_phase', 'other')
+
+    if (syncOtherError && !isMissingTableError(syncOtherError)) {
+      return { ok: false, error: syncOtherError.message }
+    }
+  }
+
+  revalidateMemberMileagePaths()
+  const bundle = await loadPortalPbBundle(supabase, participant)
+  const recordList = await buildPortalPbRecordList(supabase, participant, input.distance_event)
+  return { ok: true, pbRecords: bundle.pbRecords, recordList }
+}
+
+export async function deleteMemberRunningPbRecord(input: {
+  record_id: string
+}): Promise<
+  | {
+      ok: true
+      pbRecords: RunningLeagueRecord[]
+      recordList: PortalPbRecordListItem[]
+    }
+  | { ok: false; error: string }
+> {
   const member = await getMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
@@ -2419,6 +3056,265 @@ export async function deleteMemberRunningPb(input: {
   if (!ensured.ok) return ensured
 
   const supabase = await leagueClient()
+  let distanceForList: RunningLeagueDistanceEvent = '10km'
+  let recordId = input.record_id.trim()
+  let deleted = false
+
+  const currentRef = parseCurrentPortalRecordId(recordId)
+  if (currentRef) {
+    const snapshots = await fetchPortalPbSnapshotsForParticipant(supabase, ensured.participant.id)
+    const snapshotMatch = snapshots?.find(
+      (row) =>
+        row.distance_event === currentRef.distance_event &&
+        row.measured_at.slice(0, 10) === currentRef.measured_at.slice(0, 10) &&
+        row.time_text.trim() === currentRef.time_text.trim(),
+    )
+    if (snapshotMatch) {
+      recordId = snapshotMatch.id
+    } else {
+      const { data: otherRow } = await supabase
+        .from('running_league_records')
+        .select('id')
+        .eq('participant_id', ensured.participant.id)
+        .eq('distance_event', currentRef.distance_event)
+        .eq('record_phase', 'other')
+        .eq('time_text', currentRef.time_text.trim())
+        .eq('measured_at', currentRef.measured_at.slice(0, 10))
+        .maybeSingle()
+      if (otherRow?.id) {
+        recordId = otherRow.id
+      } else {
+        return { ok: false, error: '삭제할 기록을 찾을 수 없습니다.' }
+      }
+    }
+  }
+
+  const { data: deletedSnapshot, error: snapshotDeleteError } = await supabase
+    .from('running_league_pb_snapshots')
+    .delete()
+    .eq('id', recordId)
+    .eq('participant_id', ensured.participant.id)
+    .select('distance_event')
+    .maybeSingle()
+
+  if (!snapshotDeleteError && deletedSnapshot) {
+    deleted = true
+    distanceForList = deletedSnapshot.distance_event as RunningLeagueDistanceEvent
+    const remaining = await fetchPortalPbSnapshotsForParticipant(supabase, ensured.participant.id)
+    const latest = remaining?.find((row) => row.distance_event === distanceForList)
+    if (latest) {
+      await supabase
+        .from('running_league_records')
+        .update({
+          time_text: latest.time_text,
+          time_seconds: latest.time_seconds,
+          measured_at: latest.measured_at,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('participant_id', ensured.participant.id)
+        .eq('distance_event', distanceForList)
+        .eq('record_phase', 'other')
+    } else {
+      const { error: clearOtherError } = await supabase
+        .from('running_league_records')
+        .delete()
+        .eq('participant_id', ensured.participant.id)
+        .eq('distance_event', distanceForList)
+        .in('record_phase', ['other', 'pb_history'])
+
+      if (clearOtherError && !isMissingTableError(clearOtherError)) {
+        return { ok: false, error: clearOtherError.message }
+      }
+    }
+  } else if (!snapshotDeleteError || isMissingTableError(snapshotDeleteError)) {
+    const noteRef = parseNoteHistoryRecordId(recordId)
+
+    if (noteRef) {
+      distanceForList = noteRef.distance
+      const { data: otherRow, error: readError } = await supabase
+        .from('running_league_records')
+        .select('id, notes')
+        .eq('participant_id', ensured.participant.id)
+        .eq('distance_event', noteRef.distance)
+        .eq('record_phase', 'other')
+        .maybeSingle()
+
+      if (readError) {
+        return { ok: false, error: readError.message }
+      }
+      if (!otherRow) {
+        return { ok: false, error: '삭제할 기록을 찾을 수 없습니다.' }
+      }
+
+      const payload = parsePbPortalNotes(otherRow.notes)
+      const nextHistory = payload.history.filter(
+        (entry) =>
+          !(
+            entry.measured_at === noteRef.measured_at &&
+            entry.time_text === noteRef.time_text
+          ),
+      )
+
+      const { error: updateError } = await supabase
+        .from('running_league_records')
+        .update({
+          notes: serializePbPortalNotes(payload.label, nextHistory),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', otherRow.id)
+        .eq('participant_id', ensured.participant.id)
+        .eq('record_phase', 'other')
+
+      if (updateError) {
+        return { ok: false, error: updateError.message }
+      }
+      deleted = true
+    } else {
+      const { data: otherRow, error: otherReadError } = await supabase
+        .from('running_league_records')
+        .select('id, distance_event, notes, time_text, time_seconds, measured_at')
+        .eq('id', recordId)
+        .eq('participant_id', ensured.participant.id)
+        .eq('record_phase', 'other')
+        .maybeSingle()
+
+      if (otherReadError) {
+        return { ok: false, error: otherReadError.message }
+      }
+
+      if (otherRow) {
+        distanceForList = otherRow.distance_event as RunningLeagueDistanceEvent
+        const { data: historyRows } = await supabase
+          .from('running_league_records')
+          .select('time_text, time_seconds, measured_at')
+          .eq('participant_id', ensured.participant.id)
+          .eq('distance_event', otherRow.distance_event)
+          .eq('record_phase', 'pb_history')
+          .order('measured_at', { ascending: false })
+          .order('updated_at', { ascending: false })
+          .limit(1)
+
+        const notesPayload = parsePbPortalNotes(otherRow.notes)
+        const notesCandidate = [...notesPayload.history].sort((a, b) =>
+          b.measured_at.localeCompare(a.measured_at),
+        )[0]
+        const historyCandidate = historyRows?.[0]
+
+        const promote =
+          historyCandidate &&
+          (!notesCandidate ||
+            historyCandidate.measured_at.localeCompare(notesCandidate.measured_at) >= 0)
+            ? {
+                time_text: historyCandidate.time_text ?? '',
+                time_seconds: historyCandidate.time_seconds,
+                measured_at: historyCandidate.measured_at,
+              }
+            : notesCandidate
+              ? {
+                  time_text: notesCandidate.time_text,
+                  time_seconds: notesCandidate.time_seconds,
+                  measured_at: notesCandidate.measured_at,
+                }
+              : null
+
+        if (promote) {
+          const { error: promoteError } = await supabase
+            .from('running_league_records')
+            .update({
+              time_text: promote.time_text,
+              time_seconds: promote.time_seconds,
+              measured_at: promote.measured_at,
+              notes: serializePbPortalNotes(
+                notesPayload.label,
+                notesPayload.history.filter(
+                  (entry) =>
+                    !(
+                      entry.measured_at === promote.measured_at &&
+                      entry.time_text === promote.time_text
+                    ),
+                ),
+              ),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', otherRow.id)
+            .eq('participant_id', ensured.participant.id)
+            .eq('record_phase', 'other')
+
+          if (promoteError) {
+            return { ok: false, error: promoteError.message }
+          }
+        } else {
+          const { error: deleteOtherError } = await supabase
+            .from('running_league_records')
+            .delete()
+            .eq('id', otherRow.id)
+            .eq('participant_id', ensured.participant.id)
+            .eq('record_phase', 'other')
+
+          if (deleteOtherError) {
+            return { ok: false, error: deleteOtherError.message }
+          }
+        }
+        deleted = true
+      } else {
+        const { data: deletedHistory, error } = await supabase
+          .from('running_league_records')
+          .delete()
+          .eq('id', recordId)
+          .eq('participant_id', ensured.participant.id)
+          .eq('record_phase', 'pb_history')
+          .select('distance_event')
+          .maybeSingle()
+
+        if (error) {
+          if (isMissingTableError(error)) {
+            return { ok: false, error: '기록 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.' }
+          }
+          return { ok: false, error: error.message }
+        }
+        if (deletedHistory?.distance_event) {
+          deleted = true
+          distanceForList = deletedHistory.distance_event as RunningLeagueDistanceEvent
+        }
+      }
+    }
+  } else {
+    return { ok: false, error: snapshotDeleteError.message }
+  }
+
+  if (!deleted) {
+    return { ok: false, error: '삭제할 기록을 찾을 수 없습니다.' }
+  }
+
+  revalidateMemberMileagePaths()
+  const bundle = await loadPortalPbBundle(supabase, ensured.participant)
+  const recordList = await buildPortalPbRecordList(
+    supabase,
+    ensured.participant,
+    distanceForList,
+  )
+  return { ok: true, pbRecords: bundle.pbRecords, recordList }
+}
+
+export async function deleteMemberRunningPb(input: {
+  distance_event: RunningLeagueDistanceEvent
+}): Promise<
+  | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
+  | { ok: false; error: string }
+> {
+  const member = await getMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const supabase = await leagueClient()
+  await supabase
+    .from('running_league_pb_snapshots')
+    .delete()
+    .eq('participant_id', ensured.participant.id)
+    .eq('distance_event', input.distance_event)
+
   const { error } = await supabase
     .from('running_league_records')
     .delete()
@@ -2434,5 +3330,11 @@ export async function deleteMemberRunningPb(input: {
   }
 
   revalidateMemberMileagePaths()
-  return { ok: true }
+  const bundle = await loadPortalPbBundle(supabase, ensured.participant)
+  const recordList = await buildPortalPbRecordList(
+    supabase,
+    ensured.participant,
+    input.distance_event,
+  )
+  return { ok: true, pbRecords: bundle.pbRecords, recordList }
 }

@@ -8,6 +8,7 @@ import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/runn
 import { buildLeaderboard, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import type { MileageDistanceLeaderboard } from '@/lib/running-league/mileage-leaderboard'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
+import { expandPortalPbRecordsWithNotesHistory } from '@/lib/running-league/pb-portal-history'
 import type { RunningLeagueRecord } from '@/lib/types'
 
 export type FilteredPortalRankings = {
@@ -16,8 +17,15 @@ export type FilteredPortalRankings = {
   scoreLeaderboard: RunningLeagueRankRow[]
 }
 
-function otherPhasePbRecords(records: ReadonlyArray<RunningLeagueRecord>) {
-  return records.filter((row) => row.record_phase === 'other')
+function portalPbRecordsForRanking(records: ReadonlyArray<RunningLeagueRecord>) {
+  return expandPortalPbRecordsWithNotesHistory(
+    records.filter((row) => row.record_phase === 'other' || row.record_phase === 'pb_history'),
+  )
+}
+
+/** PB 추이 그래프용 — 포털 PB·이력·스냅샷(notes 포함) */
+export function filterPortalPbTrendRecords(records: ReadonlyArray<RunningLeagueRecord>) {
+  return portalPbRecordsForRanking(records)
 }
 
 export function buildFilteredPortalRankings(
@@ -27,7 +35,7 @@ export function buildFilteredPortalRankings(
   if (!bundle) return null
 
   const participants = filterParticipantsByGender(bundle.participants, genderFilter)
-  const pbRecords = otherPhasePbRecords(bundle.pbRecords)
+  const pbRecords = portalPbRecordsForRanking(bundle.pbRecords)
 
   return {
     pbByDistance: {

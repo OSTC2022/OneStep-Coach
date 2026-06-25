@@ -262,7 +262,12 @@ export type RunningLeagueGoalType =
   | 'race_prep'
 
 export type RunningLeagueDistanceEvent = '1km' | '3km' | '5km' | '10km' | 'half' | 'full'
-export type RunningLeagueRecordPhase = 'month_start' | 'month_end' | 'mid_month' | 'other'
+export type RunningLeagueRecordPhase =
+  | 'month_start'
+  | 'month_end'
+  | 'mid_month'
+  | 'other'
+  | 'pb_history'
 export type RunningLeagueMileageSource = 'manual' | 'lesson' | 'import' | 'other'
 export type RunningLeagueRecoveryCheckType =
   | 'stretching'
