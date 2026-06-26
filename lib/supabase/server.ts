@@ -1,6 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { getPublicSupabaseEnv } from '@/lib/supabase/env'
+import {
+  applyRememberMeToSupabaseCookieOptions,
+  getRememberMeFromCookieList,
+} from '@/lib/auth/remember-me'
 
 /**
  * Especially important if using Fluid compute: Don't put this client in a
@@ -18,8 +22,13 @@ export async function createClient() {
       },
       setAll(cookiesToSet) {
         try {
+          const rememberMe = getRememberMeFromCookieList(cookieStore.getAll())
           cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
+            cookieStore.set(
+              name,
+              value,
+              applyRememberMeToSupabaseCookieOptions(name, options ?? {}, rememberMe),
+            ),
           )
         } catch (error) {
           if (process.env.NODE_ENV === 'development') {

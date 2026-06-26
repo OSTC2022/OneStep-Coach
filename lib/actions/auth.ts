@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import type {
   Member,
   Profile,
@@ -23,6 +24,44 @@ import {
   formatRecoveryEmailError,
   sendPasswordRecoveryEmail,
 } from '@/lib/auth-recovery-link'
+import {
+  REMEMBER_ME_COOKIE,
+  REMEMBER_ME_MAX_AGE_SECONDS,
+  applyRememberMeToSupabaseCookieOptions,
+} from '@/lib/auth/remember-me'
+
+async function applyRememberMeCookies(rememberMe: boolean) {
+  const cookieStore = await cookies()
+  const secure = process.env.NODE_ENV === 'production'
+
+  if (rememberMe) {
+    cookieStore.set(REMEMBER_ME_COOKIE, '1', {
+      path: '/',
+      maxAge: REMEMBER_ME_MAX_AGE_SECONDS,
+      sameSite: 'lax',
+      secure,
+      httpOnly: true,
+    })
+    for (const cookie of cookieStore.getAll()) {
+      if (!cookie.name.startsWith('sb-')) continue
+      cookieStore.set(
+        cookie.name,
+        cookie.value,
+        applyRememberMeToSupabaseCookieOptions(cookie.name, { path: '/', sameSite: 'lax', secure }, true),
+      )
+    }
+    return
+  }
+
+  cookieStore.set(REMEMBER_ME_COOKIE, '', {
+    path: '/',
+    maxAge: 0,
+    expires: new Date(0),
+    sameSite: 'lax',
+    secure,
+    httpOnly: true,
+  })
+}
 
 export async function signIn(
   _prevState: { error?: string; redirectTo?: string } | null,
@@ -32,6 +71,7 @@ export async function signIn(
 
   const loginInput = (formData.get('email') as string)?.trim() ?? ''
   const password = formData.get('password') as string
+  const rememberMe = formData.get('remember_me') === 'on'
 
   const resolved = await resolveLoginAuthEmail(loginInput)
   if (resolved.error) {
@@ -91,6 +131,7 @@ export async function signIn(
     !isProfileAccessAllowed(approvalStatus, accountEmail)
   ) {
     if (approvalStatus === 'pending') {
+      await applyRememberMeCookies(rememberMe)
       return { redirectTo: '/auth/pending' }
     }
     if (approvalStatus === 'rejected') {
@@ -141,12 +182,15 @@ export async function signIn(
     }
   }
 
+  await applyRememberMeCookies(rememberMe)
+
   return { redirectTo: getDefaultDashboardPath(appRole) }
 }
 
 export async function signOut() {
   const supabase = await createClient()
   await supabase.auth.signOut()
+  await applyRememberMeCookies(false)
   redirect('/auth/login')
 }
 

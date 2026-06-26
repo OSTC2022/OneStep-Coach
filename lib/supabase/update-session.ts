@@ -20,6 +20,10 @@ import {
 } from '@/lib/roles'
 import type { ProfileApprovalStatus } from '@/lib/types'
 import { getPublicSupabaseEnv, hasPublicSupabaseEnv } from '@/lib/supabase/env'
+import {
+  applyRememberMeToSupabaseCookieOptions,
+  getRememberMeFromCookieList,
+} from '@/lib/auth/remember-me'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
 const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 3000
@@ -246,6 +250,7 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
+          const rememberMe = getRememberMeFromCookieList(request.cookies.getAll())
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           )
@@ -253,7 +258,11 @@ export async function updateSession(request: NextRequest) {
             request,
           })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options),
+            supabaseResponse.cookies.set(
+              name,
+              value,
+              applyRememberMeToSupabaseCookieOptions(name, options ?? {}, rememberMe),
+            ),
           )
         },
       },

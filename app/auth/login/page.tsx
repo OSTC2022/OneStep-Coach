@@ -19,8 +19,13 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Checkbox } from '@/components/ui/checkbox'
 import { MemberGenderField } from '@/components/members/member-gender-field'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
+import {
+  LOGIN_IDENTIFIER_STORAGE_KEY,
+  REMEMBER_ME_STORAGE_KEY,
+} from '@/lib/auth/remember-me'
 import type { PublicSignUpMemberType } from '@/lib/auth/public-signup'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
 
@@ -40,6 +45,7 @@ export default function LoginPage() {
   const [signUpParentPhone, setSignUpParentPhone] = useState('')
   const [signUpGender, setSignUpGender] = useState<MemberGender | null>(null)
   const [loginEmail, setLoginEmail] = useState('')
+  const [rememberMe, setRememberMe] = useState(true)
   const [resetEmail, setResetEmail] = useState('')
   const [loginState, setLoginState] = useState<{
     error?: string
@@ -62,11 +68,23 @@ export default function LoginPage() {
 
     const form = event.currentTarget
     const formData = new FormData(form)
+    formData.set('remember_me', rememberMe ? 'on' : '')
     let navigating = false
 
     try {
       const result = await signIn(null, formData)
       if (result?.redirectTo) {
+        try {
+          if (rememberMe) {
+            localStorage.setItem(REMEMBER_ME_STORAGE_KEY, '1')
+            localStorage.setItem(LOGIN_IDENTIFIER_STORAGE_KEY, loginEmail.trim())
+          } else {
+            localStorage.setItem(REMEMBER_ME_STORAGE_KEY, '0')
+            localStorage.removeItem(LOGIN_IDENTIFIER_STORAGE_KEY)
+          }
+        } catch {
+          // ignore storage errors
+        }
         navigating = true
         window.location.assign(result.redirectTo)
         return
@@ -202,6 +220,25 @@ export default function LoginPage() {
       setResetPending(false)
     }
   }
+
+  useEffect(() => {
+    try {
+      const savedRemember = localStorage.getItem(REMEMBER_ME_STORAGE_KEY)
+      if (savedRemember === '0') {
+        setRememberMe(false)
+        return
+      }
+      if (savedRemember === '1') {
+        setRememberMe(true)
+        const savedLogin = localStorage.getItem(LOGIN_IDENTIFIER_STORAGE_KEY)
+        if (savedLogin) {
+          setLoginEmail(savedLogin)
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [])
 
   useEffect(() => {
     if (loginState?.error) {
@@ -354,6 +391,18 @@ export default function LoginPage() {
                       autoComplete="current-password"
                     />
                   </div>
+                  <label
+                    htmlFor="remember-me"
+                    className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground"
+                  >
+                    <Checkbox
+                      id="remember-me"
+                      checked={rememberMe}
+                      onCheckedChange={(checked) => setRememberMe(checked === true)}
+                      disabled={loginPending}
+                    />
+                    <span>자동 로그인</span>
+                  </label>
                   <Button
                     type="submit"
                     className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
