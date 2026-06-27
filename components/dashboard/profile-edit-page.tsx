@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { ProfileSettingsForm } from '@/components/dashboard/profile-settings-form'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,7 @@ interface ProfileEditPageProps {
   backLabel: string
   memberGender?: MemberGender | null
   showMemberGender?: boolean
+  memberRankingStatusMessage?: string
 }
 
 export function ProfileEditPage({
@@ -22,7 +24,10 @@ export function ProfileEditPage({
   backLabel,
   memberGender = null,
   showMemberGender = false,
+  memberRankingStatusMessage = '',
 }: ProfileEditPageProps) {
+  const router = useRouter()
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <div className="flex items-center gap-2">
@@ -34,7 +39,7 @@ export function ProfileEditPage({
         <div>
           <h1 className="text-xl font-bold lg:text-2xl">프로필 수정</h1>
           <p className="text-sm text-muted-foreground">
-            사진·이름·연락처{showMemberGender ? '·성별' : ''}·SNS 정보를 변경합니다.
+            사진·이름·연락처{showMemberGender ? '·성별·랭킹 상태 메시지' : ''}·SNS 정보를 변경합니다.
           </p>
         </div>
       </div>
@@ -53,6 +58,8 @@ export function ProfileEditPage({
             idPrefix="profile-page"
             memberGender={memberGender}
             showMemberGender={showMemberGender}
+            memberRankingStatusMessage={memberRankingStatusMessage}
+            onSaved={() => router.push(backHref)}
           />
         </CardContent>
       </Card>

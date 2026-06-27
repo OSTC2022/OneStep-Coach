@@ -16,6 +16,7 @@ export default async function MemberProfilePage() {
       backLabel="홈"
       memberGender={settings?.gender ?? null}
       showMemberGender={profile.role === 'adult_member'}
+      memberRankingStatusMessage={settings?.ranking_status_message ?? ''}
     />
   )
 }

@@ -46,7 +46,11 @@ import {
   graphRankingViewForChartTab,
   type GraphChartTab,
 } from '@/components/dashboard/member-ranking-charts'
-import { BeatRivalFireBadge } from '@/components/dashboard/beat-rival-badges'
+import {
+  RankingMemberNameBlock,
+  RankingStatusMessageSlot,
+  resolveRankingRowGridClass,
+} from '@/components/dashboard/ranking-member-name-block'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
@@ -115,6 +119,7 @@ import {
   MEMBER_PORTAL_SHELL_CLASS,
 } from '@/lib/running-league/member-portal-layout'
 import { RANKING_TOP_DISPLAY_COUNT } from '@/lib/running-league/ranking-portal-guards'
+import { buildRankingStatusMessageByMemberId } from '@/lib/running-league/ranking-status-message'
 
 function filterRankedBySearch<R extends { memberId: string; memberName: string }>(
   ranked: R[],
@@ -948,6 +953,14 @@ function RankingPreview({
     ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
     : []
 
+  const statusMessageByMemberId = useMemo(
+    () =>
+      rankingBundle
+        ? buildRankingStatusMessageByMemberId(rankingBundle.participants)
+        : new Map<string, string>(),
+    [rankingBundle],
+  )
+
   function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
     if (!rankingBundle) return null
     return resolveRankChangeDeltaForView({
@@ -1024,6 +1037,7 @@ function RankingPreview({
                     isSelected={selectedMemberId === row.memberId}
                     beatRivalMemberId={beatRivalMemberId}
                     showBeatRivalLabel={showBeatRivalLabel}
+                    statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
                   />
                 ) : (
                   <MileageRankingRow
@@ -1035,6 +1049,7 @@ function RankingPreview({
                     isSelected={selectedMemberId === row.memberId}
                     beatRivalMemberId={beatRivalMemberId}
                     showBeatRivalLabel={showBeatRivalLabel}
+                    statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
                   />
                 )
               })}
@@ -1132,6 +1147,7 @@ function PbRankingRow({
   showDistanceLabel = true,
   beatRivalMemberId,
   showBeatRivalLabel = false,
+  statusMessage = null,
 }: {
   row: PbDistanceRankRow
   isMe: boolean
@@ -1143,6 +1159,7 @@ function PbRankingRow({
   showDistanceLabel?: boolean
   beatRivalMemberId?: string | null
   showBeatRivalLabel?: boolean
+  statusMessage?: string | null
 }) {
   const isRowSelected = Boolean(isSelected)
 
@@ -1155,31 +1172,30 @@ function PbRankingRow({
       aria-current={isSelected ? 'true' : undefined}
       data-selected-member={isSelected ? 'true' : undefined}
       className={cn(
-        'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
+        resolveRankingRowGridClass({
+          showDistanceLabel,
+          isSelected: isRowSelected,
+        }),
+        'rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
         topRankRowAccent(row.rank),
         rankingRowClass(isRowSelected),
       )}
     >
       <RankChangeBadge delta={rankChangeDelta} />
       <RankMedalDisplay rank={row.rank} />
-      <span
-        className={cn(
-          'flex min-w-0 flex-1 items-center gap-1.5 font-medium',
-          rankingMemberNameClass(isRowSelected),
-        )}
-      >
-        <span className="min-w-0 truncate">
-          {formatRankingMemberName(row.memberName)}
-        </span>
-        {showBeatRivalLabel && beatRivalMemberId === row.memberId ? (
-          <BeatRivalFireBadge />
-        ) : null}
-      </span>
+      <RankingMemberNameBlock
+        memberName={row.memberName}
+        beatRivalMemberId={beatRivalMemberId}
+        rowMemberId={row.memberId}
+        showBeatRivalLabel={showBeatRivalLabel}
+        className={rankingMemberNameClass(isRowSelected)}
+      />
+      <RankingStatusMessageSlot message={statusMessage} />
       {showDistanceLabel ? (
         <span className="shrink-0 text-xs text-zinc-500">{distanceLabel}</span>
       ) : null}
       <span
-        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
+        className={cn('text-right font-semibold tabular-nums', rankingValueClass(isRowSelected))}
       >
         {row.timeText}
       </span>
@@ -1197,6 +1213,7 @@ function MileageRankingRow({
   scrollAnchor = false,
   beatRivalMemberId,
   showBeatRivalLabel = false,
+  statusMessage = null,
 }: {
   row: MileageDistanceRankRow
   isMe: boolean
@@ -1206,6 +1223,7 @@ function MileageRankingRow({
   scrollAnchor?: boolean
   beatRivalMemberId?: string | null
   showBeatRivalLabel?: boolean
+  statusMessage?: string | null
 }) {
   const isRowSelected = Boolean(isSelected)
 
@@ -1218,28 +1236,24 @@ function MileageRankingRow({
       aria-current={isSelected ? 'true' : undefined}
       data-selected-member={isSelected ? 'true' : undefined}
       className={cn(
-        'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
+        resolveRankingRowGridClass({ isSelected: isRowSelected }),
+        'rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
         topRankRowAccent(row.rank),
         rankingRowClass(isRowSelected),
       )}
     >
       <RankChangeBadge delta={rankChangeDelta} />
       <RankMedalDisplay rank={row.rank} />
+      <RankingMemberNameBlock
+        memberName={row.memberName}
+        beatRivalMemberId={beatRivalMemberId}
+        rowMemberId={row.memberId}
+        showBeatRivalLabel={showBeatRivalLabel}
+        className={rankingMemberNameClass(isRowSelected)}
+      />
+      <RankingStatusMessageSlot message={statusMessage} />
       <span
-        className={cn(
-          'flex min-w-0 flex-1 items-center gap-1.5 font-medium',
-          rankingMemberNameClass(isRowSelected),
-        )}
-      >
-        <span className="min-w-0 truncate">
-          {formatRankingMemberName(row.memberName)}
-        </span>
-        {showBeatRivalLabel && beatRivalMemberId === row.memberId ? (
-          <BeatRivalFireBadge />
-        ) : null}
-      </span>
-      <span
-        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
+        className={cn('text-right font-semibold tabular-nums', rankingValueClass(isRowSelected))}
       >
         {formatMileageKmDisplay(row.mileageKm)}
       </span>
@@ -1294,6 +1308,14 @@ function PbRankingList({
         ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
         : [],
     [genderFilter, rankingBundle],
+  )
+
+  const statusMessageByMemberId = useMemo(
+    () =>
+      rankingBundle
+        ? buildRankingStatusMessageByMemberId(rankingBundle.participants)
+        : new Map<string, string>(),
+    [rankingBundle],
   )
 
   function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
@@ -1351,6 +1373,7 @@ function PbRankingList({
                 showDistanceLabel={showDistanceLabel}
                 beatRivalMemberId={beatRivalMemberId}
                 showBeatRivalLabel={showBeatRivalLabel}
+                statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
               />
             </div>
           )
@@ -1434,6 +1457,14 @@ function MileageRankingList({
     [genderFilter, rankingBundle],
   )
 
+  const statusMessageByMemberId = useMemo(
+    () =>
+      rankingBundle
+        ? buildRankingStatusMessageByMemberId(rankingBundle.participants)
+        : new Map<string, string>(),
+    [rankingBundle],
+  )
+
   function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
     if (!rankingBundle) return null
     return resolveRankChangeDeltaForView({
@@ -1487,6 +1518,7 @@ function MileageRankingList({
                 scrollAnchor={isMe}
                 beatRivalMemberId={beatRivalMemberId}
                 showBeatRivalLabel={showBeatRivalLabel}
+                statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
               />
             </div>
           )

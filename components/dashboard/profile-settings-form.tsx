@@ -16,6 +16,7 @@ import {
 } from '@/lib/profile-avatar-upload'
 import { getRoleLabel } from '@/lib/roles'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
+import { RANKING_STATUS_MESSAGE_MAX_LENGTH } from '@/lib/running-league/ranking-status-message'
 import { MemberGenderField } from '@/components/members/member-gender-field'
 import type { User } from '@/lib/types'
 
@@ -26,9 +27,14 @@ interface ProfileSettingsFormProps {
   onSaved?: () => void
   memberGender?: MemberGender | null
   showMemberGender?: boolean
+  memberRankingStatusMessage?: string
 }
 
-function settingsFromUser(user: User, memberGender: MemberGender | null | undefined) {
+function settingsFromUser(
+  user: User,
+  memberGender: MemberGender | null | undefined,
+  memberRankingStatusMessage?: string,
+) {
   return {
     fullName: user.full_name ?? '',
     phone: user.phone ?? '',
@@ -36,6 +42,7 @@ function settingsFromUser(user: User, memberGender: MemberGender | null | undefi
     instagramId: user.instagram_id ?? '',
     avatarUrl: user.avatar_url ?? null,
     gender: memberGender ?? null,
+    rankingStatusMessage: memberRankingStatusMessage ?? '',
   }
 }
 
@@ -46,26 +53,43 @@ export function ProfileSettingsForm({
   onSaved,
   memberGender = null,
   showMemberGender = false,
+  memberRankingStatusMessage = '',
 }: ProfileSettingsFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPending, startTransition] = useTransition()
   const [isUploading, setIsUploading] = useState(false)
-  const [fullName, setFullName] = useState(() => settingsFromUser(user, memberGender).fullName)
-  const [phone, setPhone] = useState(() => settingsFromUser(user, memberGender).phone)
-  const [kakaoId, setKakaoId] = useState(() => settingsFromUser(user, memberGender).kakaoId)
-  const [instagramId, setInstagramId] = useState(() => settingsFromUser(user, memberGender).instagramId)
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(() => settingsFromUser(user, memberGender).avatarUrl)
-  const [gender, setGender] = useState<MemberGender | null>(() => settingsFromUser(user, memberGender).gender)
+  const [fullName, setFullName] = useState(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).fullName,
+  )
+  const [phone, setPhone] = useState(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).phone,
+  )
+  const [kakaoId, setKakaoId] = useState(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).kakaoId,
+  )
+  const [instagramId, setInstagramId] = useState(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).instagramId,
+  )
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).avatarUrl,
+  )
+  const [gender, setGender] = useState<MemberGender | null>(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).gender,
+  )
+  const [rankingStatusMessage, setRankingStatusMessage] = useState(
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).rankingStatusMessage,
+  )
 
   useEffect(() => {
-    const next = settingsFromUser(user, memberGender)
+    const next = settingsFromUser(user, memberGender, memberRankingStatusMessage)
     setFullName(next.fullName)
     setPhone(next.phone)
     setKakaoId(next.kakaoId)
     setInstagramId(next.instagramId)
     setAvatarUrl(next.avatarUrl)
     setGender(next.gender)
-  }, [user, memberGender])
+    setRankingStatusMessage(next.rankingStatusMessage)
+  }, [user, memberGender, memberRankingStatusMessage])
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -114,7 +138,7 @@ export function ProfileSettingsForm({
         phone,
         kakao_id: kakaoId,
         instagram_id: instagramId,
-        ...(showMemberGender ? { gender } : {}),
+        ...(showMemberGender ? { gender, ranking_status_message: rankingStatusMessage } : {}),
       })
       if (result.error) {
         toast.error('프로필 저장 실패', { description: result.error })
@@ -210,6 +234,23 @@ export function ProfileSettingsForm({
               required
               disabled={disabled}
             />
+          </div>
+        ) : null}
+
+        {showMemberGender ? (
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={`${idPrefix}-ranking-status`}>랭킹 상태 메시지</Label>
+            <Input
+              id={`${idPrefix}-ranking-status`}
+              value={rankingStatusMessage}
+              onChange={(e) => setRankingStatusMessage(e.target.value)}
+              placeholder="예: 오늘도 화이팅"
+              maxLength={RANKING_STATUS_MESSAGE_MAX_LENGTH}
+              disabled={disabled}
+            />
+            <p className="text-xs text-muted-foreground">
+              러닝 포털 랭킹에 이름 옆에 표시됩니다. (최대 {RANKING_STATUS_MESSAGE_MAX_LENGTH}자)
+            </p>
           </div>
         ) : null}
 

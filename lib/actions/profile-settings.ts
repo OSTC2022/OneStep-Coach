@@ -8,6 +8,10 @@ import { isProtectedAdminAccount } from '@/lib/protected-admin'
 import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
+import {
+  normalizeRankingStatusMessage,
+  RANKING_STATUS_MESSAGE_MAX_LENGTH,
+} from '@/lib/running-league/ranking-status-message'
 import type { UserRole } from '@/lib/types'
 
 const PROFILE_SETTINGS_SELECT =
@@ -31,6 +35,7 @@ async function syncContactToLinkedRecords(
     kakao_id: string | null
     instagram_id: string | null
     gender?: MemberGender | null
+    ranking_status_message?: string | null
   },
 ) {
   const supabase = await createClient()
@@ -42,6 +47,9 @@ async function syncContactToLinkedRecords(
   }
   if (contact.gender !== undefined) {
     memberPatch.gender = contact.gender
+  }
+  if (contact.ranking_status_message !== undefined) {
+    memberPatch.ranking_status_message = contact.ranking_status_message
   }
 
   await supabase
@@ -73,6 +81,7 @@ export type MyProfileSettings = {
   kakao_id: string
   instagram_id: string
   gender: MemberGender | null
+  ranking_status_message: string
 }
 
 export async function getMyProfileSettings(): Promise<MyProfileSettings | null> {
@@ -90,6 +99,7 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
   let kakaoId = profile?.kakao_id ?? user.kakao_id ?? ''
   let instagramId = profile?.instagram_id ?? user.instagram_id ?? ''
   let gender: MemberGender | null = null
+  let rankingStatusMessage = ''
 
   const member = await getMemberForCurrentUser()
   if (member) {
@@ -97,6 +107,7 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
     kakaoId = kakaoId || member.kakao_id || ''
     instagramId = instagramId || member.instagram_id || ''
     gender = normalizeMemberGender(member.gender)
+    rankingStatusMessage = member.ranking_status_message ?? ''
   }
 
   return {
@@ -108,6 +119,7 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
     kakao_id: kakaoId,
     instagram_id: instagramId,
     gender,
+    ranking_status_message: rankingStatusMessage,
   }
 }
 
@@ -118,6 +130,7 @@ export async function updateMyProfile(input: {
   kakao_id?: string
   instagram_id?: string
   gender?: MemberGender | null
+  ranking_status_message?: string
 }): Promise<{ error?: string }> {
   const user = await requireAuth()
   const fullName = input.full_name.trim()
@@ -161,6 +174,18 @@ export async function updateMyProfile(input: {
     return { error: '인스타그램 아이디는 80자 이내로 입력해주세요.' }
   }
 
+  const rankingStatusMessage =
+    input.ranking_status_message === undefined
+      ? undefined
+      : normalizeRankingStatusMessage(input.ranking_status_message)
+
+  if (
+    input.ranking_status_message !== undefined &&
+    input.ranking_status_message.trim().length > RANKING_STATUS_MESSAGE_MAX_LENGTH
+  ) {
+    return { error: `상태 메시지는 ${RANKING_STATUS_MESSAGE_MAX_LENGTH}자 이내로 입력해주세요.` }
+  }
+
   const supabase = await createClient()
   const updatePayload: Record<string, string | null> = {
     full_name: fullName,
@@ -188,6 +213,9 @@ export async function updateMyProfile(input: {
     kakao_id: kakaoId,
     instagram_id: instagramId,
     ...(genderToSync !== undefined ? { gender: genderToSync } : {}),
+    ...(user.role === 'adult_member' && rankingStatusMessage !== undefined
+      ? { ranking_status_message: rankingStatusMessage }
+      : {}),
   })
 
   await supabase.from('users').upsert(
@@ -229,6 +257,8 @@ export async function updateMyProfile(input: {
   revalidatePath('/dashboard/profile', 'page')
   revalidatePath('/dashboard/my/profile', 'page')
   revalidatePath('/dashboard/my', 'page')
+  revalidatePath('/dashboard/my/running-league', 'page')
+  revalidatePath('/dashboard/settings/adult-running-portal', 'page')
   revalidatePath('/dashboard', 'layout')
   return { success: true as const }
 }

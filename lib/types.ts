@@ -73,6 +73,7 @@ export interface Member {
   goal: string | null
   injury_history: string | null
   memo: string | null
+  ranking_status_message?: string | null
   primary_instructor_id: string | null
   remaining_sessions: number
   registered_at: string
@@ -337,7 +338,7 @@ export interface RunningLeagueParticipant {
   coach_comment: string
   created_at: string
   updated_at: string
-  member?: Pick<Member, 'id' | 'name' | 'sport' | 'phone' | 'gender'> | null
+  member?: Pick<Member, 'id' | 'name' | 'sport' | 'phone' | 'gender' | 'ranking_status_message'> | null
 }
 
 export interface RunningLeagueGoal {

@@ -97,7 +97,7 @@ import { revalidatePath } from 'next/cache'
 import { runRunningLeagueSelectQuery } from '@/lib/running-league/league-select'
 
 const PARTICIPANT_SELECT =
-  'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone, gender)'
+  'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone, gender, ranking_status_message)'
 
 function mapLeague(row: Record<string, unknown>): RunningLeague {
   return {
@@ -127,6 +127,9 @@ function mapParticipant(row: Record<string, unknown>): RunningLeagueParticipant 
           sport: ((memberRaw as Record<string, unknown>).sport as string | null) ?? null,
           phone: ((memberRaw as Record<string, unknown>).phone as string | null) ?? null,
           gender: normalizeMemberGender((memberRaw as Record<string, unknown>).gender),
+          ranking_status_message:
+            ((memberRaw as Record<string, unknown>).ranking_status_message as string | null) ??
+            null,
         }
       : null
 
