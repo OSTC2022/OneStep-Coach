@@ -7,7 +7,7 @@ import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getLessonCalendarDisplayLine,
-  getLessonCalendarLabel,
+  sortLessonsByTimeThenColor,
   toDateKey,
   type CalendarMemberSearchItem,
 } from '@/lib/calendar-utils'
@@ -55,17 +55,11 @@ export function MonthDayPanel({
   const dateKey = toDateKey(selectedDate)
   const dayLessons = useMemo(
     () =>
-      lessons
-        .filter((lesson) => lesson.lesson_date === dateKey)
-        .sort(
-          (a, b) =>
-            (a.start_time ?? '').localeCompare(b.start_time ?? '') ||
-            getLessonCalendarLabel(a).localeCompare(
-              getLessonCalendarLabel(b),
-              'ko',
-            ),
-        ),
-    [lessons, dateKey],
+      sortLessonsByTimeThenColor(
+        lessons.filter((lesson) => lesson.lesson_date === dateKey),
+        instructors,
+      ),
+    [lessons, dateKey, instructors],
   )
 
   const dateLabel = format(selectedDate, 'M월 d일 EEEE', { locale: ko })

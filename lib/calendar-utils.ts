@@ -19,6 +19,7 @@ import {
   getMemberCalendarDisplayParts,
 } from '@/lib/member-utils'
 import type { Instructor } from '@/lib/types'
+import { resolveLessonDisplayColor } from '@/lib/instructor-colors'
 import { scoreMemberSearch } from '@/lib/korean-search'
 
 export const LESSON_TITLE_CONTENT_PREFIX = '__cal_title__:'
@@ -374,16 +375,56 @@ export function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks
 }
 
+/** 같은 시간대 안에서 강사 색상 → 강사 순 → 이름 순 */
+export function compareLessonsByTimeThenColor(
+  a: Lesson,
+  b: Lesson,
+  instructors: Instructor[] = [],
+): number {
+  const startCmp = (a.start_time ?? '').localeCompare(b.start_time ?? '')
+  if (startCmp !== 0) return startCmp
+
+  const colorCmp = resolveLessonDisplayColor(a, instructors).localeCompare(
+    resolveLessonDisplayColor(b, instructors),
+  )
+  if (colorCmp !== 0) return colorCmp
+
+  const instructorOrder = buildInstructorOrderMap(instructors)
+  const instructorA = instructorOrder.get(getLessonInstructorGroupId(a)) ?? 9999
+  const instructorB = instructorOrder.get(getLessonInstructorGroupId(b)) ?? 9999
+  if (instructorA !== instructorB) return instructorA - instructorB
+
+  const labelCmp = getLessonCalendarLabel(a).localeCompare(getLessonCalendarLabel(b), 'ko')
+  if (labelCmp !== 0) return labelCmp
+
+  return a.id.localeCompare(b.id)
+}
+
+export function sortLessonsByTimeThenColor(
+  lessons: Lesson[],
+  instructors: Instructor[] = [],
+): Lesson[] {
+  return [...lessons].sort((a, b) => compareLessonsByTimeThenColor(a, b, instructors))
+}
+
 /** 같은 시간대 안에서 강사 순으로 정렬 */
 export function sortLessonsInTimeSlot(
   lessons: Lesson[],
   instructors: Instructor[] = [],
 ): Lesson[] {
-  const instructorOrder = buildInstructorOrderMap(instructors)
   return [...lessons].sort((a, b) => {
+    const colorCmp = resolveLessonDisplayColor(a, instructors).localeCompare(
+      resolveLessonDisplayColor(b, instructors),
+    )
+    if (colorCmp !== 0) return colorCmp
+
+    const instructorOrder = buildInstructorOrderMap(instructors)
     const instructorA = instructorOrder.get(getLessonInstructorGroupId(a)) ?? 9999
     const instructorB = instructorOrder.get(getLessonInstructorGroupId(b)) ?? 9999
     if (instructorA !== instructorB) return instructorA - instructorB
+
+    const labelCmp = getLessonCalendarLabel(a).localeCompare(getLessonCalendarLabel(b), 'ko')
+    if (labelCmp !== 0) return labelCmp
 
     const createdCmp = (a.created_at ?? '').localeCompare(b.created_at ?? '')
     if (createdCmp !== 0) return createdCmp

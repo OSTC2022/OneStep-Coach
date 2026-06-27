@@ -196,7 +196,7 @@ export function DayWeekView({
           <CalendarPanelResizeHandle isDragging={isDragging} {...handleProps} />
 
           <div
-            className="flex shrink-0 flex-col overflow-hidden"
+            className="flex min-h-0 shrink-0 flex-col overflow-hidden"
             style={{ height: bottomPx }}
           >
             <MonthDayPanel

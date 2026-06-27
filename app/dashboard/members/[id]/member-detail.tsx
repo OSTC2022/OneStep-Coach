@@ -75,6 +75,7 @@ import {
 import { cn } from '@/lib/utils'
 import { MemberStaffLeagueSummary } from '@/components/dashboard/member-staff-league-summary'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
+import type { Instructor } from '@/lib/types'
 
 const LESSON_RECORD_PAGE_SIZE = 10
 
@@ -82,6 +83,7 @@ interface MemberDetailProps {
   member: Member & { primary_instructor?: { id: string; name: string } | null }
   sessionPackages: SessionPackage[]
   lessons: MemberLessonRecord[]
+  instructors?: Instructor[]
   sessionNumberByLessonId?: Record<string, number>
   initialTrashCount?: number
   accountEmail?: string | null
@@ -123,11 +125,13 @@ export function MemberDetail({
   centerAccount = null,
   linkedProfileRole = null,
   runningLeagueHome = null,
+  instructors = [],
 }: MemberDetailProps) {
   const [memberState, setMemberState] = useState(() =>
     mergeMemberWithDetailPatch(member, member.id),
   )
   const [sessionPackages, setSessionPackages] = useState(initialPackages)
+  const [lessonRecords, setLessonRecords] = useState(lessons)
   const [deleteTarget, setDeleteTarget] = useState<SessionPackage | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [trashCount, setTrashCount] = useState(initialTrashCount)
@@ -137,9 +141,13 @@ export function MemberDetail({
   const [lessonPage, setLessonPage] = useState(1)
 
   const sortedLessons = useMemo(
-    () => sortLessonsForRecentDisplay(lessons, sessionNumberByLessonId),
-    [lessons, sessionNumberByLessonId],
+    () => sortLessonsForRecentDisplay(lessonRecords, sessionNumberByLessonId),
+    [lessonRecords, sessionNumberByLessonId],
   )
+
+  useEffect(() => {
+    setLessonRecords(lessons)
+  }, [lessons])
 
   useEffect(() => {
     setMemberState(mergeMemberWithDetailPatch(member, member.id))
@@ -171,7 +179,7 @@ export function MemberDetail({
 
   useEffect(() => {
     setLessonPage(1)
-  }, [lessons])
+  }, [lessonRecords])
 
   useEffect(() => {
     if (lessonPage > lessonTotalPages) {
@@ -653,12 +661,21 @@ export function MemberDetail({
                   })
 
                   return (
-                    <TableRow key={lesson.id}>
+                    <TableRow
+                      key={lesson.id}
+                      className={canManage ? 'cursor-pointer hover:bg-muted/30' : undefined}
+                      onClick={() => {
+                        if (canManage) setDetailLesson(lesson)
+                      }}
+                    >
                       <TableCell>
                         {lesson.session_deducted && sessionNumber != null ? (
                           <button
                             type="button"
-                            onClick={() => setDetailLesson(lesson)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setDetailLesson(lesson)
+                            }}
                             className={`rounded px-1.5 py-0.5 text-xs font-semibold hover:opacity-90 ${
                               isSessionOver
                                 ? 'bg-destructive/15 text-destructive hover:bg-destructive/25'
@@ -747,6 +764,25 @@ export function MemberDetail({
         open={detailLesson != null}
         onOpenChange={(open) => {
           if (!open) setDetailLesson(null)
+        }}
+        instructors={instructors}
+        sessionPackages={sessionPackages}
+        canEdit={canManage}
+        onUpdated={(updated) => {
+          setLessonRecords((prev) =>
+            prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+          )
+          setDetailLesson((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev))
+          if (updated.instructor_id) {
+            setMemberState((prev) => ({
+              ...prev,
+              primary_instructor_id: updated.instructor_id ?? prev.primary_instructor_id,
+              primary_instructor:
+                updated.instructor ??
+                instructors.find((item) => item.id === updated.instructor_id) ??
+                prev.primary_instructor,
+            }))
+          }
         }}
       />
 

@@ -367,10 +367,23 @@ const AthleteTile = memo(function AthleteTile({
           : {}),
       })
 
-      if (result.data.session_overage && result.data.session_overage > 0) {
+      if (
+        (result.data.member_remaining_sessions != null &&
+          result.data.member_remaining_sessions < 0) ||
+        (result.data.member_remaining_sessions == null &&
+          result.data.session_overage &&
+          result.data.session_overage > 0)
+      ) {
+        const overage =
+          result.data.member_remaining_sessions != null &&
+          result.data.member_remaining_sessions < 0
+            ? Math.abs(result.data.member_remaining_sessions)
+            : result.data.session_overage!
         toast.warning(
-          formatSessionOverageAlert(result.data.session_overage, {
-            noPackage: result.data.no_session_package,
+          formatSessionOverageAlert(overage, {
+            noPackage:
+              result.data.no_session_package &&
+              (result.data.member_remaining_sessions ?? 0) <= 0,
           }),
           { duration: 8000 },
         )

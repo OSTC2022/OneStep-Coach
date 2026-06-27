@@ -6,9 +6,9 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import type { Lesson, LessonFormData, AttendanceStatus } from '@/lib/types'
 import { getCurrentUser, requireRole } from './auth'
-import { checkInLesson } from './lesson-sessions'
+import { checkInLesson, syncLessonSessionRow } from './lesson-sessions'
 import { queryActiveSessionPackageId } from './sessions'
-import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
+import { extractMemberNameFromCalendarLabel, normalizePrimaryInstructorId } from '@/lib/member-utils'
 import {
   LESSON_TITLE_CONTENT_PREFIX,
   resolveLessonTitle,
@@ -1298,7 +1298,9 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
 
   const { data: existing } = await supabase
     .from('lessons')
-    .select('id, lesson_date, start_time, member_id, special_note')
+    .select(
+      'id, lesson_date, start_time, member_id, special_note, session_deducted, session_package_id, instructor_id',
+    )
     .eq('id', id)
     .maybeSingle()
 
@@ -1333,11 +1335,34 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   }
 
   if ('instructor_id' in updates) {
+    const memberId =
+      (updates.member_id !== undefined ? updates.member_id : existing?.member_id) ??
+      null
+    const normalizedInstructor = normalizePrimaryInstructorId(updates.instructor_id)
+
     console.info('[lesson-sync] instructor change', {
       lesson_id: id,
-      instructor_id: updates.instructor_id ?? null,
+      instructor_id: normalizedInstructor,
       sync_origin: 'app',
     })
+
+    if (memberId && normalizedInstructor) {
+      await supabase
+        .from('members')
+        .update({ primary_instructor_id: normalizedInstructor })
+        .eq('id', memberId)
+    }
+
+    if (
+      memberId &&
+      !('session_package_id' in updates) &&
+      !existing?.session_deducted
+    ) {
+      const autoPackageId = await queryActiveSessionPackageId(supabase, memberId)
+      if (autoPackageId) {
+        payload.session_package_id = autoPackageId
+      }
+    }
   }
 
   let warning: string | undefined
@@ -1401,6 +1426,13 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   const user = await getCurrentUser()
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
+  if ('instructor_id' in updates || 'session_package_id' in payload) {
+    await syncLessonSessionRow(supabase, id, {
+      instructor_id: lesson.instructor_id,
+      session_package_id: lesson.session_package_id,
+    })
+  }
+
   await runGoogleLessonPush(lesson.id)
 
   revalidatePath('/dashboard/lessons')
@@ -1409,6 +1441,9 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   revalidatePath('/dashboard/lesson-status')
   revalidatePath('/dashboard/instructors')
   revalidatePath('/dashboard/reports')
+  if (lesson.member_id) {
+    revalidatePath(`/dashboard/members/${lesson.member_id}`)
+  }
   return { data: lesson, warning }
 }
 

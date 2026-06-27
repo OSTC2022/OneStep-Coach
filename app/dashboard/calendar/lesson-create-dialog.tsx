@@ -74,6 +74,9 @@ import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import { MemberSearchSelect } from '@/components/members/member-search-select'
 import { searchMembersForPicker } from '@/lib/actions/members'
+import { getSessionPackages } from '@/lib/actions/sessions'
+import { pickSessionPackageIdForDeduction } from '@/lib/session-package-deduction'
+import { formatPackagePlanLabel } from '@/lib/session-package-utils'
 import {
   Dialog,
   DialogContent,
@@ -91,7 +94,7 @@ import {
 } from '@/components/ui/select'
 import { isLessonEditFloatingUIOpen } from '@/lib/lesson-edit-floating-ui'
 import { useTouchFriendlyLayout } from '@/hooks/use-touch-friendly-layout'
-import type { Instructor, Lesson } from '@/lib/types'
+import type { Instructor, Lesson, LessonFormData } from '@/lib/types'
 
 interface MemberOption {
   id: string
@@ -258,6 +261,20 @@ export function LessonCreateDialog({
   const [calendarDisplayText, setCalendarDisplayText] = useState('')
   const [instructorId, setInstructorId] = useState(initialInstructorId)
   const [lessonType, setLessonType] = useState('개인레슨')
+  const [sessionPackageId, setSessionPackageId] = useState('')
+  const [memberPackages, setMemberPackages] = useState<
+    Array<{
+      id: string
+      total_sessions: number
+      remaining_sessions: number
+      note?: string | null
+      is_active: boolean
+      expires_at?: string | null
+      created_at: string
+      paid_at?: string | null
+    }>
+  >([])
+  const [packagesLoading, setPackagesLoading] = useState(false)
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [date, setDate] = useState('')
@@ -385,6 +402,12 @@ export function LessonCreateDialog({
         : null
 
   const linkedMemberId = memberId || getLessonMemberId(lesson)
+  const sessionPackagePayload = useMemo(() => {
+    if (!linkedMemberId) return undefined
+    if (sessionPackageId) return sessionPackageId
+    const picked = pickSessionPackageIdForDeduction(memberPackages)
+    return picked ?? undefined
+  }, [linkedMemberId, sessionPackageId, memberPackages])
   const linkedMemberLabel = useMemo(() => {
     if (lesson) return getLessonCalendarLabel(lesson)
     if (memberId) {
@@ -490,6 +513,7 @@ export function LessonCreateDialog({
       }
       setInstructorId(lesson.instructor_id || initialInstructorId)
       setLessonType(normalizeLessonType(lesson.lesson_type))
+      setSessionPackageId(lesson.session_package_id ?? '')
       setDate(lesson.lesson_date)
       setStartTime(toTimeInputValue(lesson.start_time))
       setEndTime(toTimeInputValue(lesson.end_time))
@@ -532,6 +556,7 @@ export function LessonCreateDialog({
       setCalendarDisplayText('')
       setInstructorId(initialInstructorId)
       setLessonType('개인레슨')
+      setSessionPackageId('')
       setDate(draft.date)
       setStartTime(draft.startTime)
       setEndTime('')
@@ -557,6 +582,50 @@ export function LessonCreateDialog({
     if (!open || !isEditing || !onEditDraftChange) return
     onEditDraftChange({ instructorId })
   }, [open, isEditing, instructorId, onEditDraftChange])
+
+  useEffect(() => {
+    if (!open || !linkedMemberId) {
+      setMemberPackages([])
+      return
+    }
+
+    let cancelled = false
+    setPackagesLoading(true)
+    void getSessionPackages({ memberId: linkedMemberId })
+      .then(({ data }) => {
+        if (cancelled) return
+        setMemberPackages(data)
+      })
+      .finally(() => {
+        if (!cancelled) setPackagesLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, linkedMemberId])
+
+  const prevPackageSyncRef = useRef({
+    memberId: '',
+    instructorId: '',
+  })
+
+  useEffect(() => {
+    if (!open || !linkedMemberId || memberPackages.length === 0) return
+
+    const memberChanged = prevPackageSyncRef.current.memberId !== linkedMemberId
+    const instructorChanged =
+      prevPackageSyncRef.current.instructorId !== instructorId
+    prevPackageSyncRef.current = {
+      memberId: linkedMemberId,
+      instructorId,
+    }
+
+    if (!memberChanged && !instructorChanged) return
+
+    const picked = pickSessionPackageIdForDeduction(memberPackages)
+    if (picked) setSessionPackageId(picked)
+  }, [open, linkedMemberId, instructorId, memberPackages])
 
   useEffect(() => {
     if (!open || !useAnchoredPopup) return
@@ -1075,6 +1144,7 @@ export function LessonCreateDialog({
     const identityPayload = {
       member_id: submitMemberId,
       title: submitTitle,
+      ...(sessionPackagePayload ? { session_package_id: sessionPackagePayload } : {}),
     }
 
     if (isAddingToSlot && lesson) {
@@ -1299,6 +1369,52 @@ export function LessonCreateDialog({
           </div>
         </>
       )}
+
+      {linkedMemberId ? (
+        <div className={cn(isCompactForm ? POPUP_SECTION : 'space-y-1.5')}>
+          <p className={isCompactForm ? POPUP_FIELD_LABEL : undefined}>
+            {isCompactForm ? (
+              '수업권'
+            ) : (
+              <Label htmlFor="lesson-session-package">수업권</Label>
+            )}
+          </p>
+          <Select
+            value={sessionPackageId || 'auto'}
+            onValueChange={(value) =>
+              setSessionPackageId(value === 'auto' ? '' : value)
+            }
+            disabled={packagesLoading || memberPackages.length === 0}
+          >
+            <SelectTrigger
+              id="lesson-session-package"
+              className={
+                isCompactForm
+                  ? 'h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none'
+                  : undefined
+              }
+            >
+              <SelectValue
+                placeholder={
+                  packagesLoading
+                    ? '수업권 불러오는 중…'
+                    : memberPackages.length === 0
+                      ? '등록된 수업권 없음'
+                      : '수업권 선택'
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {memberPackages.map((pkg) => (
+                <SelectItem key={pkg.id} value={pkg.id}>
+                  {formatPackagePlanLabel(pkg.total_sessions, pkg.note)} · 잔여{' '}
+                  {pkg.remaining_sessions}회
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
 
       {fixedLessonPayHint ? (
         <p className="text-[11px] font-medium text-primary">{fixedLessonPayHint}</p>

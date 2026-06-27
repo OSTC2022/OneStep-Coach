@@ -250,7 +250,7 @@ export function MonthMemoInput({
       : null
 
   return (
-    <div ref={containerRef} className="relative shrink-0 border-t border-border p-3">
+    <div ref={containerRef} className="relative shrink-0 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 pr-20 md:pr-24">
       <div className="relative">
         <Input
           ref={inputRef}

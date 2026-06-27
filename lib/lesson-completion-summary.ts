@@ -8,8 +8,20 @@ export type LessonCompletionRemainingInput = {
 export function formatLessonCompletionRemainingLabel(
   data: LessonCompletionRemainingInput,
 ): string | null {
-  if (data.no_session_package) {
+  const memberRemaining = data.member_remaining_sessions
+
+  if (
+    data.no_session_package &&
+    (memberRemaining == null || memberRemaining <= 0)
+  ) {
     return '등록된 수업권이 없습니다'
+  }
+
+  if (memberRemaining != null && Number.isFinite(memberRemaining)) {
+    if (memberRemaining < 0) {
+      return `수업권 ${Math.abs(memberRemaining)}회 초과`
+    }
+    return `남은 수업 ${memberRemaining}회`
   }
 
   const overage = data.session_overage ?? 0
@@ -17,12 +29,13 @@ export function formatLessonCompletionRemainingLabel(
     return `수업권 ${overage}회 초과`
   }
 
-  const remaining =
-    data.session_package_remaining ?? data.member_remaining_sessions
-
-  if (remaining == null || !Number.isFinite(remaining)) {
-    return null
+  const packageRemaining = data.session_package_remaining
+  if (packageRemaining != null && Number.isFinite(packageRemaining)) {
+    if (packageRemaining < 0) {
+      return `수업권 ${Math.abs(packageRemaining)}회 초과`
+    }
+    return `남은 수업 ${packageRemaining}회`
   }
 
-  return `남은 수업 ${remaining}회`
+  return null
 }

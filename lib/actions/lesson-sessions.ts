@@ -13,11 +13,16 @@ import { syncTrialLessonPayOverride } from '@/lib/trial-lesson-pay-sync'
 import type { AttendanceStatus, Lesson, LessonSession, SessionTransaction } from '@/lib/types'
 import { getLessonCalendarDisplayParts, resolveLessonTitle } from '@/lib/calendar-utils'
 import { countsTowardSessionNumber, getTodayDateKey } from '@/lib/lesson-record-utils'
-import { extractMemberNameFromCalendarLabel } from '@/lib/member-utils'
+import {
+  extractMemberNameFromCalendarLabel,
+  normalizePrimaryInstructorId,
+} from '@/lib/member-utils'
 import {
   adjustSessionPackageRemaining,
+  queryActiveSessionPackageId,
   querySessionPackageIdForDeduction,
 } from '@/lib/actions/sessions'
+import { toStoredLessonType } from '@/lib/lesson-types'
 import {
   getSessionPackageOverageCount,
   isMonthlyUnlimitedSessions,
@@ -674,11 +679,16 @@ async function tryDeductLessonSessionOnce(
     .eq('id', memberId)
     .single()
 
+  const memberRemaining = member?.remaining_sessions ?? undefined
+
   return {
     deducted: true,
     newRemaining: reconcile.remaining,
-    memberRemaining: member?.remaining_sessions ?? undefined,
-    sessionOverage: getSessionPackageOverageCount(reconcile.remaining),
+    memberRemaining,
+    sessionOverage:
+      memberRemaining != null
+        ? getSessionPackageOverageCount(memberRemaining)
+        : getSessionPackageOverageCount(reconcile.remaining),
   }
 }
 
@@ -907,6 +917,13 @@ export async function completeLessonWithSignature(
 
   revalidateSessionDeductionPaths(lesson.member_id)
 
+  if (memberRemaining != null) {
+    sessionOverage = getSessionPackageOverageCount(memberRemaining)
+    if (memberRemaining > 0) {
+      noSessionPackage = false
+    }
+  }
+
   return {
     data: {
       ...(updatedLesson as {
@@ -983,6 +1000,189 @@ export async function updateLessonEndTime(
   revalidateLessonAttendanceViews()
 
   return { data: data as { id: string; end_time: string } }
+}
+
+export async function syncLessonSessionRow(
+  supabase: SupabaseClient,
+  lessonId: string,
+  patch: {
+    instructor_id?: string | null
+    session_package_id?: string | null
+  },
+) {
+  const update: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  }
+  if ('instructor_id' in patch) {
+    update.instructor_id = patch.instructor_id ?? null
+  }
+  if ('session_package_id' in patch) {
+    update.session_package_id = patch.session_package_id ?? null
+  }
+  if (Object.keys(update).length <= 1) return
+
+  const { data: existingSession } = await supabase
+    .from('lesson_sessions')
+    .select('id')
+    .eq('lesson_id', lessonId)
+    .maybeSingle()
+
+  if (!existingSession?.id) return
+
+  const { error } = await supabase
+    .from('lesson_sessions')
+    .update(update)
+    .eq('id', existingSession.id)
+
+  if (error && !isMissingTableError(error.message)) {
+    console.warn('syncLessonSessionRow:', error.message)
+  }
+}
+
+async function transferLessonSessionPackage(
+  supabase: SupabaseClient,
+  memberId: string,
+  oldPackageId: string | null,
+  newPackageId: string | null,
+) {
+  if (!newPackageId || oldPackageId === newPackageId) return { error: undefined as string | undefined }
+
+  if (oldPackageId) {
+    const restore = await adjustSessionPackageRemaining(oldPackageId, 1, supabase)
+    if (restore.error) return { error: restore.error }
+  }
+
+  const deduct = await adjustSessionPackageRemaining(newPackageId, -1, supabase)
+  if (deduct.error) return { error: deduct.error }
+
+  const { error: syncError } = await supabase.rpc('sync_member_remaining_sessions', {
+    p_member_id: memberId,
+  })
+  if (syncError) {
+    console.warn('sync_member_remaining_sessions:', syncError.message)
+  }
+
+  return { error: undefined as string | undefined }
+}
+
+/** 수업 기록 수정 — 강사·수업권·유형 (차감 완료 수업 포함) */
+export async function updateLessonRecord(
+  lessonId: string,
+  updates: {
+    instructor_id?: string | null
+    session_package_id?: string | null
+    lesson_type?: string
+  },
+): Promise<{
+  data?: {
+    id: string
+    instructor_id: string | null
+    session_package_id: string | null
+    lesson_type: string
+    instructor?: { id: string; name: string } | null
+  }
+  error?: string
+}> {
+  await requireRole(['admin', 'instructor'])
+
+  const admin = attendanceWriteClient()
+  const supabase = admin ?? (await createClient())
+
+  const { data: lesson, error: lessonError } = await supabase
+    .from('lessons')
+    .select(
+      'id, member_id, instructor_id, session_package_id, lesson_type, session_deducted',
+    )
+    .eq('id', lessonId)
+    .single()
+
+  if (lessonError || !lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  const payload: Record<string, unknown> = {}
+  const syncPatch: {
+    instructor_id?: string | null
+    session_package_id?: string | null
+  } = {}
+
+  if ('instructor_id' in updates) {
+    const normalized = normalizePrimaryInstructorId(updates.instructor_id)
+    payload.instructor_id = normalized
+    syncPatch.instructor_id = normalized
+
+    if (lesson.member_id && normalized) {
+      await supabase
+        .from('members')
+        .update({ primary_instructor_id: normalized })
+        .eq('id', lesson.member_id)
+    }
+  }
+
+  if ('lesson_type' in updates && updates.lesson_type) {
+    payload.lesson_type = toStoredLessonType(updates.lesson_type)
+  }
+
+  if ('session_package_id' in updates) {
+    const nextPackageId = updates.session_package_id?.trim() || null
+    const currentPackageId = lesson.session_package_id as string | null
+
+    if (lesson.session_deducted && nextPackageId !== currentPackageId && lesson.member_id) {
+      const transfer = await transferLessonSessionPackage(
+        supabase,
+        lesson.member_id,
+        currentPackageId,
+        nextPackageId,
+      )
+      if (transfer.error) {
+        return { error: transfer.error }
+      }
+    }
+
+    payload.session_package_id = nextPackageId
+    syncPatch.session_package_id = nextPackageId
+  } else if ('instructor_id' in updates && lesson.member_id && !lesson.session_deducted) {
+    const autoPackageId = await queryActiveSessionPackageId(supabase, lesson.member_id)
+    if (autoPackageId) {
+      payload.session_package_id = autoPackageId
+      syncPatch.session_package_id = autoPackageId
+    }
+  }
+
+  if (Object.keys(payload).length === 0) {
+    return { error: '변경할 항목이 없습니다.' }
+  }
+
+  const { data, error } = await supabase
+    .from('lessons')
+    .update(payload)
+    .eq('id', lessonId)
+    .select(
+      'id, instructor_id, session_package_id, lesson_type, instructor:instructors(id, name)',
+    )
+    .single()
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  await syncLessonSessionRow(supabase, lessonId, syncPatch)
+
+  revalidateLessonAttendanceWithCalendar()
+  revalidateSessionDeductionPaths()
+  if (lesson.member_id) {
+    revalidatePath(`/dashboard/members/${lesson.member_id}`)
+  }
+
+  return {
+    data: data as {
+      id: string
+      instructor_id: string | null
+      session_package_id: string | null
+      lesson_type: string
+      instructor?: { id: string; name: string } | null
+    },
+  }
 }
 
 /** 수업 종료 취소 — 종료 시간·서명 제거 + 세션 차감 복구 */
@@ -1887,6 +2087,7 @@ export async function addSignatureToPastLesson(
     end_time: string | null
     session_deducted: boolean
     attendance_status: AttendanceStatus
+    member_remaining_sessions?: number
     session_overage?: number
     no_session_package?: boolean
   }
@@ -1987,6 +2188,7 @@ async function addSignatureToPastLessonViaComplete(
           end_time: result.data.end_time,
           session_deducted: result.data.session_deducted,
           attendance_status: result.data.attendance_status,
+          member_remaining_sessions: result.data.member_remaining_sessions,
           session_overage: result.data.session_overage,
           no_session_package: result.data.no_session_package,
         }

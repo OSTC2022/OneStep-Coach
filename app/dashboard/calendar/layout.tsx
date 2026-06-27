@@ -13,7 +13,7 @@ export default async function CalendarLayout({
 
   return (
     <CalendarSelectionProvider>
-      <div className="-mx-4 flex h-[calc(100svh-3.5rem-2rem)] min-h-0 w-[calc(100%+2rem)] max-w-none flex-1 flex-col overflow-hidden md:-mx-6 md:h-[calc(100svh-3.5rem-3rem)] md:w-[calc(100%+3rem)]">
+      <div className="-mx-4 -mb-4 flex h-[calc(100svh-3.5rem-1rem)] min-h-0 w-[calc(100%+2rem)] max-w-none flex-1 flex-col overflow-hidden md:-mx-6 md:-mb-6 md:h-[calc(100svh-3.5rem-1.5rem)] md:w-[calc(100%+3rem)]">
         {children}
       </div>
       {showFab && <LessonScheduleFab role={profile.role} />}

@@ -16,6 +16,7 @@ import {
   getTodayDateKey,
 } from '@/lib/lesson-record-utils'
 import { getMemberRunningLeagueHomeForStaff } from '@/lib/actions/running-league'
+import { getInstructors } from '@/lib/actions/instructors'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { notFound } from 'next/navigation'
 import { MemberDetail } from './member-detail'
@@ -32,7 +33,7 @@ export default async function MemberDetailPage({
   const { canManage, role } = await requireMemberViewer()
   const { id } = await params
   const linkedProfileRole = await getMemberLinkedProfileRole(id)
-  const [member, packagesResult, trashCount, accountEmailInfo, canEditBasicInfo, centerSettings, canAddBodyRecord, runningLeagueHome] =
+  const [member, packagesResult, trashCount, accountEmailInfo, canEditBasicInfo, centerSettings, canAddBodyRecord, runningLeagueHome, instructorsResult] =
     await Promise.all([
     getMember(id),
     getSessionPackages({ memberId: id }),
@@ -44,8 +45,10 @@ export default async function MemberDetailPage({
     linkedProfileRole === 'adult_member'
       ? getMemberRunningLeagueHomeForStaff(id)
       : Promise.resolve(null),
+    getInstructors({ isActive: true }),
   ])
   const sessionPackages = packagesResult.data
+  const instructors = instructorsResult
 
   if (!member) {
     notFound()
@@ -63,6 +66,8 @@ export default async function MemberDetailPage({
     attendance_status,
     session_deducted,
     lesson_no,
+    instructor_id,
+    session_package_id,
     content,
     special_note,
     created_at,
@@ -155,6 +160,7 @@ export default async function MemberDetailPage({
         centerAccount={centerAccount}
         linkedProfileRole={linkedProfileRole}
         runningLeagueHome={runningLeagueHome}
+        instructors={instructors}
       />
     </div>
   )
