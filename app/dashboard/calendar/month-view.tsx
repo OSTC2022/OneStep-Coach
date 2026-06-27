@@ -19,8 +19,8 @@ import {
   type CalendarMemberSearchItem,
   type LessonEditAnchor,
 } from '@/lib/calendar-utils'
-import { getInstructorCalendarColor } from '@/lib/instructor-colors'
-import type { Lesson } from '@/lib/types'
+import { resolveLessonDisplayColor } from '@/lib/instructor-colors'
+import type { Instructor, Lesson } from '@/lib/types'
 import { MonthDayPanel } from './month-day-panel'
 import { CalendarPanelResizeHandle } from './calendar-panel-resize-handle'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,7 @@ interface MonthViewProps {
   selectedDate: Date
   onSelectDate: (date: Date) => void
   lessons: Lesson[]
+  instructors: Instructor[]
   members: CalendarMemberSearchItem[]
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
   onLessonEdit?: (lesson: Lesson, anchor?: LessonEditAnchor) => void
@@ -61,6 +62,7 @@ export function MonthView({
   selectedDate,
   onSelectDate,
   lessons,
+  instructors,
   members,
   onMemoSubmit,
   onLessonEdit,
@@ -128,6 +130,7 @@ export function MonthView({
     <MonthDayPanel
       selectedDate={selectedDate}
       lessons={lessons}
+      instructors={instructors}
       members={members}
       onLessonActivate={onLessonActivate}
       onLessonEdit={onLessonEdit}
@@ -235,7 +238,7 @@ export function MonthView({
                           className="block w-full shrink-0 rounded-full"
                           style={{
                             height: LINE_HEIGHT,
-                            backgroundColor: getInstructorCalendarColor(lesson.instructor),
+                            backgroundColor: resolveLessonDisplayColor(lesson, instructors),
                             opacity:
                               lesson.attendance_status === 'cancelled' ? 0.35 : 1,
                           }}

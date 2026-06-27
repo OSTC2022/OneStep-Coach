@@ -12,6 +12,7 @@ import { enrichLessonRecurrenceFields } from '@/lib/lesson-recurrence-legacy'
 import { resolveLessonTitle, isLessonCalendarVisible, isLessonStatusPageVisible } from '@/lib/calendar-utils'
 import { isLessonIdentifiable } from '@/lib/calendar-recurrence/expand-lessons'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import { logLessonViewFetch } from '@/lib/lesson-data-sync'
 
 function isMissingRecurrenceV2Column(error: { message?: string; code?: string } | null) {
   if (!error) return false
@@ -175,8 +176,20 @@ export async function fetchExpandedCalendarLessons(
     options,
   ).map(normalizeCalendarLesson)
 
+  const resultLessons = merged.slice(0, limit)
+  logLessonViewFetch(options?.forStatusPage ? 'lesson-status' : 'calendar', {
+    dateFrom,
+    dateTo,
+    count: resultLessons.length,
+    sample: resultLessons.map((lesson) => ({
+      id: lesson.id,
+      instructor_id: lesson.instructor_id,
+      google_event_id: lesson.google_event_id,
+    })),
+  })
+
   return {
-    lessons: merged.slice(0, limit),
+    lessons: resultLessons,
     supportsExpansion: true,
   }
 }

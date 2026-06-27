@@ -108,7 +108,7 @@ export async function resolveGoogleCalendarTarget(
   return null
 }
 
-/** Google에서 가져온 기존 일정에 캘린더별 담당 강사 일괄 반영 */
+/** Google에서 가져온 기존 일정에 캘린더별 담당 강사 일괄 반영 (instructor_id가 비어 있는 행만) */
 export async function backfillGoogleCalendarInstructor(
   supabase: ReturnType<typeof createServiceRoleClient>,
   googleCalendarId: string,
@@ -121,6 +121,7 @@ export async function backfillGoogleCalendarInstructor(
     .update({ instructor_id: instructorId })
     .eq('google_calendar_id', googleCalendarId)
     .not('google_event_id', 'is', null)
+    .is('instructor_id', null)
 
   if (error && !error.message.includes('google_calendar_id')) {
     throw new Error(error.message)

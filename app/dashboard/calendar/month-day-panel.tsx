@@ -11,8 +11,8 @@ import {
   toDateKey,
   type CalendarMemberSearchItem,
 } from '@/lib/calendar-utils'
-import { getInstructorCalendarColor } from '@/lib/instructor-colors'
-import type { Lesson } from '@/lib/types'
+import { resolveLessonDisplayColor, resolveLessonInstructorName } from '@/lib/instructor-colors'
+import type { Instructor, Lesson } from '@/lib/types'
 import { Input } from '@/components/ui/input'
 import {
   MonthMemoInput,
@@ -22,6 +22,7 @@ import {
 interface MonthDayPanelProps {
   selectedDate: Date
   lessons: Lesson[]
+  instructors: Instructor[]
   members: CalendarMemberSearchItem[]
   onLessonEdit?: (lesson: Lesson) => void
   onLessonActivate?: (
@@ -36,6 +37,7 @@ interface MonthDayPanelProps {
 export function MonthDayPanel({
   selectedDate,
   lessons,
+  instructors,
   members,
   onLessonEdit,
   onLessonActivate,
@@ -128,7 +130,8 @@ export function MonthDayPanel({
         ) : (
           <ul className="divide-y divide-border">
             {dayLessons.map((lesson) => {
-              const color = getInstructorCalendarColor(lesson.instructor)
+              const color = resolveLessonDisplayColor(lesson, instructors)
+              const instructorName = resolveLessonInstructorName(lesson, instructors)
               const displayLine = getLessonCalendarDisplayLine(lesson)
               const isEditing = inlineEditId === lesson.id
               const isSaving = savingId === lesson.id
@@ -208,9 +211,9 @@ export function MonthDayPanel({
                           </span>
                         </button>
                       )}
-                      {lesson.instructor?.name && !isEditing && (
+                      {instructorName !== '—' && !isEditing && (
                         <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {lesson.instructor.name}
+                          {instructorName}
                         </span>
                       )}
                     </div>

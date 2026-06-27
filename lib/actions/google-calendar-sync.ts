@@ -2,6 +2,7 @@
 
 import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { revalidateLessonViews } from '@/lib/lesson-data-sync'
 import { formatGoogleCalendarSyncError } from '@/lib/google-calendar/errors'
 import { requireRole } from '@/lib/actions/auth'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
@@ -264,6 +265,9 @@ export async function pullGoogleCalendarChanges(): Promise<PullResult> {
         lightweight: true,
       })
       const changed = countGoogleSyncChanges(result)
+      if (changed > 0) {
+        revalidateLessonViews()
+      }
       return { synced: true, changed }
     } catch (error) {
       if (isGoogleCalendarConfigured()) {

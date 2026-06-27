@@ -147,6 +147,8 @@ export interface Lesson {
   created_by: string | null
   app_modified_at?: string | null
   google_event_updated_at?: string | null
+  sync_origin?: 'app' | 'google' | null
+  last_synced_at?: string | null
   // Joined fields
   member?: Member
   instructor?: Instructor

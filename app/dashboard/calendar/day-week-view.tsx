@@ -202,6 +202,7 @@ export function DayWeekView({
             <MonthDayPanel
               selectedDate={selectedDate}
               lessons={lessons}
+              instructors={instructors}
               members={members}
               onLessonActivate={onLessonActivate}
               onLessonEdit={onLessonEdit}
@@ -254,6 +255,7 @@ export function DayWeekView({
             <MonthDayPanel
               selectedDate={selectedDate}
               lessons={lessons}
+              instructors={instructors}
               members={members}
               onLessonActivate={onLessonActivate}
               onLessonEdit={onLessonEdit}

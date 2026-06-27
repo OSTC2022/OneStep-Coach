@@ -18,6 +18,7 @@ import {
 } from '@/lib/google-calendar/event-mapper'
 import {
   googleEventUpdatedAt,
+  preserveInstructorOnGoogleSync,
   shouldApplyGoogleEvent,
 } from '@/lib/google-calendar/sync-conflict'
 import { GOOGLE_LESSON_ID_PROPERTY } from '@/lib/google-calendar/config'
@@ -126,8 +127,10 @@ type ExistingLesson = {
   google_event_id?: string | null
   event_type?: string | null
   member_id?: string | null
+  instructor_id?: string | null
   app_modified_at?: string | null
   google_event_updated_at?: string | null
+  sync_origin?: string | null
 }
 
 export async function loadExistingByGoogleEventId(
@@ -146,7 +149,7 @@ export async function loadExistingByGoogleEventId(
     const chunk = googleEventIds.slice(offset, offset + chunkSize)
     let query = supabase
       .from('lessons')
-      .select('id, google_event_id, google_calendar_id, google_account_id, session_deducted, event_type, member_id, app_modified_at, google_event_updated_at')
+      .select('id, google_event_id, google_calendar_id, google_account_id, session_deducted, event_type, member_id, instructor_id, app_modified_at, google_event_updated_at, sync_origin')
       .in('google_event_id', chunk)
 
     if (options?.googleAccountId) {
@@ -172,8 +175,10 @@ export async function loadExistingByGoogleEventId(
           google_event_id: row.google_event_id,
           event_type: row.event_type,
           member_id: row.member_id,
+          instructor_id: row.instructor_id as string | null | undefined,
           app_modified_at: row.app_modified_at as string | null | undefined,
           google_event_updated_at: row.google_event_updated_at as string | null | undefined,
+          sync_origin: row.sync_origin as string | null | undefined,
         })
       }
     }
@@ -196,7 +201,7 @@ export async function enrichExistingMapFromGoogleLessonIds(
     const { data, error } = await supabase
       .from('lessons')
       .select(
-        'id, google_event_id, session_deducted, event_type, member_id, app_modified_at, google_event_updated_at',
+        'id, google_event_id, session_deducted, event_type, member_id, instructor_id, app_modified_at, google_event_updated_at, sync_origin',
       )
       .eq('id', lessonId)
       .maybeSingle()
@@ -388,6 +393,36 @@ function withGoogleEventTimestamp(
   const updated = googleEventUpdatedAt(event)
   if (!updated) return payload
   return { ...payload, google_event_updated_at: updated }
+}
+
+function withGoogleSyncMetadata(
+  payload: Record<string, unknown>,
+  event: GoogleCalendarEvent,
+): Record<string, unknown> {
+  const now = new Date().toISOString()
+  return {
+    ...withGoogleEventTimestamp(payload, event),
+    sync_origin: 'google',
+    last_synced_at: now,
+  }
+}
+
+function applyGoogleUpdatePayload<
+  T extends Record<string, unknown>,
+>(
+  payload: T,
+  existing: {
+    member_id?: string | null
+    app_modified_at?: string | null
+    google_event_updated_at?: string | null
+    sync_origin?: string | null
+    instructor_id?: string | null
+  } | null | undefined,
+): T {
+  return preserveInstructorOnGoogleSync(
+    preserveLinkedMemberOnGoogleSync(payload, existing?.member_id),
+    existing,
+  ) as T
 }
 
 function buildGoogleLessonBase(
@@ -762,12 +797,12 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
-      const updatePayload = preserveLinkedMemberOnGoogleSync(
-        withGoogleEventTimestamp(
+      const updatePayload = applyGoogleUpdatePayload(
+        withGoogleSyncMetadata(
           withGoogleSyncKeys(payload, googleAccountId, calendarId),
           event,
         ),
-        existing.member_id,
+        existing,
       )
       const { error } = await supabase
         .from('lessons')
@@ -787,7 +822,7 @@ async function applyGoogleEventsChunk(
 
     const saved = await upsertGoogleLessonRow(
       supabase,
-      withGoogleEventTimestamp(payload, event),
+      withGoogleSyncMetadata(payload, event),
       googleAccountId,
       calendarId,
       existing,
@@ -880,12 +915,12 @@ async function applyGoogleEventsChunk(
     }
 
     if (existing) {
-      const updatePayload = preserveLinkedMemberOnGoogleSync(
-        withGoogleEventTimestamp(
+      const updatePayload = applyGoogleUpdatePayload(
+        withGoogleSyncMetadata(
           withGoogleSyncKeys(payload, googleAccountId, calendarId),
           event,
         ),
-        existing.member_id,
+        existing,
       )
       const { error } = await supabase
         .from('lessons')
@@ -909,12 +944,12 @@ async function applyGoogleEventsChunk(
           result.skipped += 1
           continue
         }
-        const updatePayload = preserveLinkedMemberOnGoogleSync(
-          withGoogleEventTimestamp(
+        const updatePayload = applyGoogleUpdatePayload(
+          withGoogleSyncMetadata(
             withGoogleSyncKeys(payload, googleAccountId, calendarId),
             event,
           ),
-          dupe.member_id,
+          dupe,
         )
         await supabase
           .from('lessons')
@@ -928,7 +963,7 @@ async function applyGoogleEventsChunk(
     try {
       const saved = await upsertGoogleLessonRow(
         supabase,
-        withGoogleEventTimestamp(payload, event),
+        withGoogleSyncMetadata(payload, event),
         googleAccountId,
         calendarId,
         existing,
@@ -1003,7 +1038,7 @@ async function applyGoogleEventsChunk(
     }
 
     singleUpsertRows.push(
-      withGoogleEventTimestamp(
+      withGoogleSyncMetadata(
         withGoogleSyncKeys(
           {
             ...payload,

@@ -34,6 +34,7 @@ import {
   loadExistingByGoogleEventId,
 } from '@/lib/google-calendar/sync-apply'
 import { dedupeGoogleCalendarLessons } from '@/lib/google-calendar/sync-dedupe'
+import { revalidateLessonViews } from '@/lib/lesson-data-sync'
 import {
   buildGoogleCalendarSyncDetail,
   emptyRunStats,
@@ -554,6 +555,15 @@ export async function syncGoogleCalendarLessons(options?: {
               .map((event) => event.id)
               .filter((id): id is string => Boolean(id))
 
+            if (options?.reason) {
+              console.info('[google-calendar] sync batch', {
+                reason: options.reason,
+                calendarId: calendar.calendarId,
+                fetched: events.length,
+                google_event_ids: googleEventIds.slice(0, 20),
+              })
+            }
+
             const existingMap = await loadExistingByGoogleEventId(supabase, googleEventIds, {
               googleAccountId,
               googleCalendarId: calendar.calendarId,
@@ -677,6 +687,15 @@ export async function syncGoogleCalendarLessons(options?: {
 
     if (syncStatus === 'failure') {
       throw new Error(buildSyncStatusMessage(calendarOutcomes))
+    }
+
+    if (countGoogleSyncChanges(aggregated) > 0 || deduped > 0) {
+      revalidateLessonViews()
+      console.info('[lesson-sync] cache invalidation', {
+        reason: options?.reason ?? 'sync',
+        changed: countGoogleSyncChanges(aggregated),
+        deduped,
+      })
     }
 
     return aggregated

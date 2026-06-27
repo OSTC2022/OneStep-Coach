@@ -185,9 +185,14 @@ export function LessonCalendar({
       normalizeCalendarLessonsForDisplay(
         mergeLessonsById(searchPoolLessons, lessons)
           .filter((item) => item.event_type !== 'recurring_master')
-          .map((item) => enrichLessonWithMemberCatalog(item, members)),
+          .map((item) =>
+            enrichLessonWithInstructorCatalog(
+              enrichLessonWithMemberCatalog(item, members),
+              instructors,
+            ),
+          ),
       ),
-    [searchPoolLessons, lessons, members],
+    [searchPoolLessons, lessons, members, instructors],
   )
 
   const lessonsWithEditPreview = useMemo(() => {
@@ -1287,6 +1292,7 @@ export function LessonCalendar({
             selectedDate={agendaSelectedDate}
             onSelectDate={setAgendaSelectedDate}
             lessons={filteredLessons}
+            instructors={instructors}
             members={members}
             onMemoSubmit={handleMemoSubmit}
             onLessonActivate={handleLessonActivate}

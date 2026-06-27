@@ -17,6 +17,13 @@ import {
 import { ko } from 'date-fns/locale'
 import { Lesson, Instructor, AttendanceStatus } from '@/types/database'
 import { getLessonsForStatusView, updateLesson } from '@/lib/actions/lessons'
+import { pullGoogleCalendarChanges } from '@/lib/actions/google-calendar-sync'
+import { invalidateAllCalendarCache } from '@/lib/calendar-data-store'
+import {
+  enrichLessonWithInstructorCatalog,
+  resolveLessonInstructorName,
+  resolveLessonDisplayColor,
+} from '@/lib/instructor-colors'
 import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
 import { isEditableTarget, matchCalendarUndoRedo } from '@/lib/calendar-shortcuts'
 import {
@@ -91,7 +98,6 @@ import {
   AUTO_INSTRUCTOR_BORDER_COLOR,
   getInstructorCalendarColor,
   isAutoAssignedLesson,
-  resolveLessonDisplayColor,
 } from '@/lib/instructor-colors'
 import {
   CalendarDays,
@@ -295,12 +301,7 @@ const AthleteTile = memo(function AthleteTile({
   const lessonTypeLabel = normalizeLessonType(lesson.lesson_type)
   const canEndLesson = isPresentMarked && !completed && !isCancelled
   const isGuestTrialMarked = lesson.lesson_type === '체험레슨' && !isCancelled
-  const instructorName =
-    lesson.instructor?.name ??
-    (lesson.instructor_id
-      ? instructorLookup.get(lesson.instructor_id)?.name
-      : undefined) ??
-    '—'
+  const instructorName = resolveLessonInstructorName(lesson, [...instructorLookup.values()])
   const memberPickerOptions = useMemo(
     () =>
       lesson.member
@@ -1326,6 +1327,15 @@ export function LessonStatusView({
     window.history.replaceState(null, '', `/dashboard/lesson-status?${params}`)
   }, [])
 
+  const enrichForDisplay = useCallback(
+    (rows: Lesson[]) =>
+      sortLessonsForStatusDisplay(
+        rows.map((lesson) => enrichLessonWithInstructorCatalog(lesson, instructors)),
+        instructors,
+      ),
+    [instructors],
+  )
+
   const loadLessons = useCallback(
     async (anchorDate: string, mode: LessonStatusViewMode) => {
       setIsLoadingDate(true)
@@ -1334,7 +1344,7 @@ export function LessonStatusView({
           const nextLessons = await getLessonsForStatusView({
             date: anchorDate,
           })
-          setLessons(sortLessonsForStatusDisplay(nextLessons, instructors))
+          setLessons(enrichForDisplay(nextLessons))
           return
         }
         const { dateFrom, dateTo } = getRangeForView(
@@ -1345,7 +1355,7 @@ export function LessonStatusView({
           dateFrom,
           dateTo,
         })
-        setLessons(sortLessonsForStatusDisplay(nextLessons, instructors))
+        setLessons(enrichForDisplay(nextLessons))
       } catch {
         toast.error('수업 목록을 불러오지 못했습니다.')
       } finally {
@@ -1353,7 +1363,7 @@ export function LessonStatusView({
         clearHistoryRef.current()
       }
     },
-    [instructors],
+    [enrichForDisplay],
   )
 
   useEffect(() => {
@@ -1369,10 +1379,12 @@ export function LessonStatusView({
     if (isRefreshing || isLoadingDate) return
     setIsRefreshing(true)
     try {
+      await pullGoogleCalendarChanges()
+      invalidateAllCalendarCache()
       await loadLessons(currentDate, viewMode)
       router.refresh()
       toast.success('새로고침 완료', {
-        description: '앱 캘린더와 동일한 일정을 다시 불러왔습니다.',
+        description: 'Google 동기화 후 최신 일정을 불러왔습니다.',
       })
     } catch {
       toast.error('새로고침 실패', {

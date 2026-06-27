@@ -463,6 +463,7 @@ function buildInsertPayload(
     lesson_no: lessonNo,
     created_by: userId,
     app_modified_at: touchAppModifiedAt(),
+    sync_origin: 'app',
   }
 
   if (options?.recurrenceGroupId !== undefined) {
@@ -763,7 +764,7 @@ export async function getLessonsForStatusView(options: {
   const { lessons } = await fetchExpandedCalendarLessons(
     dateFrom,
     dateTo,
-    options.limit ?? 200,
+    options.limit ?? 400,
     { forStatusPage: true },
   )
 
@@ -1305,6 +1306,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   let titleForFallback: string | null = null
 
   payload.app_modified_at = touchAppModifiedAt()
+  payload.sync_origin = 'app'
 
   if ('member_id' in updates || 'title' in updates) {
     const enriched = await enrichLessonIdentity(supabase, {
@@ -1328,6 +1330,14 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     if (enriched.sessionPackageId && !updates.session_package_id) {
       payload.session_package_id = enriched.sessionPackageId
     }
+  }
+
+  if ('instructor_id' in updates) {
+    console.info('[lesson-sync] instructor change', {
+      lesson_id: id,
+      instructor_id: updates.instructor_id ?? null,
+      sync_origin: 'app',
+    })
   }
 
   let warning: string | undefined
@@ -1432,6 +1442,7 @@ export async function markAttendance(
 function buildLessonUpdatePayload(updates: Partial<LessonFormData>) {
   const payload: Record<string, unknown> = { ...updates }
   payload.app_modified_at = touchAppModifiedAt()
+  payload.sync_origin = 'app'
 
   if ('instructor_id' in updates) {
     payload.instructor_id = updates.instructor_id?.trim() || null

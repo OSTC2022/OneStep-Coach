@@ -121,6 +121,14 @@ export function resolveLessonInstructor(
   return null
 }
 
+/** instructor_id 기준 이름 (join보다 catalog 우선) */
+export function resolveLessonInstructorName(
+  lesson: Pick<Lesson, 'instructor_id' | 'instructor'>,
+  instructors?: ReadonlyArray<InstructorColorSource>,
+): string {
+  return resolveLessonInstructor(lesson, instructors)?.name ?? '—'
+}
+
 export function enrichLessonWithInstructorCatalog<T extends Lesson>(
   lesson: T,
   instructors?: ReadonlyArray<InstructorColorSource>,

@@ -13,6 +13,9 @@ export type LessonSlotDedupeRow = LessonAttendanceRow & {
   event_status?: string | null
   event_type?: string | null
   created_at?: string | null
+  app_modified_at?: string | null
+  sync_origin?: string | null
+  instructor_id?: string | null
 }
 
 /** 같은 날·시간·회원(또는 제목) 슬롯 키 */
@@ -56,6 +59,12 @@ export function scoreLessonForSlotDedupe(lesson: LessonSlotDedupeRow): number {
   if (lesson.event_type === 'exception') score += 60
   if (lesson.event_type === 'materialized') score += 40
   if (lesson.end_time) score += 20
+  if (lesson.sync_origin === 'app') score += 150
+
+  if (lesson.app_modified_at) {
+    const ts = new Date(lesson.app_modified_at).getTime()
+    if (!Number.isNaN(ts)) score += ts / 1e12
+  }
 
   if (lesson.created_at) {
     const ts = new Date(lesson.created_at).getTime()
