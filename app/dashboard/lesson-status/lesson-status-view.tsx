@@ -1392,13 +1392,20 @@ export function LessonStatusView({
     if (isRefreshing || isLoadingDate) return
     setIsRefreshing(true)
     try {
-      await pullGoogleCalendarChanges()
-      invalidateAllCalendarCache()
       await loadLessons(currentDate, viewMode)
-      router.refresh()
-      toast.success('새로고침 완료', {
-        description: 'Google 동기화 후 최신 일정을 불러왔습니다.',
-      })
+      toast.success('새로고침 완료')
+
+      void pullGoogleCalendarChanges()
+        .then(async (pull) => {
+          if (!pull.changed) return
+          invalidateAllCalendarCache()
+          await loadLessons(currentDate, viewMode)
+          router.refresh()
+          toast.info('Google 일정 반영', {
+            description: `${pull.changed}건 변경이 반영되었습니다.`,
+          })
+        })
+        .catch(() => {})
     } catch {
       toast.error('새로고침 실패', {
         description: '일정을 다시 불러오지 못했습니다.',

@@ -85,16 +85,36 @@ async function purgeCancelledRecurrenceExceptions() {
   }
 }
 
+const MAINTENANCE_COOLDOWN_MS = 30 * 60 * 1000
+let lastMaintenanceAt = 0
+let maintenanceInFlight = false
+
+/** 읽기 요청을 막지 않도록 백그라운드에서만 주기적 정리 (수업현황 조회는 생략) */
+function scheduleCalendarLessonMaintenance(options?: { forStatusPage?: boolean }) {
+  if (options?.forStatusPage) return
+
+  const now = Date.now()
+  if (maintenanceInFlight || now - lastMaintenanceAt < MAINTENANCE_COOLDOWN_MS) return
+
+  maintenanceInFlight = true
+  lastMaintenanceAt = now
+  void (async () => {
+    try {
+      await purgeUnnamedRecurringMasters()
+      await purgeCancelledRecurrenceExceptions()
+    } finally {
+      maintenanceInFlight = false
+    }
+  })()
+}
+
 export async function fetchExpandedCalendarLessons(
   dateFrom: string,
   dateTo: string,
   limit = 300,
   options?: { forStatusPage?: boolean },
 ): Promise<{ lessons: Lesson[]; supportsExpansion: boolean }> {
-  await purgeUnnamedRecurringMasters()
-  if (!options?.forStatusPage) {
-    await purgeCancelledRecurrenceExceptions()
-  }
+  scheduleCalendarLessonMaintenance(options)
 
   const supabase = await createStaffDataClient()
 
