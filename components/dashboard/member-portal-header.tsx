@@ -20,6 +20,10 @@ import { MemberBoardPopover } from '@/components/dashboard/member-board-popover'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
+import {
+  DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
+  DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
+} from '@/lib/running-league/adult-running-portal-defaults'
 import type { User } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -31,11 +35,11 @@ function portalTitle(pathname: string, hash: string, role?: string | null): stri
     return hash === '#today-record' ? (isAdult ? '컨디션' : '오늘 기록') : isAdult ? '컨디션' : '리포트'
   }
   if (pathname.startsWith('/dashboard/my/sessions')) return '수업'
-  return isAdult ? '내 러닝 포털' : '내 선수 리포트'
+  return isAdult ? DEFAULT_ADULT_RUNNING_PORTAL_TITLE : '내 선수 리포트'
 }
 
 function portalBrandLabel(role?: string | null): string {
-  return role === 'adult_member' ? 'OneStep Running' : 'OneStep Athlete'
+  return role === 'adult_member' ? DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL : 'OneStep Athlete'
 }
 
 interface MemberPortalHeaderProps {

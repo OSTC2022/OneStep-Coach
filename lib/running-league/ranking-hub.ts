@@ -41,7 +41,7 @@ export function buildFilteredPortalRankings(
   const mileageLogs = period
     ? filterMileageLogsForPeriod(bundle.mileageLogs, period)
     : bundle.mileageLogs
-  const asOfDate = period?.end ?? null
+  const asOfDate = period?.asOfDate ?? period?.end ?? null
 
   return {
     pbByDistance: {

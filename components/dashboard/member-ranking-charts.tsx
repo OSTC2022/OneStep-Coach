@@ -390,8 +390,8 @@ export function graphRankingViewForChartTab(tab: GraphChartTab): RankingView | n
 
 const GRAPH_CHART_TABS: Array<{ value: GraphChartTab; label: string; fireLabel?: boolean }> = [
   { value: 'mileage', label: '마일리지' },
-  { value: 'record', label: '기록' },
   { value: 'beat_rival', label: '이겨라', fireLabel: true },
+  { value: 'record', label: '기록' },
 ]
 
 function GraphChartTabs({

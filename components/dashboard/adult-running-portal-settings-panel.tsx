@@ -10,7 +10,12 @@ import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
 } from '@/lib/running-league/adult-running-portal-defaults'
-import { toRankingMonthKey } from '@/lib/running-league/ranking-period'
+import type {
+  AdultRunningPortalHeaderStyle,
+  PortalTextStyleConfig,
+} from '@/lib/running-league/adult-running-portal-styles'
+import { PORTAL_TEXT_ALIGN_OPTIONS } from '@/lib/running-league/adult-running-portal-styles'
+import { PortalTextStyleFields } from '@/components/dashboard/portal-text-style-fields'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -25,6 +30,7 @@ import {
 } from '@/components/ui/select'
 
 const NONE_VALUE = '__none__'
+const DEFAULT_OPTION = '__default__'
 
 export function AdultRunningPortalSettingsPanel({
   settings,
@@ -37,10 +43,14 @@ export function AdultRunningPortalSettingsPanel({
   const [portalTitle, setPortalTitle] = useState(settings.portalTitle)
   const [notice, setNotice] = useState(settings.notice ?? '')
   const [beatRivalMemberId, setBeatRivalMemberId] = useState(settings.beatRivalMemberId ?? NONE_VALUE)
-  const [rankingReferenceMonth, setRankingReferenceMonth] = useState(
-    toRankingMonthKey(settings.rankingReferenceDate) ?? '',
+  const [rankingReferenceDate, setRankingReferenceDate] = useState(
+    settings.rankingReferenceDate?.slice(0, 10) ?? '',
   )
   const [rankingCaption, setRankingCaption] = useState(settings.rankingCaption ?? '')
+  const [headerStyle, setHeaderStyle] = useState<AdultRunningPortalHeaderStyle>(settings.headerStyle)
+  const [rankingCaptionStyle, setRankingCaptionStyle] = useState<PortalTextStyleConfig>(
+    settings.rankingCaptionStyle,
+  )
 
   function handleSave() {
     startTransition(async () => {
@@ -50,10 +60,10 @@ export function AdultRunningPortalSettingsPanel({
         notice,
         beatRivalMemberId: beatRivalMemberId === NONE_VALUE ? null : beatRivalMemberId,
         leagueId: settings.leagueId,
-        rankingReferenceDate: rankingReferenceMonth
-          ? `${rankingReferenceMonth}-01`
-          : null,
+        rankingReferenceDate: rankingReferenceDate || null,
         rankingCaption,
+        headerStyle,
+        rankingCaptionStyle,
       })
 
       if (!result.ok) {
@@ -101,6 +111,56 @@ export function AdultRunningPortalSettingsPanel({
           </div>
         </div>
 
+        <div className="space-y-3 rounded-lg border border-lime-500/15 bg-black/10 p-3">
+          <div>
+            <p className="text-sm font-semibold text-lime-100">헤더 스타일</p>
+            <p className="text-[11px] text-zinc-500">
+              상단 리그 문구·포털 제목의 색상, 크기, 정렬을 설정합니다.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[11px] text-zinc-400">헤더 전체 정렬</Label>
+            <Select
+              value={headerStyle.containerAlign ?? DEFAULT_OPTION}
+              onValueChange={(next) =>
+                setHeaderStyle((current) => ({
+                  ...current,
+                  containerAlign:
+                    next === DEFAULT_OPTION
+                      ? null
+                      : (next as AdultRunningPortalHeaderStyle['containerAlign']),
+                }))
+              }
+            >
+              <SelectTrigger className="border-lime-500/20 bg-black/40">
+                <SelectValue placeholder="기본값 (왼쪽)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_OPTION}>기본값 (왼쪽)</SelectItem>
+                {PORTAL_TEXT_ALIGN_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <PortalTextStyleFields
+            label="리그 문구"
+            value={headerStyle.leagueLabel ?? {}}
+            onChange={(next) =>
+              setHeaderStyle((current) => ({ ...current, leagueLabel: next }))
+            }
+          />
+          <PortalTextStyleFields
+            label="포털 제목"
+            value={headerStyle.portalTitle ?? {}}
+            onChange={(next) =>
+              setHeaderStyle((current) => ({ ...current, portalTitle: next }))
+            }
+          />
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="portal-notice">공지사항</Label>
           <Textarea
@@ -115,21 +175,22 @@ export function AdultRunningPortalSettingsPanel({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="ranking-reference-month">랭킹 기본 월</Label>
+            <Label htmlFor="ranking-reference-date">랭킹 기준일 (관리자 전용)</Label>
             <Input
-              id="ranking-reference-month"
-              type="month"
-              value={rankingReferenceMonth}
-              onChange={(event) => setRankingReferenceMonth(event.target.value)}
+              id="ranking-reference-date"
+              type="date"
+              value={rankingReferenceDate}
+              onChange={(event) => setRankingReferenceDate(event.target.value)}
               className="border-lime-500/20 bg-black/40"
             />
             <p className="text-[11px] text-zinc-500">
-              비우면 매월 자동(당월) 기준입니다.{' '}
-              {rankingReferenceMonth ? (
+              회원 화면에는 기간만 표시됩니다. 비우면 당월 전체, 1일만 지정하면 해당 월 전체, 특정 일을
+              지정하면 그날까지 집계됩니다.{' '}
+              {rankingReferenceDate ? (
                 <button
                   type="button"
                   className="text-lime-300/80 underline-offset-2 hover:underline"
-                  onClick={() => setRankingReferenceMonth('')}
+                  onClick={() => setRankingReferenceDate('')}
                 >
                   기본(당월)으로
                 </button>
@@ -147,6 +208,12 @@ export function AdultRunningPortalSettingsPanel({
             />
           </div>
         </div>
+
+        <PortalTextStyleFields
+          label="랭킹 한줄 문구 스타일"
+          value={rankingCaptionStyle}
+          onChange={setRankingCaptionStyle}
+        />
 
         <div className="space-y-2">
           <Label htmlFor="beat-rival-member">이겨라 대상 회원</Label>

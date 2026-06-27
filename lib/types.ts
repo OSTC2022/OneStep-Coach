@@ -229,6 +229,8 @@ export interface CenterSettings {
   adult_running_portal_notice?: string | null
   adult_running_portal_ranking_reference_date?: string | null
   adult_running_portal_ranking_caption?: string | null
+  adult_running_portal_header_style?: Record<string, unknown> | null
+  adult_running_portal_ranking_caption_style?: Record<string, unknown> | null
   updated_at: string
 }
 

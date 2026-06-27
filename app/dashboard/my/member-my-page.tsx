@@ -161,6 +161,7 @@ export function MemberMyPage({
           <MemberPortalBrandHeader
             leagueLabel={portalDisplay?.leagueLabel}
             portalTitle={portalDisplay?.portalTitle}
+            headerStyle={portalDisplay?.headerStyle}
           />
           <MemberPortalNoticePanel notice={portalDisplay?.notice} />
           <MemberRunningLeagueTrainingSchedule
@@ -194,6 +195,8 @@ export function MemberMyPage({
               portalTitle={portalDisplay?.portalTitle}
               portalRankingReferenceDate={portalDisplay?.rankingReferenceDate ?? null}
               portalRankingCaption={portalDisplay?.rankingCaption ?? null}
+              portalHeaderStyle={portalDisplay?.headerStyle}
+              portalRankingCaptionStyle={portalDisplay?.rankingCaptionStyle}
               showBrandHeader={false}
               showPortalShell={false}
             />

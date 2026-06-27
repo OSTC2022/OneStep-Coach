@@ -1,12 +1,20 @@
 'use server'
 
 import { requireRole } from '@/lib/actions/auth'
-import { getCenterSettingsCached } from '@/lib/data/center-settings-read'
+import {
+  getCenterSettingsCached,
+  readAdultRunningPortalHeaderStyle,
+  readAdultRunningPortalRankingCaptionStyle,
+} from '@/lib/data/center-settings-read'
 import { ensureCenterPortalRankingLeague } from '@/lib/running-league/center-portal-ranking-league'
 import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
 } from '@/lib/running-league/adult-running-portal-defaults'
+import type {
+  AdultRunningPortalHeaderStyle,
+  PortalTextStyleConfig,
+} from '@/lib/running-league/adult-running-portal-styles'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { updateRunningLeagueBeatRivalMember } from '@/lib/actions/running-league'
@@ -21,6 +29,8 @@ export type AdultRunningPortalDisplaySettings = {
   beatRivalMemberId: string | null
   rankingReferenceDate: string | null
   rankingCaption: string | null
+  headerStyle: AdultRunningPortalHeaderStyle
+  rankingCaptionStyle: PortalTextStyleConfig
 }
 
 export type AdultRunningPortalAdminSettings = AdultRunningPortalDisplaySettings & {
@@ -48,6 +58,8 @@ function mapDisplayFromCenter(
     beatRivalMemberId,
     rankingReferenceDate: center.adult_running_portal_ranking_reference_date ?? null,
     rankingCaption: center.adult_running_portal_ranking_caption?.trim() || null,
+    headerStyle: readAdultRunningPortalHeaderStyle(center),
+    rankingCaptionStyle: readAdultRunningPortalRankingCaptionStyle(center),
   }
 }
 
@@ -92,6 +104,8 @@ export async function updateAdultRunningPortalSettings(input: {
   leagueId?: string | null
   rankingReferenceDate?: string | null
   rankingCaption?: string | null
+  headerStyle?: AdultRunningPortalHeaderStyle
+  rankingCaptionStyle?: PortalTextStyleConfig
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireRole(['admin'])
   const supabase = await settingsClient()
@@ -105,6 +119,10 @@ export async function updateAdultRunningPortalSettings(input: {
     : null
 
   const current = await getCenterSettingsCached()
+  const headerStyle = input.headerStyle ?? readAdultRunningPortalHeaderStyle(current)
+  const rankingCaptionStyle =
+    input.rankingCaptionStyle ?? readAdultRunningPortalRankingCaptionStyle(current)
+
   const { error } = await supabase.from('center_settings').upsert({
     id: CENTER_SETTINGS_ID,
     name: current.name,
@@ -121,6 +139,8 @@ export async function updateAdultRunningPortalSettings(input: {
     adult_running_portal_notice: notice,
     adult_running_portal_ranking_reference_date: rankingReferenceDate,
     adult_running_portal_ranking_caption: rankingCaption,
+    adult_running_portal_header_style: headerStyle,
+    adult_running_portal_ranking_caption_style: rankingCaptionStyle,
     updated_at: new Date().toISOString(),
   })
 

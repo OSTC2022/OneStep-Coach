@@ -15,6 +15,9 @@ export type RankingPeriod = {
   end: string
   label: string
   monthKey: string
+  /** 월 전체 vs 특정 일 기준 */
+  mode: 'month' | 'day'
+  asOfDate: string
 }
 
 export function toRankingMonthKey(value: Date | string | null | undefined): string | null {
@@ -32,29 +35,44 @@ export function resolveEffectiveRankingMonth(
   memberMonthKey: string | null | undefined,
   adminReferenceDate: string | null | undefined,
 ): { monthKey: string; reference: Date; auto: boolean } {
-  if (memberMonthKey) {
-    return {
-      monthKey: memberMonthKey,
-      reference: parseISO(`${memberMonthKey}-01`),
-      auto: false,
-    }
-  }
-
-  const adminMonthKey = toRankingMonthKey(adminReferenceDate)
-  if (adminMonthKey) {
-    return {
-      monthKey: adminMonthKey,
-      reference: parseISO(`${adminMonthKey}-01`),
-      auto: true,
-    }
-  }
-
-  const now = new Date()
+  const resolved = resolveEffectiveRankingPeriod(memberMonthKey, null, adminReferenceDate)
   return {
-    monthKey: format(now, 'yyyy-MM'),
-    reference: now,
-    auto: true,
+    monthKey: resolved.period.monthKey,
+    reference: parseISO(resolved.period.end),
+    auto: resolved.auto,
   }
+}
+
+/** 월 지정 · 일 지정 · 미지정(자동 월별) */
+export function resolveEffectiveRankingPeriod(
+  memberMonthKey: string | null | undefined,
+  memberAsOfDate: string | null | undefined,
+  adminReferenceDate: string | null | undefined,
+): { period: RankingPeriod; auto: boolean } {
+  const memberDate = memberAsOfDate?.trim().slice(0, 10) || null
+  const memberMonth = memberMonthKey?.trim() || null
+
+  if (memberDate) {
+    return { period: rankingPeriodFromDayKey(memberDate), auto: false }
+  }
+  if (memberMonth) {
+    return { period: rankingPeriodFromMonthKey(memberMonth), auto: false }
+  }
+
+  const adminDate = adminReferenceDate?.trim().slice(0, 10) || null
+  if (adminDate) {
+    const parsed = parseISO(adminDate)
+    if (parsed.getDate() !== 1) {
+      return { period: rankingPeriodFromDayKey(adminDate), auto: true }
+    }
+    const monthKey = toRankingMonthKey(adminDate)
+    if (monthKey) {
+      return { period: rankingPeriodFromMonthKey(monthKey), auto: true }
+    }
+  }
+
+  const monthKey = format(new Date(), 'yyyy-MM')
+  return { period: rankingPeriodFromMonthKey(monthKey), auto: true }
 }
 
 export function rankingPeriodFromMonthKey(monthKey: string): RankingPeriod {
@@ -65,6 +83,23 @@ export function rankingPeriodFromMonthKey(monthKey: string): RankingPeriod {
     end,
     label: formatCurrentMonthRankingLabel(reference),
     monthKey,
+    mode: 'month',
+    asOfDate: end,
+  }
+}
+
+export function rankingPeriodFromDayKey(dateKey: string): RankingPeriod {
+  const normalized = dateKey.slice(0, 10)
+  const reference = parseISO(normalized)
+  const { start } = currentMonthDateRange(reference)
+  const monthKey = format(reference, 'yyyy-MM')
+  return {
+    start,
+    end: normalized,
+    label: format(reference, 'yyyy년 M월 d일', { locale: ko }),
+    monthKey,
+    mode: 'day',
+    asOfDate: normalized,
   }
 }
 

@@ -6,12 +6,20 @@ import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
 } from '@/lib/running-league/adult-running-portal-defaults'
+import {
+  parseAdultRunningPortalHeaderStyle,
+  parsePortalTextStyleConfig,
+  type AdultRunningPortalHeaderStyle,
+  type PortalTextStyleConfig,
+} from '@/lib/running-league/adult-running-portal-styles'
 import type { CenterSettings } from '@/lib/types'
+
+export type { AdultRunningPortalHeaderStyle, PortalTextStyleConfig }
 
 const CENTER_SETTINGS_ID = 'default'
 
 const CENTER_SETTINGS_SELECT =
-  'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, adult_running_portal_league_label, adult_running_portal_title, adult_running_portal_notice, adult_running_portal_ranking_reference_date, adult_running_portal_ranking_caption, updated_at'
+  'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, adult_running_portal_league_label, adult_running_portal_title, adult_running_portal_notice, adult_running_portal_ranking_reference_date, adult_running_portal_ranking_caption, adult_running_portal_header_style, adult_running_portal_ranking_caption_style, updated_at'
 
 const CENTER_SETTINGS_SELECT_LEGACY =
   'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, updated_at'
@@ -32,6 +40,8 @@ export const DEFAULT_CENTER_SETTINGS: CenterSettings = {
   adult_running_portal_notice: null,
   adult_running_portal_ranking_reference_date: null,
   adult_running_portal_ranking_caption: null,
+  adult_running_portal_header_style: null,
+  adult_running_portal_ranking_caption_style: null,
   updated_at: new Date().toISOString(),
 }
 
@@ -58,8 +68,24 @@ export function normalizeCenterSettingsRow(data: Record<string, unknown>): Cente
       (data.adult_running_portal_ranking_reference_date as string | null) ?? null,
     adult_running_portal_ranking_caption:
       (data.adult_running_portal_ranking_caption as string | null)?.trim() || null,
+    adult_running_portal_header_style:
+      (data.adult_running_portal_header_style as Record<string, unknown> | null) ?? null,
+    adult_running_portal_ranking_caption_style:
+      (data.adult_running_portal_ranking_caption_style as Record<string, unknown> | null) ?? null,
     updated_at: String(data.updated_at ?? new Date().toISOString()),
   }
+}
+
+export function readAdultRunningPortalHeaderStyle(
+  center: Pick<CenterSettings, 'adult_running_portal_header_style'>,
+): AdultRunningPortalHeaderStyle {
+  return parseAdultRunningPortalHeaderStyle(center.adult_running_portal_header_style)
+}
+
+export function readAdultRunningPortalRankingCaptionStyle(
+  center: Pick<CenterSettings, 'adult_running_portal_ranking_caption_style'>,
+): PortalTextStyleConfig {
+  return parsePortalTextStyleConfig(center.adult_running_portal_ranking_caption_style)
 }
 
 function isMissingPortalSettingsColumnError(error: { code?: string; message?: string } | null): boolean {

@@ -4,8 +4,8 @@ export type RankingView = 'mileage' | 'pb' | 'beat_rival'
 
 export const RANKING_VIEW_OPTIONS: Array<{ value: RankingView; label: string }> = [
   { value: 'mileage', label: '월 마일리지' },
-  { value: 'pb', label: 'PB 랭킹' },
   { value: 'beat_rival', label: '이겨라' },
+  { value: 'pb', label: 'PB 랭킹' },
 ]
 
 export function getRankingViewDescription(view: RankingView): string {
