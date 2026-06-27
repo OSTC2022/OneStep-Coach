@@ -282,3 +282,32 @@ html.onestep-splash-active body {
     content: '...';
   }
 }
+
+@keyframes beat-rival-fire-flicker {
+  0%,
+  100% {
+    color: #fbbf24;
+    text-shadow:
+      0 0 4px #f97316,
+      0 0 10px #ef4444,
+      0 0 18px rgba(239, 68, 68, 0.55);
+  }
+  33% {
+    color: #fde047;
+    text-shadow:
+      0 0 6px #fb923c,
+      0 0 14px #dc2626,
+      0 0 22px rgba(251, 146, 60, 0.65);
+  }
+  66% {
+    color: #fb923c;
+    text-shadow:
+      0 0 5px #f97316,
+      0 0 12px #b91c1c,
+      0 0 20px rgba(249, 115, 22, 0.6);
+  }
+}
+
+.beat-rival-fire-badge {
+  animation: beat-rival-fire-flicker 1.15s ease-in-out infinite;
+}

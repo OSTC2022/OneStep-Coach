@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createMember, deleteMember, getMembers, toggleMemberStatus } from '@/lib/actions/members'
+import { createSessionPackage } from '@/lib/actions/sessions'
 import { getInstructors } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import {
@@ -20,6 +21,13 @@ import {
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
+import {
+  EMPTY_MEMBER_INITIAL_SESSION_PACKAGE,
+  hasMemberInitialSessionPackageDraft,
+  MemberInitialSessionPackageSection,
+  parseMemberInitialSessionPackageDraft,
+  type MemberInitialSessionPackageDraft,
+} from '@/components/members/member-initial-session-package-section'
 import { Member, Instructor, MemberFormData } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -259,9 +267,24 @@ export function MemberList({
     memo: '',
     primary_instructor_id: AUTO_INSTRUCTOR_ID,
   })
+  const [sessionPackageDraft, setSessionPackageDraft] =
+    useState<MemberInitialSessionPackageDraft>(EMPTY_MEMBER_INITIAL_SESSION_PACKAGE)
 
   const handleAddMember = async () => {
     if (!formData.name.trim()) return
+
+    let parsedSessionPackage:
+      | { total_sessions: number; remaining_sessions: number; note?: string }
+      | null = null
+
+    if (hasMemberInitialSessionPackageDraft(sessionPackageDraft)) {
+      const parsed = parseMemberInitialSessionPackageDraft(sessionPackageDraft)
+      if ('error' in parsed) {
+        toast.error('수업권 입력 오류', { description: parsed.error })
+        return
+      }
+      parsedSessionPackage = parsed
+    }
 
     setIsLoading(true)
 
@@ -271,6 +294,23 @@ export function MemberList({
       toast.error('회원 등록 실패', { description: result.error })
       setIsLoading(false)
       return
+    }
+
+    if (result.data && parsedSessionPackage) {
+      const packageResult = await createSessionPackage({
+        member_id: result.data.id,
+        total_sessions: parsedSessionPackage.total_sessions,
+        remaining_sessions: parsedSessionPackage.remaining_sessions,
+        note: parsedSessionPackage.note,
+      })
+
+      if (packageResult.error) {
+        toast.error('회원은 등록되었으나 수업권 추가 실패', {
+          description: packageResult.error,
+        })
+        setIsLoading(false)
+        return
+      }
     }
 
     if (result.data) {
@@ -312,6 +352,7 @@ export function MemberList({
         memo: '',
         primary_instructor_id: AUTO_INSTRUCTOR_ID,
       })
+      setSessionPackageDraft(EMPTY_MEMBER_INITIAL_SESSION_PACKAGE)
       toast.success('새 회원이 등록되었습니다.')
     }
 
@@ -411,7 +452,15 @@ export function MemberList({
             </Link>
           </Button>
 
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <Dialog
+            open={isAddDialogOpen}
+            onOpenChange={(open) => {
+              setIsAddDialogOpen(open)
+              if (!open) {
+                setSessionPackageDraft(EMPTY_MEMBER_INITIAL_SESSION_PACKAGE)
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -581,6 +630,12 @@ export function MemberList({
                   placeholder="특이사항"
                 />
               </div>
+
+              <MemberInitialSessionPackageSection
+                idPrefix="quick-member-package"
+                value={sessionPackageDraft}
+                onChange={setSessionPackageDraft}
+              />
             </div>
 
             <DialogFooter>

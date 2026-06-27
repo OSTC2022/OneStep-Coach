@@ -10,6 +10,7 @@ import {
   buildLeagueRankComparisonChart,
   formatRankComparisonCaption,
 } from '@/lib/running-league/league-rank-comparison'
+import { buildLeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
 import { buildMemberMileageHistorySeries } from '@/lib/running-league/mileage-history'
 import { buildMemberMileageRankHistorySeries } from '@/lib/running-league/mileage-rank-history'
 import { formatRankingMemberName } from '@/lib/running-league/mask-member-name'
@@ -25,13 +26,13 @@ import { cn } from '@/lib/utils'
 import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-layout'
 import type { RankAspirationInsight } from '@/lib/running-league/rank-aspiration'
 
-type RankingDetailView = 'pb' | 'mileage'
+import type { RankingView } from '@/lib/running-league/ranking-view'
 
 interface MemberRankingDetailPanelProps {
   memberId: string
   memberName: string
   distance: PbLeaderboardDistance
-  rankingView?: RankingDetailView
+  rankingView?: RankingView
   genderFilter: RankingGenderFilter
   rankingBundle: MemberRunningLeagueRankingBundle | null
   highlightMemberId?: string | null
@@ -48,6 +49,7 @@ interface MemberRankingDetailPanelProps {
   mobileFilterSlot?: ReactNode
   graphChartTab?: GraphChartTab
   onGraphChartTabChange?: (tab: GraphChartTab) => void
+  beatRivalMemberId?: string | null
 }
 
 function MemberGraphSummaryHeader({
@@ -113,6 +115,7 @@ export function MemberRankingDetailPanel({
   mobileFilterSlot = null,
   graphChartTab,
   onGraphChartTabChange,
+  beatRivalMemberId = null,
 }: MemberRankingDetailPanelProps) {
   const isMobile = variant === 'mobile'
   const isMe = highlightMemberId != null && memberId === highlightMemberId
@@ -172,6 +175,15 @@ export function MemberRankingDetailPanel({
       logs: rankingBundle.mileageLogs,
     })
   }, [filteredParticipants, memberId, rankingBundle])
+
+  const mileageComparisonChart = useMemo(() => {
+    if (!rankingBundle) return null
+    return buildLeagueMileageComparisonChart({
+      participants: filteredParticipants,
+      logs: rankingBundle.mileageLogs,
+      beatRivalMemberId,
+    })
+  }, [beatRivalMemberId, filteredParticipants, rankingBundle])
 
   const graphSummary = useMemo(
     () =>
@@ -280,6 +292,7 @@ export function MemberRankingDetailPanel({
           mileagePoints={mileagePoints}
           mileageRankPoints={mileageRankPoints}
           comparisonChart={comparisonChart}
+          mileageComparisonChart={mileageComparisonChart}
           recordSummary={recordSummary}
           rankCaption={rankCaption}
           mode={rankingView}
@@ -288,6 +301,7 @@ export function MemberRankingDetailPanel({
           compact={isMobile}
           activeTab={graphChartTab}
           onActiveTabChange={onGraphChartTabChange}
+          beatRivalMemberId={beatRivalMemberId}
           className="animate-in fade-in-0 duration-300"
         />
       </div>

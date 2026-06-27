@@ -154,6 +154,13 @@ export interface Lesson {
   instructor?: Instructor
   session_package?: SessionPackage
   signature?: Signature
+  lesson_sessions?: Array<{ checked_in_at?: string | null; id?: string }>
+  attendance_record?: {
+    id: string
+    lesson_occurrence_key: string
+    status: AttendanceStatus
+    checked_in_at: string | null
+  }
 }
 
 // Form types
@@ -180,6 +187,7 @@ export interface MemberFormData {
 export interface SessionPackageFormData {
   member_id: string
   total_sessions: number
+  remaining_sessions?: number
   price?: number
   paid_at?: string | null
   expires_at?: string | null
@@ -216,6 +224,11 @@ export interface CenterSettings {
   center_address?: string | null
   business_hours?: string | null
   show_instructor_contact?: boolean
+  adult_running_portal_league_label?: string | null
+  adult_running_portal_title?: string | null
+  adult_running_portal_notice?: string | null
+  adult_running_portal_ranking_reference_date?: string | null
+  adult_running_portal_ranking_caption?: string | null
   updated_at: string
 }
 
@@ -295,6 +308,7 @@ export interface RunningLeague {
   audience: RunningLeagueAudience
   target_group: RunningLeagueTargetGroup
   board_post_id: string | null
+  beat_rival_member_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string

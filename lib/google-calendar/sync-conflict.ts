@@ -6,6 +6,8 @@ export type SyncConflictLesson = {
   session_deducted?: boolean
   sync_origin?: string | null
   instructor_id?: string | null
+  attendance_status?: string | null
+  lesson_sessions?: Array<{ checked_in_at?: string | null }> | null
 }
 
 /** 앱에서 수정 직후 Google이 덮어쓰지 못하도록 하는 유예 시간 */
@@ -17,30 +19,53 @@ function parseTs(value: string | null | undefined): number {
   return Number.isFinite(ms) ? ms : 0
 }
 
-/** Google → 앱 적용 여부 (최근 수정 시각·출처 기준) */
+function hasCheckedInSession(
+  lesson_sessions?: Array<{ checked_in_at?: string | null }> | null,
+): boolean {
+  return Boolean(lesson_sessions?.some((session) => session.checked_in_at))
+}
+
+/** Google 반복 일정 정리 시 삭제하면 안 되는 앱 출석·수정 행 */
+export function shouldPreserveLessonOnGoogleConsolidation(
+  row: Pick<
+    SyncConflictLesson,
+    'session_deducted' | 'sync_origin' | 'attendance_status' | 'lesson_sessions'
+  >,
+): boolean {
+  if (row.session_deducted) return true
+  if (row.sync_origin === 'app') return true
+  if (hasCheckedInSession(row.lesson_sessions)) return true
+  if (
+    row.attendance_status === 'cancelled' ||
+    row.attendance_status === 'absent' ||
+    row.attendance_status === 'makeup'
+  ) {
+    return true
+  }
+  return false
+}
+
+/** Google → 앱 적용 여부 (최근 수정 시각·출처 기준). Supabase 원본 정책: 기존 행은 기본 거부 */
 export function shouldApplyGoogleEvent(
   event: GoogleCalendarEvent,
   existing: SyncConflictLesson | null | undefined,
 ): boolean {
-  if (existing?.session_deducted) return false
+  if (!existing) return true
+  if (existing.session_deducted) return false
+
+  // 앱에 강사·회원·수정 이력이 있으면 Google 본문 적용 금지
+  if (existing.sync_origin === 'app') return false
+  if (existing.instructor_id) return false
+  if (existing.member_id) return false
+  if (existing.app_modified_at) return false
 
   const googleUpdatedMs = parseTs(event.updated)
-  if (!googleUpdatedMs) return true
-
-  if (!existing) return true
+  if (!googleUpdatedMs) return false
 
   const storedGoogleMs = parseTs(existing.google_event_updated_at)
   if (googleUpdatedMs <= storedGoogleMs) return false
 
-  const appModifiedMs = parseTs(existing.app_modified_at)
-  if (appModifiedMs > 0) {
-    const sinceAppEdit = Date.now() - appModifiedMs
-    if (sinceAppEdit < APP_EDIT_GRACE_MS) return false
-    if (existing.sync_origin === 'app' && appModifiedMs >= googleUpdatedMs) return false
-    if (appModifiedMs > googleUpdatedMs) return false
-  }
-
-  return true
+  return false
 }
 
 /** Google 동기화 시 instructor_id 덮어쓰기 방지 */

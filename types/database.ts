@@ -134,6 +134,7 @@ export interface MemberFormData {
 export interface SessionPackageFormData {
   member_id: string
   total_sessions: number
+  remaining_sessions?: number
   price?: number
   paid_at?: string
   expires_at?: string

@@ -264,6 +264,11 @@ export type LessonAttendanceRow = LessonScheduleTiming & {
   end_time?: string | null
   signature_id?: string | null
   lesson_sessions?: Array<{ checked_in_at?: string | null }> | null
+  attendance_record?: {
+    id: string
+    status?: string | null
+    checked_in_at?: string | null
+  } | null
 }
 
 /** 종료·서명(또는 세션 차감)이 기록된 완료 수업 */
@@ -277,6 +282,7 @@ export function isLessonCompletedRecord(
 /** 출석 버튼을 눌렀거나 종료·차감이 기록된 경우만 true (예정 end_time 제외) */
 export function isAttendanceMarked(lesson: LessonAttendanceRow): boolean {
   if (isLessonCompletedRecord(lesson)) return true
+  if (lesson.attendance_record?.checked_in_at) return true
   if (lesson.attendance_status !== 'present') return true
   if (lesson.lesson_sessions?.[0]?.checked_in_at) return true
   return false

@@ -24,6 +24,7 @@ import type { RecordChangeChartSummary } from '@/lib/running-league/ranking-impr
 import type { RankingHistoryPoint } from '@/lib/running-league/ranking-history'
 import { RANKING_EMPTY_GRAPH } from '@/lib/running-league/ranking-empty-states'
 import {
+  BEAT_RIVAL_CHART_COLOR,
   buildMemberChartColorMap,
   getMemberChartColor,
 } from '@/lib/running-league/chart-member-colors'
@@ -36,21 +37,46 @@ const LIME_MUTED = '#4d7c0f'
 const FADED_MEMBER_COLOR = '#3f4f5f'
 const FADED_MEMBER_OPACITY = 0.22
 
+function beatRivalLineDot(
+  memberId: string,
+  beatRivalMemberId?: string | null,
+): false | { r: number; fill: string; stroke: string; strokeWidth: number } {
+  if (!beatRivalMemberId || memberId !== beatRivalMemberId) return false
+  return {
+    r: 5,
+    fill: BEAT_RIVAL_CHART_COLOR,
+    stroke: '#ff4444',
+    strokeWidth: 2,
+  }
+}
+
 function TooltipMemberRow({
   color,
   name,
   value,
   emphasized = false,
+  isBeatRival = false,
 }: {
   color: string
   name: string
   value: ReactNode
   emphasized?: boolean
+  isBeatRival?: boolean
 }) {
   return (
-    <p className={cn('flex items-center gap-2', emphasized && 'font-semibold')}>
+    <p
+      className={cn(
+        'flex items-center gap-2',
+        emphasized && 'font-semibold',
+        isBeatRival &&
+          'rounded-md border border-red-500/90 px-1.5 py-0.5 shadow-[0_0_10px_rgba(239,68,68,0.55)]',
+      )}
+    >
       <span
-        className="h-2 w-2 shrink-0 rounded-full ring-1 ring-white/15"
+        className={cn(
+          'h-2 w-2 shrink-0 rounded-full ring-1 ring-white/15',
+          isBeatRival && 'ring-2 ring-red-400/80 shadow-[0_0_6px_rgba(239,68,68,0.7)]',
+        )}
         style={{ backgroundColor: color }}
         aria-hidden
       />
@@ -144,6 +170,7 @@ function RankComparisonTooltip({
   members,
   memberColorMap,
   isAggregate = false,
+  beatRivalMemberId = null,
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number; color?: string }>
@@ -151,6 +178,7 @@ function RankComparisonTooltip({
   members: LeagueRankComparisonChart['members']
   memberColorMap: Map<string, string>
   isAggregate?: boolean
+  beatRivalMemberId?: string | null
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -171,10 +199,12 @@ function RankComparisonTooltip({
     <ChartTooltipShell label={label}>
       {rows.map((row) => {
         const color = isAggregate
-          ? getMemberChartColor(row.memberId, memberColorMap)
+          ? getMemberChartColor(row.memberId, memberColorMap, beatRivalMemberId)
           : row.isSelected
             ? LIME_EMPHASIS
             : '#71717a'
+        const isBeatRival =
+          beatRivalMemberId != null && row.memberId === beatRivalMemberId
         return (
           <TooltipMemberRow
             key={row.memberId}
@@ -182,6 +212,7 @@ function RankComparisonTooltip({
             name={row.name}
             value={`${row.rank}위`}
             emphasized={!isAggregate && row.isSelected}
+            isBeatRival={isBeatRival}
           />
         )
       })}
@@ -195,12 +226,14 @@ function MileageComparisonTooltip({
   label,
   members,
   memberColorMap,
+  beatRivalMemberId = null,
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number; color?: string }>
   label?: string
   members: LeagueMileageComparisonChart['members']
   memberColorMap: Map<string, string>
+  beatRivalMemberId?: string | null
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -218,14 +251,19 @@ function MileageComparisonTooltip({
 
   return (
     <ChartTooltipShell label={label}>
-      {rows.map((row) => (
-        <TooltipMemberRow
-          key={row.memberId}
-          color={getMemberChartColor(row.memberId, memberColorMap)}
-          name={row.name}
-          value={`${row.km.toFixed(1)}km`}
-        />
-      ))}
+      {rows.map((row) => {
+        const isBeatRival =
+          beatRivalMemberId != null && row.memberId === beatRivalMemberId
+        return (
+          <TooltipMemberRow
+            key={row.memberId}
+            color={getMemberChartColor(row.memberId, memberColorMap, beatRivalMemberId)}
+            name={row.name}
+            value={`${row.km.toFixed(1)}km`}
+            isBeatRival={isBeatRival}
+          />
+        )
+      })}
     </ChartTooltipShell>
   )
 }
@@ -331,18 +369,29 @@ function GraphEmptyState({
   )
 }
 
-type GraphChartTab = 'rank' | 'record' | 'mileage'
+import type { RankingView } from '@/lib/running-league/ranking-view'
+import { BeatRivalFireTabLabel } from '@/components/dashboard/beat-rival-badges'
+
+type GraphChartTab = 'record' | 'mileage' | 'beat_rival'
 
 export type { GraphChartTab }
 
-export function graphChartTabForRankingView(view: 'pb' | 'mileage'): GraphChartTab {
-  return view === 'pb' ? 'record' : 'mileage'
+export function graphChartTabForRankingView(view: RankingView): GraphChartTab {
+  if (view === 'mileage') return 'mileage'
+  if (view === 'beat_rival') return 'beat_rival'
+  return 'record'
 }
 
-const GRAPH_CHART_TABS: Array<{ value: GraphChartTab; label: string }> = [
-  { value: 'record', label: '기록' },
+export function graphRankingViewForChartTab(tab: GraphChartTab): RankingView | null {
+  if (tab === 'mileage') return 'mileage'
+  if (tab === 'beat_rival') return 'beat_rival'
+  return null
+}
+
+const GRAPH_CHART_TABS: Array<{ value: GraphChartTab; label: string; fireLabel?: boolean }> = [
   { value: 'mileage', label: '마일리지' },
-  { value: 'rank', label: '순위' },
+  { value: 'record', label: '기록' },
+  { value: 'beat_rival', label: '이겨라', fireLabel: true },
 ]
 
 function GraphChartTabs({
@@ -365,46 +414,64 @@ function GraphChartTabs({
         role="tablist"
         aria-label="그래프 종류"
       >
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            role="tab"
-            aria-selected={value === tab.value}
-            onClick={() => onChange(tab.value)}
-            className={cn(
-              'min-h-8 rounded-md px-1 text-[11px] font-medium leading-tight transition-colors',
-              value === tab.value
-                ? 'bg-lime-500/20 text-lime-100'
-                : 'text-zinc-500 hover:text-zinc-300',
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const isActive = value === tab.value
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => onChange(tab.value)}
+              className={cn(
+                'min-h-8 rounded-md px-0.5 text-[11px] font-medium leading-tight transition-colors',
+                tab.fireLabel && isActive
+                  ? 'bg-orange-500/15 ring-1 ring-orange-400/45'
+                  : isActive
+                    ? 'bg-lime-500/20 text-lime-100'
+                    : 'text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              {tab.fireLabel ? (
+                <BeatRivalFireTabLabel active={isActive} />
+              ) : (
+                tab.label
+              )}
+            </button>
+          )
+        })}
       </div>
     )
   }
 
   return (
     <div className={cn('flex flex-wrap gap-2', className)} role="tablist" aria-label="그래프 종류">
-      {tabs.map((tab) => (
-        <button
-          key={tab.value}
-          type="button"
-          role="tab"
-          aria-selected={value === tab.value}
-          onClick={() => onChange(tab.value)}
-          className={cn(
-            'min-h-9 shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors',
-            value === tab.value
-              ? 'border-lime-400/55 bg-lime-500/15 font-medium text-lime-100 shadow-[0_0_14px_rgba(163,230,53,0.1)]'
-              : 'border-lime-500/20 bg-black/50 text-zinc-400 hover:border-lime-500/35 hover:text-zinc-200',
-          )}
-        >
-          {tab.label}
-        </button>
-      ))}
+      {tabs.map((tab) => {
+        const isActive = value === tab.value
+        return (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(tab.value)}
+            className={cn(
+              'min-h-9 shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition-colors',
+              tab.fireLabel && isActive
+                ? 'border-orange-400/55 bg-orange-500/15 font-medium shadow-[0_0_14px_rgba(249,115,22,0.18)]'
+                : isActive
+                  ? 'border-lime-400/55 bg-lime-500/15 font-medium text-lime-100 shadow-[0_0_14px_rgba(163,230,53,0.1)]'
+                  : 'border-lime-500/20 bg-black/50 text-zinc-400 hover:border-lime-500/35 hover:text-zinc-200',
+            )}
+          >
+            {tab.fireLabel ? (
+              <BeatRivalFireTabLabel active={isActive} />
+            ) : (
+              tab.label
+            )}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -446,7 +513,7 @@ interface MemberRankingChartsProps {
   recordSummary?: RecordChangeChartSummary | null
   rankCaption?: { title: string; trajectory: string | null } | null
   distanceLabel?: string
-  mode?: 'pb' | 'mileage'
+  mode?: RankingView
   emphasized?: boolean
   soloComparisonHint?: string | null
   aggregateMode?: boolean
@@ -454,6 +521,7 @@ interface MemberRankingChartsProps {
   className?: string
   activeTab?: GraphChartTab
   onActiveTabChange?: (tab: GraphChartTab) => void
+  beatRivalMemberId?: string | null
 }
 
 export function MemberRankingCharts({
@@ -473,6 +541,7 @@ export function MemberRankingCharts({
   className,
   activeTab: activeTabProp,
   onActiveTabChange,
+  beatRivalMemberId = null,
 }: MemberRankingChartsProps) {
   const [internalTab, setInternalTab] = useState<GraphChartTab>(() =>
     graphChartTabForRankingView(mode),
@@ -577,45 +646,6 @@ export function MemberRankingCharts({
     )
   }
 
-  const rankPanel =
-    mode === 'mileage' ? (
-      mileageRankData.length === 0 && !(comparisonChart?.rows?.length ?? 0) ? (
-        <GraphEmptyState compact={compact} description={rankEmptyDescription} />
-      ) : mileageRankData.length > 0 ? (
-        <MileageRankTrendChart
-          data={mileageRankData}
-          chartShellClass={chartShellClass}
-          chartAxisClass={chartAxisClass}
-          emphasized={emphasized}
-          compact={compact}
-        />
-      ) : (
-        <RankTrendChart
-          rankData={[]}
-          comparisonChart={comparisonChart}
-          rankCaption={null}
-          chartShellClass={chartShellClass}
-          chartAxisClass={chartAxisClass}
-          emphasized={emphasized}
-          compact={compact}
-          aggregateMode={aggregateMode}
-        />
-      )
-    ) : rankData.length === 0 && !(comparisonChart?.rows?.length ?? 0) ? (
-      <GraphEmptyState compact={compact} description={rankEmptyDescription} />
-    ) : (
-      <RankTrendChart
-        rankData={rankData}
-        comparisonChart={comparisonChart}
-        rankCaption={rankCaption}
-        chartShellClass={chartShellClass}
-        chartAxisClass={chartAxisClass}
-        emphasized={emphasized}
-        compact={compact}
-        aggregateMode={aggregateMode}
-      />
-    )
-
   const recordPanel =
     pbRecordComparisonChart && pbRecordComparisonChart.rows.length > 0 ? (
       <PbRecordAggregateTrendChart
@@ -652,6 +682,7 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
+        beatRivalMemberId={beatRivalMemberId}
       />
     ) : mileageData.length === 0 ? (
       <GraphEmptyState
@@ -668,12 +699,26 @@ export function MemberRankingCharts({
       />
     )
 
+  const beatRivalPanel =
+    mileageComparisonChart && mileageComparisonChart.rows.length > 0 ? (
+      <MileageAggregateTrendChart
+        chart={mileageComparisonChart}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        compact={compact}
+        beatRivalMemberId={beatRivalMemberId}
+        title="이겨라 · 마일리지"
+      />
+    ) : (
+      mileagePanel
+    )
+
   return (
     <div className={cn('grid min-w-0 grid-cols-1', compact ? 'gap-2' : 'gap-3', className)}>
       <GraphChartTabs value={activeTab} onChange={setActiveTab} compact={compact} />
-      {activeTab === 'rank' ? rankPanel : null}
       {activeTab === 'record' ? recordPanel : null}
       {activeTab === 'mileage' ? mileagePanel : null}
+      {activeTab === 'beat_rival' ? beatRivalPanel : null}
     </div>
   )
 }
@@ -781,6 +826,7 @@ function RankTrendChart({
   emphasized,
   compact = false,
   aggregateMode = false,
+  beatRivalMemberId = null,
 }: {
   rankData: Array<RankingHistoryPoint & { chartLabel: string; rank: number }>
   comparisonChart: LeagueRankComparisonChart | null
@@ -790,6 +836,7 @@ function RankTrendChart({
   emphasized: boolean
   compact?: boolean
   aggregateMode?: boolean
+  beatRivalMemberId?: string | null
 }) {
   const comparisonRows = comparisonChart?.rows ?? []
   const comparisonMembers = comparisonChart?.members ?? []
@@ -841,23 +888,42 @@ function RankTrendChart({
                   members={comparisonMembers}
                   memberColorMap={memberColorMap}
                   isAggregate={isAggregate}
+                  beatRivalMemberId={beatRivalMemberId}
                 />
               }
             />
             {isAggregate
-              ? comparisonMembers.map((member) => (
-                  <Line
-                    key={member.memberId}
-                    type="monotone"
-                    dataKey={`rank_${member.memberId}`}
-                    name={`rank_${member.memberId}`}
-                    stroke={getMemberChartColor(member.memberId, memberColorMap)}
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                    isAnimationActive={false}
-                  />
-                ))
+              ? comparisonMembers.map((member) => {
+                  const isBeatRival =
+                    beatRivalMemberId != null && member.memberId === beatRivalMemberId
+                  return (
+                    <Line
+                      key={member.memberId}
+                      type="monotone"
+                      dataKey={`rank_${member.memberId}`}
+                      name={`rank_${member.memberId}`}
+                      stroke={getMemberChartColor(
+                        member.memberId,
+                        memberColorMap,
+                        beatRivalMemberId,
+                      )}
+                      strokeWidth={isBeatRival ? 2.5 : 2}
+                      dot={beatRivalLineDot(member.memberId, beatRivalMemberId)}
+                      activeDot={
+                        isBeatRival
+                          ? {
+                              r: 7,
+                              fill: BEAT_RIVAL_CHART_COLOR,
+                              stroke: '#ff4444',
+                              strokeWidth: 2.5,
+                            }
+                          : { r: 5, fill: getMemberChartColor(member.memberId, memberColorMap) }
+                      }
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                  )
+                })
               : (
                 <>
                   {comparisonMembers
@@ -950,9 +1016,11 @@ function PbRecordAggregateTrendChart({
 
   return (
     <div className={chartShellClass}>
-      <p className={cn('font-medium text-lime-300', compact ? 'mb-1 text-xs' : 'mb-2 text-xs')}>
-        {compact ? '기록 추이' : '전체 회원 PB 기록 추이'}
-      </p>
+      {!compact ? (
+        <p className={cn('mb-2 text-xs font-medium text-lime-300')}>
+          전체 회원 PB 기록 추이
+        </p>
+      ) : null}
       <ChartContainer config={timeChartConfig} className={chartAxisClass}>
         <LineChart data={chart.rows} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
@@ -1004,11 +1072,15 @@ function MileageAggregateTrendChart({
   chartShellClass,
   chartAxisClass,
   compact = false,
+  beatRivalMemberId = null,
+  title = '전체 회원 누적 마일리지',
 }: {
   chart: LeagueMileageComparisonChart
   chartShellClass: string
   chartAxisClass: string
   compact?: boolean
+  beatRivalMemberId?: string | null
+  title?: string
 }) {
   const memberColorMap = useMemo(
     () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
@@ -1018,7 +1090,7 @@ function MileageAggregateTrendChart({
   return (
     <div className={chartShellClass}>
       {!compact ? (
-        <p className="mb-2 text-xs font-medium text-lime-300">전체 회원 누적 마일리지</p>
+        <p className="mb-2 text-xs font-medium text-lime-300">{title}</p>
       ) : null}
       <ChartContainer config={mileageChartConfig} className={chartAxisClass}>
         <LineChart data={chart.rows} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
@@ -1033,22 +1105,40 @@ function MileageAggregateTrendChart({
           <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `${v}km`} />
           <Tooltip
             content={
-              <MileageComparisonTooltip members={chart.members} memberColorMap={memberColorMap} />
+              <MileageComparisonTooltip
+                members={chart.members}
+                memberColorMap={memberColorMap}
+                beatRivalMemberId={beatRivalMemberId}
+              />
             }
           />
-          {chart.members.map((member) => (
-            <Line
-              key={member.memberId}
-              type="monotone"
-              dataKey={`km_${member.memberId}`}
-              name={`km_${member.memberId}`}
-              stroke={getMemberChartColor(member.memberId, memberColorMap)}
-              strokeWidth={2}
-              dot={false}
-              connectNulls
-              isAnimationActive={false}
-            />
-          ))}
+          {chart.members.map((member) => {
+            const isBeatRival =
+              beatRivalMemberId != null && member.memberId === beatRivalMemberId
+            return (
+              <Line
+                key={member.memberId}
+                type="monotone"
+                dataKey={`km_${member.memberId}`}
+                name={`km_${member.memberId}`}
+                stroke={getMemberChartColor(member.memberId, memberColorMap, beatRivalMemberId)}
+                strokeWidth={isBeatRival ? 2.5 : 2}
+                dot={beatRivalLineDot(member.memberId, beatRivalMemberId)}
+                activeDot={
+                  isBeatRival
+                    ? {
+                        r: 7,
+                        fill: BEAT_RIVAL_CHART_COLOR,
+                        stroke: '#ff4444',
+                        strokeWidth: 2.5,
+                      }
+                    : { r: 5, fill: getMemberChartColor(member.memberId, memberColorMap) }
+                }
+                connectNulls
+                isAnimationActive={false}
+              />
+            )
+          })}
         </LineChart>
       </ChartContainer>
       {!compact ? (

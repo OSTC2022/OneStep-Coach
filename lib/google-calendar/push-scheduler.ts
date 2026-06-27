@@ -6,7 +6,16 @@ import {
   type GoogleLessonDeleteSnapshot,
 } from '@/lib/google-calendar/push'
 
-/** 센터 변경 → Google 즉시 반영 (응답 전에 push 완료) */
+/** Supabase 저장 후 Google 반영 — 백그라운드 (앱 UI는 Supabase 기준 즉시 표시) */
+export function scheduleGoogleLessonPush(lessonIds: string | string[]) {
+  void runGoogleLessonPush(lessonIds)
+}
+
+/** @deprecated scheduleGoogleLessonPush 사용 — 동기 push가 필요한 경우만 */
+export async function awaitGoogleLessonPush(lessonIds: string | string[]) {
+  await runGoogleLessonPush(lessonIds)
+}
+
 export async function runGoogleLessonPush(lessonIds: string | string[]) {
   const ids = Array.isArray(lessonIds) ? lessonIds : [lessonIds]
   if (!ids.length) return
@@ -42,12 +51,7 @@ export async function runGoogleLessonDeletes(
   }
 }
 
-/** @deprecated runGoogleLessonPush 사용 */
-export function scheduleGoogleLessonPush(lessonIds: string | string[]) {
-  void runGoogleLessonPush(lessonIds)
-}
-
-/** @deprecated runGoogleLessonDeletes 사용 */
+/** @deprecated scheduleGoogleLessonPush 사용 */
 export function scheduleGoogleLessonDeletes(
   snapshots: GoogleLessonDeleteSnapshot[],
 ) {

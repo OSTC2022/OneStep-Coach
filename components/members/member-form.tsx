@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2, ArrowLeft } from 'lucide-react'
 import { createMember, updateMember } from '@/lib/actions/members'
+import { createSessionPackage } from '@/lib/actions/sessions'
 import {
   getMemberAge,
   suggestAgeFromBirthDate,
@@ -29,6 +30,13 @@ import { InstructorSelectField } from '@/components/members/instructor-select-fi
 import { toast } from 'sonner'
 import type { Member, Instructor, MemberFormData } from '@/lib/types'
 import Link from 'next/link'
+import {
+  EMPTY_MEMBER_INITIAL_SESSION_PACKAGE,
+  hasMemberInitialSessionPackageDraft,
+  MemberInitialSessionPackageSection,
+  parseMemberInitialSessionPackageDraft,
+  type MemberInitialSessionPackageDraft,
+} from '@/components/members/member-initial-session-package-section'
 
 interface MemberFormProps {
   member?: Member
@@ -56,6 +64,8 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
     memo: member?.memo || '',
     primary_instructor_id: member?.primary_instructor_id || AUTO_INSTRUCTOR_ID,
   })
+  const [sessionPackageDraft, setSessionPackageDraft] =
+    useState<MemberInitialSessionPackageDraft>(EMPTY_MEMBER_INITIAL_SESSION_PACKAGE)
 
   // Calculate BMI preview
   const bmiPreview = formData.height_cm && formData.weight_kg
@@ -72,6 +82,20 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
 
     setIsLoading(true)
 
+    let parsedSessionPackage:
+      | { total_sessions: number; remaining_sessions: number; note?: string }
+      | null = null
+
+    if (!member && hasMemberInitialSessionPackageDraft(sessionPackageDraft)) {
+      const parsed = parseMemberInitialSessionPackageDraft(sessionPackageDraft)
+      if ('error' in parsed) {
+        toast.error('수업권 입력 오류', { description: parsed.error })
+        setIsLoading(false)
+        return
+      }
+      parsedSessionPackage = parsed
+    }
+
     try {
       const result = member
         ? await updateMember(member.id, formData)
@@ -82,6 +106,23 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
           description: result.error,
         })
         return
+      }
+
+      if (!member && result.data && parsedSessionPackage) {
+        const packageResult = await createSessionPackage({
+          member_id: result.data.id,
+          total_sessions: parsedSessionPackage.total_sessions,
+          remaining_sessions: parsedSessionPackage.remaining_sessions,
+          note: parsedSessionPackage.note,
+        })
+
+        if (packageResult.error) {
+          toast.error('회원은 등록되었으나 수업권 추가 실패', {
+            description: packageResult.error,
+          })
+          router.push(`/dashboard/members/${result.data.id}`)
+          return
+        }
       }
 
       toast.success(member ? '회원 정보가 수정되었습니다.' : '새 회원이 추가되었습니다.')
@@ -308,6 +349,13 @@ export function MemberForm({ member, instructors }: MemberFormProps) {
             </div>
           </CardContent>
         </Card>
+
+        {!member ? (
+          <MemberInitialSessionPackageSection
+            value={sessionPackageDraft}
+            onChange={setSessionPackageDraft}
+          />
+        ) : null}
 
         {/* Actions */}
         <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-4">

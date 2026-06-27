@@ -40,6 +40,7 @@ import {
   sumMileageLogsKm,
   type MileageDistanceLeaderboard,
 } from '@/lib/running-league/mileage-leaderboard'
+import { format, subMonths } from 'date-fns'
 import { currentMonthDateRange } from '@/lib/running-league/month-range'
 import { resolveAdultRunningMemberIds } from '@/lib/running-league/resolve-adult-running-member-ids'
 import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
@@ -93,8 +94,7 @@ import type {
 } from '@/lib/types'
 import { revalidatePath } from 'next/cache'
 
-const LEAGUE_SELECT =
-  'id, title, description, starts_at, ends_at, status, audience, target_group, board_post_id, created_by, created_at, updated_at'
+import { runRunningLeagueSelectQuery } from '@/lib/running-league/league-select'
 
 const PARTICIPANT_SELECT =
   'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone, gender)'
@@ -110,6 +110,7 @@ function mapLeague(row: Record<string, unknown>): RunningLeague {
     audience: (row.audience as RunningLeague['audience']) ?? 'adult',
     target_group: (row.target_group as RunningLeagueTargetGroup) ?? 'all',
     board_post_id: (row.board_post_id as string | null) ?? null,
+    beat_rival_member_id: (row.beat_rival_member_id as string | null) ?? null,
     created_by: (row.created_by as string | null) ?? null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -385,25 +386,30 @@ async function resolveMemberLeague(
   supabase: Awaited<ReturnType<typeof createClient>>,
   memberId: string,
 ): Promise<RunningLeague | null> {
-  const { data: activeLeagues, error: activeError } = await supabase
-    .from('running_leagues')
-    .select(LEAGUE_SELECT)
-    .eq('status', 'active')
-    .order('starts_at', { ascending: false })
-    .limit(1)
+  const { data: activeLeagues, error: activeError } = await runRunningLeagueSelectQuery((select) =>
+    supabase
+      .from('running_leagues')
+      .select(select)
+      .eq('status', 'active')
+      .order('starts_at', { ascending: false })
+      .limit(1),
+  )
 
   if (!activeError && activeLeagues?.[0]) {
     return mapLeague(activeLeagues[0] as Record<string, unknown>)
   }
 
-  const { data: closedLeagues, error: closedError } = await supabase
-    .from('running_leagues')
-    .select(LEAGUE_SELECT)
-    .eq('status', 'closed')
-    .order('starts_at', { ascending: false })
-    .limit(6)
+  const { data: closedLeagues, error: closedError } = await runRunningLeagueSelectQuery((select) =>
+    supabase
+      .from('running_leagues')
+      .select(select)
+      .eq('status', 'closed')
+      .order('starts_at', { ascending: false })
+      .limit(6),
+  )
 
-  if (closedError || !closedLeagues?.length) return null
+  if (closedError) throw closedError
+  if (!closedLeagues?.length) return null
 
   for (const row of closedLeagues) {
     const league = mapLeague(row as Record<string, unknown>)
@@ -527,12 +533,13 @@ export async function getRunningLeaguesForAdmin(status?: RunningLeagueStatus | '
 }> {
   await requireRole(['admin'])
   const supabase = await leagueClient()
-  let query = supabase.from('running_leagues').select(LEAGUE_SELECT).order('starts_at', { ascending: false })
-  if (status && status !== 'all') {
-    query = query.eq('status', status)
-  }
-
-  const { data, error } = await query
+  const { data, error } = await runRunningLeagueSelectQuery((select) => {
+    let query = supabase.from('running_leagues').select(select).order('starts_at', { ascending: false })
+    if (status && status !== 'all') {
+      query = query.eq('status', status)
+    }
+    return query
+  })
 
   if (isMissingTableError(error)) {
     return { leagues: [], tableReady: false }
@@ -563,7 +570,7 @@ export async function getRunningLeagueDetail(leagueId: string): Promise<{
   const supabase = await leagueClient()
 
   const [
-    { data: leagueRow, error: leagueError },
+    leagueResult,
     { data: participantRows, error: participantError },
     awardResult,
     reportResult,
@@ -571,7 +578,9 @@ export async function getRunningLeagueDetail(leagueId: string): Promise<{
     recoveryResult,
     dailyRecoveryResult,
   ] = await Promise.all([
-    supabase.from('running_leagues').select(LEAGUE_SELECT).eq('id', leagueId).maybeSingle(),
+    runRunningLeagueSelectQuery((select) =>
+      supabase.from('running_leagues').select(select).eq('id', leagueId).maybeSingle(),
+    ),
     supabase
       .from('running_league_participants')
       .select(PARTICIPANT_SELECT)
@@ -583,6 +592,9 @@ export async function getRunningLeagueDetail(leagueId: string): Promise<{
     supabase.from('running_league_recovery_logs').select('*').eq('league_id', leagueId),
     supabase.from('running_league_daily_recovery').select('*').eq('league_id', leagueId),
   ])
+
+  const leagueRow = leagueResult.data
+  const leagueError = leagueResult.error
 
   function rowsOrEmpty<T>(
     result: { data: T[] | null; error: { code?: string } | null },
@@ -701,11 +713,9 @@ export async function createRunningLeague(input: {
 export async function getRunningLeagueById(leagueId: string): Promise<RunningLeague | null> {
   await requireRole(['admin'])
   const supabase = await leagueClient()
-  const { data, error } = await supabase
-    .from('running_leagues')
-    .select(LEAGUE_SELECT)
-    .eq('id', leagueId)
-    .maybeSingle()
+  const { data, error } = await runRunningLeagueSelectQuery((select) =>
+    supabase.from('running_leagues').select(select).eq('id', leagueId).maybeSingle(),
+  )
   if (error || !data) return null
   return mapLeague(data as Record<string, unknown>)
 }
@@ -733,6 +743,34 @@ export async function updateRunningLeague(
   const supabase = await leagueClient()
   const { error } = await supabase.from('running_leagues').update(patch).eq('id', leagueId)
   if (error) return { ok: false, error: error.message }
+
+  revalidateRunningLeaguePaths(leagueId)
+  return { ok: true }
+}
+
+export async function updateRunningLeagueBeatRivalMember(
+  leagueId: string,
+  beatRivalMemberId: string | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireRole(['admin'])
+  const supabase = await leagueClient()
+  const { error } = await supabase
+    .from('running_leagues')
+    .update({
+      beat_rival_member_id: beatRivalMemberId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', leagueId)
+
+  if (error) {
+    if (error.message.includes('beat_rival_member_id')) {
+      return {
+        ok: false,
+        error: 'beat_rival_member_id 컬럼이 없습니다. add-running-league-beat-rival.sql을 실행해주세요.',
+      }
+    }
+    return { ok: false, error: error.message }
+  }
 
   revalidateRunningLeaguePaths(leagueId)
   return { ok: true }
@@ -1852,6 +1890,7 @@ async function fetchMemberRunningLeagueHome(
   }
 
   const { start, end } = currentMonthDateRange()
+  const mileageLookbackStart = format(subMonths(new Date(), 24), 'yyyy-MM-dd')
 
   let pb5kLeaderboard = EMPTY_PB_LEADERBOARD
   let pb10kLeaderboard = EMPTY_PB_LEADERBOARD
@@ -1895,8 +1934,7 @@ async function fetchMemberRunningLeagueHome(
           .from('running_league_mileage_logs')
           .select('id, participant_id, league_id, member_id, distance_km, logged_at')
           .eq('league_id', league.id)
-          .gte('logged_at', start)
-          .lte('logged_at', end),
+          .gte('logged_at', mileageLookbackStart),
         leaderboardSupabase
           .from('running_league_pb_snapshots')
           .select(

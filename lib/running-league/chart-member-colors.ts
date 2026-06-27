@@ -1,5 +1,7 @@
 /** 집계 그래프 — 회원별 고유 색상 (차트·툴팁 공통) */
 
+export const BEAT_RIVAL_CHART_COLOR = '#ef4444'
+
 export function memberChartColorAtIndex(index: number, total: number): string {
   if (total <= 0) return '#a3e635'
   if (total === 1) return '#a3e635'
@@ -21,6 +23,10 @@ export function buildMemberChartColorMap(memberIds: readonly string[]): Map<stri
 export function getMemberChartColor(
   memberId: string,
   colorMap: Map<string, string>,
+  beatRivalMemberId?: string | null,
 ): string {
+  if (beatRivalMemberId && memberId === beatRivalMemberId) {
+    return BEAT_RIVAL_CHART_COLOR
+  }
   return colorMap.get(memberId) ?? '#a3e635'
 }

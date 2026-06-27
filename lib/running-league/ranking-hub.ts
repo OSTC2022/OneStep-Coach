@@ -1,14 +1,15 @@
 import { buildMileageDistanceLeaderboard } from '@/lib/running-league/mileage-leaderboard'
 import {
-  buildPbDistanceLeaderboard,
-  type PbDistanceLeaderboard,
-  type PbLeaderboardDistance,
-} from '@/lib/running-league/pb-leaderboard'
+  buildPbLeaderboardForPeriod,
+  filterMileageLogsForPeriod,
+  type RankingPeriod,
+} from '@/lib/running-league/ranking-period'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import { buildLeaderboard, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import type { MileageDistanceLeaderboard } from '@/lib/running-league/mileage-leaderboard'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
 import { expandPortalPbRecordsWithNotesHistory } from '@/lib/running-league/pb-portal-history'
+import type { PbDistanceLeaderboard, PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import type { RunningLeagueRecord } from '@/lib/types'
 
 export type FilteredPortalRankings = {
@@ -31,20 +32,25 @@ export function filterPortalPbTrendRecords(records: ReadonlyArray<RunningLeagueR
 export function buildFilteredPortalRankings(
   bundle: MemberRunningLeagueRankingBundle | null,
   genderFilter: RankingGenderFilter,
+  period?: RankingPeriod | null,
 ): FilteredPortalRankings | null {
   if (!bundle) return null
 
   const participants = filterParticipantsByGender(bundle.participants, genderFilter)
   const pbRecords = portalPbRecordsForRanking(bundle.pbRecords)
+  const mileageLogs = period
+    ? filterMileageLogsForPeriod(bundle.mileageLogs, period)
+    : bundle.mileageLogs
+  const asOfDate = period?.end ?? null
 
   return {
     pbByDistance: {
-      '5km': buildPbDistanceLeaderboard(participants, pbRecords, '5km'),
-      '10km': buildPbDistanceLeaderboard(participants, pbRecords, '10km'),
-      half: buildPbDistanceLeaderboard(participants, pbRecords, 'half'),
-      full: buildPbDistanceLeaderboard(participants, pbRecords, 'full'),
+      '5km': buildPbLeaderboardForPeriod(participants, pbRecords, '5km', asOfDate),
+      '10km': buildPbLeaderboardForPeriod(participants, pbRecords, '10km', asOfDate),
+      half: buildPbLeaderboardForPeriod(participants, pbRecords, 'half', asOfDate),
+      full: buildPbLeaderboardForPeriod(participants, pbRecords, 'full', asOfDate),
     },
-    mileageLeaderboard: buildMileageDistanceLeaderboard(participants, bundle.mileageLogs),
+    mileageLeaderboard: buildMileageDistanceLeaderboard(participants, mileageLogs),
     scoreLeaderboard: buildLeaderboard(participants),
   }
 }

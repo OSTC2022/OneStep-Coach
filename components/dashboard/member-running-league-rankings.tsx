@@ -43,14 +43,29 @@ import { MemberRankingDetailPanel } from '@/components/dashboard/member-ranking-
 import { PortalAggregateGraphPanel } from '@/components/dashboard/portal-aggregate-graph-panel'
 import {
   graphChartTabForRankingView,
+  graphRankingViewForChartTab,
   type GraphChartTab,
 } from '@/components/dashboard/member-ranking-charts'
+import { BeatRivalFireBadge } from '@/components/dashboard/beat-rival-badges'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
+import { resolveBeatRivalMileageGap } from '@/lib/running-league/beat-rival-gap'
 import { buildFilteredPortalRankings } from '@/lib/running-league/ranking-hub'
-import { formatMemberRankChangeHint } from '@/lib/running-league/ranking-history'
+import {
+  resolveEffectiveRankingMonth,
+  rankingPeriodFromMonthKey,
+} from '@/lib/running-league/ranking-period'
+import {
+  RankingPeriodCaptionMobile,
+  RankingPeriodHeader,
+} from '@/components/dashboard/ranking-period-header'
+import {
+  resolveMemberMileageRankChangeDelta,
+  resolveMemberPbRankChangeDelta,
+  type RankChangeDelta,
+} from '@/lib/running-league/rank-change-display'
 import {
   RANKING_GENDER_FILTERS,
   countUnclassifiedParticipants,
@@ -110,6 +125,60 @@ const TOP_DISPLAY_COUNT = RANKING_TOP_DISPLAY_COUNT
 const PORTAL_PB_DISTANCES = PB_RANKING_DISTANCES.filter((distance) => distance !== '5km')
 const PORTAL_DEFAULT_PB_DISTANCE: PbLeaderboardDistance = '10km'
 
+function usesPbLeaderboard(view: RankingView) {
+  return view === 'pb'
+}
+
+function usesMileageLeaderboard(view: RankingView) {
+  return view === 'mileage' || view === 'beat_rival'
+}
+
+function RankChangeBadge({ delta }: { delta: RankChangeDelta | null }) {
+  if (!delta) {
+    return <span className="w-7 shrink-0" aria-hidden />
+  }
+  if (delta.kind === 'frozen') {
+    return (
+      <span className="w-7 shrink-0 text-center text-[11px] font-semibold text-white">-</span>
+    )
+  }
+  if (delta.kind === 'up') {
+    return (
+      <span className="w-7 shrink-0 text-center text-[11px] font-bold tabular-nums text-sky-400">
+        ↑{delta.steps}
+      </span>
+    )
+  }
+  return (
+    <span className="w-7 shrink-0 text-center text-[11px] font-bold tabular-nums text-red-400">
+      ↓{delta.steps}
+    </span>
+  )
+}
+
+function resolveRankChangeDeltaForView(input: {
+  memberId: string
+  rankingView: RankingView
+  pbDistance: PbLeaderboardDistance
+  participants: ReadonlyArray<RunningLeagueParticipant>
+  pbRecords: ReadonlyArray<RunningLeagueRecord>
+  mileageLogs: ReadonlyArray<RunningLeagueMileageLog>
+}): RankChangeDelta | null {
+  if (input.rankingView === 'pb') {
+    return resolveMemberPbRankChangeDelta(
+      input.memberId,
+      input.pbDistance,
+      input.participants,
+      input.pbRecords,
+    )
+  }
+  return resolveMemberMileageRankChangeDelta(
+    input.memberId,
+    input.participants,
+    input.mileageLogs,
+  )
+}
+
 function RankingViewTabs({
   value,
   onChange,
@@ -123,7 +192,7 @@ function RankingViewTabs({
 }) {
   return (
     <div className={cn('min-w-0', compact ? 'space-y-0' : 'space-y-2', className)}>
-      <div className={cn(compact ? 'grid grid-cols-2 gap-1.5' : 'flex flex-wrap gap-2')}>
+      <div className={cn(compact ? 'grid grid-cols-3 gap-1.5' : 'flex flex-wrap gap-2')}>
         {RANKING_VIEW_OPTIONS.map((item) => (
           <RankingFilterChip
             key={item.value}
@@ -267,7 +336,9 @@ function RankingFiltersPanel({
           </p>
         ) : null}
       </div>
-      {rankingView === 'mileage' && !compact ? <RankingPeriodBanner /> : null}
+      {rankingView === 'mileage' || rankingView === 'beat_rival' ? (
+        !compact ? <RankingPeriodBanner /> : null
+      ) : null}
       <GenderFilterNotice
         genderFilter={genderFilter}
         genderFilterBlocked={genderFilterBlocked}
@@ -310,8 +381,9 @@ function InlineRankingFilterStrip({
   onAddPb?: () => void
 }) {
   const viewLabels: Record<RankingView, string> = {
-    pb: 'PB',
     mileage: '마일리지',
+    pb: 'PB',
+    beat_rival: '이겨라',
   }
 
   return (
@@ -322,7 +394,7 @@ function InlineRankingFilterStrip({
           role="toolbar"
           aria-label="랭킹 필터"
         >
-        <div className="grid w-[8.25rem] shrink-0 grid-cols-2 gap-0.5 rounded-md border border-lime-500/20 bg-black/40 p-0.5">
+        <div className="grid w-[12.5rem] shrink-0 grid-cols-3 gap-0.5 rounded-md border border-lime-500/20 bg-black/40 p-0.5">
           {RANKING_VIEW_OPTIONS.map((item) => (
             <button
               key={item.value}
@@ -579,9 +651,12 @@ function RankMedalDisplay({ rank }: { rank: number }) {
     )
   }
   return (
-    <span className="flex w-11 shrink-0 flex-col items-center justify-center leading-none">
-      <span className="text-xl font-bold tabular-nums text-zinc-200">{rank}</span>
-      <span className="text-[9px] font-semibold text-zinc-500">위</span>
+    <span
+      className="flex w-11 shrink-0 items-center justify-center leading-none"
+      aria-label={`${rank}위`}
+      title={`${rank}위`}
+    >
+      <span className="text-sm font-bold tabular-nums text-zinc-200">{rank}위</span>
     </span>
   )
 }
@@ -615,6 +690,11 @@ interface MemberRunningLeagueRankingsProps {
   brandHeaderBelow?: ReactNode
   showBrandHeader?: boolean
   showPortalShell?: boolean
+  beatRivalMemberId?: string | null
+  portalLeagueLabel?: string
+  portalTitle?: string
+  portalRankingReferenceDate?: string | null
+  portalRankingCaption?: string | null
 }
 
 type MemberRankSummary =
@@ -687,7 +767,11 @@ function buildNeighborRankRows<T extends { memberId: string }>(
   const myIndex = ranked.findIndex((row) => row.memberId === highlightMemberId)
   if (myIndex < 0) return ranked.slice(0, Math.min(3, ranked.length))
 
-  const start = Math.max(0, myIndex - 1)
+  if (myIndex === 0) {
+    return ranked.slice(0, Math.min(3, ranked.length))
+  }
+
+  const start = myIndex - 1
   const end = Math.min(ranked.length, myIndex + 2)
   return ranked.slice(start, end)
 }
@@ -702,29 +786,6 @@ function MyRankSeparator() {
       <span>내 순위</span>
       <span className="h-px flex-1 bg-lime-500/20" />
     </div>
-  )
-}
-
-function MyRankBadge() {
-  return (
-    <span className="shrink-0 rounded-full border border-lime-300/50 bg-lime-400/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-lime-50 shadow-[0_0_12px_rgba(163,230,53,0.35)]">
-      내 순위
-    </span>
-  )
-}
-
-function RankChangeHint({ label }: { label: string | null }) {
-  if (!label) return null
-  const improved = label.startsWith('▲')
-  return (
-    <span
-      className={cn(
-        'shrink-0 text-[11px] font-semibold tabular-nums',
-        improved ? 'text-emerald-400' : 'text-amber-400/90',
-      )}
-    >
-      {label}
-    </span>
   )
 }
 
@@ -784,14 +845,22 @@ function RankingCardAction({
   )
 }
 
-function MemberPortalBrandHeader({ action }: { action?: ReactNode }) {
+function MemberPortalBrandHeader({
+  action,
+  leagueLabel = 'ONE STEP RUNNING LEAGUE',
+  portalTitle = '내 러닝 포털',
+}: {
+  action?: ReactNode
+  leagueLabel?: string
+  portalTitle?: string
+}) {
   return (
     <div className="space-y-2">
       <div className="space-y-1">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-[11px]">
-          ONE STEP RUNNING LEAGUE
+          {leagueLabel}
         </p>
-        <h1 className="text-xl font-bold text-foreground sm:text-2xl">내 러닝 포털</h1>
+        <h1 className="text-xl font-bold text-foreground sm:text-2xl">{portalTitle}</h1>
       </div>
       {action}
     </div>
@@ -815,6 +884,13 @@ function RankingPreview({
   genderFilter,
   leagueStatus,
   onRetry,
+  beatRivalMemberId,
+  rankingPeriod,
+  rankingCaption,
+  selectedMonthKey,
+  autoRankingMonth,
+  onRankingMonthKeyChange,
+  onResetRankingMonth,
 }: {
   rankingView: RankingView
   pbDistance: PbLeaderboardDistance
@@ -830,46 +906,81 @@ function RankingPreview({
   genderFilter: RankingGenderFilter
   leagueStatus?: MemberLeagueStatusSnapshot | null
   onRetry?: () => void
+  beatRivalMemberId?: string | null
+  rankingPeriod: ReturnType<typeof rankingPeriodFromMonthKey>
+  rankingCaption?: string | null
+  selectedMonthKey: string
+  autoRankingMonth: boolean
+  onRankingMonthKeyChange: (monthKey: string) => void
+  onResetRankingMonth: () => void
 }) {
-  const leaderboard = rankingView === 'pb' ? activePbLeaderboard : activeMileageLeaderboard
+  const leaderboard = usesPbLeaderboard(rankingView)
+    ? activePbLeaderboard
+    : activeMileageLeaderboard
   const previewRows = buildNeighborRankRows(leaderboard.ranked, highlightMemberId)
-  const viewLabel =
-    rankingView === 'pb'
-      ? formatPbDistanceLabel(pbDistance)
-      : formatCurrentMonthRankingLabel()
+  const showBeatRivalLabel = rankingView === 'beat_rival'
+  const beatRivalGap = useMemo(() => {
+    if (rankingView !== 'beat_rival') return null
+    return resolveBeatRivalMileageGap({
+      myMemberId: highlightMemberId,
+      beatRivalMemberId,
+      mileageLeaderboard: activeMileageLeaderboard,
+    })
+  }, [activeMileageLeaderboard, beatRivalMemberId, highlightMemberId, rankingView])
 
   const filteredParticipants = rankingBundle
     ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
     : []
 
-  function resolveChangeHint(memberId: string): string | null {
-    if (!rankingBundle || rankingView !== 'pb') return null
-    return formatMemberRankChangeHint(
+  function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
+    if (!rankingBundle) return null
+    return resolveRankChangeDeltaForView({
       memberId,
+      rankingView,
       pbDistance,
-      filteredParticipants,
-      rankingBundle.pbRecords,
-    )
+      participants: filteredParticipants,
+      pbRecords: rankingBundle.pbRecords,
+      mileageLogs: rankingBundle.mileageLogs,
+    })
   }
 
   return (
     <div className={MEMBER_PORTAL_CARD_CLASS}>
       <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="shrink-0 text-sm font-semibold text-lime-100">랭킹</span>
-          {rankingView === 'pb' ? (
-            <span
-              className={cn(
-                'truncate text-sm font-semibold',
-                getPbDistanceAccentClass(pbDistance),
-              )}
-            >
-              {formatPbDistanceLabel(pbDistance)}
-            </span>
-          ) : viewLabel ? (
-            <span className="truncate text-sm font-medium text-zinc-400">{viewLabel}</span>
-          ) : null}
-        </div>
+        {usesPbLeaderboard(rankingView) ? (
+          <RankingPeriodHeader
+            period={rankingPeriod}
+            monthKey={selectedMonthKey}
+            autoMonth={autoRankingMonth}
+            caption={rankingCaption}
+            onMonthKeyChange={onRankingMonthKeyChange}
+            onResetMonth={onResetRankingMonth}
+            showPeriodPicker={false}
+            distanceLabel={formatPbDistanceLabel(pbDistance)}
+            distanceAccentClass={getPbDistanceAccentClass(pbDistance)}
+          />
+        ) : rankingView === 'beat_rival' ? (
+          <RankingPeriodHeader
+            period={rankingPeriod}
+            monthKey={selectedMonthKey}
+            autoMonth={autoRankingMonth}
+            caption={rankingCaption}
+            onMonthKeyChange={onRankingMonthKeyChange}
+            onResetMonth={onResetRankingMonth}
+            showPeriodPicker={false}
+            gapLabel={beatRivalGap?.gapText}
+            gapAccentClass={beatRivalGap?.accentClass}
+          />
+        ) : (
+          <RankingPeriodHeader
+            period={rankingPeriod}
+            monthKey={selectedMonthKey}
+            autoMonth={autoRankingMonth}
+            caption={rankingCaption}
+            onMonthKeyChange={onRankingMonthKeyChange}
+            onResetMonth={onResetRankingMonth}
+          />
+        )}
         {onOpenList && !rankingsError ? (
           <Button
             type="button"
@@ -882,6 +993,7 @@ function RankingPreview({
           </Button>
         ) : null}
       </div>
+      <RankingPeriodCaptionMobile caption={rankingCaption} />
       <div className="space-y-1.5 p-2.5">
         {rankingsError ? (
           <RankingsLoadErrorState onRetry={onRetry} />
@@ -890,25 +1002,29 @@ function RankingPreview({
             <div className="space-y-1.5">
               {previewRows.map((row) => {
                 const isMe = highlightMemberId != null && row.memberId === highlightMemberId
-                return rankingView === 'pb' ? (
+                return usesPbLeaderboard(rankingView) ? (
                   <PbRankingRow
                     key={row.participantId}
                     row={row as PbDistanceRankRow}
                     isMe={isMe}
                     distanceLabel={formatPbDistanceLabel(pbDistance)}
                     showDistanceLabel={false}
-                    changeHint={resolveChangeHint(row.memberId)}
+                    rankChangeDelta={resolveRankChangeDelta(row.memberId)}
                     onMemberSelect={onMemberSelect}
                     isSelected={selectedMemberId === row.memberId}
+                    beatRivalMemberId={beatRivalMemberId}
+                    showBeatRivalLabel={showBeatRivalLabel}
                   />
                 ) : (
                   <MileageRankingRow
                     key={row.participantId}
                     row={row as MileageDistanceRankRow}
                     isMe={isMe}
-                    showPeriodLabel={false}
+                    rankChangeDelta={resolveRankChangeDelta(row.memberId)}
                     onMemberSelect={onMemberSelect}
                     isSelected={selectedMemberId === row.memberId}
+                    beatRivalMemberId={beatRivalMemberId}
+                    showBeatRivalLabel={showBeatRivalLabel}
                   />
                 )
               })}
@@ -924,9 +1040,11 @@ function RankingPreview({
           </>
         ) : (
           <RankingEmptyState
-            title={rankingView === 'pb' ? RANKING_EMPTY_PB.title : RANKING_EMPTY_MILEAGE.title}
+            title={usesMileageLeaderboard(rankingView) ? RANKING_EMPTY_MILEAGE.title : RANKING_EMPTY_PB.title}
             description={
-              rankingView === 'pb' ? RANKING_EMPTY_PB.description : RANKING_EMPTY_MILEAGE.description
+              usesMileageLeaderboard(rankingView)
+                ? RANKING_EMPTY_MILEAGE.description
+                : RANKING_EMPTY_PB.description
             }
           />
         )}
@@ -971,13 +1089,16 @@ function resolveMemberCurrentRank(
   pbLeaderboard: PbDistanceLeaderboard,
   mileageLeaderboard: MileageDistanceLeaderboard,
 ): number | null {
-  if (rankingView === 'pb') {
-    return pbLeaderboard.ranked.find((row) => row.memberId === memberId)?.rank ?? null
+  if (usesMileageLeaderboard(rankingView)) {
+    return mileageLeaderboard.ranked.find((row) => row.memberId === memberId)?.rank ?? null
   }
-  return mileageLeaderboard.ranked.find((row) => row.memberId === memberId)?.rank ?? null
+  return pbLeaderboard.ranked.find((row) => row.memberId === memberId)?.rank ?? null
 }
 
-function rankingRowClass(isSelected: boolean) {
+function rankingRowClass(isSelected: boolean, isMe: boolean) {
+  if (isMe) {
+    return 'relative z-[1] border-2 border-lime-400 bg-white shadow-[0_0_22px_rgba(163,230,53,0.42)] ring-2 ring-lime-300/50'
+  }
   if (isSelected) {
     return 'border-lime-400/55 bg-lime-500/14 ring-2 ring-lime-400/40 shadow-[0_0_16px_rgba(163,230,53,0.12)]'
   }
@@ -985,33 +1106,61 @@ function rankingRowClass(isSelected: boolean) {
 }
 
 function rankingMemberNameClass(isMe: boolean, isSelected: boolean) {
-  if (isMe) return 'text-lime-400'
+  if (isMe) return 'text-zinc-900'
   if (isSelected) return 'text-lime-50'
   return 'text-foreground'
 }
 
-function rankingValueClass(isSelected: boolean) {
+function rankingValueClass(isSelected: boolean, isMe: boolean) {
+  if (isMe) return 'font-bold text-lime-700'
   return isSelected ? 'text-lime-300' : 'text-lime-400/90'
+}
+
+function MyRankNameEmphasis({
+  name,
+  isMe,
+}: {
+  name: string
+  isMe: boolean
+}) {
+  if (!isMe) {
+    return <span className="min-w-0 truncate">{name}</span>
+  }
+
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border-2 border-lime-400 bg-white px-2 py-0.5 shadow-[0_0_12px_rgba(163,230,53,0.35)]">
+      <span className="min-w-0 truncate text-sm font-extrabold tracking-tight text-zinc-900">
+        {name}
+      </span>
+      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-lime-600">
+        나
+      </span>
+    </span>
+  )
 }
 
 function PbRankingRow({
   row,
   isMe,
   distanceLabel,
-  changeHint,
+  rankChangeDelta = null,
   onMemberSelect,
   isSelected,
   scrollAnchor = false,
   showDistanceLabel = true,
+  beatRivalMemberId,
+  showBeatRivalLabel = false,
 }: {
   row: PbDistanceRankRow
   isMe: boolean
   distanceLabel: string
-  changeHint?: string | null
+  rankChangeDelta?: RankChangeDelta | null
   onMemberSelect?: (memberId: string, memberName: string) => void
   isSelected?: boolean
   scrollAnchor?: boolean
   showDistanceLabel?: boolean
+  beatRivalMemberId?: string | null
+  showBeatRivalLabel?: boolean
 }) {
   const isRowSelected = Boolean(isSelected)
 
@@ -1025,29 +1174,34 @@ function PbRankingRow({
       data-selected-member={isSelected ? 'true' : undefined}
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
-        topRankRowAccent(row.rank),
-        rankingRowClass(isRowSelected),
+        !isMe && topRankRowAccent(row.rank),
+        rankingRowClass(isRowSelected, isMe),
       )}
     >
+      <RankChangeBadge delta={rankChangeDelta} />
       <RankMedalDisplay rank={row.rank} />
       <span
         className={cn(
-          'min-w-0 flex-1 truncate font-medium',
+          'flex min-w-0 flex-1 items-center gap-1.5 font-medium',
           rankingMemberNameClass(isMe, isRowSelected),
         )}
       >
-        {formatRankingMemberName(row.memberName, { isMe })}
+        <MyRankNameEmphasis
+          name={formatRankingMemberName(row.memberName, { isMe })}
+          isMe={isMe}
+        />
+        {showBeatRivalLabel && beatRivalMemberId === row.memberId ? (
+          <BeatRivalFireBadge />
+        ) : null}
       </span>
       {showDistanceLabel ? (
         <span className="shrink-0 text-xs text-zinc-500">{distanceLabel}</span>
       ) : null}
       <span
-        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
+        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected, isMe))}
       >
         {row.timeText}
       </span>
-      <RankChangeHint label={changeHint ?? null} />
-      {isMe ? <MyRankBadge /> : null}
       {isSelected ? <ChevronRight className="h-4 w-4 shrink-0 text-lime-400" aria-hidden /> : null}
     </button>
   )
@@ -1056,19 +1210,21 @@ function PbRankingRow({
 function MileageRankingRow({
   row,
   isMe,
-  changeHint,
+  rankChangeDelta = null,
   onMemberSelect,
   isSelected,
   scrollAnchor = false,
-  showPeriodLabel = true,
+  beatRivalMemberId,
+  showBeatRivalLabel = false,
 }: {
   row: MileageDistanceRankRow
   isMe: boolean
-  changeHint?: string | null
+  rankChangeDelta?: RankChangeDelta | null
   onMemberSelect?: (memberId: string, memberName: string) => void
   isSelected?: boolean
   scrollAnchor?: boolean
-  showPeriodLabel?: boolean
+  beatRivalMemberId?: string | null
+  showBeatRivalLabel?: boolean
 }) {
   const isRowSelected = Boolean(isSelected)
 
@@ -1082,29 +1238,31 @@ function MileageRankingRow({
       data-selected-member={isSelected ? 'true' : undefined}
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
-        topRankRowAccent(row.rank),
-        rankingRowClass(isRowSelected),
+        !isMe && topRankRowAccent(row.rank),
+        rankingRowClass(isRowSelected, isMe),
       )}
     >
+      <RankChangeBadge delta={rankChangeDelta} />
       <RankMedalDisplay rank={row.rank} />
       <span
         className={cn(
-          'min-w-0 flex-1 truncate font-medium',
+          'flex min-w-0 flex-1 items-center gap-1.5 font-medium',
           rankingMemberNameClass(isMe, isRowSelected),
         )}
       >
-        {formatRankingMemberName(row.memberName, { isMe })}
+        <MyRankNameEmphasis
+          name={formatRankingMemberName(row.memberName, { isMe })}
+          isMe={isMe}
+        />
+        {showBeatRivalLabel && beatRivalMemberId === row.memberId ? (
+          <BeatRivalFireBadge />
+        ) : null}
       </span>
-      {showPeriodLabel ? (
-        <span className="shrink-0 text-xs text-zinc-500">이번 달</span>
-      ) : null}
       <span
-        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
+        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected, isMe))}
       >
         {formatMileageKmDisplay(row.mileageKm)}
       </span>
-      <RankChangeHint label={changeHint ?? null} />
-      {isMe ? <MyRankBadge /> : null}
       {isSelected ? <ChevronRight className="h-4 w-4 shrink-0 text-lime-400" aria-hidden /> : null}
     </button>
   )
@@ -1120,6 +1278,8 @@ function PbRankingList({
   rankingBundle = null,
   genderFilter = 'all',
   showDistanceLabel = true,
+  beatRivalMemberId,
+  showBeatRivalLabel = false,
 }: {
   leaderboard: PbDistanceLeaderboard
   highlightMemberId?: string | null
@@ -1130,6 +1290,8 @@ function PbRankingList({
   rankingBundle?: MemberRunningLeagueRankingBundle | null
   genderFilter?: RankingGenderFilter
   showDistanceLabel?: boolean
+  beatRivalMemberId?: string | null
+  showBeatRivalLabel?: boolean
 }) {
   const { ranked, unranked } = leaderboard
   const total = getLeaderboardTotal(leaderboard)
@@ -1154,14 +1316,16 @@ function PbRankingList({
     [genderFilter, rankingBundle],
   )
 
-  function resolveChangeHint(memberId: string): string | null {
+  function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
     if (!rankingBundle) return null
-    return formatMemberRankChangeHint(
+    return resolveRankChangeDeltaForView({
       memberId,
+      rankingView: 'pb',
       pbDistance,
-      filteredParticipants,
-      rankingBundle.pbRecords,
-    )
+      participants: filteredParticipants,
+      pbRecords: rankingBundle.pbRecords,
+      mileageLogs: rankingBundle.mileageLogs,
+    })
   }
 
   const myRow = highlightMemberId
@@ -1200,11 +1364,13 @@ function PbRankingList({
                 row={row}
                 isMe={isMe}
                 distanceLabel={distanceLabel}
-                changeHint={resolveChangeHint(row.memberId)}
+                rankChangeDelta={resolveRankChangeDelta(row.memberId)}
                 onMemberSelect={onMemberSelect}
                 isSelected={selectedMemberId === row.memberId}
                 scrollAnchor={isMe}
                 showDistanceLabel={showDistanceLabel}
+                beatRivalMemberId={beatRivalMemberId}
+                showBeatRivalLabel={showBeatRivalLabel}
               />
             </div>
           )
@@ -1249,12 +1415,22 @@ function MileageRankingList({
   onMemberSelect,
   selectedMemberId,
   showAllRanks = false,
+  beatRivalMemberId,
+  showBeatRivalLabel = false,
+  rankingBundle = null,
+  genderFilter = 'all',
+  rankingView = 'mileage',
 }: {
   leaderboard: MileageDistanceLeaderboard
   highlightMemberId?: string | null
   onMemberSelect?: (memberId: string, memberName: string) => void
   selectedMemberId?: string | null
   showAllRanks?: boolean
+  beatRivalMemberId?: string | null
+  showBeatRivalLabel?: boolean
+  rankingBundle?: MemberRunningLeagueRankingBundle | null
+  genderFilter?: RankingGenderFilter
+  rankingView?: RankingView
 }) {
   const { ranked, unranked } = leaderboard
   const total = getLeaderboardTotal(leaderboard)
@@ -1269,6 +1445,26 @@ function MileageRankingList({
   const hasRankingData = ranked.length > 0
   const showUnrankedSection =
     hasRankingData && unranked.some((row) => row.memberId !== highlightMemberId)
+
+  const filteredParticipants = useMemo(
+    () =>
+      rankingBundle
+        ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
+        : [],
+    [genderFilter, rankingBundle],
+  )
+
+  function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
+    if (!rankingBundle) return null
+    return resolveRankChangeDeltaForView({
+      memberId,
+      rankingView,
+      pbDistance: '10km',
+      participants: filteredParticipants,
+      pbRecords: rankingBundle.pbRecords,
+      mileageLogs: rankingBundle.mileageLogs,
+    })
+  }
 
   const myRow = highlightMemberId
     ? ranked.find((row) => row.memberId === highlightMemberId)
@@ -1305,9 +1501,12 @@ function MileageRankingList({
               <MileageRankingRow
                 row={row}
                 isMe={isMe}
+                rankChangeDelta={resolveRankChangeDelta(row.memberId)}
                 onMemberSelect={onMemberSelect}
                 isSelected={selectedMemberId === row.memberId}
                 scrollAnchor={isMe}
+                beatRivalMemberId={beatRivalMemberId}
+                showBeatRivalLabel={showBeatRivalLabel}
               />
             </div>
           )
@@ -1365,8 +1564,8 @@ function ScoreRankingRow({
       onClick={() => onMemberSelect?.(row.memberId, row.memberName)}
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
-        topRankRowAccent(row.rank),
-        rankingRowClass(isRowSelected),
+        !isMe && topRankRowAccent(row.rank),
+        rankingRowClass(isRowSelected, isMe),
       )}
     >
       <RankMedalDisplay rank={row.rank} />
@@ -1376,14 +1575,16 @@ function ScoreRankingRow({
           rankingMemberNameClass(isMe, isRowSelected),
         )}
       >
-        {formatRankingMemberName(row.memberName, { isMe })}
+        <MyRankNameEmphasis
+          name={formatRankingMemberName(row.memberName, { isMe })}
+          isMe={isMe}
+        />
       </span>
       <span
-        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected))}
+        className={cn('shrink-0 font-semibold tabular-nums', rankingValueClass(isRowSelected, isMe))}
       >
         {formatScoreDisplay(row.totalScore)}점
       </span>
-      {isMe ? <MyRankBadge /> : null}
     </button>
   )
 }
@@ -1508,6 +1709,7 @@ function FullRankingDialog({
   rankingBundle,
   genderFilterBlocked,
   unclassifiedCount = 0,
+  beatRivalMemberId,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -1525,13 +1727,16 @@ function FullRankingDialog({
   rankingBundle?: MemberRunningLeagueRankingBundle | null
   genderFilterBlocked?: boolean
   unclassifiedCount?: number
+  beatRivalMemberId?: string | null
 }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(1)
   const scrollPendingRef = useRef(false)
 
-  const fullRanked =
-    rankingView === 'pb' ? activePbLeaderboard.ranked : activeMileageLeaderboard.ranked
+  const fullRanked = usesPbLeaderboard(rankingView)
+    ? activePbLeaderboard.ranked
+    : activeMileageLeaderboard.ranked
+  const showBeatRivalLabel = true
   const searchedRanked = useMemo(
     () => filterRankedBySearch(fullRanked, searchQuery, highlightMemberId),
     [fullRanked, highlightMemberId, searchQuery],
@@ -1672,7 +1877,7 @@ function FullRankingDialog({
             <p className="py-8 text-center text-sm text-zinc-500">
               {searchQuery.trim() ? '검색 결과가 없습니다.' : '표시할 랭킹이 없습니다.'}
             </p>
-          ) : rankingView === 'pb' ? (
+          ) : usesPbLeaderboard(rankingView) ? (
             <PbRankingList
               leaderboard={paginatedPbLeaderboard}
               highlightMemberId={highlightMemberId}
@@ -1683,6 +1888,8 @@ function FullRankingDialog({
               rankingBundle={rankingBundle}
               genderFilter={genderFilter}
               showDistanceLabel={false}
+              beatRivalMemberId={beatRivalMemberId}
+              showBeatRivalLabel={showBeatRivalLabel}
             />
           ) : (
             <MileageRankingList
@@ -1691,6 +1898,11 @@ function FullRankingDialog({
               onMemberSelect={onMemberSelect}
               selectedMemberId={selectedMemberId}
               showAllRanks
+              beatRivalMemberId={beatRivalMemberId}
+              showBeatRivalLabel={showBeatRivalLabel}
+              rankingBundle={rankingBundle}
+              genderFilter={genderFilter}
+              rankingView={rankingView}
             />
           )}
         </ScrollArea>
@@ -1751,9 +1963,15 @@ export function MemberRunningLeagueRankings({
   brandHeaderBelow,
   showBrandHeader = true,
   showPortalShell = true,
+  beatRivalMemberId = null,
+  portalLeagueLabel,
+  portalTitle,
+  portalRankingReferenceDate = null,
+  portalRankingCaption = null,
 }: MemberRunningLeagueRankingsProps) {
   const [genderFilter, setGenderFilter] = useState<RankingGenderFilter>('all')
   const [rankingView, setRankingView] = useState<RankingView>('pb')
+  const [memberRankingMonthKey, setMemberRankingMonthKey] = useState<string | null>(null)
   const [graphChartTab, setGraphChartTab] = useState<GraphChartTab>('record')
   const [pbDistance, setPbDistance] = useState<PbLeaderboardDistance>(PORTAL_DEFAULT_PB_DISTANCE)
   const [fullRankingOpen, setFullRankingOpen] = useState(false)
@@ -1789,9 +2007,18 @@ export function MemberRunningLeagueRankings({
     }
   }, [pbDistance, portalPbDistance])
 
+  const effectiveRankingMonth = useMemo(
+    () => resolveEffectiveRankingMonth(memberRankingMonthKey, portalRankingReferenceDate),
+    [memberRankingMonthKey, portalRankingReferenceDate],
+  )
+  const rankingPeriod = useMemo(
+    () => rankingPeriodFromMonthKey(effectiveRankingMonth.monthKey),
+    [effectiveRankingMonth.monthKey],
+  )
+
   const filteredRankings = useMemo(() => {
     if (rankingBundle) {
-      return buildFilteredPortalRankings(rankingBundle, genderFilter)
+      return buildFilteredPortalRankings(rankingBundle, genderFilter, rankingPeriod)
     }
     return {
       pbByDistance: {
@@ -1812,16 +2039,16 @@ export function MemberRunningLeagueRankings({
     pbHalfLeaderboard,
     rankingBundle,
     scoreLeaderboard,
+    rankingPeriod,
   ])
 
   const activePbLeaderboard =
     filteredRankings?.pbByDistance[portalPbDistance] ?? EMPTY_PB_LEADERBOARD
   const activeMileageLeaderboard =
     filteredRankings?.mileageLeaderboard ?? { ranked: [], unranked: [] }
-  const activeRankedCount =
-    rankingView === 'pb'
-      ? activePbLeaderboard.ranked.length
-      : activeMileageLeaderboard.ranked.length
+  const activeRankedCount = usesPbLeaderboard(rankingView)
+    ? activePbLeaderboard.ranked.length
+    : activeMileageLeaderboard.ranked.length
   const genderFilterBlocked = isGenderFilterUnavailable(rankingBundle)
   const unclassifiedCount = useMemo(
     () => (rankingBundle ? countUnclassifiedParticipants(rankingBundle.participants) : 0),
@@ -1843,13 +2070,13 @@ export function MemberRunningLeagueRankings({
 
   const leagueMomentum = useMemo(() => {
     if (!rankingBundle || rankingsError) {
-      return { topRiser: null, recentPbUpdates: [] }
+      return { topRiser: null, recentPbUpdates: [], hotIssues: [] }
     }
     const filteredParticipants = filterParticipantsByGender(
       rankingBundle.participants,
       genderFilter,
     )
-    const { start, end } = currentMonthDateRange()
+    const { start, end } = rankingPeriod
     return buildLeagueMomentumSnapshot({
       rankingView,
       distance: portalPbDistance,
@@ -1864,6 +2091,7 @@ export function MemberRunningLeagueRankings({
     genderFilter,
     portalPbDistance,
     rankingBundle,
+    rankingPeriod,
     rankingView,
     rankingsError,
   ])
@@ -1907,6 +2135,14 @@ export function MemberRunningLeagueRankings({
     setGraphChartTab(graphChartTabForRankingView(view))
   }
 
+  function handleGraphChartTabChange(tab: GraphChartTab) {
+    setGraphChartTab(tab)
+    const view = graphRankingViewForChartTab(tab)
+    if (view) {
+      setRankingView(view)
+    }
+  }
+
   function handleGenderFilterChange(value: RankingGenderFilter) {
     setGenderFilter(value)
     setSelectedMember(null)
@@ -1938,6 +2174,26 @@ export function MemberRunningLeagueRankings({
     })
   }
 
+  function handleHotIssueViewDetail(item: LeagueMomentumMember) {
+    if (item.kind === 'mileage_riser' || item.kind === 'mileage_surge') {
+      handlePortalRankingViewChange('mileage')
+      setGraphChartTab('mileage')
+    } else {
+      handlePortalRankingViewChange('pb')
+      setGraphChartTab('record')
+      if (
+        item.pbDistance &&
+        PORTAL_PB_DISTANCES.includes(item.pbDistance as (typeof PORTAL_PB_DISTANCES)[number])
+      ) {
+        setPbDistance(item.pbDistance)
+      }
+    }
+    setSelectedMember({ id: item.memberId, name: item.memberName })
+    window.requestAnimationFrame(() => {
+      graphPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }
+
   const graphFilterStrip = (
     <MobileGraphFilterStrip
       rankingView={rankingView}
@@ -1947,7 +2203,7 @@ export function MemberRunningLeagueRankings({
       pbDistance={pbDistance}
       onPbDistanceChange={setPbDistance}
       genderFilterBlocked={genderFilterBlocked}
-      onGraphChartTabChange={setGraphChartTab}
+      onGraphChartTabChange={handleGraphChartTabChange}
       showRecordActions={canShowRecordActions}
       onAddMileage={openMileageDialog}
       onAddPb={() => setPbDialogOpen(true)}
@@ -1974,7 +2230,8 @@ export function MemberRunningLeagueRankings({
       soloComparisonHint={leagueStatus?.soloRankHint ?? leagueStatus?.comparisonHint}
       mobileFilterSlot={graphFilterStrip}
       graphChartTab={graphChartTab}
-      onGraphChartTabChange={setGraphChartTab}
+      onGraphChartTabChange={handleGraphChartTabChange}
+      beatRivalMemberId={beatRivalMemberId}
       className={MEMBER_PORTAL_CARD_CLASS}
     />
   ) : rankingBundle ? (
@@ -1984,7 +2241,8 @@ export function MemberRunningLeagueRankings({
       pbDistance={portalPbDistance}
       rankingBundle={rankingBundle}
       graphChartTab={graphChartTab}
-      onGraphChartTabChange={setGraphChartTab}
+      onGraphChartTabChange={handleGraphChartTabChange}
+      beatRivalMemberId={beatRivalMemberId}
       mobileFilterSlot={graphFilterStrip}
       className={MEMBER_PORTAL_CARD_CLASS}
     />
@@ -2000,15 +2258,17 @@ export function MemberRunningLeagueRankings({
   const portalHighlightsBody =
     !rankingsError && rankingBundle ? (
       <MemberLeagueMomentumStrip
+        hotIssues={leagueMomentum.hotIssues}
         topRiser={leagueMomentum.topRiser}
         recentPbUpdates={leagueMomentum.recentPbUpdates}
         highlightMemberId={highlightMemberId}
         onMemberSelect={handleMemberSelect}
         onPbUpdateSelect={handlePbUpdateSelect}
+        onHotIssueViewDetail={handleHotIssueViewDetail}
         rankingViewLabel={
-          rankingView === 'pb'
+          usesPbLeaderboard(rankingView)
             ? formatPbDistanceLabel(portalPbDistance)
-            : formatCurrentMonthRankingLabel()
+            : rankingPeriod.label
         }
         className={MEMBER_PORTAL_CARD_CLASS}
       />
@@ -2026,7 +2286,13 @@ export function MemberRunningLeagueRankings({
         className,
       )}
     >
-      {showBrandHeader ? <MemberPortalBrandHeader action={brandHeaderAction} /> : null}
+      {showBrandHeader ? (
+        <MemberPortalBrandHeader
+          action={brandHeaderAction}
+          leagueLabel={portalLeagueLabel}
+          portalTitle={portalTitle}
+        />
+      ) : null}
       {brandHeaderBelow}
 
       <div className="flex flex-col gap-2.5 sm:gap-4">
@@ -2045,6 +2311,13 @@ export function MemberRunningLeagueRankings({
           genderFilter={genderFilter}
           leagueStatus={leagueStatus}
           onRetry={() => router.refresh()}
+          beatRivalMemberId={beatRivalMemberId}
+          rankingPeriod={rankingPeriod}
+          rankingCaption={portalRankingCaption}
+          selectedMonthKey={effectiveRankingMonth.monthKey}
+          autoRankingMonth={effectiveRankingMonth.auto}
+          onRankingMonthKeyChange={setMemberRankingMonthKey}
+          onResetRankingMonth={() => setMemberRankingMonthKey(null)}
         />
 
         <div ref={graphPanelRef} className="scroll-mt-4">
@@ -2082,6 +2355,7 @@ export function MemberRunningLeagueRankings({
         rankingBundle={rankingBundle}
         genderFilterBlocked={genderFilterBlocked}
         unclassifiedCount={unclassifiedCount}
+        beatRivalMemberId={beatRivalMemberId}
       />
 
       <MemberRunningPbDialog

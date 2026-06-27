@@ -1,5 +1,6 @@
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
+import { formatMileageKmDisplay } from '@/lib/running-league/mileage-leaderboard'
 import { buildMemberMileageRankHistorySeries } from '@/lib/running-league/mileage-rank-history'
 import { formatPbDistanceLabel } from '@/lib/running-league/pb-distance-labels'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
@@ -16,18 +17,42 @@ import type {
 } from '@/lib/types'
 import type { RankingView } from '@/lib/running-league/ranking-view'
 
+export type LeagueMomentumKind =
+  | 'rank_riser'
+  | 'mileage_riser'
+  | 'pb_update'
+  | 'mileage_surge'
+
 export type LeagueMomentumMember = {
   memberId: string
   memberName: string
   headline: string
   detail: string
-  kind?: 'rank_riser' | 'pb_update'
+  kind: LeagueMomentumKind
   pbDistance?: PbLeaderboardDistance
+  /** 정렬·중복 제거용 우선순위 (높을수록 상단) */
+  priority?: number
 }
 
 export type LeagueMomentumSnapshot = {
   topRiser: LeagueMomentumMember | null
   recentPbUpdates: LeagueMomentumMember[]
+  hotIssues: LeagueMomentumMember[]
+}
+
+export const LEAGUE_HOT_ISSUE_LIMIT = 4
+
+export function getLeagueHotIssueLabel(kind: LeagueMomentumKind): string {
+  switch (kind) {
+    case 'rank_riser':
+      return 'PB 순위 급상승'
+    case 'mileage_riser':
+      return '마일리지 순위 급상승'
+    case 'pb_update':
+      return 'PB 갱신'
+    case 'mileage_surge':
+      return '마일리지 폭주'
+  }
 }
 
 function formatShortDate(value: string): string {
@@ -111,13 +136,120 @@ export function buildTopMonthlyRankRiser(input: {
 
   if (!best) return null
 
+  const kind = input.rankingView === 'mileage' ? 'mileage_riser' : 'rank_riser'
+
   return {
     memberId: best.memberId,
     memberName: best.memberName,
     headline: `${best.startRank}위 → ${best.endRank}위`,
     detail: `▲${best.delta} 계단 상승`,
-    kind: 'rank_riser',
+    kind,
+    priority: 100 + best.delta,
   }
+}
+
+/** 이번 달 가장 많이 뛴 회원 (누적 km) */
+export function buildTopMileageSurge(input: {
+  participants: ReadonlyArray<RunningLeagueParticipant>
+  mileageLogs: ReadonlyArray<RunningLeagueMileageLog>
+  monthStart: string
+  monthEnd: string
+}): LeagueMomentumMember | null {
+  const kmByMember = new Map<string, number>()
+
+  for (const log of input.mileageLogs) {
+    if (log.logged_at < input.monthStart || log.logged_at > input.monthEnd) continue
+    const km = Number(log.distance_km)
+    if (!Number.isFinite(km) || km <= 0) continue
+    kmByMember.set(log.member_id, (kmByMember.get(log.member_id) ?? 0) + km)
+  }
+
+  let best: { memberId: string; km: number } | null = null
+  for (const [memberId, km] of kmByMember) {
+    if (!best || km > best.km) best = { memberId, km }
+  }
+  if (!best || best.km < 5) return null
+
+  const participant = input.participants.find((row) => row.member_id === best!.memberId)
+
+  return {
+    memberId: best.memberId,
+    memberName: resolveParticipantName(participant),
+    headline: `${formatMileageKmDisplay(best.km)} 누적`,
+    detail: '이번 달 최다 마일리지',
+    kind: 'mileage_surge',
+    priority: 70 + Math.min(best.km, 50),
+  }
+}
+
+function dedupeHotIssuesByMember(
+  items: LeagueMomentumMember[],
+  limit: number,
+): LeagueMomentumMember[] {
+  const byMember = new Map<string, LeagueMomentumMember>()
+
+  for (const item of items) {
+    const existing = byMember.get(item.memberId)
+    if (!existing || (item.priority ?? 0) > (existing.priority ?? 0)) {
+      byMember.set(item.memberId, item)
+    }
+  }
+
+  return [...byMember.values()]
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    .slice(0, limit)
+}
+
+/** 최근 핫한 이슈 최대 4건 (순위 상승 · PB 갱신 · 마일리지) */
+export function buildLeagueHotIssues(input: {
+  rankingView: RankingView
+  distance: PbLeaderboardDistance
+  participants: ReadonlyArray<RunningLeagueParticipant>
+  records: ReadonlyArray<RunningLeagueRecord>
+  mileageLogs: ReadonlyArray<RunningLeagueMileageLog>
+  monthStart: string
+  monthEnd: string
+  limit?: number
+}): LeagueMomentumMember[] {
+  const limit = input.limit ?? LEAGUE_HOT_ISSUE_LIMIT
+  const candidates: LeagueMomentumMember[] = []
+
+  const pbRiser = buildTopMonthlyRankRiser({
+    ...input,
+    rankingView: 'pb',
+  })
+  if (pbRiser) candidates.push(pbRiser)
+
+  const mileageRiser = buildTopMonthlyRankRiser({
+    ...input,
+    rankingView: 'mileage',
+  })
+  if (mileageRiser) candidates.push(mileageRiser)
+
+  const surge = buildTopMileageSurge({
+    participants: input.participants,
+    mileageLogs: input.mileageLogs,
+    monthStart: input.monthStart,
+    monthEnd: input.monthEnd,
+  })
+  if (surge) candidates.push(surge)
+
+  const pbUpdates = buildRecentPbUpdates({
+    participants: input.participants,
+    records: input.records,
+    monthStart: input.monthStart,
+    monthEnd: input.monthEnd,
+    distance: null,
+    limit: 3,
+  })
+  for (const [index, item] of pbUpdates.entries()) {
+    candidates.push({
+      ...item,
+      priority: 85 - index * 5,
+    })
+  }
+
+  return dedupeHotIssuesByMember(candidates, limit)
 }
 
 /** 최근 PB 갱신 회원 (이번 달, 거리별) */
@@ -175,6 +307,7 @@ export function buildRecentPbUpdates(input: {
       detail: `${formatSecondsToRunningTime(seconds)} · ${formatShortDate(record.measured_at)}`,
       kind: 'pb_update',
       pbDistance: record.distance_event as PbLeaderboardDistance,
+      priority: 80,
     })
 
     if (results.length >= limit) break
@@ -193,16 +326,30 @@ export function buildLeagueMomentumSnapshot(input: {
   monthEnd: string
   recentPbLimit?: number
 }): LeagueMomentumSnapshot {
+  const topRiser = buildTopMonthlyRankRiser(input)
+  const recentPbUpdates = buildRecentPbUpdates({
+    participants: input.participants,
+    records: input.records,
+    monthStart: input.monthStart,
+    monthEnd: input.monthEnd,
+    distance: input.rankingView === 'pb' ? input.distance : null,
+    limit: input.recentPbLimit,
+  })
+  const hotIssues = buildLeagueHotIssues({
+    rankingView: input.rankingView,
+    distance: input.distance,
+    participants: input.participants,
+    records: input.records,
+    mileageLogs: input.mileageLogs,
+    monthStart: input.monthStart,
+    monthEnd: input.monthEnd,
+    limit: LEAGUE_HOT_ISSUE_LIMIT,
+  })
+
   return {
-    topRiser: buildTopMonthlyRankRiser(input),
-    recentPbUpdates: buildRecentPbUpdates({
-      participants: input.participants,
-      records: input.records,
-      monthStart: input.monthStart,
-      monthEnd: input.monthEnd,
-      distance: input.rankingView === 'pb' ? input.distance : null,
-      limit: input.recentPbLimit,
-    }),
+    topRiser,
+    recentPbUpdates,
+    hotIssues,
   }
 }
 

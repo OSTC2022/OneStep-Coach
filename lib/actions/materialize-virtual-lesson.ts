@@ -6,6 +6,7 @@ import {
   type RecurrenceCapableLesson,
 } from '@/lib/calendar-recurrence/types'
 import { querySessionPackageIdForDeduction } from '@/lib/actions/sessions'
+import { touchAppModifiedAt } from '@/lib/google-calendar/push-scheduler'
 
 const MASTER_SELECT =
   'id, lesson_date, start_time, end_time, member_id, title, content, instructor_id, session_package_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, event_status, attendance_status'
@@ -41,6 +42,8 @@ function buildAttendanceExceptionPayload(
     recurrence_pattern: master.recurrence_pattern,
     session_package_id: sessionPackageId ?? master.session_package_id,
     session_deducted: false,
+    sync_origin: 'app',
+    app_modified_at: touchAppModifiedAt(),
   }
 }
 

@@ -5,11 +5,18 @@ import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import {
+  revalidateAfterLessonStatusAttendanceChange,
   revalidateLessonAttendanceViews,
   revalidateLessonAttendanceWithCalendar,
   revalidateSessionDeductionPaths,
 } from '@/lib/dashboard-revalidate'
 import { syncTrialLessonPayOverride } from '@/lib/trial-lesson-pay-sync'
+import { touchAppModifiedAt } from '@/lib/google-calendar/push-scheduler'
+import {
+  deleteAttendanceRecord,
+  resolveLessonOccurrenceContext,
+  upsertAttendanceRecord,
+} from '@/lib/actions/attendance-records'
 import type { AttendanceStatus, Lesson, LessonSession, SessionTransaction } from '@/lib/types'
 import { getLessonCalendarDisplayParts, resolveLessonTitle } from '@/lib/calendar-utils'
 import { countsTowardSessionNumber, getTodayDateKey } from '@/lib/lesson-record-utils'
@@ -41,6 +48,9 @@ type CheckInResult = {
   success?: boolean
   lesson_session_id?: string
   lesson_id?: string
+  attendance_record_id?: string
+  lesson_occurrence_key?: string
+  checked_in_at?: string
   member_remaining_sessions?: number
   session_package_remaining?: number
   session_overage?: number
@@ -248,7 +258,7 @@ export async function checkInLesson(
   }
 }
 
-/** 출석/취소만 변경 (세션 차감 없음) — 수업현황용 */
+/** 출석/취소만 변경 (세션 차감 없음) — 수업현황용. attendance_records에 독립 저장 */
 export async function updateLessonAttendanceStatus(
   lessonId: string,
   status: AttendanceStatus,
@@ -262,116 +272,103 @@ export async function updateLessonAttendanceStatus(
   const admin = attendanceWriteClient()
   const supabase = admin ?? (await createClient())
 
-  const resolved = await resolveLessonIdForAttendanceWrite(supabase, lessonId)
-  if (resolved.error) {
-    return { error: resolved.error }
+  const contextResult = await resolveLessonOccurrenceContext(supabase, lessonId)
+  if (contextResult.error || !contextResult.context) {
+    return { error: contextResult.error ?? '수업 정보를 확인할 수 없습니다.' }
   }
-  const persistedLessonId = resolved.lessonId
+  const context = contextResult.context
 
-  const { data: lesson, error: lessonError } = await supabase
-    .from('lessons')
-    .select(
-      'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted, attendance_status',
-    )
-    .eq('id', persistedLessonId)
-    .single()
-
-  if (lessonError || !lesson) {
-    return { error: '수업을 찾을 수 없습니다.' }
-  }
-
-  if (!lesson.member_id) {
+  if (!context.member_id) {
     return { error: '회원이 연결되지 않은 수업입니다.' }
   }
 
-  const sessionPackageId = await resolveSessionPackageId(supabase, lesson)
-
-  const now = new Date().toISOString()
-  const sessionUpdate = {
+  const attendanceResult = await upsertAttendanceRecord(supabase, {
+    context,
     status,
-    checked_in_at: now,
-    checked_in_by: user.id,
-    updated_at: now,
+    userId: user.id,
+  })
+
+  if (attendanceResult.error || !attendanceResult.data) {
+    return { error: attendanceResult.error ?? '출석 기록 저장에 실패했습니다.' }
   }
 
+  const attendanceRecord = attendanceResult.data
   let sessionId: string | undefined
+  const persistedLessonId = context.persisted_lesson_id
 
-  const { data: existingSession, error: existingError } = await supabase
-    .from('lesson_sessions')
-    .select('id')
-    .eq('lesson_id', persistedLessonId)
-    .maybeSingle()
+  if (persistedLessonId) {
+    const { data: lesson } = await supabase
+      .from('lessons')
+      .select(
+        'id, member_id, instructor_id, session_package_id, lesson_date, session_deducted',
+      )
+      .eq('id', persistedLessonId)
+      .single()
 
-  if (!existingError) {
-    if (existingSession?.id) {
-      sessionId = existingSession.id
-      const { error } = await supabase
-        .from('lesson_sessions')
-        .update(sessionUpdate)
-        .eq('id', existingSession.id)
-      if (error && !isMissingTableError(error.message)) {
-        console.warn('lesson_sessions update:', error.message)
+    if (lesson?.member_id) {
+      const sessionPackageId = await resolveSessionPackageId(supabase, lesson)
+      const now = attendanceRecord.checked_in_at ?? new Date().toISOString()
+      const sessionUpdate = {
+        status,
+        checked_in_at: status === 'present' ? now : null,
+        checked_in_by: user.id,
+        updated_at: now,
       }
-    } else {
-      const { data: inserted, error } = await supabase
+
+      const { data: existingSession } = await supabase
         .from('lesson_sessions')
-        .insert({
-          lesson_id: persistedLessonId,
-          member_id: lesson.member_id,
-          instructor_id: lesson.instructor_id,
-          session_package_id: sessionPackageId,
-          session_date: lesson.lesson_date,
-          ...sessionUpdate,
-        })
         .select('id')
-        .single()
+        .eq('lesson_id', persistedLessonId)
+        .maybeSingle()
 
-      if (error) {
-        if (!isMissingTableError(error.message)) {
-          console.warn('lesson_sessions insert:', error.message)
-        }
-      } else {
-        sessionId = inserted.id
+      if (existingSession?.id) {
+        sessionId = existingSession.id
+        await supabase
+          .from('lesson_sessions')
+          .update(sessionUpdate)
+          .eq('id', existingSession.id)
+      } else if (status === 'present') {
+        const { data: inserted } = await supabase
+          .from('lesson_sessions')
+          .insert({
+            lesson_id: persistedLessonId,
+            member_id: lesson.member_id,
+            instructor_id: lesson.instructor_id,
+            session_package_id: sessionPackageId,
+            session_date: lesson.lesson_date,
+            ...sessionUpdate,
+          })
+          .select('id')
+          .single()
+        sessionId = inserted?.id
       }
+
+      const lessonUpdatePayload: Record<string, unknown> = {
+        attendance_status: status,
+        sync_origin: 'app',
+        app_modified_at: touchAppModifiedAt(),
+      }
+      if (sessionPackageId) {
+        lessonUpdatePayload.session_package_id = sessionPackageId
+      }
+
+      await supabase
+        .from('lessons')
+        .update(lessonUpdatePayload)
+        .eq('id', persistedLessonId)
     }
   }
 
-  const lessonUpdatePayload: Record<string, unknown> = {
-    attendance_status: status,
-  }
-  if (sessionPackageId) {
-    lessonUpdatePayload.session_package_id = sessionPackageId
-  }
-
-  const { error: lessonUpdateError } = await supabase
-    .from('lessons')
-    .update(lessonUpdatePayload)
-    .eq('id', persistedLessonId)
-
-  if (lessonUpdateError) {
-    if (
-      lessonUpdateError.message.includes('row-level security') ||
-      lessonUpdateError.message.includes('permission denied')
-    ) {
-      return {
-        error:
-          '출석 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY를 확인하거나 supabase/fix-check-in-lesson.sql 을 실행해주세요.',
-      }
-    }
-    return { error: lessonUpdateError.message }
-  }
-
-  revalidateLessonAttendanceWithCalendar()
-  revalidatePath('/dashboard/members')
-  if (lesson.member_id) {
-    revalidatePath(`/dashboard/members/${lesson.member_id}`)
-  }
+  revalidateAfterLessonStatusAttendanceChange(context.member_id)
 
   return {
     data: {
       success: true,
       lesson_session_id: sessionId,
-      lesson_id: persistedLessonId !== lessonId ? persistedLessonId : undefined,
+      attendance_record_id: attendanceRecord.id,
+      lesson_occurrence_key: attendanceRecord.lesson_occurrence_key,
+      checked_in_at: attendanceRecord.checked_in_at ?? undefined,
+      lesson_id: persistedLessonId && persistedLessonId !== lessonId ? persistedLessonId : undefined,
     },
   }
 }
@@ -385,11 +382,26 @@ export async function clearLessonAttendanceCheck(
   const admin = attendanceWriteClient()
   const supabase = admin ?? (await createClient())
 
-  const resolved = await resolveLessonIdForAttendanceWrite(supabase, lessonId)
-  if (resolved.error) {
-    return { error: resolved.error }
+  const contextResult = await resolveLessonOccurrenceContext(supabase, lessonId)
+  if (contextResult.error || !contextResult.context) {
+    return { error: contextResult.error ?? '수업 정보를 확인할 수 없습니다.' }
   }
-  const persistedLessonId = resolved.lessonId
+
+  const deleteRecord = await deleteAttendanceRecord(supabase, contextResult.context)
+  if (deleteRecord.error) {
+    return { error: deleteRecord.error }
+  }
+
+  const persistedLessonId = contextResult.context.persisted_lesson_id
+  if (!persistedLessonId) {
+    revalidateAfterLessonStatusAttendanceChange(contextResult.context.member_id ?? undefined)
+    return {
+      data: {
+        success: true,
+        lesson_occurrence_key: contextResult.context.lesson_occurrence_key,
+      },
+    }
+  }
 
   const { data: lesson, error: lessonError } = await supabase
     .from('lessons')
@@ -431,6 +443,8 @@ export async function clearLessonAttendanceCheck(
   let memberRemaining: number | undefined
   const lessonUpdatePayload: Record<string, unknown> = {
     attendance_status: 'present',
+    sync_origin: 'app',
+    app_modified_at: touchAppModifiedAt(),
   }
 
   if (lesson.session_deducted && !lesson.end_time) {
@@ -481,11 +495,7 @@ export async function clearLessonAttendanceCheck(
   if (lesson.session_deducted && !lesson.end_time) {
     revalidateSessionDeductionPaths(lesson.member_id)
   } else {
-    revalidateLessonAttendanceWithCalendar()
-    revalidatePath('/dashboard/members')
-    if (lesson.member_id) {
-      revalidatePath(`/dashboard/members/${lesson.member_id}`)
-    }
+    revalidateAfterLessonStatusAttendanceChange(lesson.member_id)
   }
 
   return {
@@ -1396,6 +1406,8 @@ export async function updateAthleticsClubAttendanceStatus(
       attendance_status: attendanceStatus,
       special_note: specialNote,
       lesson_type: lesson.lesson_type,
+      sync_origin: 'app',
+      app_modified_at: touchAppModifiedAt(),
     })
     .eq('id', persistedLessonId)
     .select(
@@ -1416,7 +1428,7 @@ export async function updateAthleticsClubAttendanceStatus(
     return { error: error.message }
   }
 
-  revalidateLessonAttendanceWithCalendar()
+  revalidateAfterLessonStatusAttendanceChange()
   revalidatePath('/dashboard/instructors')
   revalidatePath('/dashboard/reports')
 
@@ -1496,10 +1508,25 @@ export async function markGuestLessonStatus(
 
   const updates =
     action === 'trial'
-      ? { lesson_type: '체험레슨', attendance_status: 'present' as AttendanceStatus }
+      ? {
+          lesson_type: '체험레슨',
+          attendance_status: 'present' as AttendanceStatus,
+          sync_origin: 'app',
+          app_modified_at: touchAppModifiedAt(),
+        }
       : action === 'cancelled'
-        ? { lesson_type: '개인레슨', attendance_status: 'cancelled' as AttendanceStatus }
-        : { lesson_type: '개인레슨', attendance_status: 'present' as AttendanceStatus }
+        ? {
+            lesson_type: '개인레슨',
+            attendance_status: 'cancelled' as AttendanceStatus,
+            sync_origin: 'app',
+            app_modified_at: touchAppModifiedAt(),
+          }
+        : {
+            lesson_type: '개인레슨',
+            attendance_status: 'present' as AttendanceStatus,
+            sync_origin: 'app',
+            app_modified_at: touchAppModifiedAt(),
+          }
 
   const { data, error } = await supabase
     .from('lessons')
@@ -1525,7 +1552,7 @@ export async function markGuestLessonStatus(
 
   await syncTrialLessonPayOverride(supabase, data, user.id)
 
-  revalidateLessonAttendanceWithCalendar()
+  revalidateAfterLessonStatusAttendanceChange()
   revalidatePath('/dashboard/instructors')
   revalidatePath('/dashboard/reports')
 

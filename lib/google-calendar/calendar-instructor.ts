@@ -1,10 +1,11 @@
 import 'server-only'
 
-import {
-  GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME,
-} from '@/lib/google-calendar/config'
 import type { GoogleCalendarSyncRow } from '@/lib/google-calendar/types'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import {
+  loadGoogleCalendarMappings,
+  resolveCoachIdFromGoogleCalendar,
+} from '@/lib/google-calendar/calendar-mappings'
 
 export type GoogleCalendarInstructorResolver = {
   resolveInstructorId(googleCalendarId: string): string | null
@@ -17,48 +18,30 @@ export async function buildGoogleCalendarInstructorResolver(
     'calendar_id' | 'calendar_name' | 'calendar_id_2' | 'calendar_name_2'
   >,
 ): Promise<GoogleCalendarInstructorResolver> {
-  const instructorNameByCalendarId = new Map<string, string>()
+  await loadGoogleCalendarMappings()
+
+  const instructorIdByCalendarId = new Map<string, string | null>()
 
   if (row.calendar_id) {
-    const calendarName = row.calendar_name?.trim() ?? ''
-    const instructorName = GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME[calendarName]
-    if (instructorName) {
-      instructorNameByCalendarId.set(row.calendar_id, instructorName)
-    }
+    instructorIdByCalendarId.set(
+      row.calendar_id,
+      await resolveCoachIdFromGoogleCalendar(
+        supabase,
+        row.calendar_id,
+        row.calendar_name,
+      ),
+    )
   }
 
   if (row.calendar_id_2) {
-    const calendarName = row.calendar_name_2?.trim() ?? ''
-    const instructorName = GOOGLE_CALENDAR_INSTRUCTOR_BY_CALENDAR_NAME[calendarName]
-    if (instructorName) {
-      instructorNameByCalendarId.set(row.calendar_id_2, instructorName)
-    }
-  }
-
-  const instructorNames = [...new Set(instructorNameByCalendarId.values())]
-  const instructorIdByName = new Map<string, string>()
-
-  if (instructorNames.length > 0) {
-    const { data, error } = await supabase
-      .from('instructors')
-      .select('id, name')
-      .in('name', instructorNames)
-      .eq('is_active', true)
-
-    if (error) throw new Error(error.message)
-
-    for (const instructor of data ?? []) {
-      const name = instructor.name?.trim()
-      if (name) instructorIdByName.set(name, instructor.id)
-    }
-  }
-
-  const instructorIdByCalendarId = new Map<string, string>()
-  for (const [calendarId, instructorName] of instructorNameByCalendarId) {
-    const instructorId = instructorIdByName.get(instructorName)
-    if (instructorId) {
-      instructorIdByCalendarId.set(calendarId, instructorId)
-    }
+    instructorIdByCalendarId.set(
+      row.calendar_id_2,
+      await resolveCoachIdFromGoogleCalendar(
+        supabase,
+        row.calendar_id_2,
+        row.calendar_name_2,
+      ),
+    )
   }
 
   return {
@@ -68,7 +51,7 @@ export async function buildGoogleCalendarInstructorResolver(
   }
 }
 
-/** 강사 ID → Google 캘린더 (수업/수업2) — 인바운드 동기화와 동일한 매핑 */
+/** 강사 ID → Google 캘린더 (수업/수업2) — DB 매핑 우선 */
 export async function resolveGoogleCalendarTarget(
   supabase: ReturnType<typeof createServiceRoleClient>,
   row: Pick<
@@ -77,7 +60,7 @@ export async function resolveGoogleCalendarTarget(
   >,
   instructorId: string | null,
 ): Promise<{ calendarId: string; calendarName: string } | null> {
-  const resolver = await buildGoogleCalendarInstructorResolver(supabase, row)
+  const mappings = await loadGoogleCalendarMappings()
 
   const calendars: { id: string; name: string }[] = []
   if (row.calendar_id) {
@@ -91,6 +74,16 @@ export async function resolveGoogleCalendarTarget(
   }
 
   if (instructorId) {
+    for (const calendar of calendars) {
+      const mapping =
+        mappings.byCalendarId.get(calendar.id) ??
+        mappings.byCalendarName.get(calendar.name)
+      if (mapping?.default_coach_id === instructorId) {
+        return { calendarId: calendar.id, calendarName: calendar.name }
+      }
+    }
+
+    const resolver = await buildGoogleCalendarInstructorResolver(supabase, row)
     for (const calendar of calendars) {
       if (resolver.resolveInstructorId(calendar.id) === instructorId) {
         return { calendarId: calendar.id, calendarName: calendar.name }
@@ -108,22 +101,11 @@ export async function resolveGoogleCalendarTarget(
   return null
 }
 
-/** Google에서 가져온 기존 일정에 캘린더별 담당 강사 일괄 반영 (instructor_id가 비어 있는 행만) */
+/** Supabase SOT: Google pull이 instructor_id를 덮어쓰지 않으므로 백필 비활성화 */
 export async function backfillGoogleCalendarInstructor(
-  supabase: ReturnType<typeof createServiceRoleClient>,
-  googleCalendarId: string,
-  instructorId: string | null,
+  _supabase: ReturnType<typeof createServiceRoleClient>,
+  _googleCalendarId: string,
+  _instructorId: string | null,
 ): Promise<void> {
-  if (!instructorId) return
-
-  const { error } = await supabase
-    .from('lessons')
-    .update({ instructor_id: instructorId })
-    .eq('google_calendar_id', googleCalendarId)
-    .not('google_event_id', 'is', null)
-    .is('instructor_id', null)
-
-  if (error && !error.message.includes('google_calendar_id')) {
-    throw new Error(error.message)
-  }
+  return
 }

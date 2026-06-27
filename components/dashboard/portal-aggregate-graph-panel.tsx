@@ -3,19 +3,15 @@
 import { useMemo, type ReactNode } from 'react'
 import { MemberRankingCharts, type GraphChartTab } from '@/components/dashboard/member-ranking-charts'
 import { buildLeagueAggregateRankComparisonChart } from '@/lib/running-league/league-rank-comparison'
-import {
-  buildLeagueAggregateMileageRankComparisonChart,
-  buildLeagueMileageComparisonChart,
-} from '@/lib/running-league/league-mileage-comparison'
+import { buildLeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
 import { buildLeaguePbRecordComparisonChart } from '@/lib/running-league/league-pb-record-comparison'
 import { filterPortalPbTrendRecords } from '@/lib/running-league/ranking-hub'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
+import type { RankingView } from '@/lib/running-league/ranking-view'
 import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-layout'
 import { cn } from '@/lib/utils'
-
-type RankingView = 'pb' | 'mileage'
 
 interface PortalAggregateGraphPanelProps {
   rankingView: RankingView
@@ -24,6 +20,7 @@ interface PortalAggregateGraphPanelProps {
   rankingBundle: MemberRunningLeagueRankingBundle | null
   graphChartTab: GraphChartTab
   onGraphChartTabChange: (tab: GraphChartTab) => void
+  beatRivalMemberId?: string | null
   mobileFilterSlot?: ReactNode
   className?: string
 }
@@ -35,6 +32,7 @@ export function PortalAggregateGraphPanel({
   rankingBundle,
   graphChartTab,
   onGraphChartTabChange,
+  beatRivalMemberId = null,
   mobileFilterSlot = null,
   className,
 }: PortalAggregateGraphPanelProps) {
@@ -48,37 +46,32 @@ export function PortalAggregateGraphPanel({
     [rankingBundle],
   )
 
-  const comparisonChart = useMemo(() => {
+  const pbRankComparisonChart = useMemo(() => {
     if (!rankingBundle) return null
-    if (rankingView === 'pb') {
-      return buildLeagueAggregateRankComparisonChart({
-        distance: pbDistance,
-        participants: filteredParticipants,
-        records: portalPbRecords,
-      })
-    }
-    return buildLeagueAggregateMileageRankComparisonChart({
+    return buildLeagueAggregateRankComparisonChart({
+      distance: pbDistance,
       participants: filteredParticipants,
-      logs: rankingBundle.mileageLogs,
+      records: portalPbRecords,
     })
-  }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle, rankingView])
+  }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle])
 
   const mileageComparisonChart = useMemo(() => {
-    if (!rankingBundle || rankingView !== 'mileage') return null
+    if (!rankingBundle) return null
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
       logs: rankingBundle.mileageLogs,
+      beatRivalMemberId,
     })
-  }, [filteredParticipants, rankingBundle, rankingView])
+  }, [beatRivalMemberId, filteredParticipants, rankingBundle])
 
   const pbRecordComparisonChart = useMemo(() => {
-    if (!rankingBundle || rankingView !== 'pb') return null
+    if (!rankingBundle) return null
     return buildLeaguePbRecordComparisonChart({
       distance: pbDistance,
       participants: filteredParticipants,
       records: portalPbRecords,
     })
-  }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle, rankingView])
+  }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle])
 
   return (
     <div className={cn(MEMBER_PORTAL_CARD_CLASS, className)}>
@@ -92,7 +85,7 @@ export function PortalAggregateGraphPanel({
           points={[]}
           mileagePoints={[]}
           mileageRankPoints={[]}
-          comparisonChart={comparisonChart}
+          comparisonChart={pbRankComparisonChart}
           mileageComparisonChart={mileageComparisonChart}
           pbRecordComparisonChart={pbRecordComparisonChart}
           mode={rankingView}
@@ -100,6 +93,7 @@ export function PortalAggregateGraphPanel({
           compact
           activeTab={graphChartTab}
           onActiveTabChange={onGraphChartTabChange}
+          beatRivalMemberId={beatRivalMemberId}
         />
       </div>
     </div>

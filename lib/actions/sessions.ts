@@ -651,12 +651,18 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
   await requireRole(['admin'])
   const supabase = await sessionWriteClient()
 
+  const totalSessions = formData.total_sessions
+  const remainingSessions = formData.remaining_sessions ?? totalSessions
+  if (remainingSessions < 0 || remainingSessions > totalSessions) {
+    return { error: '잔여 회차는 0 이상 총 회차 이하여야 합니다.' }
+  }
+
   const { data, error } = await supabase
     .from('session_packages')
     .insert({
       member_id: formData.member_id,
-      total_sessions: formData.total_sessions,
-      remaining_sessions: formData.total_sessions,
+      total_sessions: totalSessions,
+      remaining_sessions: remainingSessions,
       price: formData.price || null,
       paid_at: normalizeOptionalDate(formData.paid_at),
       expires_at: normalizeOptionalDate(formData.expires_at),
@@ -681,8 +687,8 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
   await supabase.from('session_transactions').insert({
     member_id: formData.member_id,
     session_package_id: pkg.id,
-    delta: formData.total_sessions,
-    balance_after: formData.total_sessions,
+    delta: totalSessions,
+    balance_after: remainingSessions,
     reason: 'package_purchase',
     note: formData.note ?? null,
   })

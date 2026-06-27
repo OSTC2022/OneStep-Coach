@@ -1,12 +1,14 @@
 import dynamic from 'next/dynamic'
 import { parseISO } from 'date-fns'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { getLessonsForStatusView } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
 import { getMemberBodyWeightsForLessons } from '@/lib/actions/member-body-records'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getRangeForView, toDateKey, type CalendarView } from '@/lib/calendar-utils'
+import { LESSON_STATUS_DATE_COOKIE, buildLessonStatusPath } from '@/lib/lesson-status-date'
 import { profileRoleToAppRole } from '@/lib/roles'
-import { redirect } from 'next/navigation'
 import { TimeSlotsSkeleton } from '@/components/dashboard/page-skeletons'
 import type { LessonStatusViewMode } from './lesson-status-view'
 
@@ -35,7 +37,6 @@ export default async function LessonStatusPage({
   }
 
   const params = await searchParams
-  const selectedDate = params.date ?? toDateKey(new Date())
   const viewParam = params.view
   const viewMode: LessonStatusViewMode =
     viewParam === 'week' ||
@@ -44,6 +45,15 @@ export default async function LessonStatusPage({
     viewParam === 'day'
       ? viewParam
       : 'day'
+
+  if (!params.date) {
+    const cookieStore = await cookies()
+    const savedDate = cookieStore.get(LESSON_STATUS_DATE_COOKIE)?.value
+    const fallbackDate = savedDate ?? toDateKey(new Date())
+    redirect(buildLessonStatusPath(fallbackDate, viewMode))
+  }
+
+  const selectedDate = params.date
 
   const rangeView: CalendarView =
     viewMode === 'list' ? 'week' : viewMode === 'day' ? 'day' : viewMode

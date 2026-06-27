@@ -40,7 +40,7 @@ export interface MemberGraphPanelSummary {
 export function buildMemberGraphPanelSummary(input: {
   memberName: string
   isMe: boolean
-  rankingView: 'pb' | 'mileage'
+  rankingView: 'pb' | 'mileage' | 'beat_rival'
   distanceLabel: string
   currentRank: number | null
   totalRanked: number
@@ -49,7 +49,7 @@ export function buildMemberGraphPanelSummary(input: {
 }): MemberGraphPanelSummary {
   const displayName = input.isMe ? input.memberName : input.memberName
 
-  if (input.rankingView === 'mileage') {
+  if (input.rankingView === 'mileage' || input.rankingView === 'beat_rival') {
     const km = input.mileageTotalKm ?? 0
     return {
       displayName,

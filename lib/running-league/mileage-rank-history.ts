@@ -75,6 +75,45 @@ function collectMileageSnapshotDates(
   return [...dates].sort()
 }
 
+function collectLeagueMileageSnapshotDates(
+  logs: ReadonlyArray<RunningLeagueMileageLog>,
+  maxPoints = 24,
+): string[] {
+  const dates = new Set<string>()
+  for (const log of logs) {
+    dates.add(log.logged_at)
+  }
+  const sorted = [...dates].sort()
+  if (sorted.length <= maxPoints) return sorted
+  return sorted.slice(-maxPoints)
+}
+
+/** 리그 전체 기록 시점 기준 순위 변화 — 순위 변동 배지용 */
+export function buildMemberMileageRankChangeSeries(input: {
+  memberId: string
+  participants: ReadonlyArray<RunningLeagueParticipant>
+  logs: ReadonlyArray<RunningLeagueMileageLog>
+}): MileageRankHistoryPoint[] {
+  const logs = input.logs ?? []
+  const dates = collectLeagueMileageSnapshotDates(logs)
+  if (dates.length === 0) return []
+
+  return dates.map((date) => {
+    const cumulativeKm = sumMileageUpToDate(input.memberId, logs, date)
+    return {
+      date,
+      label: formatChartDate(date),
+      cumulativeKm,
+      rank: computeMileageRankAtDate({
+        memberId: input.memberId,
+        participants: input.participants,
+        logs,
+        asOfDate: date,
+      }),
+    }
+  })
+}
+
 /** 월 마일리지 순위 변화 — 기록 시점 스냅샷 기준 (1차 버전) */
 export function buildMemberMileageRankHistorySeries(input: {
   memberId: string

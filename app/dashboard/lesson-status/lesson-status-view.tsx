@@ -30,6 +30,7 @@ import {
   lessonAttendanceLocalPatch,
   restoreLessonAttendanceSnapshot,
 } from '@/lib/lesson-status-attendance-restore'
+import { setLessonStatusDateCookie } from '@/lib/lesson-status-date'
 import {
   cancelLessonCompletion,
   clearLessonAttendanceCheck,
@@ -1180,6 +1181,9 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   )
 })
 
+const LESSON_STATUS_FETCH_TIMEOUT_MS = 45_000
+const LESSON_STATUS_LAST_DATE_KEY = 'lesson-status:last-view-date'
+
 export function LessonStatusView({
   lessons: initialLessons,
   instructors,
@@ -1203,6 +1207,11 @@ export function LessonStatusView({
   const [isUpdating, setIsUpdating] = useState<string | null>(null)
   const [isLoadingDate, setIsLoadingDate] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const loadLessonsGenerationRef = useRef(0)
+  const cancelInFlightLessonLoad = useCallback(() => {
+    loadLessonsGenerationRef.current += 1
+    setIsLoadingDate(false)
+  }, [])
   const quickRegisterPanelRef = useRef<HTMLDivElement>(null)
   const [bodyWeightByKey, setBodyWeightByKey] = useState(initialBodyWeightByKey)
   const bodyWeightSeedRef = useRef(initialBodyWeightByKey)
@@ -1225,15 +1234,13 @@ export function LessonStatusView({
   useEffect(() => {
     const navKey = `${selectedDate}|${initialViewMode}`
     const navChanged = navKeyRef.current !== navKey
-    navKeyRef.current = navKey
+    if (!navChanged) return
 
+    navKeyRef.current = navKey
     setCurrentDate(selectedDate)
     setViewMode(initialViewMode)
-
-    if (navChanged) {
-      setLessons(sortLessonsForStatusDisplay(initialLessons, instructors))
-      clearHistoryRef.current()
-    }
+    setLessons(sortLessonsForStatusDisplay(initialLessons, instructors))
+    clearHistoryRef.current()
   }, [selectedDate, initialViewMode, initialLessons, instructors])
 
   useEffect(() => {
@@ -1334,11 +1341,18 @@ export function LessonStatusView({
     [instructors],
   )
 
-  const syncUrl = useCallback((date: string, mode: LessonStatusViewMode) => {
-    const params = new URLSearchParams({ date })
-    if (mode !== 'day') params.set('view', mode)
-    window.history.replaceState(null, '', `/dashboard/lesson-status?${params}`)
-  }, [])
+  const syncUrl = useCallback(
+    (date: string, mode: LessonStatusViewMode) => {
+      const params = new URLSearchParams({ date })
+      if (mode !== 'day') params.set('view', mode)
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(LESSON_STATUS_LAST_DATE_KEY, date)
+        setLessonStatusDateCookie(date)
+      }
+      router.replace(`/dashboard/lesson-status?${params.toString()}`, { scroll: false })
+    },
+    [router],
+  )
 
   const enrichForDisplay = useCallback(
     (rows: Lesson[]) =>
@@ -1351,29 +1365,50 @@ export function LessonStatusView({
 
   const loadLessons = useCallback(
     async (anchorDate: string, mode: LessonStatusViewMode) => {
+      const generation = loadLessonsGenerationRef.current + 1
+      loadLessonsGenerationRef.current = generation
       setIsLoadingDate(true)
       try {
-        if (mode === 'day') {
-          const nextLessons = await getLessonsForStatusView({
-            date: anchorDate,
-          })
-          setLessons(enrichForDisplay(nextLessons))
-          return
+        const fetchLessons = async () => {
+          if (mode === 'day') {
+            return getLessonsForStatusView({ date: anchorDate })
+          }
+          const { dateFrom, dateTo } = getRangeForView(
+            parseISO(anchorDate),
+            getRangeViewForMode(mode),
+          )
+          return getLessonsForStatusView({ dateFrom, dateTo })
         }
-        const { dateFrom, dateTo } = getRangeForView(
-          parseISO(anchorDate),
-          getRangeViewForMode(mode),
-        )
-        const nextLessons = await getLessonsForStatusView({
-          dateFrom,
-          dateTo,
-        })
+
+        const nextLessons = await Promise.race([
+          fetchLessons(),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(
+              () => reject(new Error('lesson-status-fetch-timeout')),
+              LESSON_STATUS_FETCH_TIMEOUT_MS,
+            )
+          }),
+        ])
+
+        if (generation !== loadLessonsGenerationRef.current) return
         setLessons(enrichForDisplay(nextLessons))
-      } catch {
-        toast.error('수업 목록을 불러오지 못했습니다.')
+      } catch (error) {
+        if (generation !== loadLessonsGenerationRef.current) return
+        if (
+          error instanceof Error &&
+          error.message === 'lesson-status-fetch-timeout'
+        ) {
+          toast.error('일정 불러오기 지연', {
+            description: '서버 응답이 느립니다. 잠시 후 다시 시도해주세요.',
+          })
+        } else {
+          toast.error('수업 목록을 불러오지 못했습니다.')
+        }
       } finally {
-        setIsLoadingDate(false)
-        clearHistoryRef.current()
+        if (generation === loadLessonsGenerationRef.current) {
+          setIsLoadingDate(false)
+          clearHistoryRef.current()
+        }
       }
     },
     [enrichForDisplay],
@@ -1381,11 +1416,15 @@ export function LessonStatusView({
 
   useEffect(() => {
     if (searchParams.has('date')) return
-    const localToday = format(new Date(), 'yyyy-MM-dd')
-    syncUrl(localToday, initialViewMode)
-    if (selectedDate === localToday) return
-    setCurrentDate(localToday)
-    void loadLessons(localToday, initialViewMode)
+    const savedDate =
+      typeof window !== 'undefined'
+        ? window.sessionStorage.getItem(LESSON_STATUS_LAST_DATE_KEY)
+        : null
+    const targetDate = savedDate || format(new Date(), 'yyyy-MM-dd')
+    syncUrl(targetDate, initialViewMode)
+    if (selectedDate === targetDate) return
+    setCurrentDate(targetDate)
+    void loadLessons(targetDate, initialViewMode)
   }, [searchParams, selectedDate, initialViewMode, loadLessons, syncUrl])
 
   const handleRefresh = useCallback(async () => {
@@ -1533,7 +1572,7 @@ export function LessonStatusView({
             'special_note' in result.data ? result.data.special_note : null,
           ) ??
           new Date().toISOString()
-        : new Date().toISOString()
+        : result.data?.checked_in_at ?? null
 
     const localPatch: Partial<Lesson> = {
       ...(result.data ?? {}),
@@ -1541,10 +1580,18 @@ export function LessonStatusView({
       ...(isAthleticsGroup && result.data && 'special_note' in result.data
         ? { special_note: result.data.special_note }
         : {}),
-      ...(status === 'present'
-        ? { lesson_sessions: [{ checked_in_at: checkedInAt }] }
+      ...(status === 'present' && checkedInAt
+        ? {
+            attendance_record: {
+              id: result.data?.attendance_record_id ?? '',
+              status,
+              checked_in_at: checkedInAt,
+              lesson_occurrence_key: result.data?.lesson_occurrence_key ?? '',
+            },
+            lesson_sessions: [{ checked_in_at: checkedInAt }],
+          }
         : status === 'cancelled'
-          ? { lesson_sessions: [] }
+          ? { attendance_record: undefined, lesson_sessions: [] }
           : {}),
     }
 
@@ -1553,6 +1600,8 @@ export function LessonStatusView({
       result.data && 'lesson_id' in result.data ? result.data.lesson_id : undefined,
       localPatch,
     )
+
+    cancelInFlightLessonLoad()
 
     const beforeSnap = structuredClone(before)
     lessonHistory.pushCommand({
@@ -1607,7 +1656,13 @@ export function LessonStatusView({
     toast.message('출석 상태 변경', {
       description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
     })
-  }, [lessons, replaceLessonInPlace, updateLessonInPlace, lessonHistory])
+  }, [
+    lessons,
+    replaceLessonInPlace,
+    updateLessonInPlace,
+    lessonHistory,
+    cancelInFlightLessonLoad,
+  ])
 
   const handleClearAttendanceCheck = useCallback(
     async (lessonId: string) => {
@@ -1648,6 +1703,8 @@ export function LessonStatusView({
         result.data && 'lesson_id' in result.data ? result.data.lesson_id : undefined,
         localPatch,
       )
+
+      cancelInFlightLessonLoad()
 
       const beforeSnap = structuredClone(before)
       lessonHistory.pushCommand({
@@ -1703,7 +1760,7 @@ export function LessonStatusView({
         },
       )
     },
-    [lessons, replaceLessonInPlace, updateLessonInPlace, lessonHistory],
+    [lessons, replaceLessonInPlace, updateLessonInPlace, lessonHistory, cancelInFlightLessonLoad],
   )
 
   const handleGuestStatusChange = useCallback(async (lessonId: string, action: GuestLessonAction) => {

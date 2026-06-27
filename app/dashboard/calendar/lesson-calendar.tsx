@@ -405,14 +405,17 @@ export function LessonCalendar({
   }, [currentDate, view, initialLessons])
 
   const refreshWithGoogleSync = useCallback(
-    async (options?: { force?: boolean; refreshing?: boolean }) => {
-      const pull = await pullGoogleCalendarChanges()
-      if (options?.force || (pull.synced && pull.changed > 0)) {
-        await syncRange(currentDate, view, {
-          force: true,
-          refreshing: options?.refreshing ?? pull.changed > 0,
+    (options?: { force?: boolean; refreshing?: boolean }) => {
+      void pullGoogleCalendarChanges()
+        .then((pull) => {
+          if (options?.force || (pull.synced && pull.changed > 0)) {
+            return syncRange(currentDate, view, {
+              force: true,
+              refreshing: options?.refreshing ?? pull.changed > 0,
+            })
+          }
         })
-      }
+        .catch(() => {})
     },
     [currentDate, syncRange, view],
   )

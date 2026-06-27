@@ -24,10 +24,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import { MemberRunningLeagueRankings, MemberPortalBrandHeader } from '@/components/dashboard/member-running-league-rankings'
+import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
 import {
   MemberRunningLeagueTrainingSchedule,
 } from '@/components/dashboard/member-running-league-training-schedule'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
+import type { AdultRunningPortalDisplaySettings } from '@/lib/actions/adult-running-portal-settings'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
 import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
@@ -42,6 +44,7 @@ interface MemberMyPageProps {
   role?: string | null
   runningLeagueHome?: MemberRunningLeagueHome | null
   centerTrainingSchedule?: CenterRunningTrainingScheduleBundle | null
+  portalDisplay?: AdultRunningPortalDisplaySettings | null
   adminPreview?: boolean
   runningLeagueHref?: string
 }
@@ -123,6 +126,7 @@ export function MemberMyPage({
   role,
   runningLeagueHome,
   centerTrainingSchedule,
+  portalDisplay,
   adminPreview = false,
   runningLeagueHref = '/dashboard/my/running-league',
 }: MemberMyPageProps) {
@@ -154,7 +158,11 @@ export function MemberMyPage({
 
       {isAdultMember ? (
         <section className={cn(MEMBER_PORTAL_SHELL_CLASS, 'flex flex-col gap-2.5 sm:gap-4')}>
-          <MemberPortalBrandHeader />
+          <MemberPortalBrandHeader
+            leagueLabel={portalDisplay?.leagueLabel}
+            portalTitle={portalDisplay?.portalTitle}
+          />
+          <MemberPortalNoticePanel notice={portalDisplay?.notice} />
           <MemberRunningLeagueTrainingSchedule
             days={trainingScheduleDays}
             tableReady={trainingScheduleReady}
@@ -179,6 +187,13 @@ export function MemberMyPage({
               rankingsError={runningLeagueHome.rankingsError}
               highlightMemberId={member.id}
               runningLeagueDetailHref={runningLeagueHref}
+              beatRivalMemberId={
+                portalDisplay?.beatRivalMemberId ?? runningLeagueHome.league?.beat_rival_member_id ?? null
+              }
+              portalLeagueLabel={portalDisplay?.leagueLabel}
+              portalTitle={portalDisplay?.portalTitle}
+              portalRankingReferenceDate={portalDisplay?.rankingReferenceDate ?? null}
+              portalRankingCaption={portalDisplay?.rankingCaption ?? null}
               showBrandHeader={false}
               showPortalShell={false}
             />

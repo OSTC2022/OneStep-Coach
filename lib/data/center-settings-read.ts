@@ -2,11 +2,18 @@ import 'server-only'
 
 import { unstable_cache } from 'next/cache'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
+import {
+  DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
+  DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
+} from '@/lib/running-league/adult-running-portal-defaults'
 import type { CenterSettings } from '@/lib/types'
 
 const CENTER_SETTINGS_ID = 'default'
 
 const CENTER_SETTINGS_SELECT =
+  'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, adult_running_portal_league_label, adult_running_portal_title, adult_running_portal_notice, adult_running_portal_ranking_reference_date, adult_running_portal_ranking_caption, updated_at'
+
+const CENTER_SETTINGS_SELECT_LEGACY =
   'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, updated_at'
 
 export const DEFAULT_CENTER_SETTINGS: CenterSettings = {
@@ -20,6 +27,11 @@ export const DEFAULT_CENTER_SETTINGS: CenterSettings = {
   center_address: null,
   business_hours: null,
   show_instructor_contact: false,
+  adult_running_portal_league_label: DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
+  adult_running_portal_title: DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
+  adult_running_portal_notice: null,
+  adult_running_portal_ranking_reference_date: null,
+  adult_running_portal_ranking_caption: null,
   updated_at: new Date().toISOString(),
 }
 
@@ -35,8 +47,26 @@ export function normalizeCenterSettingsRow(data: Record<string, unknown>): Cente
     center_address: (data.center_address as string | null) ?? null,
     business_hours: (data.business_hours as string | null) ?? null,
     show_instructor_contact: Boolean(data.show_instructor_contact),
+    adult_running_portal_league_label:
+      (data.adult_running_portal_league_label as string | null)?.trim() ||
+      DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
+    adult_running_portal_title:
+      (data.adult_running_portal_title as string | null)?.trim() || DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
+    adult_running_portal_notice:
+      (data.adult_running_portal_notice as string | null)?.trim() || null,
+    adult_running_portal_ranking_reference_date:
+      (data.adult_running_portal_ranking_reference_date as string | null) ?? null,
+    adult_running_portal_ranking_caption:
+      (data.adult_running_portal_ranking_caption as string | null)?.trim() || null,
     updated_at: String(data.updated_at ?? new Date().toISOString()),
   }
+}
+
+function isMissingPortalSettingsColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  if (error.code === '42703') return true
+  const message = (error.message ?? '').toLowerCase()
+  return message.includes('adult_running_portal_')
 }
 
 async function fetchCenterSettingsUncached(): Promise<CenterSettings> {
@@ -49,6 +79,20 @@ async function fetchCenterSettingsUncached(): Promise<CenterSettings> {
       .maybeSingle()
 
     if (error) {
+      if (isMissingPortalSettingsColumnError(error)) {
+        const { data: legacy, error: legacyError } = await supabase
+          .from('center_settings')
+          .select(CENTER_SETTINGS_SELECT_LEGACY)
+          .eq('id', CENTER_SETTINGS_ID)
+          .maybeSingle()
+
+        if (legacyError || !legacy) {
+          return DEFAULT_CENTER_SETTINGS
+        }
+
+        return normalizeCenterSettingsRow(legacy as Record<string, unknown>)
+      }
+
       const { data: legacy, error: legacyError } = await supabase
         .from('center_settings')
         .select('id, name, kakao_id, instagram_id, blog_url, updated_at')

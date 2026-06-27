@@ -183,6 +183,32 @@ export function buildMemberRankingHistorySeries(input: {
   })
 }
 
+/** 리그 전체 PB 기록 시점 기준 순위 변화 — 순위 변동 배지용 */
+export function buildMemberPbRankChangeSeries(input: {
+  memberId: string
+  distance: PbLeaderboardDistance
+  participants: ReadonlyArray<RunningLeagueParticipant>
+  records: ReadonlyArray<RunningLeagueRecord>
+}): Array<{ rank: number | null }> {
+  const memberPoints = buildMemberRankingHistorySeries(input)
+  const dates = collectPbRankSnapshotDates({
+    distance: input.distance,
+    records: input.records,
+    memberPoints,
+  })
+  if (dates.length === 0) return []
+
+  return dates.map((date) => ({
+    rank: computeMemberPbRankAtDate({
+      memberId: input.memberId,
+      distance: input.distance,
+      participants: input.participants,
+      records: input.records,
+      asOfDate: date,
+    }),
+  }))
+}
+
 /** 순위 변화 그래프용 스냅샷 날짜 — 최근 기록 시점 기준 (1차 버전) */
 export function collectPbRankSnapshotDates(input: {
   distance: PbLeaderboardDistance
@@ -205,28 +231,4 @@ export function collectPbRankSnapshotDates(input: {
   const maxPoints = input.maxPoints ?? 12
   if (sorted.length <= maxPoints) return sorted
   return sorted.slice(-maxPoints)
-}
-
-/** 랭킹 목록용 간단한 순위 변화 표시 (▲2 / ▼1) */
-export function formatMemberRankChangeHint(
-  memberId: string,
-  distance: PbLeaderboardDistance,
-  participants: ReadonlyArray<RunningLeagueParticipant>,
-  records: ReadonlyArray<RunningLeagueRecord>,
-): string | null {
-  const points = buildMemberRankingHistorySeries({
-    memberId,
-    distance,
-    participants,
-    records,
-  })
-  if (points.length < 2) return null
-
-  const firstRank = points[0]?.rank
-  const lastRank = points[points.length - 1]?.rank
-  if (firstRank == null || lastRank == null || firstRank === lastRank) return null
-
-  const delta = firstRank - lastRank
-  if (delta > 0) return `▲${delta}`
-  return `▼${Math.abs(delta)}`
 }

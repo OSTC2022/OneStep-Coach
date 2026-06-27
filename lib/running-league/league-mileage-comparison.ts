@@ -86,6 +86,7 @@ export function buildLeagueMileageComparisonChart(input: {
   participants: ReadonlyArray<RunningLeagueParticipant>
   logs: ReadonlyArray<RunningLeagueMileageLog>
   maxMembers?: number
+  beatRivalMemberId?: string | null
 }): LeagueMileageComparisonChart | null {
   const dates = collectMileageSnapshotDates(input.logs)
   if (dates.length === 0) return null
@@ -97,9 +98,27 @@ export function buildLeagueMileageComparisonChart(input: {
     latestDate,
     maxMembers: input.maxMembers ?? 20,
   })
-  if (rankedMembers.length === 0) return null
+  if (rankedMembers.length === 0 && !input.beatRivalMemberId) return null
 
-  const members: LeagueRankMemberSeries[] = rankedMembers.map((row) => ({
+  const memberRows = [...rankedMembers]
+  if (
+    input.beatRivalMemberId &&
+    !memberRows.some((row) => row.memberId === input.beatRivalMemberId)
+  ) {
+    const rival = input.participants.find(
+      (participant) => participant.member_id === input.beatRivalMemberId,
+    )
+    if (rival) {
+      memberRows.push({
+        memberId: rival.member_id,
+        memberName: rival.member?.name?.trim() || '회원',
+        km: sumMileageUpToDate(rival.member_id, input.logs, latestDate),
+      })
+    }
+  }
+  if (memberRows.length === 0) return null
+
+  const members: LeagueRankMemberSeries[] = memberRows.map((row) => ({
     memberId: row.memberId,
     memberName: maskMemberNameForRanking(row.memberName),
     isSelected: false,

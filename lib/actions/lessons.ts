@@ -24,6 +24,10 @@ import {
 } from '@/lib/lesson-recurrence'
 import { fetchExpandedCalendarLessons } from '@/lib/actions/calendar-lessons-range'
 import {
+  attachAttendanceRecordsToLessons,
+  fetchAttendanceRecordsForRange,
+} from '@/lib/actions/attendance-records'
+import {
   findDisplayableMemberSlotConflict,
   purgeOrphanMemberSlotRows,
 } from '@/lib/actions/member-slot-conflict'
@@ -39,7 +43,7 @@ import {
 import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
 import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import {
-  runGoogleLessonPush,
+  scheduleGoogleLessonPush,
   scheduleGoogleLessonDeletes,
   touchAppModifiedAt,
 } from '@/lib/google-calendar/push-scheduler'
@@ -768,7 +772,15 @@ export async function getLessonsForStatusView(options: {
     { forStatusPage: true },
   )
 
-  return attachCheckInSessions(lessons.map(normalizeLessonRecord))
+  const withSessions = await attachCheckInSessions(lessons.map(normalizeLessonRecord))
+  const supabase = await createStaffDataClient()
+  const attendanceRecords = await fetchAttendanceRecordsForRange(
+    supabase,
+    dateFrom,
+    dateTo,
+  )
+
+  return attachAttendanceRecordsToLessons(withSessions, attendanceRecords)
 }
 
 const CALENDAR_MONTH_LESSON_LIMIT = 400
@@ -889,7 +901,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   const lesson = normalizeLessonRecord(data as Lesson)
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
-  await runGoogleLessonPush(lesson.id)
+  scheduleGoogleLessonPush(lesson.id)
 
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
@@ -1003,7 +1015,7 @@ async function createRecurringMasterLesson(
   const lesson = normalizeLessonRecord(data as Lesson)
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
-  await runGoogleLessonPush(lesson.id)
+  scheduleGoogleLessonPush(lesson.id)
 
   if (!options.silent) {
     revalidatePath('/dashboard/lessons')
@@ -1257,7 +1269,7 @@ export async function createRecurringLessons(
     await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
   }
 
-  await runGoogleLessonPush(savedLessons.map((lesson) => lesson.id))
+  scheduleGoogleLessonPush(savedLessons.map((lesson) => lesson.id))
 
   if (!options.silent) {
     revalidatePath('/dashboard/lessons')
@@ -1433,7 +1445,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     })
   }
 
-  await runGoogleLessonPush(lesson.id)
+  scheduleGoogleLessonPush(lesson.id)
 
   revalidatePath('/dashboard/lessons')
   revalidatePath('/dashboard/attendance')
@@ -1801,7 +1813,7 @@ export async function updateLessonSeries(
   revalidatePath('/dashboard/instructors')
   revalidatePath('/dashboard/reports')
 
-  await runGoogleLessonPush(updatedLessons.map((lesson) => lesson.id))
+  scheduleGoogleLessonPush(updatedLessons.map((lesson) => lesson.id))
 
   return { data: updatedLessons, warning }
 }

@@ -1,5 +1,9 @@
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import {
+  LEAGUE_SELECT_BASE,
+  runRunningLeagueSelectQuery,
+} from '@/lib/running-league/league-select'
 import type {
   RunningLeague,
   RunningLeagueStatus,
@@ -10,9 +14,6 @@ import type {
 export const CENTER_PORTAL_RANKING_LEAGUE_MARKER = '__center_portal_ranking__'
 
 export const CENTER_PORTAL_RANKING_LEAGUE_TITLE = 'ONE STEP RUNNING RANKING'
-
-const LEAGUE_SELECT =
-  'id, title, description, starts_at, ends_at, status, audience, target_group, board_post_id, created_by, created_at, updated_at'
 
 function mapLeagueRow(row: Record<string, unknown>): RunningLeague {
   return {
@@ -25,6 +26,7 @@ function mapLeagueRow(row: Record<string, unknown>): RunningLeague {
     audience: (row.audience as RunningLeague['audience']) ?? 'adult',
     target_group: (row.target_group as RunningLeagueTargetGroup) ?? 'all',
     board_post_id: (row.board_post_id as string | null) ?? null,
+    beat_rival_member_id: (row.beat_rival_member_id as string | null) ?? null,
     created_by: (row.created_by as string | null) ?? null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -70,11 +72,13 @@ function findPortalRankingLeagueRow(
 export async function ensureCenterPortalRankingLeague(): Promise<RunningLeague | null> {
   const client = await rankingLeagueClient()
 
-  const { data: activeRows, error: activeError } = await client
-    .from('running_leagues')
-    .select(LEAGUE_SELECT)
-    .eq('status', 'active')
-    .order('created_at', { ascending: true })
+  const { data: activeRows, error: activeError } = await runRunningLeagueSelectQuery((select) =>
+    client
+      .from('running_leagues')
+      .select(select)
+      .eq('status', 'active')
+      .order('created_at', { ascending: true }),
+  )
 
   if (activeError) {
     if (isMissingTableError(activeError)) return null
@@ -86,10 +90,9 @@ export async function ensureCenterPortalRankingLeague(): Promise<RunningLeague |
     return mapLeagueRow(existingActive)
   }
 
-  const { data: anyRows, error: anyError } = await client
-    .from('running_leagues')
-    .select(LEAGUE_SELECT)
-    .order('created_at', { ascending: true })
+  const { data: anyRows, error: anyError } = await runRunningLeagueSelectQuery((select) =>
+    client.from('running_leagues').select(select).order('created_at', { ascending: true }),
+  )
 
   if (anyError) {
     if (isMissingTableError(anyError)) return null
@@ -119,15 +122,14 @@ export async function ensureCenterPortalRankingLeague(): Promise<RunningLeague |
       ends_at: '2099-12-31',
       status: 'active',
     })
-    .select(LEAGUE_SELECT)
+    .select(LEAGUE_SELECT_BASE)
     .single()
 
   if (insertError) {
     if (isMissingTableError(insertError)) return null
-    const { data: retryRows } = await client
-      .from('running_leagues')
-      .select(LEAGUE_SELECT)
-      .order('created_at', { ascending: true })
+    const { data: retryRows } = await runRunningLeagueSelectQuery((select) =>
+      client.from('running_leagues').select(select).order('created_at', { ascending: true }),
+    )
     const retry = findPortalRankingLeagueRow(retryRows as Record<string, unknown>[] | null)
     if (retry) return mapLeagueRow(retry)
     throw insertError
