@@ -37,6 +37,7 @@ import {
   Pencil,
   Eye,
   EyeOff,
+  Trophy,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { User } from '@/lib/types'
@@ -62,6 +63,7 @@ import { cn } from '@/lib/utils'
 
 const MENU_ICONS: Record<string, LucideIcon> = {
   '/dashboard/my': LayoutDashboard,
+  '/dashboard/running-portal': Trophy,
   '/dashboard': LayoutDashboard,
   '/dashboard/lesson-status': ListChecks,
   '/dashboard/members': Users,
@@ -87,6 +89,9 @@ function isMenuItemActive(pathname: string, url: string) {
   }
   if (url === '/dashboard/settings/adult-running-portal') {
     return pathname.startsWith('/dashboard/settings/adult-running-portal')
+  }
+  if (url === '/dashboard/running-portal') {
+    return pathname === '/dashboard/running-portal' || pathname.startsWith('/dashboard/running-portal/')
   }
   return (
     pathname === url ||

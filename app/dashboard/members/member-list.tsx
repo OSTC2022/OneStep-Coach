@@ -18,7 +18,7 @@ import {
   AUTO_INSTRUCTOR_ID,
   formatPrimaryInstructorName,
 } from '@/lib/member-utils'
-import { BirthDateInput } from '@/components/members/birth-date-input'
+import { MemberNameWithStaffBadges } from '@/components/members/member-new-signup-badge'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import {
@@ -751,10 +751,14 @@ export function MemberList({
                     <Link
                       href={`/dashboard/members/${member.id}`}
                       prefetch={LIST_ROW_LINK_PREFETCH}
-                      className="block truncate hover:text-primary hover:underline underline-offset-4"
+                      className="block hover:text-primary hover:underline underline-offset-4"
                       title={member.name}
                     >
-                      {member.name}
+                      <MemberNameWithStaffBadges
+                        name={member.name}
+                        badgeUntil={member.new_member_badge_until}
+                        showStaffBadges={canManage}
+                      />
                     </Link>
                   </TableCell>
                   <TableCell className="hidden w-[7rem] pl-0 pr-1 font-medium sm:table-cell whitespace-nowrap">

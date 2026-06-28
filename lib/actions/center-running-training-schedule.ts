@@ -4,7 +4,8 @@ import {
   clearCenterTrainingScheduleAttendance,
   recordCenterTrainingScheduleAttendance,
 } from '@/lib/actions/center-training-schedule-attendance'
-import { getCurrentUser, getMemberForCurrentUser, requireRole } from '@/lib/actions/auth'
+import { getCurrentUser, requireRole } from '@/lib/actions/auth'
+import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -327,7 +328,7 @@ export async function saveCenterRunningTrainingSchedule(
 }
 
 export async function getCenterRunningTrainingScheduleForMember(): Promise<CenterRunningTrainingScheduleBundle> {
-  const member = await getMemberForCurrentUser()
+  const member = await getRunningPortalMemberForCurrentUser()
   return fetchCenterRunningTrainingSchedule(member?.id ?? null, { includeHidden: true })
 }
 
@@ -342,7 +343,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   | { ok: true; signedUp: boolean; signupCount: number }
   | { ok: false; error: string }
 > {
-  const [member, user] = await Promise.all([getMemberForCurrentUser(), getCurrentUser()])
+  const [member, user] = await Promise.all([getRunningPortalMemberForCurrentUser(), getCurrentUser()])
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
   const weekday = parseCenterDayId(scheduleDayId)
@@ -468,7 +469,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
 export async function saveMemberCenterTrainingScheduleVote(
   signedUpDayIds: string[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const member = await getMemberForCurrentUser()
+  const member = await getRunningPortalMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
   const supabase = await scheduleClient()

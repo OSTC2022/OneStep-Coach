@@ -47,6 +47,7 @@ interface MemberMyPageProps {
   portalDisplay?: AdultRunningPortalDisplaySettings | null
   adminPreview?: boolean
   runningLeagueHref?: string
+  showRunningPortal?: boolean
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -129,14 +130,16 @@ export function MemberMyPage({
   portalDisplay,
   adminPreview = false,
   runningLeagueHref = '/dashboard/my/running-league',
+  showRunningPortal = false,
 }: MemberMyPageProps) {
   const { member, summary, centerContact, coachContact, sessionStatus } = data
   const isAdultMember = role === 'adult_member'
+  const showRunningPortalSection = showRunningPortal || isAdultMember
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const sportProfile = formatSportProfile(member)
   const todayRecordLabel = formatTodayRecordSummary(summary.todayRecorded)
   const reportReady = summary.wellnessRecordCount >= MEMBER_REPORT_MIN_RECORDS
-  const profileAside = isAdultMember
+  const profileAside = showRunningPortalSection
     ? null
     : resolveProfileAside(data)
   const trainingScheduleDays = centerTrainingSchedule?.days ?? []

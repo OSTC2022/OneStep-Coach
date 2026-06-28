@@ -41,7 +41,7 @@ import {
 } from 'lucide-react'
 import { formatPrimaryInstructorName } from '@/lib/member-utils'
 import { mergeMemberWithDetailPatch } from '@/lib/member-detail-sync'
-import { MemberBasicInfoEditor } from '@/components/members/member-basic-info-editor'
+import { MemberNewSignupBadge } from '@/components/members/member-new-signup-badge'
 import { MemberContactEditor } from '@/components/members/member-contact-editor'
 import type { VisibleSnsAccount } from '@/lib/sns-account'
 import { MemberAccountLink } from '@/components/members/member-account-link'
@@ -270,6 +270,9 @@ export function MemberDetail({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl lg:text-3xl font-bold">{memberState.name}</h1>
+              {canManage ? (
+                <MemberNewSignupBadge badgeUntil={memberState.new_member_badge_until} />
+              ) : null}
               <Badge variant={memberState.is_active ? 'default' : 'secondary'}>
                 {memberState.is_active ? '활성' : '비활성'}
               </Badge>

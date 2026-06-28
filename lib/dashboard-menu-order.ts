@@ -83,6 +83,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin'],
   },
   {
+    id: '/dashboard/running-portal',
+    title: '내 러닝 포털',
+    url: '/dashboard/running-portal',
+    roles: ['admin', 'instructor'],
+  },
+  {
     id: '/dashboard/settings/adult-running-portal',
     title: '성인 러닝 포털',
     url: '/dashboard/settings/adult-running-portal',
@@ -129,6 +135,21 @@ export function getDefaultSidebarMenuHidden(role: SidebarMenuRole): string[] {
 
 const RUNNING_SCHEDULE_MENU_ID = '/dashboard/settings/running-schedule'
 const SETTINGS_MENU_ID = '/dashboard/settings'
+const MY_RUNNING_PORTAL_MENU_ID = '/dashboard/running-portal'
+const ADULT_RUNNING_PORTAL_MENU_ID = '/dashboard/settings/adult-running-portal'
+
+function pinMyRunningPortalAboveAdultRunningPortal(order: string[]): string[] {
+  const myPortalIndex = order.indexOf(MY_RUNNING_PORTAL_MENU_ID)
+  const adultPortalIndex = order.indexOf(ADULT_RUNNING_PORTAL_MENU_ID)
+  if (myPortalIndex < 0 || adultPortalIndex < 0) return order
+  if (myPortalIndex === adultPortalIndex - 1) return order
+
+  const next = order.filter((id) => id !== MY_RUNNING_PORTAL_MENU_ID)
+  const nextAdultPortalIndex = next.indexOf(ADULT_RUNNING_PORTAL_MENU_ID)
+  if (nextAdultPortalIndex < 0) return order
+  next.splice(nextAdultPortalIndex, 0, MY_RUNNING_PORTAL_MENU_ID)
+  return next
+}
 
 function pinRunningScheduleAboveSettings(order: string[]): string[] {
   const scheduleIndex = order.indexOf(RUNNING_SCHEDULE_MENU_ID)
@@ -192,7 +213,9 @@ export function normalizeSidebarMenuOrder(
       ? defaultOrder
       : insertMissingMenuItemsAtDefaultPositions(saved, defaultOrder)
 
-  return pinRunningScheduleAboveSettings(next)
+  return pinRunningScheduleAboveSettings(
+    pinMyRunningPortalAboveAdultRunningPortal(next),
+  )
 }
 
 export function readSidebarMenuOrder(role: SidebarMenuRole): string[] {

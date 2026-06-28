@@ -183,18 +183,20 @@ export default function LoginPage() {
       }
 
       if (result.success) {
-        toast.success('가입 신청이 완료되었습니다.', {
-          description: result.loginIdentifier
-            ? `관리자 승인 후 로그인하세요. 로그인 ID: ${result.loginIdentifier}`
-            : '관리자 승인 후 로그인할 수 있습니다.',
-          duration: 10000,
-        })
-        setTab('login')
+        const loginId = result.loginIdentifier
+        form.reset()
         setSignUpBirthDate('')
         setSignUpPhone('')
         setSignUpParentPhone('')
         setSignUpMemberType('student')
-        event.currentTarget.reset()
+        setSignUpGender(null)
+        setTab('login')
+        toast.success('가입 신청이 완료되었습니다.', {
+          description: loginId
+            ? `관리자 승인 후 로그인하세요. 로그인 ID: ${loginId}`
+            : '관리자 승인 후 로그인할 수 있습니다.',
+          duration: 10000,
+        })
       }
     } catch {
       toast.error('회원가입 실패', {

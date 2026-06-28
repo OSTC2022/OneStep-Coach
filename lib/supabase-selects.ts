@@ -6,7 +6,7 @@ export const PROFILE_SELECT =
 export const USER_LEGACY_SELECT = 'id, email, full_name, role, created_at'
 
 export const MEMBER_LIST_SELECT_CORE =
-  'id, name, phone, sport, age, birth_date, grade, is_active, primary_instructor_id, registered_at, body_baseline_recorded_at, created_at, height_cm, weight_kg, goal, injury_history, memo, parent_phone'
+  'id, name, phone, sport, age, birth_date, grade, is_active, primary_instructor_id, registered_at, body_baseline_recorded_at, created_at, height_cm, weight_kg, goal, injury_history, memo, parent_phone, new_member_badge_until'
 
 /** school 컬럼 마이그레이션 전 DB 호환 */
 export const MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL = MEMBER_LIST_SELECT_CORE

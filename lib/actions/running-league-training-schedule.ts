@@ -1,7 +1,7 @@
 'use server'
 
 import { requireRole } from '@/lib/actions/auth'
-import { getMemberForCurrentUser } from '@/lib/actions/auth'
+import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -231,7 +231,7 @@ export async function toggleRunningLeagueTrainingScheduleSignup(
   | { ok: true; signedUp: boolean; signupCount: number }
   | { ok: false; error: string }
 > {
-  const member = await getMemberForCurrentUser()
+  const member = await getRunningPortalMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
   const supabase = await leagueClient()
@@ -333,7 +333,7 @@ export async function saveMemberTrainingScheduleVote(
   leagueId: string,
   signedUpDayIds: string[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const member = await getMemberForCurrentUser()
+  const member = await getRunningPortalMemberForCurrentUser()
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
   if (!leagueId) return { ok: false, error: '리그 정보가 없습니다.' }
 

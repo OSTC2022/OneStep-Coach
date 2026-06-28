@@ -35,6 +35,7 @@ export type PendingAccountRow = {
   parent_phone?: string | null
   /** 가입 시 자동 생성된 회원 프로필 */
   signupMemberId?: string | null
+  newMemberBadgeUntil?: string | null
 }
 
 export async function signUpPublic(
@@ -86,7 +87,7 @@ export async function listPendingAccounts(): Promise<PendingAccountRow[]> {
   if (authIds.length > 0) {
     const { data: signupMembers } = await admin
       .from('members')
-      .select('id, auth_user_id, birth_date, phone, parent_phone')
+      .select('id, auth_user_id, birth_date, phone, parent_phone, new_member_badge_until')
       .in('auth_user_id', authIds)
 
     for (const member of signupMembers ?? []) {
@@ -96,6 +97,9 @@ export async function listPendingAccounts(): Promise<PendingAccountRow[]> {
           birth_date: member.birth_date,
           phone: member.phone,
           parent_phone: member.parent_phone,
+          new_member_badge_until:
+            (member as { new_member_badge_until?: string | null }).new_member_badge_until ??
+            null,
         })
       }
     }
@@ -131,6 +135,7 @@ function mapPendingAccountRow(
     birth_date: string | null
     phone: string | null
     parent_phone: string | null
+    new_member_badge_until?: string | null
   } | null,
 ): PendingAccountRow {
   const appRole = profileRoleToAppRole(row.role)
@@ -146,6 +151,7 @@ function mapPendingAccountRow(
     phone: signupMember?.phone ?? null,
     parent_phone: signupMember?.parent_phone ?? null,
     signupMemberId: signupMember?.id ?? null,
+    newMemberBadgeUntil: signupMember?.new_member_badge_until ?? null,
   }
 }
 

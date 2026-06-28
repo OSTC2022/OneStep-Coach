@@ -13,6 +13,7 @@ import {
 import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
+import { resolveNewMemberBadgeUntil } from '@/lib/member-new-signup-badge'
 
 export type PublicSignUpMemberType = 'student' | 'adult'
 export type PublicSignUpRole = 'member'
@@ -59,6 +60,7 @@ async function createSignupMemberProfile(
     invite_email: payload.email,
     is_active: true,
     memo: `로그인 화면 가입 신청 (${typeLabel}, 승인 대기)`,
+    new_member_badge_until: resolveNewMemberBadgeUntil(),
   }
 
   if (payload.gender) {
@@ -70,6 +72,16 @@ async function createSignupMemberProfile(
     .insert(insertRow)
     .select('id')
     .single()
+
+  if (error && error.message.includes('new_member_badge_until')) {
+    const { new_member_badge_until: _removed, ...legacyRow } = insertRow
+    const retry = await admin.from('members').insert(legacyRow).select('id').single()
+    if (retry.error) {
+      console.error('createSignupMemberProfile:', retry.error)
+      return { error: `회원 정보 저장 실패: ${retry.error.message}` }
+    }
+    return { memberId: retry.data.id as string }
+  }
 
   if (error) {
     console.error('createSignupMemberProfile:', error)

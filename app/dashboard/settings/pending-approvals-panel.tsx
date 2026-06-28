@@ -17,6 +17,7 @@ import type {
 import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { MemberNameWithStaffBadges } from '@/components/members/member-new-signup-badge'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -235,8 +236,12 @@ export function PendingApprovalsPanel({
                         )
                       }}
                     >
-                      <TableCell className="max-w-0 truncate font-medium">
-                        {row.full_name || '—'}
+                      <TableCell className="max-w-0 font-medium">
+                        <MemberNameWithStaffBadges
+                          name={row.full_name || '—'}
+                          badgeUntil={row.newMemberBadgeUntil}
+                          showStaffBadges
+                        />
                       </TableCell>
                       <TableCell className="max-w-0 truncate text-sm text-muted-foreground">
                         {row.email ||
