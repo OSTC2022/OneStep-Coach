@@ -5,14 +5,25 @@ export const PROFILE_SELECT =
 
 export const USER_LEGACY_SELECT = 'id, email, full_name, role, created_at'
 
+export const MEMBER_LIST_SELECT_CORE_BASE =
+  'id, name, phone, sport, age, birth_date, grade, is_active, primary_instructor_id, registered_at, body_baseline_recorded_at, created_at, height_cm, weight_kg, goal, injury_history, memo, parent_phone'
+
 export const MEMBER_LIST_SELECT_CORE =
-  'id, name, phone, sport, age, birth_date, grade, is_active, primary_instructor_id, registered_at, body_baseline_recorded_at, created_at, height_cm, weight_kg, goal, injury_history, memo, parent_phone, new_member_badge_until'
+  `${MEMBER_LIST_SELECT_CORE_BASE}, new_member_badge_until`
 
 /** school 컬럼 마이그레이션 전 DB 호환 */
 export const MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL = MEMBER_LIST_SELECT_CORE
 
 export const MEMBER_LIST_SELECT_LEGACY =
   `${MEMBER_LIST_SELECT_CORE}, school, kakao_id, instagram_id`
+
+export const MEMBER_LIST_SELECT_LEGACY_NO_BADGE_NO_SCHOOL = MEMBER_LIST_SELECT_CORE_BASE
+
+export const MEMBER_LIST_SELECT_LEGACY_NO_BADGE =
+  `${MEMBER_LIST_SELECT_CORE_BASE}, school, kakao_id, instagram_id`
+
+export const MEMBER_LIST_SELECT_NO_NEW_BADGE =
+  `${MEMBER_LIST_SELECT_LEGACY_NO_BADGE}, deleted_at`
 
 export const MEMBER_LIST_SELECT =
   `${MEMBER_LIST_SELECT_LEGACY}, deleted_at`

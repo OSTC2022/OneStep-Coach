@@ -27,6 +27,7 @@ import {
   MEMBER_LIST_SELECT,
   MEMBER_LIST_SELECT_LEGACY,
   MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL,
+  MEMBER_LIST_SELECT_NO_NEW_BADGE,
   MEMBER_LIST_SELECT_NO_SCHOOL,
 } from '@/lib/supabase-selects'
 
@@ -90,6 +91,10 @@ function isSnsColumnMissingError(message?: string, code?: string) {
   )
 }
 
+function isNewMemberBadgeColumnMissingError(message?: string, code?: string) {
+  return code === '42703' && Boolean(message?.includes('new_member_badge_until'))
+}
+
 function isSchemaColumnMissingError(message?: string, code?: string) {
   return (
     isDeletedAtMissingError(message, code) ||
@@ -121,7 +126,15 @@ function withSnsDefaults<T extends Record<string, unknown>>(row: T) {
 }
 
 function withMemberRowDefaults<T extends Record<string, unknown>>(row: T) {
-  return withSnsDefaults(withSchoolDefault(withDeletedAtDefault(row)))
+  return withSnsDefaults(
+    withSchoolDefault(
+      withDeletedAtDefault({
+        ...row,
+        new_member_badge_until:
+          (row.new_member_badge_until as string | null | undefined) ?? null,
+      }),
+    ),
+  )
 }
 
 function applyTrashFilter<T extends { is: (col: string, val: null) => T; not: (col: string, op: string, val: null) => T }>(
@@ -232,7 +245,19 @@ async function fetchMembersRows(
 
   let result = await primaryQuery
 
-  if (result.error && isSchemaColumnMissingError(result.error.message, result.error.code)) {
+  if (result.error && isNewMemberBadgeColumnMissingError(result.error.message, result.error.code)) {
+    const badgeFallbackQuery = buildMembersQuery(supabase, {
+      ...baseOpts,
+      select: MEMBER_LIST_SELECT_NO_NEW_BADGE,
+      useTrashFilter: true,
+    })
+    if (badgeFallbackQuery) {
+      result = await badgeFallbackQuery
+      if (result.data) {
+        result = { ...result, data: result.data.map(withMemberRowDefaults) }
+      }
+    }
+  } else if (result.error && isSchemaColumnMissingError(result.error.message, result.error.code)) {
     const legacyOrderBy = orderBy === 'deleted_at' ? 'name' : orderBy
     const legacySelect =
       isSchoolMissingError(result.error.message, result.error.code) ||
@@ -490,6 +515,7 @@ export async function getMember(id: string): Promise<Member | null> {
 
   const selectAttempts = [
     { select: MEMBER_DETAIL_SELECT, filterDeleted: true },
+    { select: MEMBER_LIST_SELECT_NO_NEW_BADGE, filterDeleted: true },
     { select: MEMBER_LIST_SELECT_LEGACY, filterDeleted: false },
     { select: MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL, filterDeleted: false },
   ]
@@ -509,7 +535,10 @@ export async function getMember(id: string): Promise<Member | null> {
       break
     }
     error = result.error
-    if (!isSchemaColumnMissingError(error?.message, error?.code)) {
+    if (
+      !isSchemaColumnMissingError(error?.message, error?.code) &&
+      !isNewMemberBadgeColumnMissingError(error?.message, error?.code)
+    ) {
       break
     }
   }

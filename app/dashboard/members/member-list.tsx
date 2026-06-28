@@ -19,6 +19,7 @@ import {
   formatPrimaryInstructorName,
 } from '@/lib/member-utils'
 import { MemberNameWithStaffBadges } from '@/components/members/member-new-signup-badge'
+import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import {
