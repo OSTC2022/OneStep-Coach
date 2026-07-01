@@ -4,7 +4,7 @@ export type BeatRivalMileageGapTone = 'ahead' | 'behind' | 'even' | 'unavailable
 
 export interface BeatRivalMileageGap {
   deltaKm: number
-  /** 랭킹 헤더 옆 격차 — 예: +15.3km, -2.1km */
+  /** 랭킹 헤더 격차 — 예: 3.2km 뒤, 5.1km 앞 */
   gapText: string | null
   tone: BeatRivalMileageGapTone
   accentClass: string
@@ -17,6 +17,22 @@ function resolveMemberMileageKm(
   const ranked = leaderboard.ranked.find((row) => row.memberId === memberId)
   if (ranked) return ranked.mileageKm
   return 0
+}
+
+/** 격차가 작을수록 라임에 가깝게, 멀수록 빨강/주황 */
+function resolveBehindAccentClass(absGapKm: number): string {
+  if (absGapKm <= 1) return 'text-lime-300'
+  if (absGapKm <= 3) return 'text-amber-300'
+  if (absGapKm <= 7) return 'text-orange-400'
+  if (absGapKm <= 15) return 'text-red-400'
+  return 'text-red-500'
+}
+
+/** 앞서 있을 때 — 격차가 클수록 하늘색 */
+function resolveAheadAccentClass(absGapKm: number): string {
+  if (absGapKm <= 1) return 'text-lime-300'
+  if (absGapKm <= 5) return 'text-sky-400'
+  return 'text-sky-300'
 }
 
 export function resolveBeatRivalMileageGap(input: {
@@ -44,25 +60,25 @@ export function resolveBeatRivalMileageGap(input: {
   if (deltaKm > 0) {
     return {
       deltaKm,
-      gapText: `+${absKm}km`,
+      gapText: `${absKm}km 앞`,
       tone: 'ahead',
-      accentClass: 'text-sky-400',
+      accentClass: resolveAheadAccentClass(Math.abs(deltaKm)),
     }
   }
 
   if (deltaKm < 0) {
     return {
       deltaKm,
-      gapText: `-${absKm}km`,
+      gapText: `${absKm}km 뒤`,
       tone: 'behind',
-      accentClass: 'text-red-400',
+      accentClass: resolveBehindAccentClass(Math.abs(deltaKm)),
     }
   }
 
   return {
     deltaKm: 0,
-    gapText: '±0.0km',
+    gapText: '동률',
     tone: 'even',
-    accentClass: 'text-sky-400',
+    accentClass: 'text-lime-300',
   }
 }

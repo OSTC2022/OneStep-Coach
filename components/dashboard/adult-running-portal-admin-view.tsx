@@ -33,6 +33,9 @@ export function AdultRunningPortalAdminView({
           leagueLabel={portalSettings.leagueLabel}
           portalTitle={portalSettings.portalTitle}
           headerStyle={portalSettings.headerStyle}
+          runningLeagueHome={runningLeagueHome}
+          rankingReferenceDate={portalSettings.rankingReferenceDate}
+          beatRivalMemberId={portalSettings.beatRivalMemberId}
         />
         <MemberPortalNoticePanel notice={portalSettings.notice} />
         <MemberRunningLeagueTrainingSchedule

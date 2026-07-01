@@ -883,33 +883,37 @@ export async function stopGoogleCalendarWatchForRow(
 ): Promise<void> {
   if (!row.refresh_token) return
 
-  await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
-    const channels: { channelId: string; resourceId: string }[] = []
-    if (row.watch_channel_id && row.watch_resource_id) {
-      channels.push({
-        channelId: row.watch_channel_id,
-        resourceId: row.watch_resource_id,
-      })
-    }
-    if (row.watch_channel_id_2 && row.watch_resource_id_2) {
-      channels.push({
-        channelId: row.watch_channel_id_2,
-        resourceId: row.watch_resource_id_2,
-      })
-    }
-
-    for (const channel of channels) {
-      try {
-        await stopGoogleCalendarWatch(
-          accessToken,
-          channel.channelId,
-          channel.resourceId,
-        )
-      } catch {
-        // ignore
+  try {
+    await withGoogleAccessToken(row.refresh_token, async (accessToken) => {
+      const channels: { channelId: string; resourceId: string }[] = []
+      if (row.watch_channel_id && row.watch_resource_id) {
+        channels.push({
+          channelId: row.watch_channel_id,
+          resourceId: row.watch_resource_id,
+        })
       }
-    }
-  })
+      if (row.watch_channel_id_2 && row.watch_resource_id_2) {
+        channels.push({
+          channelId: row.watch_channel_id_2,
+          resourceId: row.watch_resource_id_2,
+        })
+      }
+
+      for (const channel of channels) {
+        try {
+          await stopGoogleCalendarWatch(
+            accessToken,
+            channel.channelId,
+            channel.resourceId,
+          )
+        } catch {
+          // ignore per-channel stop failures
+        }
+      }
+    })
+  } catch {
+    // 토큰 만료·취소 시 Google API 호출 없이 로컬 연결 해제만 진행
+  }
 }
 
 export async function listPendingGoogleSyncLessons(limit = 20) {

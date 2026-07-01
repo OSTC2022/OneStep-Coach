@@ -52,14 +52,29 @@ export function RankingMemberNameBlock({
   )
 }
 
-export function RankingStatusMessageSlot({ message }: { message?: string | null }) {
+import {
+  DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
+  normalizeRankingStatusMessageColor,
+} from '@/lib/running-league/ranking-status-message'
+
+export function RankingStatusMessageSlot({
+  message,
+  color,
+}: {
+  message?: string | null
+  color?: string | null
+}) {
   const text = message?.trim()
+  const resolvedColor = normalizeRankingStatusMessageColor(
+    color ?? DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
+  )
 
   return (
     <span className="grid w-full min-w-0 grid-cols-[1.4fr_auto_2fr] items-center overflow-hidden">
       <span aria-hidden />
       <span
-        className="max-w-[8.5rem] truncate text-center text-[10px] font-normal leading-tight text-zinc-400"
+        className="max-w-[8.5rem] truncate text-center text-[10px] font-normal leading-tight"
+        style={{ color: resolvedColor }}
         title={text || undefined}
         aria-hidden={!text}
       >

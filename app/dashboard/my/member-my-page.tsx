@@ -165,6 +165,13 @@ export function MemberMyPage({
             leagueLabel={portalDisplay?.leagueLabel}
             portalTitle={portalDisplay?.portalTitle}
             headerStyle={portalDisplay?.headerStyle}
+            runningLeagueHome={runningLeagueHome}
+            rankingReferenceDate={portalDisplay?.rankingReferenceDate}
+            beatRivalMemberId={
+              portalDisplay?.beatRivalMemberId ??
+              runningLeagueHome?.league?.beat_rival_member_id ??
+              null
+            }
           />
           <MemberPortalNoticePanel notice={portalDisplay?.notice} />
           <MemberRunningLeagueTrainingSchedule

@@ -2,9 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Save, Settings2 } from 'lucide-react'
+import { format } from 'date-fns'
+import { ko } from 'date-fns/locale'
+import { Loader2, RotateCcw, Save, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateAdultRunningPortalSettings } from '@/lib/actions/adult-running-portal-settings'
+import { resetPreviousMonthsMileageLogs } from '@/lib/actions/running-league'
 import type { AdultRunningPortalAdminSettings } from '@/lib/actions/adult-running-portal-settings'
 import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
@@ -18,6 +21,16 @@ import { PORTAL_TEXT_ALIGN_OPTIONS } from '@/lib/running-league/adult-running-po
 import { PortalTextStyleFields } from '@/components/dashboard/portal-text-style-fields'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -39,6 +52,9 @@ export function AdultRunningPortalSettingsPanel({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetPending, setResetPending] = useState(false)
+  const currentMonthLabel = format(new Date(), 'yyyy년 M월', { locale: ko })
   const [leagueLabel, setLeagueLabel] = useState(settings.leagueLabel)
   const [portalTitle, setPortalTitle] = useState(settings.portalTitle)
   const [notice, setNotice] = useState(settings.notice ?? '')
@@ -74,6 +90,30 @@ export function AdultRunningPortalSettingsPanel({
       toast.success('성인 러닝 포털 설정을 저장했습니다.')
       router.refresh()
     })
+  }
+
+  async function handleResetPreviousMileage() {
+    setResetPending(true)
+    const result = await resetPreviousMonthsMileageLogs()
+    setResetPending(false)
+    setResetOpen(false)
+
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+
+    if (result.deletedCount === 0) {
+      toast.message('삭제할 이전 마일리지 기록이 없습니다.', {
+        description: `${result.keptMonthLabel} 기록만 유지 중입니다.`,
+      })
+    } else {
+      toast.success('이전 달 마일리지를 초기화했습니다.', {
+        description: `${result.deletedCount}건 삭제 · ${result.keptMonthLabel} 기록 유지`,
+      })
+    }
+
+    router.refresh()
   }
 
   return (
@@ -235,6 +275,31 @@ export function AdultRunningPortalSettingsPanel({
           </p>
         </div>
 
+        <div className="space-y-2 rounded-lg border border-rose-500/20 bg-rose-500/5 p-3">
+          <div>
+            <p className="text-sm font-semibold text-rose-100">마일리지 월 초기화</p>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              <strong className="text-zinc-300">{currentMonthLabel}</strong> 기록만 남기고, 그 이전·이후
+              달 마일리지 로그를 모두 삭제합니다. (예: 7월이면 7월 1일 기록은 유지)
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="border-rose-500/30 text-rose-200 hover:bg-rose-500/10"
+            disabled={resetPending || pending}
+            onClick={() => setResetOpen(true)}
+          >
+            {resetPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="mr-2 h-4 w-4" />
+            )}
+            이전 달 마일리지 초기화
+          </Button>
+        </div>
+
         <Button
           type="button"
           onClick={handleSave}
@@ -245,6 +310,36 @@ export function AdultRunningPortalSettingsPanel({
           저장
         </Button>
       </CardContent>
+
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>이전 달 마일리지를 초기화할까요?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  <strong className="text-foreground">{currentMonthLabel}</strong>에 기록된 마일리지만
+                  남기고, 그 외 모든 마일리지 로그가 삭제됩니다.
+                </p>
+                <p>참가자별 이번 달 마일리지 합계·랭킹 점수도 다시 계산됩니다. 되돌릴 수 없습니다.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetPending}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={resetPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault()
+                void handleResetPreviousMileage()
+              }}
+            >
+              {resetPending ? '초기화 중…' : '초기화'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

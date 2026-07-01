@@ -16,7 +16,11 @@ import {
 } from '@/lib/profile-avatar-upload'
 import { getRoleLabel } from '@/lib/roles'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
-import { RANKING_STATUS_MESSAGE_MAX_LENGTH } from '@/lib/running-league/ranking-status-message'
+import {
+  DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
+  RANKING_STATUS_MESSAGE_MAX_LENGTH,
+} from '@/lib/running-league/ranking-status-message'
+import { RankingStatusColorPicker } from '@/components/dashboard/ranking-status-color-picker'
 import { MemberGenderField } from '@/components/members/member-gender-field'
 import type { User } from '@/lib/types'
 
@@ -28,12 +32,14 @@ interface ProfileSettingsFormProps {
   memberGender?: MemberGender | null
   showMemberGender?: boolean
   memberRankingStatusMessage?: string
+  memberRankingStatusMessageColor?: string
 }
 
 function settingsFromUser(
   user: User,
   memberGender: MemberGender | null | undefined,
   memberRankingStatusMessage?: string,
+  memberRankingStatusMessageColor?: string,
 ) {
   return {
     fullName: user.full_name ?? '',
@@ -43,6 +49,8 @@ function settingsFromUser(
     avatarUrl: user.avatar_url ?? null,
     gender: memberGender ?? null,
     rankingStatusMessage: memberRankingStatusMessage ?? '',
+    rankingStatusMessageColor:
+      memberRankingStatusMessageColor ?? DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
   }
 }
 
@@ -54,34 +62,57 @@ export function ProfileSettingsForm({
   memberGender = null,
   showMemberGender = false,
   memberRankingStatusMessage = '',
+  memberRankingStatusMessageColor = DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
 }: ProfileSettingsFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPending, startTransition] = useTransition()
   const [isUploading, setIsUploading] = useState(false)
   const [fullName, setFullName] = useState(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).fullName,
+    () => settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor).fullName,
   )
   const [phone, setPhone] = useState(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).phone,
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .phone,
   )
   const [kakaoId, setKakaoId] = useState(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).kakaoId,
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .kakaoId,
   )
   const [instagramId, setInstagramId] = useState(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).instagramId,
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .instagramId,
   )
   const [avatarUrl, setAvatarUrl] = useState<string | null>(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).avatarUrl,
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .avatarUrl,
   )
   const [gender, setGender] = useState<MemberGender | null>(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).gender,
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .gender,
   )
   const [rankingStatusMessage, setRankingStatusMessage] = useState(
-    () => settingsFromUser(user, memberGender, memberRankingStatusMessage).rankingStatusMessage,
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .rankingStatusMessage,
+  )
+  const [rankingStatusMessageColor, setRankingStatusMessageColor] = useState(
+    () =>
+      settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor)
+        .rankingStatusMessageColor,
   )
 
   useEffect(() => {
-    const next = settingsFromUser(user, memberGender, memberRankingStatusMessage)
+    const next = settingsFromUser(
+      user,
+      memberGender,
+      memberRankingStatusMessage,
+      memberRankingStatusMessageColor,
+    )
     setFullName(next.fullName)
     setPhone(next.phone)
     setKakaoId(next.kakaoId)
@@ -89,7 +120,8 @@ export function ProfileSettingsForm({
     setAvatarUrl(next.avatarUrl)
     setGender(next.gender)
     setRankingStatusMessage(next.rankingStatusMessage)
-  }, [user, memberGender, memberRankingStatusMessage])
+    setRankingStatusMessageColor(next.rankingStatusMessageColor)
+  }, [user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor])
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -138,7 +170,13 @@ export function ProfileSettingsForm({
         phone,
         kakao_id: kakaoId,
         instagram_id: instagramId,
-        ...(showMemberGender ? { gender, ranking_status_message: rankingStatusMessage } : {}),
+        ...(showMemberGender
+          ? {
+              gender,
+              ranking_status_message: rankingStatusMessage,
+              ranking_status_message_color: rankingStatusMessageColor,
+            }
+          : {}),
       })
       if (result.error) {
         toast.error('프로필 저장 실패', { description: result.error })
@@ -249,8 +287,14 @@ export function ProfileSettingsForm({
               disabled={disabled}
             />
             <p className="text-xs text-muted-foreground">
-              러닝 포털 랭킹에 이름 옆에 표시됩니다. (최대 {RANKING_STATUS_MESSAGE_MAX_LENGTH}자)
+              러닝 포털 랭킹에 이름 옆에 표시됩니다. 다른 회원도 볼 수 있습니다. (최대{' '}
+              {RANKING_STATUS_MESSAGE_MAX_LENGTH}자)
             </p>
+            <RankingStatusColorPicker
+              value={rankingStatusMessageColor}
+              onChange={setRankingStatusMessageColor}
+              disabled={disabled}
+            />
           </div>
         ) : null}
 

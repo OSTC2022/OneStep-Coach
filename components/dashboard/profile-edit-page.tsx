@@ -16,6 +16,7 @@ interface ProfileEditPageProps {
   memberGender?: MemberGender | null
   showMemberGender?: boolean
   memberRankingStatusMessage?: string
+  memberRankingStatusMessageColor?: string
 }
 
 export function ProfileEditPage({
@@ -25,6 +26,7 @@ export function ProfileEditPage({
   memberGender = null,
   showMemberGender = false,
   memberRankingStatusMessage = '',
+  memberRankingStatusMessageColor,
 }: ProfileEditPageProps) {
   const router = useRouter()
 
@@ -59,6 +61,7 @@ export function ProfileEditPage({
             memberGender={memberGender}
             showMemberGender={showMemberGender}
             memberRankingStatusMessage={memberRankingStatusMessage}
+            memberRankingStatusMessageColor={memberRankingStatusMessageColor}
             onSaved={() => router.push(backHref)}
           />
         </CardContent>

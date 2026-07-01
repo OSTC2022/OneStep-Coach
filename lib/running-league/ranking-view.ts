@@ -1,10 +1,13 @@
 import { formatCurrentMonthRankingLabel } from '@/lib/running-league/month-range'
 
-export type RankingView = 'mileage' | 'pb' | 'beat_rival'
+import { ATTENDANCE_KING_DAY_RULE_LABEL } from '@/lib/running-league/attendance-king'
+
+export type RankingView = 'mileage' | 'beat_rival' | 'attendance' | 'pb'
 
 export const RANKING_VIEW_OPTIONS: Array<{ value: RankingView; label: string }> = [
   { value: 'mileage', label: '월 마일리지' },
   { value: 'beat_rival', label: '이겨라' },
+  { value: 'attendance', label: '출석왕' },
   { value: 'pb', label: 'PB 랭킹' },
 ]
 
@@ -14,6 +17,9 @@ export function getRankingViewDescription(view: RankingView): string {
   }
   if (view === 'beat_rival') {
     return '이겨라 대상 회원을 넘어서는 순위 경쟁 · 월 마일리지 기준'
+  }
+  if (view === 'attendance') {
+    return `${formatCurrentMonthRankingLabel()} · ${ATTENDANCE_KING_DAY_RULE_LABEL} · 출석 일수 많을수록 상위`
   }
   return `${formatCurrentMonthRankingLabel()} 누적 거리 · 많을수록 상위 (내림차순)`
 }

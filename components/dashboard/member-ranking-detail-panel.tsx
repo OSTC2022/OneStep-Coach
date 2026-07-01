@@ -11,6 +11,8 @@ import {
   formatRankComparisonCaption,
 } from '@/lib/running-league/league-rank-comparison'
 import { buildLeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
+import { buildLeagueAttendanceComparisonChart } from '@/lib/running-league/league-attendance-comparison'
+import { buildMemberAttendanceHistorySeries } from '@/lib/running-league/attendance-history'
 import { buildMemberMileageHistorySeries } from '@/lib/running-league/mileage-history'
 import { buildMemberMileageRankHistorySeries } from '@/lib/running-league/mileage-rank-history'
 import { formatRankingMemberName } from '@/lib/running-league/mask-member-name'
@@ -27,6 +29,7 @@ import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-lay
 import type { RankAspirationInsight } from '@/lib/running-league/rank-aspiration'
 
 import type { RankingView } from '@/lib/running-league/ranking-view'
+import type { RankingPeriod } from '@/lib/running-league/ranking-period'
 
 interface MemberRankingDetailPanelProps {
   memberId: string
@@ -35,6 +38,7 @@ interface MemberRankingDetailPanelProps {
   rankingView?: RankingView
   genderFilter: RankingGenderFilter
   rankingBundle: MemberRunningLeagueRankingBundle | null
+  rankingPeriod?: Pick<RankingPeriod, 'start' | 'end'>
   highlightMemberId?: string | null
   currentRank?: number | null
   totalRanked?: number
@@ -101,6 +105,7 @@ export function MemberRankingDetailPanel({
   rankingView = 'pb',
   genderFilter,
   rankingBundle,
+  rankingPeriod,
   highlightMemberId,
   currentRank = null,
   totalRanked = 0,
@@ -176,14 +181,40 @@ export function MemberRankingDetailPanel({
     })
   }, [filteredParticipants, memberId, rankingBundle])
 
+  const attendancePoints = useMemo(() => {
+    if (!rankingBundle) return []
+    return buildMemberAttendanceHistorySeries(
+      memberId,
+      rankingBundle.mileageLogs,
+      rankingPeriod,
+    )
+  }, [memberId, rankingBundle, rankingPeriod])
+
   const mileageComparisonChart = useMemo(() => {
     if (!rankingBundle) return null
+    return buildLeagueMileageComparisonChart({
+      participants: filteredParticipants,
+      logs: rankingBundle.mileageLogs,
+    })
+  }, [filteredParticipants, rankingBundle])
+
+  const beatRivalMileageComparisonChart = useMemo(() => {
+    if (!rankingBundle || !beatRivalMemberId) return null
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
       logs: rankingBundle.mileageLogs,
       beatRivalMemberId,
     })
   }, [beatRivalMemberId, filteredParticipants, rankingBundle])
+
+  const attendanceComparisonChart = useMemo(() => {
+    if (!rankingBundle) return null
+    return buildLeagueAttendanceComparisonChart({
+      participants: filteredParticipants,
+      logs: rankingBundle.mileageLogs,
+      period: rankingPeriod,
+    })
+  }, [filteredParticipants, rankingBundle, rankingPeriod])
 
   const graphSummary = useMemo(
     () =>
@@ -293,6 +324,9 @@ export function MemberRankingDetailPanel({
           mileageRankPoints={mileageRankPoints}
           comparisonChart={comparisonChart}
           mileageComparisonChart={mileageComparisonChart}
+          beatRivalMileageComparisonChart={beatRivalMileageComparisonChart}
+          attendanceComparisonChart={attendanceComparisonChart}
+          attendancePoints={attendancePoints}
           recordSummary={recordSummary}
           rankCaption={rankCaption}
           mode={rankingView}

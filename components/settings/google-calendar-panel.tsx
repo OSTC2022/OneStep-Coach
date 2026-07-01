@@ -64,7 +64,12 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
   const searchParams = useSearchParams()
   const [status, setStatus] = useState(initialStatus)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState<string | null>(null)
   const completionNotifiedRef = useRef(false)
+
+  useEffect(() => {
+    setOauthCallbackUrl(`${window.location.origin}/auth/google/calendar/callback`)
+  }, [])
 
   useEffect(() => {
     if (searchParams.get('connected') === '1') {
@@ -143,17 +148,24 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
 
   async function handleDisconnect() {
     setIsDisconnecting(true)
-    const result = await disconnectGoogleCalendar()
-    setIsDisconnecting(false)
+    try {
+      const result = await disconnectGoogleCalendar()
 
-    if (result.error) {
-      toast.error('연결 해제 실패', { description: result.error })
-      return
+      if (result.error) {
+        toast.error('연결 해제 실패', { description: result.error })
+        return
+      }
+
+      setStatus(await getGoogleCalendarSyncStatus())
+      toast.success('Google 캘린더 연결이 해제되었습니다.')
+      router.refresh()
+    } catch (error) {
+      toast.error('연결 해제 실패', {
+        description: error instanceof Error ? error.message : '알 수 없는 오류',
+      })
+    } finally {
+      setIsDisconnecting(false)
     }
-
-    setStatus(await getGoogleCalendarSyncStatus())
-    toast.success('Google 캘린더 연결이 해제되었습니다.')
-    router.refresh()
   }
 
   async function handleRefreshWatch() {
@@ -194,6 +206,12 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             <code className="rounded bg-muted px-1 py-0.5 text-xs">/auth/google/calendar/callback</code>
             을 등록해 주세요.
           </p>
+          {oauthCallbackUrl ? (
+            <p className="text-xs text-muted-foreground">
+              현재 접속 주소 기준 콜백 URL:{' '}
+              <code className="break-all rounded bg-muted px-1 py-0.5">{oauthCallbackUrl}</code>
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     )
@@ -426,6 +444,16 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
               /auth/google/calendar/callback
             </code>
             을 모두 등록해야 합니다.
+            {oauthCallbackUrl ? (
+              <>
+                {' '}
+                지금 이 화면에서는{' '}
+                <code className="break-all rounded bg-muted px-1 py-0.5 text-xs">
+                  {oauthCallbackUrl}
+                </code>
+                가 등록되어 있어야 합니다.
+              </>
+            ) : null}
           </p>
           <p>
             7. 같은 일정을 양쪽에서 수정하면 <strong className="text-foreground">더 최근에 저장한 쪽</strong>이

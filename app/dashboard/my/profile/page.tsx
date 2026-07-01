@@ -17,6 +17,7 @@ export default async function MemberProfilePage() {
       memberGender={settings?.gender ?? null}
       showMemberGender={profile.role === 'adult_member'}
       memberRankingStatusMessage={settings?.ranking_status_message ?? ''}
+      memberRankingStatusMessageColor={settings?.ranking_status_message_color}
     />
   )
 }

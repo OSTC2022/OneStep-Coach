@@ -15,9 +15,11 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart'
+import { ATTENDANCE_KING_DAY_RULE_LABEL } from '@/lib/running-league/attendance-king'
 import type { LeagueRankComparisonChart } from '@/lib/running-league/league-rank-comparison'
 import type { LeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
 import type { LeaguePbRecordComparisonChart } from '@/lib/running-league/league-pb-record-comparison'
+import type { AttendanceHistoryPoint } from '@/lib/running-league/attendance-history'
 import type { MileageHistoryPoint } from '@/lib/running-league/mileage-history'
 import type { MileageRankHistoryPoint } from '@/lib/running-league/mileage-rank-history'
 import type { RecordChangeChartSummary } from '@/lib/running-league/ranking-improvement-summary'
@@ -48,6 +50,12 @@ function beatRivalLineDot(
     stroke: '#ff4444',
     strokeWidth: 2,
   }
+}
+
+/** 출석 등 정수 회수 차트 — Y축을 1회 단위로 맞춤 */
+function resolveCountChartYMax(values: ReadonlyArray<number>): number {
+  const max = values.reduce((peak, value) => Math.max(peak, value), 0)
+  return Math.max(1, Math.ceil(max))
 }
 
 function TooltipMemberRow({
@@ -227,6 +235,7 @@ function MileageComparisonTooltip({
   members,
   memberColorMap,
   beatRivalMemberId = null,
+  valueUnit = 'km',
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number; color?: string }>
@@ -234,6 +243,7 @@ function MileageComparisonTooltip({
   members: LeagueMileageComparisonChart['members']
   memberColorMap: Map<string, string>
   beatRivalMemberId?: string | null
+  valueUnit?: 'km' | '회'
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -244,22 +254,26 @@ function MileageComparisonTooltip({
       return {
         memberId,
         name: member?.memberName ?? '회원',
-        km: item.value as number,
+        value: item.value as number,
       }
     })
-    .sort((a, b) => b.km - a.km)
+    .sort((a, b) => b.value - a.value)
 
   return (
     <ChartTooltipShell label={label}>
       {rows.map((row) => {
         const isBeatRival =
           beatRivalMemberId != null && row.memberId === beatRivalMemberId
+        const formattedValue =
+          valueUnit === '회'
+            ? `${Math.round(row.value)}회`
+            : `${row.value.toFixed(1)}km`
         return (
           <TooltipMemberRow
             key={row.memberId}
             color={getMemberChartColor(row.memberId, memberColorMap, beatRivalMemberId)}
             name={row.name}
-            value={`${row.km.toFixed(1)}km`}
+            value={formattedValue}
             isBeatRival={isBeatRival}
           />
         )
@@ -372,12 +386,13 @@ function GraphEmptyState({
 import type { RankingView } from '@/lib/running-league/ranking-view'
 import { BeatRivalFireTabLabel } from '@/components/dashboard/beat-rival-badges'
 
-type GraphChartTab = 'record' | 'mileage' | 'beat_rival'
+type GraphChartTab = 'record' | 'mileage' | 'beat_rival' | 'attendance'
 
 export type { GraphChartTab }
 
 export function graphChartTabForRankingView(view: RankingView): GraphChartTab {
   if (view === 'mileage') return 'mileage'
+  if (view === 'attendance') return 'attendance'
   if (view === 'beat_rival') return 'beat_rival'
   return 'record'
 }
@@ -385,12 +400,15 @@ export function graphChartTabForRankingView(view: RankingView): GraphChartTab {
 export function graphRankingViewForChartTab(tab: GraphChartTab): RankingView | null {
   if (tab === 'mileage') return 'mileage'
   if (tab === 'beat_rival') return 'beat_rival'
+  if (tab === 'attendance') return 'attendance'
+  if (tab === 'record') return 'pb'
   return null
 }
 
 const GRAPH_CHART_TABS: Array<{ value: GraphChartTab; label: string; fireLabel?: boolean }> = [
   { value: 'mileage', label: '마일리지' },
   { value: 'beat_rival', label: '이겨라', fireLabel: true },
+  { value: 'attendance', label: '출석왕' },
   { value: 'record', label: '기록' },
 ]
 
@@ -410,7 +428,7 @@ function GraphChartTabs({
   if (compact) {
     return (
       <div
-        className={cn('grid grid-cols-3 gap-1 rounded-lg border border-lime-500/20 bg-black/40 p-1', className)}
+        className={cn('grid grid-cols-4 gap-1 rounded-lg border border-lime-500/20 bg-black/40 p-1', className)}
         role="tablist"
         aria-label="그래프 종류"
       >
@@ -506,9 +524,12 @@ function RecordHighlightDot(props: {
 interface MemberRankingChartsProps {
   points: RankingHistoryPoint[]
   mileagePoints?: MileageHistoryPoint[]
+  attendancePoints?: AttendanceHistoryPoint[]
   mileageRankPoints?: MileageRankHistoryPoint[]
   comparisonChart?: LeagueRankComparisonChart | null
   mileageComparisonChart?: LeagueMileageComparisonChart | null
+  beatRivalMileageComparisonChart?: LeagueMileageComparisonChart | null
+  attendanceComparisonChart?: LeagueMileageComparisonChart | null
   pbRecordComparisonChart?: LeaguePbRecordComparisonChart | null
   recordSummary?: RecordChangeChartSummary | null
   rankCaption?: { title: string; trajectory: string | null } | null
@@ -527,9 +548,12 @@ interface MemberRankingChartsProps {
 export function MemberRankingCharts({
   points,
   mileagePoints = [],
+  attendancePoints = [],
   mileageRankPoints = [],
   comparisonChart = null,
   mileageComparisonChart = null,
+  beatRivalMileageComparisonChart = null,
+  attendanceComparisonChart = null,
   pbRecordComparisonChart = null,
   recordSummary = null,
   rankCaption = null,
@@ -595,6 +619,15 @@ export function MemberRankingCharts({
     [mileageRankPoints],
   )
 
+  const attendanceData = useMemo(
+    () =>
+      attendancePoints.map((point) => ({
+        ...point,
+        chartLabel: point.label,
+      })),
+    [attendancePoints],
+  )
+
   const chartShellClass = cn(
     'min-w-0 transition-shadow duration-300',
     compact
@@ -627,9 +660,11 @@ export function MemberRankingCharts({
     mileageRankData.length > 0 ||
     (comparisonChart?.rows?.length ?? 0) > 0 ||
     (mileageComparisonChart?.rows?.length ?? 0) > 0 ||
+    (attendanceComparisonChart?.rows?.length ?? 0) > 0 ||
     (pbRecordComparisonChart?.rows?.length ?? 0) > 0 ||
     timeData.length > 0 ||
-    mileageData.length > 0
+    mileageData.length > 0 ||
+    attendanceData.length > 0
 
   if (!hasAnyChartData) {
     return (
@@ -682,7 +717,6 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
-        beatRivalMemberId={beatRivalMemberId}
       />
     ) : mileageData.length === 0 ? (
       <GraphEmptyState
@@ -699,18 +733,44 @@ export function MemberRankingCharts({
       />
     )
 
+  const beatRivalChart = beatRivalMileageComparisonChart ?? mileageComparisonChart
   const beatRivalPanel =
-    mileageComparisonChart && mileageComparisonChart.rows.length > 0 ? (
+    beatRivalChart && beatRivalChart.rows.length > 0 ? (
       <MileageAggregateTrendChart
-        chart={mileageComparisonChart}
+        chart={beatRivalChart}
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
-        beatRivalMemberId={beatRivalMemberId}
         title="이겨라 · 마일리지"
       />
     ) : (
       mileagePanel
+    )
+
+  const attendancePanel =
+    attendanceComparisonChart && attendanceComparisonChart.rows.length > 0 ? (
+      <MileageAggregateTrendChart
+        chart={attendanceComparisonChart}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        compact={compact}
+        title="전체 회원 출석 횟수"
+        valueUnit="회"
+        footerHint={`${ATTENDANCE_KING_DAY_RULE_LABEL} · 위로 갈수록 출석이 늘어납니다.`}
+      />
+    ) : attendanceData.length > 0 ? (
+      <AttendanceRecordTrendChart
+        data={attendanceData}
+        chartShellClass={chartShellClass}
+        chartAxisClass={chartAxisClass}
+        emphasized={emphasized}
+        compact={compact}
+      />
+    ) : (
+      <GraphEmptyState
+        compact={compact}
+        description="3km 이상 러닝 기록이 쌓이면 출석왕 그래프가 표시됩니다."
+      />
     )
 
   return (
@@ -719,6 +779,7 @@ export function MemberRankingCharts({
       {activeTab === 'record' ? recordPanel : null}
       {activeTab === 'mileage' ? mileagePanel : null}
       {activeTab === 'beat_rival' ? beatRivalPanel : null}
+      {activeTab === 'attendance' ? attendancePanel : null}
     </div>
   )
 }
@@ -812,6 +873,71 @@ function MileageRecordTrendChart({
       </ChartContainer>
       {!compact ? (
         <p className="mt-1 text-[10px] text-zinc-500">위로 갈수록 이번 달 누적 거리가 늘어납니다.</p>
+      ) : null}
+    </div>
+  )
+}
+
+function AttendanceRecordTrendChart({
+  data,
+  chartShellClass,
+  chartAxisClass,
+  emphasized,
+  compact = false,
+}: {
+  data: Array<AttendanceHistoryPoint & { chartLabel: string }>
+  chartShellClass: string
+  chartAxisClass: string
+  emphasized: boolean
+  compact?: boolean
+}) {
+  const attendanceYMax = useMemo(
+    () => resolveCountChartYMax(data.map((point) => point.cumulativeCount)),
+    [data],
+  )
+
+  return (
+    <div className={chartShellClass}>
+      {!compact ? (
+        <p className="mb-2 text-xs font-medium text-lime-300">이번 달 출석 누적</p>
+      ) : null}
+      <ChartContainer config={mileageChartConfig} className={chartAxisClass}>
+        <LineChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
+          <XAxis
+            dataKey="chartLabel"
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+            minTickGap={28}
+          />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            width={44}
+            allowDecimals={false}
+            domain={[0, attendanceYMax]}
+            tickFormatter={(v) => `${v}회`}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                formatter={(value) => [`${value}회`, '출석']}
+              />
+            }
+          />
+          <Line
+            type="monotone"
+            dataKey="cumulativeCount"
+            stroke={LIME_EMPHASIS}
+            strokeWidth={emphasized ? 2.5 : 2}
+            dot={{ r: emphasized ? 4 : 3, fill: LIME_EMPHASIS }}
+            activeDot={{ r: 6, fill: LIME_BRIGHT, stroke: LIME_EMPHASIS, strokeWidth: 2 }}
+          />
+        </LineChart>
+      </ChartContainer>
+      {!compact ? (
+        <p className="mt-1 text-[10px] text-zinc-500">{ATTENDANCE_KING_DAY_RULE_LABEL}</p>
       ) : null}
     </div>
   )
@@ -1074,6 +1200,8 @@ function MileageAggregateTrendChart({
   compact = false,
   beatRivalMemberId = null,
   title = '전체 회원 누적 마일리지',
+  valueUnit = 'km',
+  footerHint,
 }: {
   chart: LeagueMileageComparisonChart
   chartShellClass: string
@@ -1081,11 +1209,26 @@ function MileageAggregateTrendChart({
   compact?: boolean
   beatRivalMemberId?: string | null
   title?: string
+  valueUnit?: 'km' | '회'
+  footerHint?: string
 }) {
   const memberColorMap = useMemo(
     () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
     [chart.members],
   )
+  const attendanceYMax = useMemo(() => {
+    if (valueUnit !== '회') return null
+    const values: number[] = []
+    for (const row of chart.rows) {
+      for (const member of chart.members) {
+        const value = row[`km_${member.memberId}`]
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          values.push(value)
+        }
+      }
+    }
+    return resolveCountChartYMax(values)
+  }, [chart.members, chart.rows, valueUnit])
 
   return (
     <div className={chartShellClass}>
@@ -1102,13 +1245,21 @@ function MileageAggregateTrendChart({
             interval="preserveStartEnd"
             minTickGap={24}
           />
-          <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `${v}km`} />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            width={44}
+            allowDecimals={valueUnit === '회' ? false : undefined}
+            domain={attendanceYMax != null ? [0, attendanceYMax] : undefined}
+            tickFormatter={(v) => (valueUnit === '회' ? `${v}회` : `${v}km`)}
+          />
           <Tooltip
             content={
               <MileageComparisonTooltip
                 members={chart.members}
                 memberColorMap={memberColorMap}
                 beatRivalMemberId={beatRivalMemberId}
+                valueUnit={valueUnit}
               />
             }
           />
@@ -1142,7 +1293,9 @@ function MileageAggregateTrendChart({
         </LineChart>
       </ChartContainer>
       {!compact ? (
-        <p className="mt-1 text-[10px] text-zinc-500">위로 갈수록 이번 달 누적 거리가 늘어납니다.</p>
+        <p className="mt-1 text-[10px] text-zinc-500">
+          {footerHint ?? '위로 갈수록 이번 달 누적 거리가 늘어납니다.'}
+        </p>
       ) : null}
     </div>
   )

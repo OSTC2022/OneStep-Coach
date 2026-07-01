@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { getCurrentUser, getMemberForCurrentUser, requireAuth } from '@/lib/actions/auth'
@@ -10,9 +10,11 @@ import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
 import {
   normalizeRankingStatusMessage,
+  normalizeRankingStatusMessageColor,
   RANKING_STATUS_MESSAGE_MAX_LENGTH,
 } from '@/lib/running-league/ranking-status-message'
 import type { UserRole } from '@/lib/types'
+import { CENTER_PORTAL_RANKINGS_CACHE_TAG } from '@/lib/running-league/center-portal-rankings-data'
 
 const PROFILE_SETTINGS_SELECT =
   'full_name, avatar_url, phone, kakao_id, instagram_id, email, role'
@@ -36,6 +38,7 @@ async function syncContactToLinkedRecords(
     instagram_id: string | null
     gender?: MemberGender | null
     ranking_status_message?: string | null
+    ranking_status_message_color?: string | null
   },
 ) {
   const supabase = await createClient()
@@ -51,11 +54,27 @@ async function syncContactToLinkedRecords(
   if (contact.ranking_status_message !== undefined) {
     memberPatch.ranking_status_message = contact.ranking_status_message
   }
+  if (contact.ranking_status_message_color !== undefined) {
+    memberPatch.ranking_status_message_color = contact.ranking_status_message_color
+  }
 
-  await supabase
+  let memberUpdate = await supabase
     .from('members')
     .update(memberPatch)
     .or(`auth_user_id.eq.${userId},user_id.eq.${userId}`)
+
+  if (
+    memberUpdate.error &&
+    memberPatch.ranking_status_message_color !== undefined &&
+    memberUpdate.error.code === '42703' &&
+    memberUpdate.error.message?.includes('ranking_status_message_color')
+  ) {
+    const { ranking_status_message_color: _color, ...patchWithoutColor } = memberPatch
+    memberUpdate = await supabase
+      .from('members')
+      .update(patchWithoutColor)
+      .or(`auth_user_id.eq.${userId},user_id.eq.${userId}`)
+  }
 
   try {
     const admin = createServiceRoleClient()
@@ -82,6 +101,7 @@ export type MyProfileSettings = {
   instagram_id: string
   gender: MemberGender | null
   ranking_status_message: string
+  ranking_status_message_color: string
 }
 
 export async function getMyProfileSettings(): Promise<MyProfileSettings | null> {
@@ -100,6 +120,7 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
   let instagramId = profile?.instagram_id ?? user.instagram_id ?? ''
   let gender: MemberGender | null = null
   let rankingStatusMessage = ''
+  let rankingStatusMessageColor = ''
 
   const member = await getMemberForCurrentUser()
   if (member) {
@@ -108,6 +129,9 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
     instagramId = instagramId || member.instagram_id || ''
     gender = normalizeMemberGender(member.gender)
     rankingStatusMessage = member.ranking_status_message ?? ''
+    rankingStatusMessageColor = normalizeRankingStatusMessageColor(
+      member.ranking_status_message_color,
+    )
   }
 
   return {
@@ -120,6 +144,7 @@ export async function getMyProfileSettings(): Promise<MyProfileSettings | null> 
     instagram_id: instagramId,
     gender,
     ranking_status_message: rankingStatusMessage,
+    ranking_status_message_color: rankingStatusMessageColor,
   }
 }
 
@@ -131,6 +156,7 @@ export async function updateMyProfile(input: {
   instagram_id?: string
   gender?: MemberGender | null
   ranking_status_message?: string
+  ranking_status_message_color?: string
 }): Promise<{ error?: string }> {
   const user = await requireAuth()
   const fullName = input.full_name.trim()
@@ -178,6 +204,10 @@ export async function updateMyProfile(input: {
     input.ranking_status_message === undefined
       ? undefined
       : normalizeRankingStatusMessage(input.ranking_status_message)
+  const rankingStatusMessageColor =
+    input.ranking_status_message_color === undefined
+      ? undefined
+      : normalizeRankingStatusMessageColor(input.ranking_status_message_color)
 
   if (
     input.ranking_status_message !== undefined &&
@@ -215,6 +245,9 @@ export async function updateMyProfile(input: {
     ...(genderToSync !== undefined ? { gender: genderToSync } : {}),
     ...(user.role === 'adult_member' && rankingStatusMessage !== undefined
       ? { ranking_status_message: rankingStatusMessage }
+      : {}),
+    ...(user.role === 'adult_member' && rankingStatusMessageColor !== undefined
+      ? { ranking_status_message_color: rankingStatusMessageColor }
       : {}),
   })
 
@@ -260,5 +293,8 @@ export async function updateMyProfile(input: {
   revalidatePath('/dashboard/my/running-league', 'page')
   revalidatePath('/dashboard/settings/adult-running-portal', 'page')
   revalidatePath('/dashboard', 'layout')
+  if (user.role === 'adult_member') {
+    revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG, 'max')
+  }
   return { success: true as const }
 }

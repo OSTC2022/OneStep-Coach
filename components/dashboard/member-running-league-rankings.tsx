@@ -88,11 +88,13 @@ import {
   type RankingView,
 } from '@/lib/running-league/ranking-view'
 import {
+  RANKING_EMPTY_ATTENDANCE,
   RANKING_EMPTY_MILEAGE,
   RANKING_EMPTY_PB,
   RANKING_LOAD_ERROR_MESSAGE,
 } from '@/lib/running-league/ranking-empty-states'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
+import type { MemberRunningLeagueHome } from '@/lib/running-league/member-ranking-types'
 import type {
   PbDistanceLeaderboard,
   PbDistanceRankRow,
@@ -119,7 +121,16 @@ import {
   MEMBER_PORTAL_SHELL_CLASS,
 } from '@/lib/running-league/member-portal-layout'
 import { RANKING_TOP_DISPLAY_COUNT } from '@/lib/running-league/ranking-portal-guards'
-import { buildRankingStatusMessageByMemberId } from '@/lib/running-league/ranking-status-message'
+import {
+  buildRankingStatusByMemberId,
+  type RankingStatusDisplay,
+} from '@/lib/running-league/ranking-status-message'
+import {
+  ATTENDANCE_KING_DAY_RULE_LABEL,
+  buildAttendanceKingLeaderboard,
+  type AttendanceKingRow,
+} from '@/lib/running-league/attendance-king'
+import { MemberPortalHeaderRoulette } from '@/components/dashboard/portal-header-roulette'
 
 function filterRankedBySearch<R extends { memberId: string; memberName: string }>(
   ranked: R[],
@@ -146,6 +157,10 @@ function usesPbLeaderboard(view: RankingView) {
 
 function usesMileageLeaderboard(view: RankingView) {
   return view === 'mileage' || view === 'beat_rival'
+}
+
+function usesAttendanceLeaderboard(view: RankingView) {
+  return view === 'attendance'
 }
 
 function RankChangeBadge({ delta }: { delta: RankChangeDelta | null }) {
@@ -179,6 +194,7 @@ function resolveRankChangeDeltaForView(input: {
   pbRecords: ReadonlyArray<RunningLeagueRecord>
   mileageLogs: ReadonlyArray<RunningLeagueMileageLog>
 }): RankChangeDelta | null {
+  if (input.rankingView === 'attendance') return null
   if (input.rankingView === 'pb') {
     return resolveMemberPbRankChangeDelta(
       input.memberId,
@@ -207,7 +223,7 @@ function RankingViewTabs({
 }) {
   return (
     <div className={cn('min-w-0', compact ? 'space-y-0' : 'space-y-2', className)}>
-      <div className={cn(compact ? 'grid grid-cols-3 gap-1.5' : 'flex flex-wrap gap-2')}>
+      <div className={cn(compact ? 'grid grid-cols-4 gap-1.5' : 'flex flex-wrap gap-2')}>
         {RANKING_VIEW_OPTIONS.map((item) => (
           <RankingFilterChip
             key={item.value}
@@ -399,6 +415,7 @@ function InlineRankingFilterStrip({
     mileage: '마일리지',
     pb: 'PB',
     beat_rival: '이겨라',
+    attendance: '출석왕',
   }
 
   return (
@@ -409,7 +426,7 @@ function InlineRankingFilterStrip({
           role="toolbar"
           aria-label="랭킹 필터"
         >
-        <div className="grid w-[12.5rem] shrink-0 grid-cols-3 gap-0.5 rounded-md border border-lime-500/20 bg-black/40 p-0.5">
+        <div className="grid w-[16.5rem] shrink-0 grid-cols-4 gap-0.5 rounded-md border border-lime-500/20 bg-black/40 p-0.5">
           {RANKING_VIEW_OPTIONS.map((item) => (
             <button
               key={item.value}
@@ -863,11 +880,19 @@ function RankingCardAction({
 
 function MemberPortalBrandHeader({
   action,
+  roulette,
+  runningLeagueHome,
+  rankingReferenceDate,
+  beatRivalMemberId,
   leagueLabel = DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   portalTitle = DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
   headerStyle,
 }: {
   action?: ReactNode
+  roulette?: ReactNode
+  runningLeagueHome?: MemberRunningLeagueHome | null
+  rankingReferenceDate?: string | null
+  beatRivalMemberId?: string | null
   leagueLabel?: string
   portalTitle?: string
   headerStyle?: AdultRunningPortalHeaderStyle
@@ -878,18 +903,35 @@ function MemberPortalBrandHeader({
   const portalTitlePresentation = resolvePortalTextPresentation(headerStyle?.portalTitle, {
     className: 'text-xl font-bold text-foreground sm:text-2xl',
   })
+  const resolvedRoulette =
+    roulette ??
+    (runningLeagueHome ? (
+      <MemberPortalHeaderRoulette
+        runningLeagueHome={runningLeagueHome}
+        rankingReferenceDate={rankingReferenceDate}
+        beatRivalMemberId={beatRivalMemberId}
+      />
+    ) : null)
 
   return (
-    <div className={cn('space-y-2', resolveContainerAlignClass(headerStyle?.containerAlign))}>
-      <div className="space-y-1">
-        <p className={leagueLabelPresentation.className} style={leagueLabelPresentation.style}>
-          {leagueLabel}
-        </p>
-        <h1 className={portalTitlePresentation.className} style={portalTitlePresentation.style}>
-          {portalTitle}
-        </h1>
+    <div
+      className={cn(
+        'flex items-center justify-between gap-3 overflow-visible',
+        resolveContainerAlignClass(headerStyle?.containerAlign),
+      )}
+    >
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="space-y-1">
+          <p className={leagueLabelPresentation.className} style={leagueLabelPresentation.style}>
+            {leagueLabel}
+          </p>
+          <h1 className={portalTitlePresentation.className} style={portalTitlePresentation.style}>
+            {portalTitle}
+          </h1>
+        </div>
+        {action}
       </div>
-      {action}
+      {resolvedRoulette ? <div className="shrink-0 self-start">{resolvedRoulette}</div> : null}
     </div>
   )
 }
@@ -901,6 +943,7 @@ function RankingPreview({
   pbDistance,
   activePbLeaderboard,
   activeMileageLeaderboard,
+  attendanceLeaderboard,
   rankedCount,
   highlightMemberId,
   selectedMemberId,
@@ -920,6 +963,7 @@ function RankingPreview({
   pbDistance: PbLeaderboardDistance
   activePbLeaderboard: PbDistanceLeaderboard
   activeMileageLeaderboard: MileageDistanceLeaderboard
+  attendanceLeaderboard: AttendanceKingRow[]
   rankedCount: number
   highlightMemberId?: string | null
   selectedMemberId?: string | null
@@ -935,29 +979,50 @@ function RankingPreview({
   rankingCaption?: string | null
   rankingCaptionStyle?: PortalTextStyleConfig
 }) {
-  const leaderboard = usesPbLeaderboard(rankingView)
-    ? activePbLeaderboard
-    : activeMileageLeaderboard
-  const previewRows = buildNeighborRankRows(leaderboard.ranked, highlightMemberId)
+  const previewRows = usesAttendanceLeaderboard(rankingView)
+    ? buildNeighborRankRows(attendanceLeaderboard, highlightMemberId)
+    : buildNeighborRankRows(
+        usesPbLeaderboard(rankingView)
+          ? activePbLeaderboard.ranked
+          : activeMileageLeaderboard.ranked,
+        highlightMemberId,
+      )
   const showBeatRivalLabel = rankingView === 'beat_rival'
-  const beatRivalGap = useMemo(() => {
-    if (rankingView !== 'beat_rival') return null
-    return resolveBeatRivalMileageGap({
-      myMemberId: highlightMemberId,
-      beatRivalMemberId,
-      mileageLeaderboard: activeMileageLeaderboard,
-    })
-  }, [activeMileageLeaderboard, beatRivalMemberId, highlightMemberId, rankingView])
+
+  const beatRivalHeader = useMemo(() => {
+    if (!beatRivalMemberId || !rankingBundle) return null
+    const participant = rankingBundle.participants.find(
+      (row) => row.member_id === beatRivalMemberId,
+    )
+    const rivalName = participant?.member?.name?.trim() ?? null
+    if (!rivalName) return null
+
+    const gap =
+      highlightMemberId != null
+        ? resolveBeatRivalMileageGap({
+            myMemberId: highlightMemberId,
+            beatRivalMemberId,
+            mileageLeaderboard: activeMileageLeaderboard,
+          })
+        : null
+
+    return { rivalName, gap }
+  }, [
+    activeMileageLeaderboard,
+    beatRivalMemberId,
+    highlightMemberId,
+    rankingBundle,
+  ])
 
   const filteredParticipants = rankingBundle
     ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
     : []
 
-  const statusMessageByMemberId = useMemo(
+  const statusByMemberId = useMemo(
     () =>
       rankingBundle
-        ? buildRankingStatusMessageByMemberId(rankingBundle.participants)
-        : new Map<string, string>(),
+        ? buildRankingStatusByMemberId(rankingBundle.participants)
+        : new Map<string, RankingStatusDisplay>(),
     [rankingBundle],
   )
 
@@ -976,31 +1041,26 @@ function RankingPreview({
   return (
     <div className={MEMBER_PORTAL_CARD_CLASS}>
       <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
-        {usesPbLeaderboard(rankingView) ? (
-          <RankingPeriodHeader
-            period={rankingPeriod}
-            caption={rankingCaption}
-            captionStyle={rankingCaptionStyle}
-            showPeriodLabel={false}
-            distanceLabel={formatPbDistanceLabel(pbDistance)}
-            distanceAccentClass={getPbDistanceAccentClass(pbDistance)}
-          />
-        ) : rankingView === 'beat_rival' ? (
-          <RankingPeriodHeader
-            period={rankingPeriod}
-            caption={rankingCaption}
-            captionStyle={rankingCaptionStyle}
-            showPeriodLabel={false}
-            gapLabel={beatRivalGap?.gapText}
-            gapAccentClass={beatRivalGap?.accentClass}
-          />
-        ) : (
-          <RankingPeriodHeader
-            period={rankingPeriod}
-            caption={rankingCaption}
-            captionStyle={rankingCaptionStyle}
-          />
-        )}
+        <RankingPeriodHeader
+          period={rankingPeriod}
+          caption={rankingCaption}
+          captionStyle={rankingCaptionStyle}
+          showPeriodLabel={
+            !usesPbLeaderboard(rankingView) &&
+            rankingView !== 'beat_rival' &&
+            rankingView !== 'attendance'
+          }
+          distanceLabel={
+            usesPbLeaderboard(rankingView) ? formatPbDistanceLabel(pbDistance) : null
+          }
+          distanceAccentClass={getPbDistanceAccentClass(pbDistance)}
+          gapLabel={
+            rankingView === 'attendance' ? ATTENDANCE_KING_DAY_RULE_LABEL : null
+          }
+          gapAccentClass={rankingView === 'attendance' ? 'text-sky-300' : undefined}
+          beatRivalName={showBeatRivalLabel ? beatRivalHeader?.rivalName : null}
+          beatRivalGap={beatRivalHeader?.gap}
+        />
         {onOpenList && !rankingsError ? (
           <Button
             type="button"
@@ -1025,6 +1085,18 @@ function RankingPreview({
             <div className="space-y-1.5">
               {previewRows.map((row) => {
                 const isMe = highlightMemberId != null && row.memberId === highlightMemberId
+                if (usesAttendanceLeaderboard(rankingView)) {
+                  return (
+                    <AttendanceRankingRow
+                      key={row.memberId}
+                      row={row as AttendanceKingRow}
+                      isMe={isMe}
+                      onMemberSelect={onMemberSelect}
+                      isSelected={selectedMemberId === row.memberId}
+                      rankingStatus={statusByMemberId.get(row.memberId) ?? null}
+                    />
+                  )
+                }
                 return usesPbLeaderboard(rankingView) ? (
                   <PbRankingRow
                     key={row.participantId}
@@ -1037,7 +1109,7 @@ function RankingPreview({
                     isSelected={selectedMemberId === row.memberId}
                     beatRivalMemberId={beatRivalMemberId}
                     showBeatRivalLabel={showBeatRivalLabel}
-                    statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
+                    rankingStatus={statusByMemberId.get(row.memberId) ?? null}
                   />
                 ) : (
                   <MileageRankingRow
@@ -1049,7 +1121,7 @@ function RankingPreview({
                     isSelected={selectedMemberId === row.memberId}
                     beatRivalMemberId={beatRivalMemberId}
                     showBeatRivalLabel={showBeatRivalLabel}
-                    statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
+                    rankingStatus={statusByMemberId.get(row.memberId) ?? null}
                   />
                 )
               })}
@@ -1065,11 +1137,19 @@ function RankingPreview({
           </>
         ) : (
           <RankingEmptyState
-            title={usesMileageLeaderboard(rankingView) ? RANKING_EMPTY_MILEAGE.title : RANKING_EMPTY_PB.title}
+            title={
+              usesAttendanceLeaderboard(rankingView)
+                ? RANKING_EMPTY_ATTENDANCE.title
+                : usesMileageLeaderboard(rankingView)
+                  ? RANKING_EMPTY_MILEAGE.title
+                  : RANKING_EMPTY_PB.title
+            }
             description={
-              usesMileageLeaderboard(rankingView)
-                ? RANKING_EMPTY_MILEAGE.description
-                : RANKING_EMPTY_PB.description
+              usesAttendanceLeaderboard(rankingView)
+                ? RANKING_EMPTY_ATTENDANCE.description
+                : usesMileageLeaderboard(rankingView)
+                  ? RANKING_EMPTY_MILEAGE.description
+                  : RANKING_EMPTY_PB.description
             }
           />
         )}
@@ -1113,7 +1193,11 @@ function resolveMemberCurrentRank(
   rankingView: RankingView,
   pbLeaderboard: PbDistanceLeaderboard,
   mileageLeaderboard: MileageDistanceLeaderboard,
+  attendanceLeaderboard: AttendanceKingRow[] = [],
 ): number | null {
+  if (usesAttendanceLeaderboard(rankingView)) {
+    return attendanceLeaderboard.find((row) => row.memberId === memberId)?.rank ?? null
+  }
   if (usesMileageLeaderboard(rankingView)) {
     return mileageLeaderboard.ranked.find((row) => row.memberId === memberId)?.rank ?? null
   }
@@ -1147,7 +1231,7 @@ function PbRankingRow({
   showDistanceLabel = true,
   beatRivalMemberId,
   showBeatRivalLabel = false,
-  statusMessage = null,
+  rankingStatus = null,
 }: {
   row: PbDistanceRankRow
   isMe: boolean
@@ -1159,7 +1243,7 @@ function PbRankingRow({
   showDistanceLabel?: boolean
   beatRivalMemberId?: string | null
   showBeatRivalLabel?: boolean
-  statusMessage?: string | null
+  rankingStatus?: RankingStatusDisplay | null
 }) {
   const isRowSelected = Boolean(isSelected)
 
@@ -1190,7 +1274,10 @@ function PbRankingRow({
         showBeatRivalLabel={showBeatRivalLabel}
         className={rankingMemberNameClass(isRowSelected)}
       />
-      <RankingStatusMessageSlot message={statusMessage} />
+      <RankingStatusMessageSlot
+        message={rankingStatus?.message}
+        color={rankingStatus?.color}
+      />
       {showDistanceLabel ? (
         <span className="shrink-0 text-xs text-zinc-500">{distanceLabel}</span>
       ) : null}
@@ -1213,7 +1300,7 @@ function MileageRankingRow({
   scrollAnchor = false,
   beatRivalMemberId,
   showBeatRivalLabel = false,
-  statusMessage = null,
+  rankingStatus = null,
 }: {
   row: MileageDistanceRankRow
   isMe: boolean
@@ -1223,7 +1310,7 @@ function MileageRankingRow({
   scrollAnchor?: boolean
   beatRivalMemberId?: string | null
   showBeatRivalLabel?: boolean
-  statusMessage?: string | null
+  rankingStatus?: RankingStatusDisplay | null
 }) {
   const isRowSelected = Boolean(isSelected)
 
@@ -1251,11 +1338,69 @@ function MileageRankingRow({
         showBeatRivalLabel={showBeatRivalLabel}
         className={rankingMemberNameClass(isRowSelected)}
       />
-      <RankingStatusMessageSlot message={statusMessage} />
+      <RankingStatusMessageSlot
+        message={rankingStatus?.message}
+        color={rankingStatus?.color}
+      />
       <span
         className={cn('text-right font-semibold tabular-nums', rankingValueClass(isRowSelected))}
       >
         {formatMileageKmDisplay(row.mileageKm)}
+      </span>
+      {isSelected ? <ChevronRight className="h-4 w-4 shrink-0 text-lime-400" aria-hidden /> : null}
+    </button>
+  )
+}
+
+function AttendanceRankingRow({
+  row,
+  isMe,
+  onMemberSelect,
+  isSelected,
+  scrollAnchor = false,
+  rankingStatus = null,
+}: {
+  row: AttendanceKingRow
+  isMe: boolean
+  onMemberSelect?: (memberId: string, memberName: string) => void
+  isSelected?: boolean
+  scrollAnchor?: boolean
+  rankingStatus?: RankingStatusDisplay | null
+}) {
+  const isRowSelected = Boolean(isSelected)
+
+  return (
+    <button
+      type="button"
+      id={scrollAnchor ? `rank-row-${row.memberId}` : undefined}
+      onClick={() => onMemberSelect?.(row.memberId, row.memberName)}
+      aria-pressed={isSelected}
+      aria-current={isSelected ? 'true' : undefined}
+      data-selected-member={isSelected ? 'true' : undefined}
+      className={cn(
+        resolveRankingRowGridClass({ isSelected: isRowSelected }),
+        'rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
+        topRankRowAccent(row.rank),
+        rankingRowClass(isRowSelected),
+      )}
+    >
+      <RankChangeBadge delta={null} />
+      <RankMedalDisplay rank={row.rank} />
+      <RankingMemberNameBlock
+        memberName={row.memberName}
+        beatRivalMemberId={null}
+        rowMemberId={row.memberId}
+        showBeatRivalLabel={false}
+        className={rankingMemberNameClass(isRowSelected)}
+      />
+      <RankingStatusMessageSlot
+        message={rankingStatus?.message}
+        color={rankingStatus?.color}
+      />
+      <span
+        className={cn('text-right font-semibold tabular-nums', rankingValueClass(isRowSelected))}
+      >
+        {row.attendanceCount}회
       </span>
       {isSelected ? <ChevronRight className="h-4 w-4 shrink-0 text-lime-400" aria-hidden /> : null}
     </button>
@@ -1310,11 +1455,11 @@ function PbRankingList({
     [genderFilter, rankingBundle],
   )
 
-  const statusMessageByMemberId = useMemo(
+  const statusByMemberId = useMemo(
     () =>
       rankingBundle
-        ? buildRankingStatusMessageByMemberId(rankingBundle.participants)
-        : new Map<string, string>(),
+        ? buildRankingStatusByMemberId(rankingBundle.participants)
+        : new Map<string, RankingStatusDisplay>(),
     [rankingBundle],
   )
 
@@ -1373,7 +1518,7 @@ function PbRankingList({
                 showDistanceLabel={showDistanceLabel}
                 beatRivalMemberId={beatRivalMemberId}
                 showBeatRivalLabel={showBeatRivalLabel}
-                statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
+                rankingStatus={statusByMemberId.get(row.memberId) ?? null}
               />
             </div>
           )
@@ -1457,11 +1602,11 @@ function MileageRankingList({
     [genderFilter, rankingBundle],
   )
 
-  const statusMessageByMemberId = useMemo(
+  const statusByMemberId = useMemo(
     () =>
       rankingBundle
-        ? buildRankingStatusMessageByMemberId(rankingBundle.participants)
-        : new Map<string, string>(),
+        ? buildRankingStatusByMemberId(rankingBundle.participants)
+        : new Map<string, RankingStatusDisplay>(),
     [rankingBundle],
   )
 
@@ -1518,7 +1663,7 @@ function MileageRankingList({
                 scrollAnchor={isMe}
                 beatRivalMemberId={beatRivalMemberId}
                 showBeatRivalLabel={showBeatRivalLabel}
-                statusMessage={statusMessageByMemberId.get(row.memberId) ?? null}
+                rankingStatus={statusByMemberId.get(row.memberId) ?? null}
               />
             </div>
           )
@@ -1712,6 +1857,7 @@ function FullRankingDialog({
   onPbDistanceChange,
   activePbLeaderboard,
   activeMileageLeaderboard,
+  attendanceLeaderboard,
   highlightMemberId,
   selectedMemberId,
   onMemberSelect,
@@ -1730,6 +1876,7 @@ function FullRankingDialog({
   onPbDistanceChange: (value: PbLeaderboardDistance) => void
   activePbLeaderboard: PbDistanceLeaderboard
   activeMileageLeaderboard: MileageDistanceLeaderboard
+  attendanceLeaderboard: AttendanceKingRow[]
   highlightMemberId?: string | null
   selectedMemberId?: string | null
   onMemberSelect?: (memberId: string, memberName: string) => void
@@ -1744,8 +1891,17 @@ function FullRankingDialog({
 
   const fullRanked = usesPbLeaderboard(rankingView)
     ? activePbLeaderboard.ranked
-    : activeMileageLeaderboard.ranked
-  const showBeatRivalLabel = true
+    : usesAttendanceLeaderboard(rankingView)
+      ? attendanceLeaderboard
+      : activeMileageLeaderboard.ranked
+  const showBeatRivalLabel = rankingView === 'beat_rival'
+  const statusByMemberId = useMemo(
+    () =>
+      rankingBundle
+        ? buildRankingStatusByMemberId(rankingBundle.participants)
+        : new Map<string, RankingStatusDisplay>(),
+    [rankingBundle],
+  )
   const searchedRanked = useMemo(
     () => filterRankedBySearch(fullRanked, searchQuery, highlightMemberId),
     [fullRanked, highlightMemberId, searchQuery],
@@ -1780,7 +1936,11 @@ function FullRankingDialog({
   const rankingLabel =
     rankingView === 'pb'
       ? `${formatPbDistanceLabel(pbDistance)} 랭킹`
-      : '월 마일리지 랭킹'
+      : rankingView === 'attendance'
+        ? '출석왕 랭킹'
+        : rankingView === 'beat_rival'
+          ? '이겨라 랭킹'
+          : '월 마일리지 랭킹'
   const genderScopeLabel = getGenderFilterScopeLabel(genderFilter)
 
   useEffect(() => {
@@ -1900,6 +2060,23 @@ function FullRankingDialog({
               beatRivalMemberId={beatRivalMemberId}
               showBeatRivalLabel={showBeatRivalLabel}
             />
+          ) : usesAttendanceLeaderboard(rankingView) ? (
+            <div className="space-y-1.5">
+              {(paginatedRanked as AttendanceKingRow[]).map((row) => {
+                const isMe = highlightMemberId != null && row.memberId === highlightMemberId
+                return (
+                  <AttendanceRankingRow
+                    key={row.memberId}
+                    row={row}
+                    isMe={isMe}
+                    onMemberSelect={onMemberSelect}
+                    isSelected={selectedMemberId === row.memberId}
+                    scrollAnchor={selectedMemberId === row.memberId}
+                    rankingStatus={statusByMemberId.get(row.memberId) ?? null}
+                  />
+                )
+              })}
+            </div>
           ) : (
             <MileageRankingList
               leaderboard={paginatedMileageLeaderboard}
@@ -2052,9 +2229,21 @@ export function MemberRunningLeagueRankings({
     filteredRankings?.pbByDistance[portalPbDistance] ?? EMPTY_PB_LEADERBOARD
   const activeMileageLeaderboard =
     filteredRankings?.mileageLeaderboard ?? { ranked: [], unranked: [] }
+  const attendanceLeaderboard = useMemo(() => {
+    const participants = rankingBundle
+      ? filterParticipantsByGender(rankingBundle.participants, genderFilter)
+      : []
+    const participantMemberIds = new Set(participants.map((row) => row.member_id))
+    const logs = (rankingBundle?.mileageLogs ?? mileageLogs).filter((log) =>
+      participantMemberIds.has(log.member_id),
+    )
+    return buildAttendanceKingLeaderboard(participants, logs, rankingPeriod)
+  }, [genderFilter, mileageLogs, rankingBundle, rankingPeriod])
   const activeRankedCount = usesPbLeaderboard(rankingView)
     ? activePbLeaderboard.ranked.length
-    : activeMileageLeaderboard.ranked.length
+    : usesAttendanceLeaderboard(rankingView)
+      ? attendanceLeaderboard.length
+      : activeMileageLeaderboard.ranked.length
   const genderFilterBlocked = isGenderFilterUnavailable(rankingBundle)
   const unclassifiedCount = useMemo(
     () => (rankingBundle ? countUnclassifiedParticipants(rankingBundle.participants) : 0),
@@ -2069,8 +2258,28 @@ export function MemberRunningLeagueRankings({
         rankingView,
         activePbLeaderboard,
         activeMileageLeaderboard,
+        attendanceLeaderboard,
       )
     : null
+
+  const headerRoulette = useMemo(
+    () => (
+      <MemberPortalHeaderRoulette
+        runningLeagueHome={
+          rankingBundle
+            ? {
+                mileageLogs,
+                rankingBundle,
+                league: null,
+              }
+            : null
+        }
+        rankingReferenceDate={portalRankingReferenceDate}
+        beatRivalMemberId={beatRivalMemberId}
+      />
+    ),
+    [beatRivalMemberId, mileageLogs, portalRankingReferenceDate, rankingBundle],
+  )
 
   const isExplicitSelection = selectedMember != null
 
@@ -2111,7 +2320,7 @@ export function MemberRunningLeagueRankings({
   )
 
   const leagueStatus = useMemo(() => {
-    if (!highlightMemberId || rankingsError) return null
+    if (!highlightMemberId || rankingsError || rankingView === 'attendance') return null
     return buildMemberLeagueStatusSnapshot({
       memberId: highlightMemberId,
       rankingView,
@@ -2146,6 +2355,9 @@ export function MemberRunningLeagueRankings({
     const view = graphRankingViewForChartTab(tab)
     if (view) {
       setRankingView(view)
+      if (view === 'pb') {
+        setPbDistance(PORTAL_DEFAULT_PB_DISTANCE)
+      }
     }
   }
 
@@ -2228,6 +2440,7 @@ export function MemberRunningLeagueRankings({
       rankingView={rankingView}
       genderFilter={genderFilter}
       rankingBundle={rankingBundle}
+      rankingPeriod={rankingPeriod}
       highlightMemberId={highlightMemberId}
       currentRank={panelMemberRank}
       totalRanked={activeRankedCount}
@@ -2246,6 +2459,7 @@ export function MemberRunningLeagueRankings({
       genderFilter={genderFilter}
       pbDistance={portalPbDistance}
       rankingBundle={rankingBundle}
+      rankingPeriod={rankingPeriod}
       graphChartTab={graphChartTab}
       onGraphChartTabChange={handleGraphChartTabChange}
       beatRivalMemberId={beatRivalMemberId}
@@ -2298,6 +2512,7 @@ export function MemberRunningLeagueRankings({
           leagueLabel={portalLeagueLabel}
           portalTitle={portalTitle}
           headerStyle={portalHeaderStyle}
+          roulette={headerRoulette}
         />
       ) : null}
       {brandHeaderBelow}
@@ -2308,6 +2523,7 @@ export function MemberRunningLeagueRankings({
           pbDistance={portalPbDistance}
           activePbLeaderboard={activePbLeaderboard}
           activeMileageLeaderboard={activeMileageLeaderboard}
+          attendanceLeaderboard={attendanceLeaderboard}
           rankedCount={rankingsError ? 0 : activeRankedCount}
           highlightMemberId={highlightMemberId}
           selectedMemberId={panelMember?.id ?? null}
@@ -2350,6 +2566,7 @@ export function MemberRunningLeagueRankings({
         onPbDistanceChange={setPbDistance}
         activePbLeaderboard={activePbLeaderboard}
         activeMileageLeaderboard={activeMileageLeaderboard}
+        attendanceLeaderboard={attendanceLeaderboard}
         highlightMemberId={highlightMemberId}
         selectedMemberId={panelMember?.id ?? null}
         onMemberSelect={(memberId, memberName) => {

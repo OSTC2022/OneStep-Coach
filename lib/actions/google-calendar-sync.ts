@@ -91,18 +91,28 @@ export async function getGoogleCalendarSyncStatus(): Promise<GoogleCalendarSyncS
 export async function disconnectGoogleCalendar(): Promise<{ error?: string }> {
   await requireRole(['admin'])
 
-  const row = await getGoogleCalendarSyncRow()
-  if (row) {
-    await stopGoogleCalendarWatchForRow(row)
+  try {
+    const row = await getGoogleCalendarSyncRow()
+    if (row) {
+      await stopGoogleCalendarWatchForRow(row)
+    }
+    await clearGoogleCalendarSyncRow()
+
+    revalidatePath('/dashboard/settings/google-calendar')
+    revalidatePath('/dashboard/calendar')
+    revalidatePath('/dashboard/lesson-status')
+    revalidatePath('/dashboard')
+
+    return {}
+  } catch (error) {
+    console.error('[google-calendar] disconnect failed:', error)
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : '연결 해제 중 오류가 발생했습니다.',
+    }
   }
-  await clearGoogleCalendarSyncRow()
-
-  revalidatePath('/dashboard/settings/google-calendar')
-  revalidatePath('/dashboard/calendar')
-  revalidatePath('/dashboard/lesson-status')
-  revalidatePath('/dashboard')
-
-  return {}
 }
 
 export async function runGoogleCalendarSyncNow(): Promise<{

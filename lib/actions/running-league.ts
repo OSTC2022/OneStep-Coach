@@ -41,7 +41,7 @@ import {
   type MileageDistanceLeaderboard,
 } from '@/lib/running-league/mileage-leaderboard'
 import { format, subMonths } from 'date-fns'
-import { currentMonthDateRange } from '@/lib/running-league/month-range'
+import { currentMonthDateRange, formatCurrentMonthRankingLabel } from '@/lib/running-league/month-range'
 import { resolveAdultRunningMemberIds } from '@/lib/running-league/resolve-adult-running-member-ids'
 import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import {
@@ -2256,6 +2256,82 @@ export async function deleteMemberMileageLog(
       error: syncError instanceof Error ? syncError.message : '마일리지 합산에 실패했습니다.',
     }
   }
+}
+
+/** 성인 러닝 포털 — 이번 달 마일리지 로그만 남기고 이전·이후 월 기록 삭제 */
+export async function resetPreviousMonthsMileageLogs(): Promise<
+  | { ok: true; deletedCount: number; keptMonthLabel: string }
+  | { ok: false; error: string }
+> {
+  await requireRole(['admin'])
+
+  let league: Awaited<ReturnType<typeof ensureCenterPortalRankingLeague>> | null
+  try {
+    league = await ensureCenterPortalRankingLeague()
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error ? error.message : '성인 러닝 포털 리그를 불러오지 못했습니다.',
+    }
+  }
+
+  if (!league) {
+    return { ok: false, error: '성인 러닝 포털 리그를 찾을 수 없습니다.' }
+  }
+
+  const supabase = await leagueClient()
+  const { start, end } = currentMonthDateRange()
+  const keptMonthLabel = formatCurrentMonthRankingLabel()
+
+  const { data: toDelete, error: selectError } = await supabase
+    .from('running_league_mileage_logs')
+    .select('id')
+    .eq('league_id', league.id)
+    .or(`logged_at.lt.${start},logged_at.gt.${end}`)
+
+  if (selectError) {
+    if (isMissingTableError(selectError)) {
+      return {
+        ok: false,
+        error: '마일리지 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.',
+      }
+    }
+    return { ok: false, error: selectError.message }
+  }
+
+  const ids = (toDelete ?? []).map((row) => String(row.id))
+  if (ids.length === 0) {
+    return { ok: true, deletedCount: 0, keptMonthLabel }
+  }
+
+  const { error: deleteError } = await supabase
+    .from('running_league_mileage_logs')
+    .delete()
+    .in('id', ids)
+
+  if (deleteError) {
+    return { ok: false, error: deleteError.message }
+  }
+
+  const { data: participants, error: participantsError } = await supabase
+    .from('running_league_participants')
+    .select('id')
+    .eq('league_id', league.id)
+
+  if (participantsError) {
+    return { ok: false, error: participantsError.message }
+  }
+
+  for (const participant of participants ?? []) {
+    await syncParticipantMileageFromLogs(supabase, String(participant.id))
+  }
+
+  revalidateMemberMileagePaths()
+  revalidateRunningLeaguePaths(league.id)
+  revalidatePath('/dashboard/settings/adult-running-portal')
+
+  return { ok: true, deletedCount: ids.length, keptMonthLabel }
 }
 
 export async function updateMemberMileageLogForm(

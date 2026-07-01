@@ -9,12 +9,31 @@ import type {
   RunningLeagueRecordPhase,
 } from '@/lib/types'
 
+const PARTICIPANT_MEMBER_FIELDS =
+  'id, name, sport, phone, gender, ranking_status_message, ranking_status_message_color'
+const PARTICIPANT_MEMBER_FIELDS_LEGACY =
+  'id, name, sport, phone, gender, ranking_status_message'
+
 /** 포털 랭킹 — members 조인에 성인 러닝 필터용 auth·grade 포함 */
 export const PORTAL_PARTICIPANT_SELECT =
-  'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone, gender, ranking_status_message, auth_user_id, user_id, grade)'
+  `id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(${PARTICIPANT_MEMBER_FIELDS}, auth_user_id, user_id, grade)`
+
+/** 마이그레이션 전 DB용 — ranking_status_message_color 컬럼 없을 때 */
+export const PORTAL_PARTICIPANT_SELECT_LEGACY =
+  `id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(${PARTICIPANT_MEMBER_FIELDS_LEGACY}, auth_user_id, user_id, grade)`
 
 export const PARTICIPANT_SELECT =
-  'id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(id, name, sport, phone, gender, ranking_status_message)'
+  `id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(${PARTICIPANT_MEMBER_FIELDS})`
+
+export const PARTICIPANT_SELECT_LEGACY =
+  `id, league_id, member_id, goal_level, goal_type, personal_goal, goal_achievement_rate, attendance_score, goal_score, record_score, mileage_score, recovery_score, mileage_km, total_score, record_baseline, record_current, notes, coach_comment, created_at, updated_at, member:members(${PARTICIPANT_MEMBER_FIELDS_LEGACY})`
+
+export function isMissingDbColumnError(
+  error: { code?: string; message?: string } | null,
+  column: string,
+): boolean {
+  return error?.code === '42703' && (error.message?.includes(column) ?? false)
+}
 
 export function mapLeagueParticipantRow(row: Record<string, unknown>): RunningLeagueParticipant {
   const memberRaw = row.member
@@ -29,6 +48,10 @@ export function mapLeagueParticipantRow(row: Record<string, unknown>): RunningLe
           ranking_status_message:
             ((memberRaw as Record<string, unknown>).ranking_status_message as string | null) ??
             null,
+          ranking_status_message_color:
+            ((memberRaw as Record<string, unknown>).ranking_status_message_color as
+              | string
+              | null) ?? null,
         }
       : null
 

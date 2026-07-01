@@ -4,12 +4,14 @@ import { useMemo, type ReactNode } from 'react'
 import { MemberRankingCharts, type GraphChartTab } from '@/components/dashboard/member-ranking-charts'
 import { buildLeagueAggregateRankComparisonChart } from '@/lib/running-league/league-rank-comparison'
 import { buildLeagueMileageComparisonChart } from '@/lib/running-league/league-mileage-comparison'
+import { buildLeagueAttendanceComparisonChart } from '@/lib/running-league/league-attendance-comparison'
 import { buildLeaguePbRecordComparisonChart } from '@/lib/running-league/league-pb-record-comparison'
 import { filterPortalPbTrendRecords } from '@/lib/running-league/ranking-hub'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
 import type { RankingView } from '@/lib/running-league/ranking-view'
+import type { RankingPeriod } from '@/lib/running-league/ranking-period'
 import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-layout'
 import { cn } from '@/lib/utils'
 
@@ -18,6 +20,7 @@ interface PortalAggregateGraphPanelProps {
   genderFilter: RankingGenderFilter
   pbDistance: PbLeaderboardDistance
   rankingBundle: MemberRunningLeagueRankingBundle | null
+  rankingPeriod: Pick<RankingPeriod, 'start' | 'end'>
   graphChartTab: GraphChartTab
   onGraphChartTabChange: (tab: GraphChartTab) => void
   beatRivalMemberId?: string | null
@@ -30,6 +33,7 @@ export function PortalAggregateGraphPanel({
   genderFilter,
   pbDistance,
   rankingBundle,
+  rankingPeriod,
   graphChartTab,
   onGraphChartTabChange,
   beatRivalMemberId = null,
@@ -60,9 +64,26 @@ export function PortalAggregateGraphPanel({
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
       logs: rankingBundle.mileageLogs,
+    })
+  }, [filteredParticipants, rankingBundle])
+
+  const beatRivalMileageComparisonChart = useMemo(() => {
+    if (!rankingBundle || !beatRivalMemberId) return null
+    return buildLeagueMileageComparisonChart({
+      participants: filteredParticipants,
+      logs: rankingBundle.mileageLogs,
       beatRivalMemberId,
     })
   }, [beatRivalMemberId, filteredParticipants, rankingBundle])
+
+  const attendanceComparisonChart = useMemo(() => {
+    if (!rankingBundle) return null
+    return buildLeagueAttendanceComparisonChart({
+      participants: filteredParticipants,
+      logs: rankingBundle.mileageLogs,
+      period: rankingPeriod,
+    })
+  }, [filteredParticipants, rankingBundle, rankingPeriod])
 
   const pbRecordComparisonChart = useMemo(() => {
     if (!rankingBundle) return null
@@ -87,6 +108,8 @@ export function PortalAggregateGraphPanel({
           mileageRankPoints={[]}
           comparisonChart={pbRankComparisonChart}
           mileageComparisonChart={mileageComparisonChart}
+          beatRivalMileageComparisonChart={beatRivalMileageComparisonChart}
+          attendanceComparisonChart={attendanceComparisonChart}
           pbRecordComparisonChart={pbRecordComparisonChart}
           mode={rankingView}
           aggregateMode
