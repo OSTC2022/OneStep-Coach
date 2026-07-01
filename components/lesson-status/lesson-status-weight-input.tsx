@@ -7,6 +7,11 @@ import {
   clearLessonStatusWeight,
   recordLessonStatusWeight,
 } from '@/lib/actions/member-body-records'
+import { WeightWithDeltaText } from '@/components/members/weight-with-delta-text'
+import {
+  formatWeightDeltaInParens,
+  weightDeltaTextClass,
+} from '@/lib/member-weight-delta'
 import { formatBodyMetric } from '@/lib/member-utils'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -17,15 +22,32 @@ interface LessonStatusWeightInputProps {
   memberId: string
   lessonDate: string
   initialWeight?: number | null
+  initialWeightDelta?: number | null
   disabled?: boolean
   className?: string
-  onWeightChange?: (weight: number | null) => void
+  onWeightChange?: (weight: number | null, deltaKg?: number | null) => void
+}
+
+function showWeightDeltaToast(deltaKg: number | null, savedWeightKg: number) {
+  const deltaLabel = formatWeightDeltaInParens(deltaKg)
+  if (deltaLabel) {
+    toast.success(
+      <span className="font-semibold tabular-nums">
+        {formatBodyMetric(savedWeightKg)}
+        <span className={cn('ml-1', weightDeltaTextClass(deltaKg))}>{deltaLabel}</span>
+      </span>,
+    )
+    return
+  }
+
+  toast.success(`${formatBodyMetric(savedWeightKg)}kg 기록`)
 }
 
 export function LessonStatusWeightInput({
   memberId,
   lessonDate,
   initialWeight,
+  initialWeightDelta = null,
   disabled,
   className,
   onWeightChange,
@@ -36,6 +58,7 @@ export function LessonStatusWeightInput({
   const [savedWeight, setSavedWeight] = useState<number | null>(
     initialWeight ?? null,
   )
+  const [weightDeltaKg, setWeightDeltaKg] = useState<number | null>(null)
   const boundRef = useRef({ memberId, lessonDate })
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -47,6 +70,7 @@ export function LessonStatusWeightInput({
 
     if (memberOrDateChanged) {
       setSavedWeight(initialWeight ?? null)
+      setWeightDeltaKg(initialWeightDelta)
       setOpen(false)
       setDraft('')
       return
@@ -54,8 +78,9 @@ export function LessonStatusWeightInput({
 
     if (initialWeight != null) {
       setSavedWeight(initialWeight)
+      setWeightDeltaKg(initialWeightDelta)
     }
-  }, [initialWeight, memberId, lessonDate])
+  }, [initialWeight, initialWeightDelta, memberId, lessonDate])
 
   useEffect(() => {
     if (!open) return
@@ -102,6 +127,7 @@ export function LessonStatusWeightInput({
       }
 
       setSavedWeight(null)
+      setWeightDeltaKg(null)
       onWeightChange?.(null)
       closeEditor()
       return
@@ -131,12 +157,16 @@ export function LessonStatusWeightInput({
       return
     }
 
-    setSavedWeight(weight)
-    onWeightChange?.(weight)
+    const saved = result.savedWeightKg ?? weight
+    setSavedWeight(saved)
+    setWeightDeltaKg(result.weightDeltaKg ?? null)
+    onWeightChange?.(saved, result.weightDeltaKg ?? null)
+    showWeightDeltaToast(result.weightDeltaKg ?? null, saved)
     closeEditor()
   }
 
   const hasSaved = savedWeight != null
+  const buttonLabel = hasSaved ? null : '체중 kg'
 
   return (
     <>
@@ -149,9 +179,7 @@ export function LessonStatusWeightInput({
         }}
         className={cn(
           'mt-1 flex w-full min-w-0 items-center rounded border border-border/70 bg-muted/30 px-2 py-1 text-left text-[10px] transition-colors hover:bg-muted/50',
-          hasSaved
-            ? 'font-medium text-primary'
-            : 'text-muted-foreground',
+          hasSaved && weightDeltaKg == null && 'font-medium text-primary',
           (disabled || saving) && 'opacity-50',
           className,
         )}
@@ -159,9 +187,14 @@ export function LessonStatusWeightInput({
         {saving ? (
           <Loader2 className="h-3 w-3 animate-spin" />
         ) : hasSaved ? (
-          '체중 작성 완료'
+          <WeightWithDeltaText
+            weightKg={savedWeight}
+            deltaKg={weightDeltaKg}
+            className="text-[10px] font-semibold"
+            weightClassName="text-primary"
+          />
         ) : (
-          '체중 kg'
+          <span>{buttonLabel}</span>
         )}
       </button>
 

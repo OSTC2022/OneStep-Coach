@@ -112,12 +112,14 @@ import {
   Pencil,
   Redo2,
   RefreshCw,
+  Scale,
   Undo2,
   UserRound,
 } from 'lucide-react'
 import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
 import { LessonMemberLinkDialog } from '@/components/lesson-status/lesson-member-link-dialog'
 import { LessonStatusWeightInput } from '@/components/lesson-status/lesson-status-weight-input'
+import type { LessonStatusBodyWeightSnapshot } from '@/lib/actions/member-body-records'
 
 const SignaturePadDialog = dynamic(
   () =>
@@ -143,7 +145,7 @@ function bodyWeightKey(memberId: string, date: string) {
   return `${memberId}:${date}`
 }
 
-const EMPTY_BODY_WEIGHT_BY_KEY: Record<string, number> = {}
+const EMPTY_BODY_WEIGHT_BY_KEY: Record<string, LessonStatusBodyWeightSnapshot> = {}
 
 interface LessonStatusViewProps {
   lessons: Lesson[]
@@ -152,7 +154,7 @@ interface LessonStatusViewProps {
   initialViewMode?: LessonStatusViewMode
   showAddSchedule?: boolean
   isAdmin?: boolean
-  initialBodyWeightByKey?: Record<string, number>
+  initialBodyWeightByKey?: Record<string, LessonStatusBodyWeightSnapshot>
 }
 
 const VIEW_MODE_OPTIONS: { value: LessonStatusViewMode; label: string }[] = [
@@ -233,8 +235,13 @@ interface AthleteTileProps {
   compact?: boolean
   expanded?: boolean
   canEditEndTime?: boolean
-  bodyWeightByKey: Record<string, number>
-  onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
+  bodyWeightByKey: Record<string, LessonStatusBodyWeightSnapshot>
+  onBodyWeightChange: (
+    memberId: string,
+    date: string,
+    weight: number | null,
+    deltaKg?: number | null,
+  ) => void
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onClearAttendanceCheck: (lessonId: string) => void
   onGuestStatusChange: (lessonId: string, action: GuestLessonAction) => void
@@ -485,7 +492,7 @@ const AthleteTile = memo(function AthleteTile({
                 'truncate text-left font-semibold leading-tight text-foreground hover:text-primary hover:underline',
                 expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
               )}
-              title={`${label} — 수업 수정 또는 회원 페이지`}
+              title={`${label} — 수업 수정 · 회원 페이지 · 체중 페이지`}
             >
               {label}
             </button>
@@ -499,6 +506,12 @@ const AthleteTile = memo(function AthleteTile({
               <Link href={`/dashboard/members/${lesson.member_id}`}>
                 <UserRound className="size-4" />
                 회원 페이지
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href={`/dashboard/members/${lesson.member_id}/weight`}>
+                <Scale className="size-4" />
+                체중 페이지
               </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -656,11 +669,20 @@ const AthleteTile = memo(function AthleteTile({
               memberId={lesson.member_id}
               lessonDate={lesson.lesson_date}
               initialWeight={
-                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]
+                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]?.weightKg
+              }
+              initialWeightDelta={
+                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]?.deltaKg ??
+                null
               }
               disabled={isLoading || isCompleting || isCancelling}
-              onWeightChange={(weight) =>
-                onBodyWeightChange(lesson.member_id!, lesson.lesson_date, weight)
+              onWeightChange={(weight, deltaKg) =>
+                onBodyWeightChange(
+                  lesson.member_id!,
+                  lesson.lesson_date,
+                  weight,
+                  deltaKg,
+                )
               }
             />
           ) : null}
@@ -927,8 +949,13 @@ interface TimeSlotsPanelProps {
   onMemberLinked: (originalLessonId: string, lesson: Lesson, deletedIds?: string[]) => void
   onLessonEdited: (lesson: Lesson) => void
   onLessonDeleted: (lessonIds: string[]) => void
-  bodyWeightByKey: Record<string, number>
-  onBodyWeightChange: (memberId: string, date: string, weight: number | null) => void
+  bodyWeightByKey: Record<string, LessonStatusBodyWeightSnapshot>
+  onBodyWeightChange: (
+    memberId: string,
+    date: string,
+    weight: number | null,
+    deltaKg?: number | null,
+  ) => void
   emptyMessage?: string
   autoScrollToNow?: boolean
 }
@@ -1255,14 +1282,22 @@ export function LessonStatusView({
   }, [selectedDate, initialViewMode])
 
   const handleBodyWeightChange = useCallback(
-    (memberId: string, date: string, weight: number | null) => {
+    (
+      memberId: string,
+      date: string,
+      weight: number | null,
+      deltaKg?: number | null,
+    ) => {
       setBodyWeightByKey((prev) => {
         const key = bodyWeightKey(memberId, date)
         if (weight == null) {
           const { [key]: _removed, ...rest } = prev
           return rest
         }
-        return { ...prev, [key]: weight }
+        return {
+          ...prev,
+          [key]: { weightKg: weight, deltaKg: deltaKg ?? null },
+        }
       })
     },
     [],

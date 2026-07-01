@@ -1,5 +1,6 @@
 'use server'
 
+import { cache } from 'react'
 import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { revalidateLessonViews } from '@/lib/lesson-data-sync'
@@ -242,11 +243,48 @@ type PullResult = {
 
 let pullInFlight: Promise<PullResult> | null = null
 
+const readGoogleCalendarSyncRowCached = cache(async () => {
+  if (!isGoogleCalendarConfigured()) return null
+  return getGoogleCalendarSyncRow()
+})
+
+export type GoogleCalendarPageBootstrap = {
+  pollingEnabled: boolean
+  alert: GoogleCalendarSyncAlert
+}
+
+/** 캘린더 페이지 — DB 1회 조회로 폴링·배너 상태 반환 */
+export async function getGoogleCalendarPageBootstrap(): Promise<GoogleCalendarPageBootstrap> {
+  await requireRole(['admin', 'instructor'])
+
+  const row = await readGoogleCalendarSyncRowCached()
+  const pollingEnabled = Boolean(row?.sync_enabled && row?.refresh_token)
+
+  if (!row?.last_sync_error || !needsGoogleCalendarReconnect(row.last_sync_error)) {
+    return {
+      pollingEnabled,
+      alert: { show: false, message: '', settingsHref: null },
+    }
+  }
+
+  const user = await getCurrentUser()
+  const isAdmin = user?.role === 'admin'
+  return {
+    pollingEnabled,
+    alert: {
+      show: true,
+      message: isAdmin
+        ? '폰(Google 캘린더) 동기화가 중단되었습니다. Google 계정을 다시 연결해 주세요.'
+        : '폰(Google 캘린더) 동기화가 중단되었습니다. 관리자에게 Google 재연결을 요청해 주세요.',
+      settingsHref: isAdmin ? '/dashboard/settings/google-calendar' : null,
+    },
+  }
+}
+
 /** 캘린더 폴링 활성 여부 (환경 변수 + DB 연결) */
 export async function isGoogleCalendarPollingEnabled(): Promise<boolean> {
-  if (!isGoogleCalendarConfigured()) return false
-  const row = await getGoogleCalendarSyncRow()
-  return Boolean(row?.sync_enabled && row.refresh_token)
+  const row = await readGoogleCalendarSyncRowCached()
+  return Boolean(row?.sync_enabled && row?.refresh_token)
 }
 
 /** Google → 센터 초고속 증분 동기화 (캘린더 폴링용) */
@@ -314,30 +352,6 @@ export type GoogleCalendarSyncAlert = {
 
 /** 캘린더 페이지 배너 — Google 토큰 만료 등 폰 동기화 중단 안내 */
 export async function getGoogleCalendarSyncAlert(): Promise<GoogleCalendarSyncAlert> {
-  await requireRole(['admin', 'instructor'])
-
-  if (!isGoogleCalendarConfigured()) {
-    return { show: false, message: '', settingsHref: null }
-  }
-
-  const row = await getGoogleCalendarSyncRow()
-  if (!row?.sync_enabled || !row.refresh_token || !row.last_sync_error) {
-    return { show: false, message: '', settingsHref: null }
-  }
-
-  if (!needsGoogleCalendarReconnect(row.last_sync_error)) {
-    return { show: false, message: '', settingsHref: null }
-  }
-
-  const user = await getCurrentUser()
-  const isAdmin = user?.role === 'admin'
-  const message = isAdmin
-    ? '폰(Google 캘린더) 동기화가 중단되었습니다. Google 계정을 다시 연결해 주세요.'
-    : '폰(Google 캘린더) 동기화가 중단되었습니다. 관리자에게 Google 재연결을 요청해 주세요.'
-
-  return {
-    show: true,
-    message,
-    settingsHref: isAdmin ? '/dashboard/settings/google-calendar' : null,
-  }
+  const { alert } = await getGoogleCalendarPageBootstrap()
+  return alert
 }

@@ -26,7 +26,7 @@ import {
 } from '@/lib/auth/remember-me'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
-const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 3000
+const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 8000
 
 let sessionAuthCache: {
   cookieKey: string

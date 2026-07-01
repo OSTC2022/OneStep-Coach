@@ -64,7 +64,7 @@ import {
   seedCalendarCache,
   setCachedLessons,
 } from '@/lib/calendar-data-store'
-import { pullGoogleCalendarChanges, isGoogleCalendarPollingEnabled, getGoogleCalendarSyncAlert, type GoogleCalendarSyncAlert } from '@/lib/actions/google-calendar-sync'
+import { pullGoogleCalendarChanges, getGoogleCalendarPageBootstrap, type GoogleCalendarSyncAlert } from '@/lib/actions/google-calendar-sync'
 import {
   logCalendarFetch,
   withCalendarFetchTimeout,
@@ -77,6 +77,8 @@ import {
 
 /** 캘린더 페이지가 열려 있는 동안 Google → 앱 증분 동기화 (Vercel Cron 대신) */
 const GOOGLE_SYNC_POLL_MS = 60_000
+/** 첫 화면 렌더 후 Google 동기화 — 메뉴 이동 체감 속도 우선 */
+const GOOGLE_INBOUND_SYNC_DELAY_MS = 2_500
 
 function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   const map = new Map<string, Lesson>()
@@ -152,6 +154,7 @@ export function LessonCalendar({
   const googleInboundSyncedRef = useRef(false)
   const googlePollInFlightRef = useRef(false)
   const googlePollEnabledRef = useRef(false)
+  const [googlePollingEnabled, setGooglePollingEnabled] = useState(false)
   const [googleSyncAlert, setGoogleSyncAlert] = useState<GoogleCalendarSyncAlert>({
     show: false,
     message: '',
@@ -428,8 +431,11 @@ export function LessonCalendar({
 
   useEffect(() => {
     let cancelled = false
-    void getGoogleCalendarSyncAlert().then((alert) => {
-      if (!cancelled) setGoogleSyncAlert(alert)
+    void getGoogleCalendarPageBootstrap().then((bootstrap) => {
+      if (cancelled) return
+      googlePollEnabledRef.current = bootstrap.pollingEnabled
+      setGooglePollingEnabled(bootstrap.pollingEnabled)
+      setGoogleSyncAlert(bootstrap.alert)
     })
     return () => {
       cancelled = true
@@ -437,62 +443,42 @@ export function LessonCalendar({
   }, [])
 
   useEffect(() => {
+    if (!googlePollingEnabled || googleInboundSyncedRef.current) return
+
     let cancelled = false
-    void isGoogleCalendarPollingEnabled().then((enabled) => {
-      if (!cancelled) googlePollEnabledRef.current = enabled
-    })
+    const timer = window.setTimeout(() => {
+      if (cancelled || googleInboundSyncedRef.current) return
+      googleInboundSyncedRef.current = true
+      void refreshWithGoogleSync({ force: false, refreshing: false })
+    }, GOOGLE_INBOUND_SYNC_DELAY_MS)
+
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
-  }, [])
+  }, [googlePollingEnabled, refreshWithGoogleSync])
 
   useEffect(() => {
-    if (googleInboundSyncedRef.current) return
-    if (!googlePollEnabledRef.current) {
-      void isGoogleCalendarPollingEnabled().then((enabled) => {
-        googlePollEnabledRef.current = enabled
-        if (!enabled || googleInboundSyncedRef.current) return
-        googleInboundSyncedRef.current = true
-        void refreshWithGoogleSync({ force: true, refreshing: true })
-      })
-      return
-    }
-    googleInboundSyncedRef.current = true
-    void refreshWithGoogleSync({ force: true, refreshing: true })
-  }, [refreshWithGoogleSync])
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
+    if (!googlePollingEnabled || typeof document === 'undefined') return
 
     let intervalId: number | null = null
-    let cancelled = false
 
-    const startPolling = (enabled: boolean) => {
-      if (cancelled || !enabled) return
-
-      const tick = () => {
-        if (document.hidden || googlePollInFlightRef.current || !googlePollEnabledRef.current) {
-          return
-        }
-        googlePollInFlightRef.current = true
-        void pullGoogleCalendarChanges()
-          .then((result) => {
-            if (!result.synced || result.changed <= 0) return
-            return syncRange(currentDate, view, { force: true, refreshing: true })
-          })
-          .finally(() => {
-            googlePollInFlightRef.current = false
-          })
+    const tick = () => {
+      if (document.hidden || googlePollInFlightRef.current || !googlePollEnabledRef.current) {
+        return
       }
-
-      tick()
-      intervalId = window.setInterval(tick, GOOGLE_SYNC_POLL_MS)
+      googlePollInFlightRef.current = true
+      void pullGoogleCalendarChanges()
+        .then((result) => {
+          if (!result.synced || result.changed <= 0) return
+          return syncRange(currentDate, view, { force: true, refreshing: true })
+        })
+        .finally(() => {
+          googlePollInFlightRef.current = false
+        })
     }
 
-    void isGoogleCalendarPollingEnabled().then((enabled) => {
-      googlePollEnabledRef.current = enabled
-      startPolling(enabled)
-    })
+    intervalId = window.setInterval(tick, GOOGLE_SYNC_POLL_MS)
 
     const onVisibility = () => {
       if (!document.hidden && googlePollEnabledRef.current) {
@@ -508,12 +494,11 @@ export function LessonCalendar({
     window.addEventListener('focus', onFocus)
 
     return () => {
-      cancelled = true
       if (intervalId !== null) window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onFocus)
     }
-  }, [currentDate, syncRange, view])
+  }, [googlePollingEnabled, currentDate, syncRange, view])
 
   useEffect(() => {
     setLessons((prev) => {

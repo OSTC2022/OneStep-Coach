@@ -5,18 +5,21 @@ import { usePathname, useRouter } from 'next/navigation'
 import { preloadRouteChunk } from '@/lib/chunk-preload'
 import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
 
-/** 한꺼번에 prefetch하면 dev 서버가 멈춘 것처럼 느껴질 수 있어 핵심만 */
 const DESKTOP_PREFETCH_ROUTES = [
   '/dashboard/lesson-status',
   '/dashboard/calendar',
   '/dashboard/attendance',
+  '/dashboard/members',
+  '/dashboard/sessions',
+  '/dashboard/instructors',
+  '/dashboard/lessons',
   '/dashboard/settings/center-contact',
-  '/dashboard/settings/google-calendar',
 ] as const
 
 const MOBILE_LIGHT_ROUTES = [
   '/dashboard/lesson-status',
   '/dashboard/attendance',
+  '/dashboard/members',
 ] as const
 
 const HEAVY_ROUTES = new Set([
@@ -74,20 +77,25 @@ export function NavPrefetch() {
 
     const mobile = isMobileViewport()
     const onHeavyPage = HEAVY_ROUTES.has(pathname)
-    const idleDelay = mobile ? (onHeavyPage ? 8000 : 4000) : 4000
+    const idleDelay = mobile ? (onHeavyPage ? 5000 : 2000) : 1500
 
     scheduleIdle(() => {
       if (onHeavyPage) return
 
       const routes = mobile ? MOBILE_LIGHT_ROUTES : DESKTOP_PREFETCH_ROUTES
       let delay = 0
+      const timers: number[] = []
       for (const href of routes) {
         if (href === pathname) continue
-        window.setTimeout(() => prefetchRoute(router, href), delay)
-        delay += 800
+        timers.push(
+          window.setTimeout(() => prefetchRoute(router, href), delay),
+        )
+        delay += 400
+      }
+      return () => {
+        for (const timer of timers) window.clearTimeout(timer)
       }
     }, idleDelay)
-    // router는 refresh 때마다 참조가 바뀌어 무한 prefetch가 날 수 있어 의존성에서 제외
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

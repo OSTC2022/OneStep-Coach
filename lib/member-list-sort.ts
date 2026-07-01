@@ -42,6 +42,36 @@ export function lessonOccurredSortKey(lesson: {
   return `${lesson.lesson_date}T${time}`
 }
 
+const MEMBER_LESSON_LOOKUP_BATCH = 25
+/** 회원별 최근 N건 — 오늘 미래 시간대 수업 제외 후에도 최신 1건 확보 */
+const RECENT_LESSONS_PER_MEMBER = 5
+
+async function fetchLastLessonSortKeyForMember(
+  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
+  memberId: string,
+  todayKey: string,
+  asOf: Date,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('lessons')
+    .select('member_id, lesson_date, start_time')
+    .eq('member_id', memberId)
+    .lte('lesson_date', todayKey)
+    .order('lesson_date', { ascending: false })
+    .order('start_time', { ascending: false })
+    .limit(RECENT_LESSONS_PER_MEMBER)
+
+  const occurred = filterLessonsUpToNow(data ?? [], asOf)
+  if (occurred.length === 0) return null
+
+  let best = ''
+  for (const row of occurred) {
+    const sortKey = lessonOccurredSortKey(row)
+    if (sortKey > best) best = sortKey
+  }
+  return best || null
+}
+
 export async function fetchLastLessonDateByMember(
   supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
   memberIds: string[],
@@ -51,20 +81,17 @@ export async function fetchLastLessonDateByMember(
   if (memberIds.length === 0) return map
 
   const todayKey = getTodayDateKey(asOf)
-  const { data } = await supabase
-    .from('lessons')
-    .select('member_id, lesson_date, start_time')
-    .in('member_id', memberIds)
-    .lte('lesson_date', todayKey)
 
-  const occurred = filterLessonsUpToNow(data ?? [], asOf)
-
-  for (const row of occurred) {
-    if (!row.member_id) continue
-    const sortKey = lessonOccurredSortKey(row)
-    const prev = map.get(row.member_id)
-    if (!prev || sortKey > prev) {
-      map.set(row.member_id, sortKey)
+  for (let i = 0; i < memberIds.length; i += MEMBER_LESSON_LOOKUP_BATCH) {
+    const batch = memberIds.slice(i, i + MEMBER_LESSON_LOOKUP_BATCH)
+    const results = await Promise.all(
+      batch.map((memberId) =>
+        fetchLastLessonSortKeyForMember(supabase, memberId, todayKey, asOf),
+      ),
+    )
+    for (let j = 0; j < batch.length; j += 1) {
+      const sortKey = results[j]
+      if (sortKey) map.set(batch[j], sortKey)
     }
   }
 

@@ -44,7 +44,10 @@ import type { LucideIcon } from 'lucide-react'
 import type { User } from '@/lib/types'
 import { getRoleLabel } from '@/lib/roles'
 import { preloadRouteChunk } from '@/lib/chunk-preload'
-import { shouldBackgroundPrefetch } from '@/lib/navigation-prefetch'
+import {
+  shouldBackgroundPrefetch,
+  shouldLinkPrefetch,
+} from '@/lib/navigation-prefetch'
 import {
   getDefaultSidebarMenuOrder,
   getDefaultSidebarMenuHidden,
@@ -183,18 +186,26 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   }
 
   function prefetchMenuRoute(href: string) {
-    if (!shouldBackgroundPrefetch()) return
     if (prefetchedRoutesRef.current.has(href)) return
     prefetchedRoutesRef.current.add(href)
     router.prefetch(href)
-    preloadRouteChunk(href)
+    preloadRouteChunk(href, { intent: true })
   }
 
   useEffect(() => {
-    if (!shouldBackgroundPrefetch() || !isMobile || editMode) return
-    for (const item of menuItems.slice(0, 4)) {
+    if (editMode) return
+    const routes = isMobile ? menuItems.slice(0, 4) : menuItems.slice(0, 8)
+    const timers: number[] = []
+    let delay = shouldBackgroundPrefetch() ? 0 : 300
+    for (const item of routes) {
       if (item.url === pathname) continue
-      prefetchMenuRoute(item.url)
+      timers.push(
+        window.setTimeout(() => prefetchMenuRoute(item.url), delay),
+      )
+      delay += shouldBackgroundPrefetch() ? 500 : 800
+    }
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, pathname, editMode, menuItems])
@@ -214,7 +225,8 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
           >
             <Link
               href={item.url}
-              prefetch={false}
+              prefetch={shouldLinkPrefetch()}
+              onPointerEnter={() => prefetchMenuRoute(item.url)}
               onPointerDown={() => prefetchMenuRoute(item.url)}
               onTouchStart={() => prefetchMenuRoute(item.url)}
               onClick={() => {

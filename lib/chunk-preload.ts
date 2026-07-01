@@ -1,3 +1,5 @@
+import { shouldPreloadRouteChunkOnIntent } from '@/lib/navigation-prefetch'
+
 /**
  * 메뉴 hover 시 클라이언트 컴포넌트 JS만 preload.
  * page.tsx(서버 컴포넌트)는 import 금지 — next/headers 등이 클라이언트 번들로 끌려옴.
@@ -10,7 +12,6 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
   '/dashboard/settings/center-contact': () =>
     void import('@/components/settings/center-contact-panel'),
   '/dashboard/my': () => void import('@/app/dashboard/my/member-my-page'),
-  // lesson-calendar는 day-week-view/time-grid를 정적 포함 — 별도 preload 생략(HMR ChunkLoadError 방지)
   '/dashboard/reports': () => {
     void import('@/app/dashboard/reports/report-dashboard')
   },
@@ -30,7 +31,17 @@ const ROUTE_CHUNK_LOADERS: Record<string, () => void> = {
     void import('@/app/dashboard/sessions/sessions-list'),
 }
 
-export function preloadRouteChunk(pathname: string) {
-  if (typeof window === 'undefined' || process.env.NODE_ENV !== 'production') return
+type PreloadRouteChunkOptions = {
+  /** 사용자가 메뉴를 가리킨 경우 — dev에서도 허용 */
+  intent?: boolean
+}
+
+export function preloadRouteChunk(
+  pathname: string,
+  options?: PreloadRouteChunkOptions,
+) {
+  if (typeof window === 'undefined') return
+  const allowInDev = options?.intent && shouldPreloadRouteChunkOnIntent()
+  if (process.env.NODE_ENV !== 'production' && !allowInDev) return
   ROUTE_CHUNK_LOADERS[pathname]?.()
 }

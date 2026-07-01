@@ -1,0 +1,49 @@
+import { formatBodyMetric, roundBodyMetric } from '@/lib/member-utils'
+
+export type WeightRecordPoint = {
+  recorded_at: string
+  weight_kg: number
+}
+
+/** 지정 날짜 이전의 가장 최근 체중과 비교 */
+export function calculateWeightDeltaKg(
+  records: ReadonlyArray<WeightRecordPoint>,
+  recordedAt: string,
+  newWeightKg: number,
+): number | null {
+  const previous = [...records]
+    .filter((row) => row.recorded_at < recordedAt)
+    .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))[0]
+
+  if (!previous) return null
+
+  const previousWeight = roundBodyMetric(previous.weight_kg) ?? previous.weight_kg
+  const nextWeight = roundBodyMetric(newWeightKg) ?? newWeightKg
+  return Number((nextWeight - previousWeight).toFixed(1))
+}
+
+export function formatWeightDeltaLabel(deltaKg: number | null): string | null {
+  if (deltaKg == null) return null
+  if (deltaKg === 0) return '0kg'
+  const formatted = formatBodyMetric(Math.abs(deltaKg)) ?? String(Math.abs(deltaKg))
+  return deltaKg > 0 ? `+${formatted}kg` : `-${formatted}kg`
+}
+
+export function formatWeightDeltaShort(deltaKg: number | null): string | null {
+  if (deltaKg == null) return null
+  if (deltaKg === 0) return '0'
+  const formatted = formatBodyMetric(Math.abs(deltaKg)) ?? String(Math.abs(deltaKg))
+  return deltaKg > 0 ? `+${formatted}` : `-${formatted}`
+}
+
+export function formatWeightDeltaInParens(deltaKg: number | null): string | null {
+  const deltaShort = formatWeightDeltaShort(deltaKg)
+  if (!deltaShort) return null
+  return `(${deltaShort})`
+}
+
+export function weightDeltaTextClass(deltaKg: number | null): string {
+  if (deltaKg == null || deltaKg === 0) return 'text-muted-foreground'
+  if (deltaKg > 0) return 'text-blue-500'
+  return 'text-red-500'
+}

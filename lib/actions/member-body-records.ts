@@ -27,6 +27,7 @@ import {
   SLEEP_HOUR_CHOICES,
 } from '@/lib/member-body-wellness'
 import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
+import { calculateWeightDeltaKg } from '@/lib/member-weight-delta'
 import { roundBodyMetric } from '@/lib/member-utils'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -595,7 +596,12 @@ export async function addMemberBodyRecord(
     /** 수업현황 체중 입력 등 — 클라이언트 상태가 있어 전체 갱신 생략 */
     skipDashboardRevalidate?: boolean
   },
-): Promise<{ record?: MemberBodyRecord; error?: string; migrationHint?: string }> {
+): Promise<{
+  record?: MemberBodyRecord
+  error?: string
+  migrationHint?: string
+  weightDeltaKg?: number | null
+}> {
   const access = await canAddBodyRecordFor(memberId)
   if (!access) {
     return { error: '권한이 없습니다.' }
@@ -608,6 +614,21 @@ export async function addMemberBodyRecord(
 
   const recordedAt = options?.recordedAt ?? format(new Date(), 'yyyy-MM-dd')
   const supabase = await memberBodyWriteClient()
+  const { data: priorWeightRows } = await supabase
+    .from('member_body_records')
+    .select('recorded_at, weight_kg')
+    .eq('member_id', memberId)
+    .order('recorded_at', { ascending: true })
+
+  const weightDeltaKg = calculateWeightDeltaKg(
+    (priorWeightRows ?? []).map((row) => ({
+      recorded_at: String(row.recorded_at),
+      weight_kg: Number(row.weight_kg),
+    })),
+    recordedAt,
+    weight,
+  )
+
   const recordHeightCm =
     options?.heightCm != null ? roundBodyMetric(options.heightCm) : null
   const { data: existingToday } = await supabase
@@ -650,6 +671,7 @@ export async function addMemberBodyRecord(
   if (!options?.skipDashboardRevalidate) {
     revalidatePath(`/dashboard/members/${memberId}`)
     revalidatePath(`/dashboard/members/${memberId}/body`)
+    revalidatePath(`/dashboard/members/${memberId}/weight`)
     revalidatePath('/dashboard/members')
     revalidatePath('/dashboard/my')
     revalidatePath('/dashboard/lesson-status')
@@ -658,6 +680,7 @@ export async function addMemberBodyRecord(
   return {
     record: saved,
     migrationHint: persistResult.migrationHint,
+    weightDeltaKg,
   }
 }
 
@@ -666,7 +689,12 @@ export async function recordLessonStatusWeight(
   memberId: string,
   lessonDate: string,
   weightKg: number,
-): Promise<{ error?: string; migrationHint?: string }> {
+): Promise<{
+  error?: string
+  migrationHint?: string
+  weightDeltaKg?: number | null
+  savedWeightKg?: number
+}> {
   const result = await addMemberBodyRecord(memberId, weightKg, {
     recordedAt: lessonDate,
     skipDashboardRevalidate: true,
@@ -674,7 +702,10 @@ export async function recordLessonStatusWeight(
   if (result.error) {
     return { error: result.error, migrationHint: result.migrationHint }
   }
-  return {}
+  return {
+    weightDeltaKg: result.weightDeltaKg ?? null,
+    savedWeightKg: roundBodyMetric(weightKg) ?? weightKg,
+  }
 }
 
 /** 수업현황 — 체중 비우기/0 입력 시 해당 수업일 기록 삭제 */
@@ -729,20 +760,24 @@ function bodyWeightKey(memberId: string, date: string) {
   return `${memberId}:${date}`
 }
 
+export type LessonStatusBodyWeightSnapshot = {
+  weightKg: number
+  deltaKg: number | null
+}
+
 export async function getMemberBodyWeightsForLessons(
   entries: { memberId: string; date: string }[],
-): Promise<Record<string, number>> {
+): Promise<Record<string, LessonStatusBodyWeightSnapshot>> {
   await requireRole(['admin', 'instructor'])
   const uniqueMemberIds = [...new Set(entries.map((entry) => entry.memberId))]
-  const uniqueDates = [...new Set(entries.map((entry) => entry.date))]
-  if (uniqueMemberIds.length === 0 || uniqueDates.length === 0) return {}
+  if (uniqueMemberIds.length === 0) return {}
 
   const supabase = await createStaffDataClient()
   const { data, error } = await supabase
     .from('member_body_records')
     .select('member_id, recorded_at, weight_kg')
     .in('member_id', uniqueMemberIds)
-    .in('recorded_at', uniqueDates)
+    .order('recorded_at', { ascending: true })
 
   if (error) {
     if (!isMissingBodyRecordsTable(error.message, error.code)) {
@@ -751,10 +786,30 @@ export async function getMemberBodyWeightsForLessons(
     return {}
   }
 
-  const map: Record<string, number> = {}
+  const recordsByMember = new Map<string, WeightRecordPoint[]>()
   for (const row of data ?? []) {
-    map[bodyWeightKey(row.member_id, row.recorded_at)] = Number(row.weight_kg)
+    const memberId = String(row.member_id)
+    const list = recordsByMember.get(memberId) ?? []
+    list.push({
+      recorded_at: String(row.recorded_at),
+      weight_kg: Number(row.weight_kg),
+    })
+    recordsByMember.set(memberId, list)
   }
+
+  const map: Record<string, LessonStatusBodyWeightSnapshot> = {}
+  for (const entry of entries) {
+    const memberRecords = recordsByMember.get(entry.memberId) ?? []
+    const weightRow = memberRecords.find((row) => row.recorded_at === entry.date)
+    if (!weightRow) continue
+
+    const weightKg = Number(weightRow.weight_kg)
+    map[bodyWeightKey(entry.memberId, entry.date)] = {
+      weightKg,
+      deltaKg: calculateWeightDeltaKg(memberRecords, entry.date, weightKg),
+    }
+  }
+
   return map
 }
 
@@ -815,6 +870,7 @@ export async function deleteMemberBodyRecord(
 
   revalidatePath(`/dashboard/members/${memberId}`)
   revalidatePath(`/dashboard/members/${memberId}/body`)
+  revalidatePath(`/dashboard/members/${memberId}/weight`)
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/lesson-status')
 
