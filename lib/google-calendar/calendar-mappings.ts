@@ -124,3 +124,23 @@ export function invalidateGoogleCalendarMappingsCache() {
   cache = null
   cacheLoadedAt = 0
 }
+
+/** Google 캘린더(수업/수업2)에 연결된 강사의 캘린더 ID 목록 */
+export async function getGoogleCalendarIdsForInstructor(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  instructorId: string,
+  calendars: Array<{ id: string; name: string | null }>,
+): Promise<string[]> {
+  const ids: string[] = []
+  for (const calendar of calendars) {
+    const coachId = await resolveCoachIdFromGoogleCalendar(
+      supabase,
+      calendar.id,
+      calendar.name,
+    )
+    if (coachId === instructorId) {
+      ids.push(calendar.id)
+    }
+  }
+  return ids
+}

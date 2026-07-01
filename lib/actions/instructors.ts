@@ -20,6 +20,88 @@ import {
   type InstructorPaySlotOverrideRecord,
 } from '@/lib/instructor-pay'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
+import { getGoogleCalendarIdsForInstructor } from '@/lib/google-calendar/calendar-mappings'
+import { getGoogleCalendarSyncRow } from '@/lib/google-calendar/sync'
+
+const INSTRUCTOR_PAY_LESSON_SELECT =
+  'id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, content, member_id, session_deducted, special_note, event_status, event_type, created_at, member:members(id, name), lesson_sessions(checked_in_at)'
+
+const INSTRUCTOR_PAY_LESSON_SELECT_COMPACT =
+  'id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, member_id, session_deducted, special_note, event_status, event_type, created_at, lesson_sessions(checked_in_at)'
+
+async function fetchInstructorPayLessons(
+  instructorId: string,
+  dateFrom: string,
+  dateTo: string,
+  select = INSTRUCTOR_PAY_LESSON_SELECT,
+) {
+  const supabase = await createClient()
+
+  const { data: direct, error } = await supabase
+    .from('lessons')
+    .select(select)
+    .eq('instructor_id', instructorId)
+    .neq('event_type', 'recurring_master')
+    .gte('lesson_date', dateFrom)
+    .lte('lesson_date', dateTo)
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true, nullsFirst: false })
+
+  if (error) {
+    throw error
+  }
+
+  const syncRow = await getGoogleCalendarSyncRow()
+  const calendars = [
+    syncRow?.calendar_id
+      ? { id: syncRow.calendar_id, name: syncRow.calendar_name ?? null }
+      : null,
+    syncRow?.calendar_id_2
+      ? { id: syncRow.calendar_id_2, name: syncRow.calendar_name_2 ?? null }
+      : null,
+  ].filter(Boolean) as Array<{ id: string; name: string | null }>
+
+  if (calendars.length === 0) {
+    return direct ?? []
+  }
+
+  const calendarIds = await getGoogleCalendarIdsForInstructor(
+    createServiceRoleClient(),
+    instructorId,
+    calendars,
+  )
+
+  if (calendarIds.length === 0) {
+    return direct ?? []
+  }
+
+  const { data: orphans, error: orphanError } = await supabase
+    .from('lessons')
+    .select(select)
+    .is('instructor_id', null)
+    .in('google_calendar_id', calendarIds)
+    .neq('event_type', 'recurring_master')
+    .gte('lesson_date', dateFrom)
+    .lte('lesson_date', dateTo)
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true, nullsFirst: false })
+
+  if (orphanError) {
+    console.error('Error fetching google-calendar pay lessons:', orphanError)
+    return direct ?? []
+  }
+
+  const byId = new Map<string, NonNullable<typeof direct>[number]>()
+  for (const lesson of [...(direct ?? []), ...(orphans ?? [])]) {
+    byId.set(lesson.id, lesson)
+  }
+
+  return [...byId.values()].sort((a, b) => {
+    const dateCmp = a.lesson_date.localeCompare(b.lesson_date)
+    if (dateCmp !== 0) return dateCmp
+    return (a.start_time ?? '').localeCompare(b.start_time ?? '')
+  })
+}
 
 type InstructorMutationResult = {
   data?: Instructor
@@ -522,29 +604,19 @@ export async function getInstructorMonthlyPayDetail(
   if (!instructor) return null
 
   const { dateFrom, dateTo } = getMonthDateRange(month)
-  const supabase = await createClient()
 
-  const { data: lessons, error } = await supabase
-    .from('lessons')
-    .select(
-      'id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, content, member_id, session_deducted, special_note, event_status, event_type, created_at, member:members(id, name), lesson_sessions(checked_in_at)',
-    )
-    .eq('instructor_id', instructorId)
-    .neq('event_type', 'recurring_master')
-    .gte('lesson_date', dateFrom)
-    .lte('lesson_date', dateTo)
-    .order('lesson_date', { ascending: true })
-    .order('start_time', { ascending: true, nullsFirst: false })
-
-  if (error) {
+  let lessons: Awaited<ReturnType<typeof fetchInstructorPayLessons>>
+  try {
+    lessons = await fetchInstructorPayLessons(instructorId, dateFrom, dateTo)
+  } catch (error) {
     console.error('Error fetching instructor monthly pay detail:', error)
     return null
   }
 
   const payableLessons =
     options?.upToNow === true
-      ? filterLessonsUpToNow(lessons ?? [])
-      : (lessons ?? [])
+      ? filterLessonsUpToNow(lessons)
+      : lessons
 
   const base = summarizeInstructorPayDetailed(payableLessons, instructor)
   const overrides = await fetchInstructorPaySlotOverrides(
@@ -583,28 +655,23 @@ export async function getInstructorReport(
   dateFrom: string,
   dateTo: string
 ): Promise<InstructorReport | null> {
-  const supabase = await createClient()
-  
-  // Get instructor
   const instructor = await getInstructor(instructorId)
   if (!instructor) return null
 
-  const { data: lessons, error } = await supabase
-    .from('lessons')
-    .select(
-      'id, lesson_date, start_time, end_time, attendance_status, lesson_type, member_id, session_deducted, special_note, event_status, event_type, created_at, lesson_sessions(checked_in_at)',
+  let lessons: Awaited<ReturnType<typeof fetchInstructorPayLessons>>
+  try {
+    lessons = await fetchInstructorPayLessons(
+      instructorId,
+      dateFrom,
+      dateTo,
+      INSTRUCTOR_PAY_LESSON_SELECT_COMPACT,
     )
-    .eq('instructor_id', instructorId)
-    .neq('event_type', 'recurring_master')
-    .gte('lesson_date', dateFrom)
-    .lte('lesson_date', dateTo)
-
-  if (error) {
+  } catch (error) {
     console.error('Error fetching instructor lessons:', error)
     return null
   }
 
-  const paySummary = summarizeInstructorPay(lessons ?? [], instructor)
+  const paySummary = summarizeInstructorPay(lessons, instructor)
   const groupLessons = paySummary.slots.filter((slot) => slot.memberCount >= 2).length
 
   return {

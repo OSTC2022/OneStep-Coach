@@ -11,7 +11,6 @@ import { cn } from '@/lib/utils'
 import {
   getMemoMemberSuggestions,
   parseMemoQuickAdd,
-  resolveMemoMember,
   stripMemberDisplayMeta,
 } from '@/lib/memo-quick-add'
 import { getInstructorCalendarColor } from '@/lib/instructor-colors'
@@ -125,7 +124,7 @@ export function MonthMemoInput({
     const text = memo.trim()
     if (!text) return
 
-    const member = resolveMemoMember(members, parsed.memberQuery, selectedMember)
+    const member = selectedMember
     const startTime = parsed.startTime ?? '09:00'
     const endTime = parsed.endTime ?? '10:00'
 
@@ -168,14 +167,7 @@ export function MonthMemoInput({
       }
       if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        const readyToSubmit =
-          parsed.startTime &&
-          Boolean(resolveMemoMember(members, parsed.memberQuery, selectedMember))
-        if (readyToSubmit) {
-          void submitMemo()
-        } else {
-          applyMember(suggestions[activeIndex])
-        }
+        void submitMemo()
         return
       }
     }
@@ -287,9 +279,12 @@ export function MonthMemoInput({
 
       {suggestionList}
 
-      {!showSuggestions && parsed.memberQuery && parsed.startTime && (
+      {!showSuggestions && parsed.memberQuery && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Enter로 {parsed.memberQuery} {parsed.startTime} 일정 추가
+          Enter로
+          {parsed.startTime
+            ? ` ${parsed.memberQuery} ${parsed.startTime} 일정 추가`
+            : ` "${parsed.memberQuery}" 일정 추가 (시간 없으면 09:00–10:00)`}
         </p>
       )}
     </div>

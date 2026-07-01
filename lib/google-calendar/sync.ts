@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { randomUUID } from 'crypto'
+import { revalidatePath } from 'next/cache'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
   GOOGLE_CALENDAR_SYNC_ID,
@@ -22,6 +23,7 @@ import {
 import {
   formatGoogleCalendarSyncError,
   isGoogleCalendarInvalidSyncQuery,
+  isGoogleOAuthTokenRevoked,
 } from '@/lib/google-calendar/errors'
 import {
   getGoogleSyncTimeBounds,
@@ -257,6 +259,26 @@ export async function upsertGoogleCalendarSyncRow(
   }
 
   return data as GoogleCalendarSyncRow
+}
+
+/** OAuth 토큰 만료·취소 시 동기화 상태 기록 (폰 반영 중단 알림용) */
+export async function recordGoogleCalendarAuthFailure(
+  error: unknown,
+): Promise<void> {
+  if (!isGoogleOAuthTokenRevoked(error)) return
+
+  const row = await getGoogleCalendarSyncRow()
+  if (!row?.refresh_token) return
+
+  const message = formatGoogleCalendarSyncError(error)
+  await upsertGoogleCalendarSyncRow({
+    last_sync_error: message,
+    sync_status: 'failure',
+    last_sync_attempt_at: new Date().toISOString(),
+  })
+
+  revalidatePath('/dashboard/settings/google-calendar')
+  revalidatePath('/dashboard/calendar')
 }
 
 export async function clearGoogleCalendarSyncRow(): Promise<void> {

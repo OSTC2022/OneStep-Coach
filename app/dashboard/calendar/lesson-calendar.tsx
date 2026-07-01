@@ -1,6 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Loader2, Redo2, RefreshCw, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -63,7 +64,7 @@ import {
   seedCalendarCache,
   setCachedLessons,
 } from '@/lib/calendar-data-store'
-import { pullGoogleCalendarChanges, isGoogleCalendarPollingEnabled } from '@/lib/actions/google-calendar-sync'
+import { pullGoogleCalendarChanges, isGoogleCalendarPollingEnabled, getGoogleCalendarSyncAlert, type GoogleCalendarSyncAlert } from '@/lib/actions/google-calendar-sync'
 import {
   logCalendarFetch,
   withCalendarFetchTimeout,
@@ -151,6 +152,11 @@ export function LessonCalendar({
   const googleInboundSyncedRef = useRef(false)
   const googlePollInFlightRef = useRef(false)
   const googlePollEnabledRef = useRef(false)
+  const [googleSyncAlert, setGoogleSyncAlert] = useState<GoogleCalendarSyncAlert>({
+    show: false,
+    message: '',
+    settingsHref: null,
+  })
   const lessonsRef = useRef(lessons)
   lessonsRef.current = lessons
   const {
@@ -419,6 +425,16 @@ export function LessonCalendar({
     },
     [currentDate, syncRange, view],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    void getGoogleCalendarSyncAlert().then((alert) => {
+      if (!cancelled) setGoogleSyncAlert(alert)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -936,6 +952,7 @@ export function LessonCalendar({
       end_time: payload.endTime,
       instructor_id: normalizePrimaryInstructorId(defaultInstructorId) || undefined,
       lesson_type: '개인레슨',
+      preserve_title_identity: !payload.memberId && Boolean(payload.title),
     })
 
     if (result.error) {
@@ -1268,6 +1285,23 @@ export function LessonCalendar({
         data-calendar-panel
         className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
       >
+        {googleSyncAlert.show && (
+          <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+            <span className="min-w-0">{googleSyncAlert.message}</span>
+            {googleSyncAlert.settingsHref ? (
+              <Button
+                asChild
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 border-amber-500/40"
+              >
+                <Link href={googleSyncAlert.settingsHref}>Google 재연결</Link>
+              </Button>
+            ) : null}
+          </div>
+        )}
+
         {loadState.error && (
           <div className="mb-2 flex shrink-0 items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <span className="min-w-0 truncate">

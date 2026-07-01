@@ -6,7 +6,7 @@ import {
   getGoogleOAuthRedirectUri,
   GOOGLE_LESSON_ID_PROPERTY,
 } from '@/lib/google-calendar/config'
-import { GoogleCalendarApiError } from '@/lib/google-calendar/errors'
+import { GoogleCalendarApiError, isGoogleOAuthTokenRevoked } from '@/lib/google-calendar/errors'
 import type {
   GoogleCalendarEvent,
   GoogleCalendarListEntry,
@@ -342,11 +342,22 @@ export async function withGoogleAccessToken<T>(
     return fn(cachedAccessToken.accessToken)
   }
 
-  const token = await refreshGoogleAccessToken(refreshToken)
-  cachedAccessToken = {
-    refreshToken,
-    accessToken: token.access_token,
-    expiresAt: now + Math.max((token.expires_in - 60) * 1000, 60_000),
+  try {
+    const token = await refreshGoogleAccessToken(refreshToken)
+    cachedAccessToken = {
+      refreshToken,
+      accessToken: token.access_token,
+      expiresAt: now + Math.max((token.expires_in - 60) * 1000, 60_000),
+    }
+    return fn(token.access_token)
+  } catch (error) {
+    cachedAccessToken = null
+    if (isGoogleOAuthTokenRevoked(error)) {
+      const { recordGoogleCalendarAuthFailure } = await import(
+        '@/lib/google-calendar/sync'
+      )
+      await recordGoogleCalendarAuthFailure(error).catch(() => {})
+    }
+    throw error
   }
-  return fn(token.access_token)
 }

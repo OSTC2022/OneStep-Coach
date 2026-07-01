@@ -5,6 +5,8 @@ import {
   pushLessonsToGoogle,
   type GoogleLessonDeleteSnapshot,
 } from '@/lib/google-calendar/push'
+import { isGoogleOAuthTokenRevoked } from '@/lib/google-calendar/errors'
+import { recordGoogleCalendarAuthFailure } from '@/lib/google-calendar/sync'
 
 /** Supabase 저장 후 Google 반영 — 백그라운드 (앱 UI는 Supabase 기준 즉시 표시) */
 export function scheduleGoogleLessonPush(lessonIds: string | string[]) {
@@ -25,6 +27,9 @@ export async function runGoogleLessonPush(lessonIds: string | string[]) {
     const message =
       error instanceof Error ? error.message : String(error)
     console.error('[google-calendar] push failed:', message)
+    if (isGoogleOAuthTokenRevoked(error)) {
+      await recordGoogleCalendarAuthFailure(error).catch(() => {})
+    }
     if (
       message.includes('쓰기 권한') ||
       message.includes('403') ||

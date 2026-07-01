@@ -421,14 +421,11 @@ async function enrichLessonIdentity(
   let memberId = formData.member_id?.trim() || null
   let title = formData.title?.trim() || null
 
-  if (!memberId) {
-    const label = title || ''
-    if (label) {
-      memberId = await lookupMemberIdByName(
-        supabase,
-        extractMemberNameFromCalendarLabel(label),
-      )
-    }
+  if (!memberId && title && !formData.preserve_title_identity) {
+    memberId = await lookupMemberIdByName(
+      supabase,
+      extractMemberNameFromCalendarLabel(title),
+    )
   }
 
   let sessionPackageId = formData.session_package_id?.trim() || null

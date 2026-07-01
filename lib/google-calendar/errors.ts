@@ -1,5 +1,3 @@
-import 'server-only'
-
 export class GoogleCalendarApiError extends Error {
   readonly status: number
   readonly body: string
@@ -10,6 +8,27 @@ export class GoogleCalendarApiError extends Error {
     this.status = status
     this.body = body
   }
+}
+
+export function isGoogleOAuthTokenRevoked(error: unknown): boolean {
+  const text =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : String(error)
+  const lower = text.toLowerCase()
+  return (
+    lower.includes('invalid_grant') ||
+    lower.includes('token has been expired or revoked')
+  )
+}
+
+export function needsGoogleCalendarReconnect(
+  lastSyncError: string | null | undefined,
+): boolean {
+  if (!lastSyncError) return false
+  return isGoogleOAuthTokenRevoked({ message: lastSyncError })
 }
 
 export function isGoogleCalendarSyncTokenGone(error: unknown): boolean {
@@ -57,13 +76,16 @@ export function formatGoogleCalendarSyncError(error: unknown): string {
   if (error instanceof Error) {
     const message = error.message.trim()
     const lower = message.toLowerCase()
+    if (isGoogleOAuthTokenRevoked(error)) {
+      return 'Google 연결이 만료되었습니다. 설정 → Google 캘린더에서 「연결 해제」 후 같은 계정을 다시 연결해 주세요.'
+    }
     if (lower.includes('orderby') || lower.includes('requested ordering')) {
       return 'Google 캘린더 동기화 조건이 맞지 않아 다시 전체 동기화를 시도합니다.'
     }
     if (lower.includes('410') || lower.includes('full sync')) {
       return '반복 일정 동기화 설정을 복구했습니다. 다시 동기화해주세요.'
     }
-    if (message.length > 0 && message.length <= 120 && !message.startsWith('Google Calendar API')) {
+    if (message.length > 0 && message.length <= 200 && !message.startsWith('Google Calendar API')) {
       return message
     }
   }

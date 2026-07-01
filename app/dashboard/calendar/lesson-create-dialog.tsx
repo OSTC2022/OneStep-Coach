@@ -41,10 +41,7 @@ import {
   type LessonEditAnchor,
 } from '@/lib/calendar-utils'
 import { parseSingleTimeToken, parseTimeRangeInput } from '@/lib/time-input-parse'
-import {
-  extractMemberNameFromCalendarLabel,
-  formatMemberCalendarLabel,
-} from '@/lib/member-utils'
+import { formatMemberCalendarLabel } from '@/lib/member-utils'
 import { touchMemberRecent } from '@/lib/member-recent-search'
 import {
   LESSON_TYPE_OPTIONS,
@@ -749,6 +746,8 @@ export function LessonCreateDialog({
         {
           ...schedulePayload,
           ...identityPayload,
+          preserve_title_identity:
+            !identityPayload.member_id && Boolean(identityPayload.title),
         },
         {
           pattern: recurrencePattern,
@@ -787,6 +786,8 @@ export function LessonCreateDialog({
     const result = await createLesson({
       ...schedulePayload,
       ...identityPayload,
+      preserve_title_identity:
+        !identityPayload.member_id && Boolean(identityPayload.title),
     })
 
     if (result.error) {
@@ -1064,24 +1065,8 @@ export function LessonCreateDialog({
 
   async function resolveSubmitMemberId(
     initialMemberId: string,
-    calendarText: string,
-    nameText: string,
   ): Promise<string | null> {
-    if (initialMemberId) return initialMemberId
-
-    const candidateName = extractMemberNameFromCalendarLabel(
-      calendarText || nameText,
-    )
-    if (!candidateName) return null
-
-    const localMatches = memberOptions.filter((m) => m.name === candidateName)
-    if (localMatches.length === 1) return localMatches[0].id
-
-    const remoteMatches = await searchMembersForPicker(candidateName)
-    const exactRemote = remoteMatches.filter((m) => m.name === candidateName)
-    if (exactRemote.length === 1) return exactRemote[0].id
-
-    return null
+    return initialMemberId || null
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -1094,11 +1079,7 @@ export function LessonCreateDialog({
 
     setIsLoading(true)
 
-    const submitMemberId = await resolveSubmitMemberId(
-      memberId,
-      trimmedCalendar,
-      entryText.trim(),
-    )
+    const submitMemberId = await resolveSubmitMemberId(memberId)
 
     const resolvedMember =
       memberOptions.find((m) => m.id === submitMemberId) ??

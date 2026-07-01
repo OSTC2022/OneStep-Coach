@@ -261,7 +261,21 @@ export function calcSlotPayForLessons(
   }
 }
 
-/** 수업현황에서 출석(또는 체험·단체 출석)이 확인된 수업만 강사료 집계 */
+/** 지난 캘린더 일정 — 취소·결석이 아니면 출석 버튼 없이도 강사료 집계 */
+function isPastScheduledCalendarLesson(lesson: LessonPayRecord): boolean {
+  if (!isLessonOccurredBy(lesson)) return false
+  if (lesson.attendance_status === 'cancelled' || lesson.attendance_status === 'absent') {
+    return false
+  }
+  if (lesson.event_status === 'cancelled') return false
+  return true
+}
+
+/**
+ * 강사료 집계 대상
+ * - 출석·차감·서명이 확인된 수업
+ * - 또는 지난 캘린더 일정(강사 지정·미취소) — 수업현황 미체크도 포함
+ */
 export function isLessonCountedForInstructorPay(lesson: LessonPayRecord): boolean {
   if (lesson.event_status === 'cancelled') return false
   if (lesson.event_type === 'recurring_master') return false
@@ -275,10 +289,15 @@ export function isLessonCountedForInstructorPay(lesson: LessonPayRecord): boolea
     if (isTrialLessonType(lesson.lesson_type)) {
       return true
     }
+    // 회원 미연결 이름 일정 (캘린더 직접 입력)
+    if (lesson.title?.trim() && isPastScheduledCalendarLesson(lesson)) {
+      return true
+    }
     return false
   }
 
-  return isLessonCountedAsMemberAttendance(lesson)
+  if (isLessonCountedAsMemberAttendance(lesson)) return true
+  return isPastScheduledCalendarLesson(lesson)
 }
 
 /** 타임 인원·강사료 집계 대상 (요금 계산식은 기존 설정 그대로) */

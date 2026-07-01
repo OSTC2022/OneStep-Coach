@@ -20,6 +20,7 @@ import {
   runGoogleCalendarSyncNow,
 } from '@/lib/actions/google-calendar-sync'
 import { syncStatusLabelKo } from '@/lib/google-calendar/sync-status'
+import { needsGoogleCalendarReconnect } from '@/lib/google-calendar/errors'
 import type { GoogleCalendarSyncStatus } from '@/lib/google-calendar/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -325,7 +326,17 @@ export function GoogleCalendarPanel({ initialStatus }: GoogleCalendarPanelProps)
             ) : null}
 
             {status.lastSyncError ? (
-              <p className="mt-3 text-xs text-destructive">{status.lastSyncError}</p>
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-destructive">{status.lastSyncError}</p>
+                {needsGoogleCalendarReconnect(status.lastSyncError) ? (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    폰·PC Google 캘린더 반영이 중단된 상태입니다. 아래{' '}
+                    <strong>연결 해제</strong> 후 같은 Google 계정(
+                    {status.connectedEmail ?? '수업 캘린더가 있는 계정'})으로{' '}
+                    <strong>다시 연결</strong>한 뒤 「지금 동기화」를 눌러 주세요.
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             {status.pendingMemberCount > 0 ? (

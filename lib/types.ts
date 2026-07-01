@@ -213,6 +213,8 @@ export interface LessonFormData {
   recurrence_pattern?: string | null
   event_type?: 'single' | 'recurring_master' | 'exception' | 'materialized' | null
   recurrence?: string[] | null
+  /** 캘린더 빠른 입력: 입력한 제목만 저장하고 이름으로 회원 자동 연결하지 않음 */
+  preserve_title_identity?: boolean
 }
 
 export interface CenterSettings {

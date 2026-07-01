@@ -1,4 +1,4 @@
-import { getLessonsForMonth, getLessonsForRange } from '@/lib/actions/lessons'
+import { getLessonsForRange } from '@/lib/actions/lessons'
 import {
   getRangeForView,
   navigateDate,
@@ -43,9 +43,6 @@ let activeFetchKey: string | null = null
 let fetchGeneration = 0
 
 function fetchLessonsForView(date: Date, view: CalendarView): Promise<Lesson[]> {
-  if (view === 'month') {
-    return getLessonsForMonth(date.getFullYear(), date.getMonth() + 1)
-  }
   const { dateFrom, dateTo } = getRangeForView(date, view)
   return getLessonsForRange(dateFrom, dateTo)
 }

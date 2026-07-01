@@ -3,8 +3,8 @@
 import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { revalidateLessonViews } from '@/lib/lesson-data-sync'
-import { formatGoogleCalendarSyncError } from '@/lib/google-calendar/errors'
-import { requireRole } from '@/lib/actions/auth'
+import { formatGoogleCalendarSyncError, needsGoogleCalendarReconnect } from '@/lib/google-calendar/errors'
+import { requireRole, getCurrentUser } from '@/lib/actions/auth'
 import { isGoogleCalendarConfigured } from '@/lib/google-calendar/config'
 import { parseGoogleCalendarSyncDetail, buildGoogleCalendarSyncDetail, emptyRunStats } from '@/lib/google-calendar/sync-status'
 import {
@@ -293,5 +293,41 @@ export async function refreshGoogleCalendarWatchAction(): Promise<{ error?: stri
     return {}
   } catch (error) {
     return { error: formatGoogleCalendarSyncError(error) }
+  }
+}
+
+export type GoogleCalendarSyncAlert = {
+  show: boolean
+  message: string
+  settingsHref: string | null
+}
+
+/** 캘린더 페이지 배너 — Google 토큰 만료 등 폰 동기화 중단 안내 */
+export async function getGoogleCalendarSyncAlert(): Promise<GoogleCalendarSyncAlert> {
+  await requireRole(['admin', 'instructor'])
+
+  if (!isGoogleCalendarConfigured()) {
+    return { show: false, message: '', settingsHref: null }
+  }
+
+  const row = await getGoogleCalendarSyncRow()
+  if (!row?.sync_enabled || !row.refresh_token || !row.last_sync_error) {
+    return { show: false, message: '', settingsHref: null }
+  }
+
+  if (!needsGoogleCalendarReconnect(row.last_sync_error)) {
+    return { show: false, message: '', settingsHref: null }
+  }
+
+  const user = await getCurrentUser()
+  const isAdmin = user?.role === 'admin'
+  const message = isAdmin
+    ? '폰(Google 캘린더) 동기화가 중단되었습니다. Google 계정을 다시 연결해 주세요.'
+    : '폰(Google 캘린더) 동기화가 중단되었습니다. 관리자에게 Google 재연결을 요청해 주세요.'
+
+  return {
+    show: true,
+    message,
+    settingsHref: isAdmin ? '/dashboard/settings/google-calendar' : null,
   }
 }
