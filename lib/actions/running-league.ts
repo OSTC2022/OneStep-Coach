@@ -99,7 +99,7 @@ import {
 } from '@/lib/running-league/center-portal-rankings-data'
 import {
   mapLeagueParticipantRow,
-  PARTICIPANT_SELECT,
+  runParticipantSelectQuery,
 } from '@/lib/running-league/league-row-mappers'
 import type {
   MemberRunningLeagueHome,
@@ -440,12 +440,14 @@ async function ensurePortalParticipantForMember(
     }
   }
 
-  const { data: existing, error: existingError } = await supabase
-    .from('running_league_participants')
-    .select(PARTICIPANT_SELECT)
-    .eq('league_id', league.id)
-    .eq('member_id', memberId)
-    .maybeSingle()
+  const { data: existing, error: existingError } = await runParticipantSelectQuery((select) =>
+    supabase
+      .from('running_league_participants')
+      .select(select)
+      .eq('league_id', league.id)
+      .eq('member_id', memberId)
+      .maybeSingle(),
+  )
 
   if (existingError) {
     if (isMissingTableError(existingError)) {
@@ -461,23 +463,27 @@ async function ensurePortalParticipantForMember(
     return { ok: true, participant: mapParticipant(existing as Record<string, unknown>) }
   }
 
-  const { data: inserted, error: insertError } = await supabase
-    .from('running_league_participants')
-    .insert({
-      league_id: league.id,
-      member_id: memberId,
-    })
-    .select(PARTICIPANT_SELECT)
-    .single()
+  const { data: inserted, error: insertError } = await runParticipantSelectQuery((select) =>
+    supabase
+      .from('running_league_participants')
+      .insert({
+        league_id: league.id,
+        member_id: memberId,
+      })
+      .select(select)
+      .single(),
+  )
 
   if (insertError) {
     if (insertError.code === '23505') {
-      const { data: retry } = await supabase
-        .from('running_league_participants')
-        .select(PARTICIPANT_SELECT)
-        .eq('league_id', league.id)
-        .eq('member_id', memberId)
-        .maybeSingle()
+      const { data: retry } = await runParticipantSelectQuery((select) =>
+        supabase
+          .from('running_league_participants')
+          .select(select)
+          .eq('league_id', league.id)
+          .eq('member_id', memberId)
+          .maybeSingle(),
+      )
       if (retry) {
         return { ok: true, participant: mapParticipant(retry as Record<string, unknown>) }
       }
@@ -549,11 +555,13 @@ export async function getRunningLeagueDetail(leagueId: string): Promise<{
     runRunningLeagueSelectQuery((select) =>
       supabase.from('running_leagues').select(select).eq('id', leagueId).maybeSingle(),
     ),
-    supabase
-      .from('running_league_participants')
-      .select(PARTICIPANT_SELECT)
-      .eq('league_id', leagueId)
-      .order('created_at', { ascending: true }),
+    runParticipantSelectQuery((select) =>
+      supabase
+        .from('running_league_participants')
+        .select(select)
+        .eq('league_id', leagueId)
+        .order('created_at', { ascending: true }),
+    ),
     supabase.from('running_league_awards').select('*').eq('league_id', leagueId),
     supabase.from('running_league_reports').select('*').eq('league_id', leagueId),
     supabase.from('running_league_records').select('*').eq('league_id', leagueId),
@@ -1109,18 +1117,21 @@ async function fetchMemberRunningLeagueView(memberId: string): Promise<{
     }
   }
 
-  const [{ data: myRow }, { data: allRows }] = await Promise.all([
-    supabase
-      .from('running_league_participants')
-      .select(PARTICIPANT_SELECT)
-      .eq('league_id', league.id)
-      .eq('member_id', memberId)
-      .maybeSingle(),
-    supabase
-      .from('running_league_participants')
-      .select(PARTICIPANT_SELECT)
-      .eq('league_id', league.id),
+  const [myRowResult, allRowsResult] = await Promise.all([
+    runParticipantSelectQuery((select) =>
+      supabase
+        .from('running_league_participants')
+        .select(select)
+        .eq('league_id', league.id)
+        .eq('member_id', memberId)
+        .maybeSingle(),
+    ),
+    runParticipantSelectQuery((select) =>
+      supabase.from('running_league_participants').select(select).eq('league_id', league.id),
+    ),
   ])
+  const myRow = myRowResult.data
+  const allRows = allRowsResult.data
 
   const participants = (allRows ?? []).map((row) =>
     mapParticipant(row as Record<string, unknown>),
@@ -1574,11 +1585,13 @@ export async function generateRunningLeagueReport(
   await requireRole(['admin'])
   const supabase = await leagueClient()
 
-  const { data: participant, error } = await supabase
-    .from('running_league_participants')
-    .select(PARTICIPANT_SELECT)
-    .eq('id', participantId)
-    .single()
+  const { data: participant, error } = await runParticipantSelectQuery((select) =>
+    supabase
+      .from('running_league_participants')
+      .select(select)
+      .eq('id', participantId)
+      .single(),
+  )
 
   if (error || !participant) {
     return { ok: false, error: error?.message ?? '참가자를 찾을 수 없습니다.' }

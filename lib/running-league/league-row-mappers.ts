@@ -32,7 +32,33 @@ export function isMissingDbColumnError(
   error: { code?: string; message?: string } | null,
   column: string,
 ): boolean {
-  return error?.code === '42703' && (error.message?.includes(column) ?? false)
+  if (!error?.message?.includes(column)) return false
+  return error.code === '42703' || error.message.includes('does not exist')
+}
+
+type ParticipantSelectResult<T> = {
+  data: T
+  error: { code?: string; message?: string } | null
+}
+
+export async function runParticipantSelectQuery<T>(
+  run: (select: string) => PromiseLike<ParticipantSelectResult<T>>,
+): Promise<ParticipantSelectResult<T>> {
+  const primary = await run(PARTICIPANT_SELECT)
+  if (primary.error && isMissingDbColumnError(primary.error, 'ranking_status_message_color')) {
+    return run(PARTICIPANT_SELECT_LEGACY)
+  }
+  return primary
+}
+
+export async function runPortalParticipantSelectQuery<T>(
+  run: (select: string) => PromiseLike<ParticipantSelectResult<T>>,
+): Promise<ParticipantSelectResult<T>> {
+  const primary = await run(PORTAL_PARTICIPANT_SELECT)
+  if (primary.error && isMissingDbColumnError(primary.error, 'ranking_status_message_color')) {
+    return run(PORTAL_PARTICIPANT_SELECT_LEGACY)
+  }
+  return primary
 }
 
 export function mapLeagueParticipantRow(row: Record<string, unknown>): RunningLeagueParticipant {

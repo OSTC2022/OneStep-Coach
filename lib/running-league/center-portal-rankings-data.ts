@@ -21,12 +21,10 @@ import {
 import { resolveAdultRunningMemberIdsFromParticipants } from '@/lib/running-league/resolve-adult-running-member-ids'
 import type { ProfilesSupabase } from '@/lib/running-league/resolve-adult-running-member-ids'
 import {
-  isMissingDbColumnError,
   mapLeagueParticipantRow,
   mapLeagueMileageLogRow,
   mapLeagueRecordRow,
-  PORTAL_PARTICIPANT_SELECT,
-  PORTAL_PARTICIPANT_SELECT_LEGACY,
+  runPortalParticipantSelectQuery,
 } from '@/lib/running-league/league-row-mappers'
 import { buildLeaderboard, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import type { PbDistanceLeaderboard } from '@/lib/running-league/pb-leaderboard'
@@ -95,22 +93,13 @@ export async function loadCenterPortalLeagueRankingsData(
   let rankingsError: string | null = null
 
   try {
-    let allParticipantsResult = await leaderboardSupabase
-      .from('running_league_participants')
-      .select(PORTAL_PARTICIPANT_SELECT)
-      .eq('league_id', leagueId)
-      .order('created_at', { ascending: true })
-
-    if (
-      allParticipantsResult.error &&
-      isMissingDbColumnError(allParticipantsResult.error, 'ranking_status_message_color')
-    ) {
-      allParticipantsResult = await leaderboardSupabase
+    const allParticipantsResult = await runPortalParticipantSelectQuery((select) =>
+      leaderboardSupabase
         .from('running_league_participants')
-        .select(PORTAL_PARTICIPANT_SELECT_LEGACY)
+        .select(select)
         .eq('league_id', leagueId)
-        .order('created_at', { ascending: true })
-    }
+        .order('created_at', { ascending: true }),
+    )
 
     const [leaguePbRecordsResult, leagueMileageLogsResult, leaguePbSnapshotsResult] =
       await Promise.all([
