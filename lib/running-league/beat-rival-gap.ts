@@ -1,4 +1,7 @@
 import type { MileageDistanceLeaderboard } from '@/lib/running-league/mileage-leaderboard'
+import { aggregateMonthlyMileageByMember } from '@/lib/running-league/mileage-leaderboard'
+import type { RunningLeagueMileageLog } from '@/lib/types'
+import { formatRankingMemberName } from '@/lib/running-league/mask-member-name'
 
 export type BeatRivalMileageGapTone = 'ahead' | 'behind' | 'even' | 'unavailable'
 
@@ -13,10 +16,30 @@ export interface BeatRivalMileageGap {
 function resolveMemberMileageKm(
   leaderboard: MileageDistanceLeaderboard,
   memberId: string,
+  monthlyLogs?: ReadonlyArray<Pick<RunningLeagueMileageLog, 'member_id' | 'distance_km'>>,
 ): number {
   const ranked = leaderboard.ranked.find((row) => row.memberId === memberId)
   if (ranked) return ranked.mileageKm
+
+  if (monthlyLogs?.length) {
+    const fromLogs = aggregateMonthlyMileageByMember(monthlyLogs).get(memberId)
+    if (fromLogs != null) return fromLogs
+  }
+
+  if (leaderboard.unranked.some((row) => row.memberId === memberId)) {
+    return 0
+  }
+
   return 0
+}
+
+export function formatBeatRivalGapWithName(
+  gap: BeatRivalMileageGap,
+  rivalName: string,
+): string | null {
+  if (!gap.gapText || gap.tone === 'even' || gap.tone === 'unavailable') return null
+  const shortName = formatRankingMemberName(rivalName)
+  return `${shortName}보다 ${gap.gapText}`
 }
 
 /** 격차가 작을수록 라임에 가깝게, 멀수록 빨강/주황 */
@@ -39,6 +62,7 @@ export function resolveBeatRivalMileageGap(input: {
   myMemberId?: string | null
   beatRivalMemberId?: string | null
   mileageLeaderboard: MileageDistanceLeaderboard
+  monthlyLogs?: ReadonlyArray<Pick<RunningLeagueMileageLog, 'member_id' | 'distance_km'>>
 }): BeatRivalMileageGap {
   const myId = input.myMemberId?.trim()
   const rivalId = input.beatRivalMemberId?.trim()
@@ -52,8 +76,12 @@ export function resolveBeatRivalMileageGap(input: {
     }
   }
 
-  const myKm = resolveMemberMileageKm(input.mileageLeaderboard, myId)
-  const rivalKm = resolveMemberMileageKm(input.mileageLeaderboard, rivalId)
+  const myKm = resolveMemberMileageKm(input.mileageLeaderboard, myId, input.monthlyLogs)
+  const rivalKm = resolveMemberMileageKm(
+    input.mileageLeaderboard,
+    rivalId,
+    input.monthlyLogs,
+  )
   const deltaKm = Math.round((myKm - rivalKm) * 10) / 10
   const absKm = Math.abs(deltaKm).toFixed(1)
 
@@ -77,7 +105,7 @@ export function resolveBeatRivalMileageGap(input: {
 
   return {
     deltaKm: 0,
-    gapText: '동률',
+    gapText: null,
     tone: 'even',
     accentClass: 'text-lime-300',
   }

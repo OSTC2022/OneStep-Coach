@@ -22,6 +22,7 @@ export function RankingPeriodHeader({
   gapAccentClass,
   beatRivalName,
   beatRivalGap,
+  beatRivalGapLabel,
   captionStyle,
 }: {
   period: RankingPeriod
@@ -34,6 +35,7 @@ export function RankingPeriodHeader({
   gapAccentClass?: string
   beatRivalName?: string | null
   beatRivalGap?: BeatRivalMileageGap | null
+  beatRivalGapLabel?: string | null
   captionStyle?: PortalTextStyleConfig | null
 }) {
   const captionText = caption?.trim()
@@ -41,6 +43,7 @@ export function RankingPeriodHeader({
     className: 'text-xs font-medium text-lime-200/80',
   })
   const rivalName = beatRivalName?.trim()
+  const rivalGapLabel = beatRivalGapLabel?.trim() || beatRivalGap?.gapText || null
 
   return (
     <div className={cn('flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1', className)}>
@@ -55,15 +58,15 @@ export function RankingPeriodHeader({
         </span>
       ) : null}
 
-      {beatRivalGap?.gapText ? (
+      {rivalName && rivalGapLabel ? (
         <span
           className={cn(
             'shrink-0 text-sm font-bold tabular-nums transition-colors duration-300',
-            beatRivalGap.accentClass,
+            beatRivalGap?.accentClass,
           )}
-          title="이번 달 마일리지 격차"
+          title="이겨라 대상과의 이번 달 마일리지 격차"
         >
-          {beatRivalGap.gapText}
+          {rivalGapLabel}
         </span>
       ) : null}
 

@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -88,8 +88,8 @@ function TooltipMemberRow({
         style={{ backgroundColor: color }}
         aria-hidden
       />
-      <span className="min-w-0 flex-1 truncate text-zinc-200">{name}</span>
-      <span className="shrink-0 tabular-nums" style={{ color }}>
+      <span className="whitespace-nowrap text-zinc-200">{name}</span>
+      <span className="ml-auto shrink-0 pl-2 tabular-nums" style={{ color }}>
         {value}
       </span>
     </p>
@@ -127,17 +127,195 @@ function formatMinutesSeconds(totalSeconds: number) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
+const COMPARISON_TOOLTIP_MAX_WIDTH = 360
+const COMPARISON_TOOLTIP_PADDING = 8
+const COMPARISON_TOOLTIP_GAP = 10
+const COMPARISON_TOOLTIP_CURSOR = {
+  stroke: 'rgba(161, 161, 170, 0.55)',
+  strokeWidth: 1,
+}
+
+function isMobileChartViewport() {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(max-width: 767px)').matches
+}
+
+function resolveComparisonTooltipPosition(
+  coordinate?: Partial<{ x: number; y: number }>,
+  viewBox?: Partial<{ width: number; x: number }>,
+) {
+  const chartWidth = viewBox?.width ?? 0
+  const anchorX = coordinate?.x ?? COMPARISON_TOOLTIP_PADDING
+  const y = COMPARISON_TOOLTIP_PADDING
+  const pad = COMPARISON_TOOLTIP_PADDING
+  const gap = COMPARISON_TOOLTIP_GAP
+  const tooltipWidth = Math.min(
+    COMPARISON_TOOLTIP_MAX_WIDTH,
+    Math.max(200, chartWidth - pad * 2),
+  )
+
+  const overflowRight = anchorX + gap + tooltipWidth > chartWidth - pad
+  const mobile = isMobileChartViewport()
+  const preferLeft = mobile
+    ? anchorX >= chartWidth * 0.38 || overflowRight
+    : overflowRight
+
+  const x = preferLeft
+    ? Math.max(pad, anchorX - tooltipWidth - gap)
+    : Math.min(chartWidth - tooltipWidth - pad, Math.max(pad, anchorX + gap))
+
+  return { x, y }
+}
+
+function ComparisonTooltipPositionSync({
+  coordinate,
+  viewBox,
+  onUpdate,
+}: {
+  coordinate?: Partial<{ x: number; y: number }>
+  viewBox?: Partial<{ width: number; x: number }>
+  onUpdate: (
+    coordinate?: Partial<{ x: number; y: number }>,
+    viewBox?: Partial<{ width: number; x: number }>,
+  ) => void
+}) {
+  useLayoutEffect(() => {
+    onUpdate(coordinate, viewBox)
+  }, [coordinate?.x, coordinate?.y, onUpdate, viewBox?.width])
+
+  return null
+}
+
+type ComparisonTooltipRenderProps = {
+  active?: boolean
+  payload?: Array<{ name?: string; value?: number; color?: string }>
+  label?: string
+  coordinate?: Partial<{ x: number; y: number }>
+  viewBox?: Partial<{ width: number; x: number }>
+}
+
+function createComparisonTooltipRenderer(
+  updateTooltipPosition: (
+    coordinate?: Partial<{ x: number; y: number }>,
+    viewBox?: Partial<{ width: number; x: number }>,
+  ) => void,
+  render: (props: ComparisonTooltipRenderProps) => ReactNode,
+) {
+  return function ComparisonTooltipRenderer(props: ComparisonTooltipRenderProps) {
+    return (
+      <>
+        <ComparisonTooltipPositionSync
+          coordinate={props.coordinate}
+          viewBox={props.viewBox}
+          onUpdate={updateTooltipPosition}
+        />
+        {render(props)}
+      </>
+    )
+  }
+}
+
+function useComparisonChartTooltip() {
+  const [listDragging, setListDragging] = useState(false)
+  const [tooltipPosition, setTooltipPosition] = useState({
+    x: COMPARISON_TOOLTIP_PADDING,
+    y: COMPARISON_TOOLTIP_PADDING,
+  })
+
+  const updateTooltipPosition = useCallback(
+    (
+      coordinate?: Partial<{ x: number; y: number }>,
+      viewBox?: Partial<{ width: number; x: number }>,
+    ) => {
+      const next = resolveComparisonTooltipPosition(coordinate, viewBox)
+      setTooltipPosition((prev) =>
+        prev.x === next.x && prev.y === next.y ? prev : next,
+      )
+    },
+    [],
+  )
+
+  return {
+    listDragging,
+    setListDragging,
+    updateTooltipPosition,
+    tooltipCursor: listDragging ? false : COMPARISON_TOOLTIP_CURSOR,
+    tooltipPosition,
+    tooltipWrapperStyle: {
+      pointerEvents: 'auto' as const,
+      outline: 'none' as const,
+      zIndex: 5,
+    },
+  }
+}
+
+function ScrollableTooltipMemberList({
+  children,
+  onDragChange,
+}: {
+  children: ReactNode
+  onDragChange?: (dragging: boolean) => void
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ y: number; scrollTop: number } | null>(null)
+
+  function endDrag(pointerId: number) {
+    const el = scrollRef.current
+    dragRef.current = null
+    onDragChange?.(false)
+    if (el?.hasPointerCapture(pointerId)) {
+      el.releasePointerCapture(pointerId)
+    }
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      className="max-h-[min(10.5rem,42vh)] overflow-y-auto overscroll-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      onPointerDown={(event) => {
+        const el = scrollRef.current
+        if (!el || el.scrollHeight <= el.clientHeight + 1) return
+        event.stopPropagation()
+        dragRef.current = { y: event.clientY, scrollTop: el.scrollTop }
+        el.setPointerCapture(event.pointerId)
+        onDragChange?.(true)
+      }}
+      onPointerMove={(event) => {
+        const el = scrollRef.current
+        const drag = dragRef.current
+        if (!el || !drag) return
+        event.preventDefault()
+        el.scrollTop = drag.scrollTop - (event.clientY - drag.y)
+      }}
+      onPointerUp={(event) => endDrag(event.pointerId)}
+      onPointerCancel={(event) => endDrag(event.pointerId)}
+    >
+      <div className="space-y-1 text-zinc-300">{children}</div>
+    </div>
+  )
+}
+
 function ChartTooltipShell({
   label,
   children,
+  scrollable = false,
+  onListDragChange,
 }: {
   label?: string
   children: ReactNode
+  scrollable?: boolean
+  onListDragChange?: (dragging: boolean) => void
 }) {
   return (
-    <div className="rounded-lg border border-lime-500/35 bg-zinc-950/95 px-3 py-2 text-xs shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+    <div className="w-max min-w-[10.5rem] max-w-[calc(100%-0.5rem)] rounded-lg border border-lime-500/35 bg-zinc-950/95 px-3 py-2 text-xs shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-sm">
       {label ? <p className="mb-1.5 font-medium text-lime-200">{label}</p> : null}
-      <div className="space-y-1 text-zinc-300">{children}</div>
+      {scrollable ? (
+        <ScrollableTooltipMemberList onDragChange={onListDragChange}>
+          {children}
+        </ScrollableTooltipMemberList>
+      ) : (
+        <div className="space-y-1 text-zinc-300">{children}</div>
+      )}
     </div>
   )
 }
@@ -179,6 +357,7 @@ function RankComparisonTooltip({
   memberColorMap,
   isAggregate = false,
   beatRivalMemberId = null,
+  onListDragChange,
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number; color?: string }>
@@ -187,6 +366,7 @@ function RankComparisonTooltip({
   memberColorMap: Map<string, string>
   isAggregate?: boolean
   beatRivalMemberId?: string | null
+  onListDragChange?: (dragging: boolean) => void
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -204,7 +384,11 @@ function RankComparisonTooltip({
     .sort((a, b) => a.rank - b.rank)
 
   return (
-    <ChartTooltipShell label={label}>
+    <ChartTooltipShell
+      label={label}
+      scrollable={rows.length >= 3}
+      onListDragChange={onListDragChange}
+    >
       {rows.map((row) => {
         const color = isAggregate
           ? getMemberChartColor(row.memberId, memberColorMap, beatRivalMemberId)
@@ -236,6 +420,7 @@ function MileageComparisonTooltip({
   memberColorMap,
   beatRivalMemberId = null,
   valueUnit = 'km',
+  onListDragChange,
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number; color?: string }>
@@ -244,6 +429,7 @@ function MileageComparisonTooltip({
   memberColorMap: Map<string, string>
   beatRivalMemberId?: string | null
   valueUnit?: 'km' | '회'
+  onListDragChange?: (dragging: boolean) => void
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -260,7 +446,11 @@ function MileageComparisonTooltip({
     .sort((a, b) => b.value - a.value)
 
   return (
-    <ChartTooltipShell label={label}>
+    <ChartTooltipShell
+      label={label}
+      scrollable={rows.length >= 3}
+      onListDragChange={onListDragChange}
+    >
       {rows.map((row) => {
         const isBeatRival =
           beatRivalMemberId != null && row.memberId === beatRivalMemberId
@@ -288,12 +478,14 @@ function PbRecordComparisonTooltip({
   label,
   members,
   memberColorMap,
+  onListDragChange,
 }: {
   active?: boolean
   payload?: Array<{ name?: string; value?: number }>
   label?: string
   members: LeaguePbRecordComparisonChart['members']
   memberColorMap: Map<string, string>
+  onListDragChange?: (dragging: boolean) => void
 }) {
   if (!active || !payload?.length) return null
   const rows = payload
@@ -310,7 +502,11 @@ function PbRecordComparisonTooltip({
     .sort((a, b) => a.seconds - b.seconds)
 
   return (
-    <ChartTooltipShell label={label}>
+    <ChartTooltipShell
+      label={label}
+      scrollable={rows.length >= 3}
+      onListDragChange={onListDragChange}
+    >
       {rows.map((row) => (
         <TooltipMemberRow
           key={row.memberId}
@@ -741,6 +937,7 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
+        beatRivalMemberId={beatRivalMemberId}
         title="이겨라 · 마일리지"
       />
     ) : (
@@ -973,6 +1170,13 @@ function RankTrendChart({
     () => buildMemberChartColorMap(comparisonMembers.map((member) => member.memberId)),
     [comparisonMembers],
   )
+  const {
+    setListDragging,
+    updateTooltipPosition,
+    tooltipCursor,
+    tooltipPosition,
+    tooltipWrapperStyle,
+  } = useComparisonChartTooltip()
 
   if (!hasComparison && rankData.length === 0) {
     return <GraphEmptyState />
@@ -1009,14 +1213,24 @@ function RankTrendChart({
             />
             <YAxis tickLine={false} axisLine={false} width={28} reversed allowDecimals={false} />
             <Tooltip
-              content={
+              allowEscapeViewBox={{ x: true, y: true }}
+              reverseDirection={{ x: true, y: false }}
+              cursor={tooltipCursor}
+              position={tooltipPosition}
+              wrapperStyle={tooltipWrapperStyle}
+              animationDuration={0}
+              content={createComparisonTooltipRenderer(updateTooltipPosition, (props) => (
                 <RankComparisonTooltip
+                  active={props.active}
+                  payload={props.payload}
+                  label={props.label}
                   members={comparisonMembers}
                   memberColorMap={memberColorMap}
                   isAggregate={isAggregate}
                   beatRivalMemberId={beatRivalMemberId}
+                  onListDragChange={setListDragging}
                 />
-              }
+              ))}
             />
             {isAggregate
               ? comparisonMembers.map((member) => {
@@ -1043,7 +1257,14 @@ function RankTrendChart({
                               stroke: '#ff4444',
                               strokeWidth: 2.5,
                             }
-                          : { r: 5, fill: getMemberChartColor(member.memberId, memberColorMap) }
+                          : {
+                        r: 5,
+                        fill: getMemberChartColor(
+                          member.memberId,
+                          memberColorMap,
+                          beatRivalMemberId,
+                        ),
+                      }
                       }
                       connectNulls
                       isAnimationActive={false}
@@ -1139,6 +1360,13 @@ function PbRecordAggregateTrendChart({
     () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
     [chart.members],
   )
+  const {
+    setListDragging,
+    updateTooltipPosition,
+    tooltipCursor,
+    tooltipPosition,
+    tooltipWrapperStyle,
+  } = useComparisonChartTooltip()
 
   return (
     <div className={chartShellClass}>
@@ -1165,9 +1393,22 @@ function PbRecordAggregateTrendChart({
             tickFormatter={(value) => formatMinutesSeconds(Number(value))}
           />
           <Tooltip
-            content={
-              <PbRecordComparisonTooltip members={chart.members} memberColorMap={memberColorMap} />
-            }
+            allowEscapeViewBox={{ x: true, y: true }}
+            reverseDirection={{ x: true, y: false }}
+            cursor={tooltipCursor}
+            position={tooltipPosition}
+            wrapperStyle={tooltipWrapperStyle}
+            animationDuration={0}
+            content={createComparisonTooltipRenderer(updateTooltipPosition, (props) => (
+              <PbRecordComparisonTooltip
+                active={props.active}
+                payload={props.payload}
+                label={props.label}
+                members={chart.members}
+                memberColorMap={memberColorMap}
+                onListDragChange={setListDragging}
+              />
+            ))}
           />
           {chart.members.map((member) => (
             <Line
@@ -1213,8 +1454,12 @@ function MileageAggregateTrendChart({
   footerHint?: string
 }) {
   const memberColorMap = useMemo(
-    () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
-    [chart.members],
+    () =>
+      buildMemberChartColorMap(
+        chart.members.map((member) => member.memberId),
+        { beatRivalMemberId },
+      ),
+    [beatRivalMemberId, chart.members],
   )
   const attendanceYMax = useMemo(() => {
     if (valueUnit !== '회') return null
@@ -1229,6 +1474,13 @@ function MileageAggregateTrendChart({
     }
     return resolveCountChartYMax(values)
   }, [chart.members, chart.rows, valueUnit])
+  const {
+    setListDragging,
+    updateTooltipPosition,
+    tooltipCursor,
+    tooltipPosition,
+    tooltipWrapperStyle,
+  } = useComparisonChartTooltip()
 
   return (
     <div className={chartShellClass}>
@@ -1254,14 +1506,24 @@ function MileageAggregateTrendChart({
             tickFormatter={(v) => (valueUnit === '회' ? `${v}회` : `${v}km`)}
           />
           <Tooltip
-            content={
+            allowEscapeViewBox={{ x: true, y: true }}
+            reverseDirection={{ x: true, y: false }}
+            cursor={tooltipCursor}
+            position={tooltipPosition}
+            wrapperStyle={tooltipWrapperStyle}
+            animationDuration={0}
+            content={createComparisonTooltipRenderer(updateTooltipPosition, (props) => (
               <MileageComparisonTooltip
+                active={props.active}
+                payload={props.payload}
+                label={props.label}
                 members={chart.members}
                 memberColorMap={memberColorMap}
                 beatRivalMemberId={beatRivalMemberId}
                 valueUnit={valueUnit}
+                onListDragChange={setListDragging}
               />
-            }
+            ))}
           />
           {chart.members.map((member) => {
             const isBeatRival =
@@ -1283,7 +1545,14 @@ function MileageAggregateTrendChart({
                         stroke: '#ff4444',
                         strokeWidth: 2.5,
                       }
-                    : { r: 5, fill: getMemberChartColor(member.memberId, memberColorMap) }
+                    : {
+                        r: 5,
+                        fill: getMemberChartColor(
+                          member.memberId,
+                          memberColorMap,
+                          beatRivalMemberId,
+                        ),
+                      }
                 }
                 connectNulls
                 isAnimationActive={false}

@@ -55,7 +55,7 @@ import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
-import { resolveBeatRivalMileageGap } from '@/lib/running-league/beat-rival-gap'
+import { resolveBeatRivalMileageGap, formatBeatRivalGapWithName } from '@/lib/running-league/beat-rival-gap'
 import { buildFilteredPortalRankings } from '@/lib/running-league/ranking-hub'
 import {
   resolveEffectiveRankingPeriod,
@@ -1003,10 +1003,11 @@ function RankingPreview({
             myMemberId: highlightMemberId,
             beatRivalMemberId,
             mileageLeaderboard: activeMileageLeaderboard,
+            monthlyLogs: rankingBundle?.mileageLogs,
           })
         : null
 
-    return { rivalName, gap }
+    return { rivalName, gap, gapLabel: gap ? formatBeatRivalGapWithName(gap, rivalName) : null }
   }, [
     activeMileageLeaderboard,
     beatRivalMemberId,
@@ -1059,7 +1060,8 @@ function RankingPreview({
           }
           gapAccentClass={rankingView === 'attendance' ? 'text-sky-300' : undefined}
           beatRivalName={showBeatRivalLabel ? beatRivalHeader?.rivalName : null}
-          beatRivalGap={beatRivalHeader?.gap}
+          beatRivalGap={showBeatRivalLabel ? beatRivalHeader?.gap : null}
+          beatRivalGapLabel={showBeatRivalLabel ? beatRivalHeader?.gapLabel : null}
         />
         {onOpenList && !rankingsError ? (
           <Button
@@ -1121,6 +1123,10 @@ function RankingPreview({
                     isSelected={selectedMemberId === row.memberId}
                     beatRivalMemberId={beatRivalMemberId}
                     showBeatRivalLabel={showBeatRivalLabel}
+                    beatRivalGapLabel={
+                      isMe && showBeatRivalLabel ? beatRivalHeader?.gapLabel ?? null : null
+                    }
+                    beatRivalGapAccent={beatRivalHeader?.gap?.accentClass}
                     rankingStatus={statusByMemberId.get(row.memberId) ?? null}
                   />
                 )
@@ -1128,6 +1134,15 @@ function RankingPreview({
             </div>
             {leagueStatus?.isSoloRanked ? (
               <p className="text-center text-[11px] font-medium text-lime-200/90">현재 리그 1위입니다</p>
+            ) : showBeatRivalLabel && beatRivalHeader?.gapLabel ? (
+              <p
+                className={cn(
+                  'text-center text-[11px] font-semibold tabular-nums',
+                  beatRivalHeader.gap?.accentClass,
+                )}
+              >
+                {beatRivalHeader.gapLabel}
+              </p>
             ) : leagueStatus && highlightMemberId ? (
               <p className="text-center text-[10px] text-zinc-400">
                 {leagueStatus.rankHeadline}
@@ -1300,6 +1315,8 @@ function MileageRankingRow({
   scrollAnchor = false,
   beatRivalMemberId,
   showBeatRivalLabel = false,
+  beatRivalGapLabel = null,
+  beatRivalGapAccent,
   rankingStatus = null,
 }: {
   row: MileageDistanceRankRow
@@ -1310,6 +1327,8 @@ function MileageRankingRow({
   scrollAnchor?: boolean
   beatRivalMemberId?: string | null
   showBeatRivalLabel?: boolean
+  beatRivalGapLabel?: string | null
+  beatRivalGapAccent?: string
   rankingStatus?: RankingStatusDisplay | null
 }) {
   const isRowSelected = Boolean(isSelected)
@@ -1331,13 +1350,25 @@ function MileageRankingRow({
     >
       <RankChangeBadge delta={rankChangeDelta} />
       <RankMedalDisplay rank={row.rank} />
-      <RankingMemberNameBlock
-        memberName={row.memberName}
-        beatRivalMemberId={beatRivalMemberId}
-        rowMemberId={row.memberId}
-        showBeatRivalLabel={showBeatRivalLabel}
-        className={rankingMemberNameClass(isRowSelected)}
-      />
+      <div className="min-w-0">
+        <RankingMemberNameBlock
+          memberName={row.memberName}
+          beatRivalMemberId={beatRivalMemberId}
+          rowMemberId={row.memberId}
+          showBeatRivalLabel={showBeatRivalLabel}
+          className={rankingMemberNameClass(isRowSelected)}
+        />
+        {beatRivalGapLabel ? (
+          <p
+            className={cn(
+              'mt-0.5 truncate text-[10px] font-semibold tabular-nums sm:text-[11px]',
+              beatRivalGapAccent,
+            )}
+          >
+            {beatRivalGapLabel}
+          </p>
+        ) : null}
+      </div>
       <RankingStatusMessageSlot
         message={rankingStatus?.message}
         color={rankingStatus?.color}
@@ -1625,7 +1656,41 @@ function MileageRankingList({
   const myRow = highlightMemberId
     ? ranked.find((row) => row.memberId === highlightMemberId)
     : undefined
-  const myGapLabel = myRow ? getMileageGapLabelForRow(myRow, ranked) : null
+
+  const beatRivalGap = useMemo(() => {
+    if (!showBeatRivalLabel || !highlightMemberId || !beatRivalMemberId) return null
+    return resolveBeatRivalMileageGap({
+      myMemberId: highlightMemberId,
+      beatRivalMemberId,
+      mileageLeaderboard: leaderboard,
+      monthlyLogs: rankingBundle?.mileageLogs,
+    })
+  }, [
+    beatRivalMemberId,
+    highlightMemberId,
+    leaderboard,
+    rankingBundle?.mileageLogs,
+    showBeatRivalLabel,
+  ])
+
+  const beatRivalName = useMemo(() => {
+    if (!beatRivalMemberId || !rankingBundle) return null
+    return (
+      rankingBundle.participants.find((row) => row.member_id === beatRivalMemberId)?.member
+        ?.name ?? null
+    )
+  }, [beatRivalMemberId, rankingBundle])
+
+  const beatRivalGapLabel =
+    beatRivalGap && beatRivalName
+      ? formatBeatRivalGapWithName(beatRivalGap, beatRivalName)
+      : null
+
+  const myGapLabel = showBeatRivalLabel
+    ? beatRivalGapLabel
+    : myRow
+      ? getMileageGapLabelForRow(myRow, ranked)
+      : null
 
   if (!hasRankingData) {
     return (
@@ -1663,6 +1728,8 @@ function MileageRankingList({
                 scrollAnchor={isMe}
                 beatRivalMemberId={beatRivalMemberId}
                 showBeatRivalLabel={showBeatRivalLabel}
+                beatRivalGapLabel={isMe ? beatRivalGapLabel : null}
+                beatRivalGapAccent={beatRivalGap?.accentClass}
                 rankingStatus={statusByMemberId.get(row.memberId) ?? null}
               />
             </div>
@@ -1692,7 +1759,7 @@ function MileageRankingList({
       ) : null}
 
       <MyRankFooter
-        label="내 마일리지 순위"
+        label={showBeatRivalLabel ? '이겨라 격차' : '내 마일리지 순위'}
         summary={mySummary}
         total={total}
         showSelfRow={showSelfRow}

@@ -46,6 +46,7 @@ export function MonthMemoInput({
   const [memo, setMemo] = useState('')
   const [selectedMember, setSelectedMember] = useState<MemoMember | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [armedIndex, setArmedIndex] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
@@ -71,6 +72,7 @@ export function MonthMemoInput({
 
   useEffect(() => {
     setActiveIndex(0)
+    setArmedIndex(null)
   }, [memo, suggestions.length])
 
   useEffect(() => {
@@ -157,17 +159,27 @@ export function MonthMemoInput({
     if (showSuggestions) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
+        setArmedIndex(null)
         setActiveIndex((i) => (i + 1) % suggestions.length)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
+        setArmedIndex(null)
         setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
         return
       }
       if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        void submitMemo()
+        const member = suggestions[activeIndex]
+        if (member && armedIndex === activeIndex) {
+          applyMember(member)
+          setArmedIndex(null)
+        } else if (member) {
+          setArmedIndex(activeIndex)
+        } else {
+          void submitMemo()
+        }
         return
       }
     }
@@ -204,6 +216,9 @@ export function MonthMemoInput({
             }}
             onPointerDown={(e) => e.preventDefault()}
           >
+            <li className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+              한 번 눌러 표시 · 같은 항목을 다시 눌러 선택
+            </li>
             {suggestions.map((member, index) => {
               const color = getInstructorCalendarColor(null)
               const label = formatMemberCalendarLabel(member)
@@ -214,12 +229,24 @@ export function MonthMemoInput({
                     className={cn(
                       'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-accent active:bg-accent',
                       index === activeIndex && 'bg-accent',
+                      index === activeIndex &&
+                        armedIndex === index &&
+                        'ring-2 ring-inset ring-primary/60',
                     )}
-                    onMouseEnter={() => setActiveIndex(index)}
+                    onMouseEnter={() => {
+                      setActiveIndex(index)
+                      setArmedIndex(null)
+                    }}
                     onPointerDown={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      applyMember(member)
+                      if (armedIndex === index) {
+                        applyMember(member)
+                        setArmedIndex(null)
+                      } else {
+                        setActiveIndex(index)
+                        setArmedIndex(index)
+                      }
                     }}
                   >
                     <span
