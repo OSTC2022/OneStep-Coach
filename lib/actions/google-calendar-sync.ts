@@ -20,6 +20,7 @@ import {
   syncGoogleCalendarLessons,
   upsertGoogleCalendarSyncRow,
 } from '@/lib/google-calendar/sync'
+import { pushPendingGoogleLessons } from '@/lib/google-calendar/push-pending'
 import type { GoogleCalendarSyncStatus } from '@/lib/google-calendar/types'
 
 function buildStatusFromRow(
@@ -139,6 +140,7 @@ export async function runGoogleCalendarSyncNow(): Promise<{
         reason: 'manual',
         skipDedupe: Boolean(row?.sync_token),
       })
+      await pushPendingGoogleLessons(40)
     } catch (error) {
       console.error(
         '[google-calendar] background sync failed:',
@@ -316,6 +318,21 @@ export async function pullGoogleCalendarChanges(): Promise<PullResult> {
       if (changed > 0) {
         revalidateLessonViews()
       }
+
+      after(async () => {
+        try {
+          const pushed = await pushPendingGoogleLessons(30)
+          if (pushed > 0) {
+            revalidateLessonViews()
+          }
+        } catch (pushError) {
+          console.warn(
+            '[google-calendar] poll pending push retry failed:',
+            pushError instanceof Error ? pushError.message : pushError,
+          )
+        }
+      })
+
       return { synced: true, changed }
     } catch (error) {
       if (isGoogleCalendarConfigured()) {

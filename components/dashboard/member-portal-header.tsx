@@ -65,7 +65,7 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
 
   async function handleSignOut() {
     const supabase = createClient()
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'local' })
     toast.success('로그아웃 되었습니다.')
     router.push('/auth/login')
     router.refresh()

@@ -434,6 +434,19 @@ function mapMembersToPickerOptions(
 const pickerSearchCache = new Map<string, MemberPickerOption[]>()
 const pickerSearchInflight = new Map<string, Promise<MemberPickerOption[]>>()
 
+/** 캘린더 회원 검색·메모 입력 — 활성 회원 전체 (월간 수업 유무와 무관) */
+export async function listMembersForCalendarPicker(
+  limit = 500,
+): Promise<MemberPickerOption[]> {
+  const { data } = await getMembers({
+    isActive: true,
+    limit,
+    orderBy: 'name',
+    orderAsc: true,
+  })
+  return mapMembersToPickerOptions(data)
+}
+
 /** 빠른 등록 등 — 활성 회원 목록 선로드 */
 export async function listMembersForPicker(limit = 80): Promise<MemberPickerOption[]> {
   const { data } = await getMembers({

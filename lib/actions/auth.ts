@@ -25,6 +25,9 @@ import {
   sendPasswordRecoveryEmail,
 } from '@/lib/auth-recovery-link'
 import {
+  enforceConcurrentSessionLimit,
+} from '@/lib/auth/concurrent-sessions'
+import {
   REMEMBER_ME_COOKIE,
   REMEMBER_ME_MAX_AGE_SECONDS,
   applyRememberMeToSupabaseCookieOptions,
@@ -184,12 +187,20 @@ export async function signIn(
 
   await applyRememberMeCookies(rememberMe)
 
+  try {
+    const { createServiceRoleClient } = await import('@/lib/supabase/admin')
+    const admin = createServiceRoleClient()
+    await enforceConcurrentSessionLimit(admin, authUser.id)
+  } catch {
+    // service role 미설정 시 SQL 트리거에만 의존
+  }
+
   return { redirectTo: getDefaultDashboardPath(appRole) }
 }
 
 export async function signOut() {
   const supabase = await createClient()
-  await supabase.auth.signOut()
+  await supabase.auth.signOut({ scope: 'local' })
   await applyRememberMeCookies(false)
   redirect('/auth/login')
 }

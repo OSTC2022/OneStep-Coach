@@ -1,13 +1,12 @@
 import dynamic from 'next/dynamic'
 import { parseISO } from 'date-fns'
-import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getLessonsForStatusView } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
 import { getMemberBodyWeightsForLessons } from '@/lib/actions/member-body-records'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
-import { getRangeForView, toDateKey, type CalendarView } from '@/lib/calendar-utils'
-import { LESSON_STATUS_DATE_COOKIE, buildLessonStatusPath } from '@/lib/lesson-status-date'
+import { getRangeForView, type CalendarView } from '@/lib/calendar-utils'
+import { buildLessonStatusEntryPath } from '@/lib/lesson-status-date'
 import { profileRoleToAppRole } from '@/lib/roles'
 import { TimeSlotsSkeleton } from '@/components/dashboard/page-skeletons'
 import type { LessonStatusViewMode } from './lesson-status-view'
@@ -47,10 +46,7 @@ export default async function LessonStatusPage({
       : 'day'
 
   if (!params.date) {
-    const cookieStore = await cookies()
-    const savedDate = cookieStore.get(LESSON_STATUS_DATE_COOKIE)?.value
-    const fallbackDate = savedDate ?? toDateKey(new Date())
-    redirect(buildLessonStatusPath(fallbackDate, viewMode))
+    redirect(buildLessonStatusEntryPath(viewMode))
   }
 
   const selectedDate = params.date

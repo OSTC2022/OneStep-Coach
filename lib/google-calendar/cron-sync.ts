@@ -8,6 +8,7 @@ import {
   isGoogleCalendarSyncInProgress,
   syncGoogleCalendarLessons,
 } from '@/lib/google-calendar/sync'
+import { pushPendingGoogleLessons } from '@/lib/google-calendar/push-pending'
 
 /** 마지막 성공 동기화가 이 시간보다 오래되면 cron에서 상태까지 갱신 */
 const STALE_SYNC_MS = 20 * 60 * 1000
@@ -68,6 +69,19 @@ export async function runGoogleCalendarCronSync(): Promise<{
       forceFull: !row.sync_token && !row.sync_token_2,
     })
     const changed = countGoogleSyncChanges(result)
+
+    try {
+      const pushed = await pushPendingGoogleLessons(40)
+      if (pushed > 0) {
+        console.info('[google-calendar] cron retried pending pushes', { pushed })
+      }
+    } catch (pushError) {
+      console.warn(
+        '[google-calendar] cron pending push retry failed:',
+        pushError instanceof Error ? pushError.message : pushError,
+      )
+    }
+
     return { ok: true, changed }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

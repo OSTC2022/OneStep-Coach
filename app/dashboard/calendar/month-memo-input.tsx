@@ -13,6 +13,7 @@ import {
   parseMemoQuickAdd,
   stripMemberDisplayMeta,
 } from '@/lib/memo-quick-add'
+import { searchMembersForPickerCached } from '@/lib/actions/members'
 import { getInstructorCalendarColor } from '@/lib/instructor-colors'
 import { formatMemberCalendarLabel } from '@/lib/member-utils'
 
@@ -50,21 +51,63 @@ export function MonthMemoInput({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+  const [remoteMatches, setRemoteMatches] = useState<MemoMember[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const searchGenerationRef = useRef(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const parsed = useMemo(() => parseMemoQuickAdd(memo), [memo])
+  const memberQuery = useMemo(
+    () => stripMemberDisplayMeta(parsed.memberQuery),
+    [parsed.memberQuery],
+  )
+
+  useEffect(() => {
+    const q = memberQuery.trim()
+    if (!q) {
+      setRemoteMatches([])
+      setIsSearching(false)
+      return
+    }
+
+    const generation = ++searchGenerationRef.current
+    setIsSearching(true)
+
+    void searchMembersForPickerCached(q)
+      .then((rows) => {
+        if (searchGenerationRef.current !== generation) return
+        setRemoteMatches(rows)
+        setIsSearching(false)
+      })
+      .catch(() => {
+        if (searchGenerationRef.current === generation) {
+          setIsSearching(false)
+        }
+      })
+  }, [memberQuery])
+
   const suggestions = useMemo(() => {
-    if (
-      selectedMember &&
-      stripMemberDisplayMeta(parsed.memberQuery) === selectedMember.name
-    ) {
+    if (selectedMember && memberQuery === selectedMember.name) {
       return []
     }
-    return getMemoMemberSuggestions(members, parsed.memberQuery)
-  }, [members, parsed.memberQuery, selectedMember])
 
-  const showSuggestions = suggestions.length > 0 && parsed.memberQuery.length > 0
+    const local = getMemoMemberSuggestions(members, memberQuery)
+    const merged = new Map<string, MemoMember>()
+    for (const member of local) {
+      merged.set(member.id, member)
+    }
+    for (const member of remoteMatches) {
+      if (!merged.has(member.id)) {
+        merged.set(member.id, member)
+      }
+    }
+
+    return getMemoMemberSuggestions(Array.from(merged.values()), memberQuery)
+  }, [members, memberQuery, selectedMember, remoteMatches])
+
+  const showSuggestions =
+    parsed.memberQuery.length > 0 && (suggestions.length > 0 || isSearching)
 
   useEffect(() => {
     setMounted(true)
@@ -219,6 +262,12 @@ export function MonthMemoInput({
             <li className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
               한 번 눌러 표시 · 같은 항목을 다시 눌러 선택
             </li>
+            {isSearching && suggestions.length === 0 ? (
+              <li className="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                검색중…
+              </li>
+            ) : null}
             {suggestions.map((member, index) => {
               const color = getInstructorCalendarColor(null)
               const label = formatMemberCalendarLabel(member)
@@ -306,12 +355,13 @@ export function MonthMemoInput({
 
       {suggestionList}
 
-      {!showSuggestions && parsed.memberQuery && (
+      {!showSuggestions && parsed.memberQuery && !isSearching && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">
           Enter로
           {parsed.startTime
             ? ` ${parsed.memberQuery} ${parsed.startTime} 일정 추가`
             : ` "${parsed.memberQuery}" 일정 추가 (시간 없으면 09:00–10:00)`}
+          {' · '}일치하는 회원이 없으면 메모로 등록됩니다.
         </p>
       )}
     </div>

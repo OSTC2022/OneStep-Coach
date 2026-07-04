@@ -92,6 +92,7 @@ interface MemberDetailProps {
   bodyRecords?: MemberBodyRecord[]
   bodyTableReady?: boolean
   canManage?: boolean
+  canRegisterSessionPackages?: boolean
   canEditBasicInfo?: boolean
   canShowPhysicalEditButton?: boolean
   canSavePhysicalInitial?: boolean
@@ -118,6 +119,7 @@ export function MemberDetail({
   bodyRecords = [],
   bodyTableReady = true,
   canManage = true,
+  canRegisterSessionPackages = false,
   canEditBasicInfo = false,
   canShowPhysicalEditButton = false,
   canSavePhysicalInitial = false,
@@ -485,7 +487,7 @@ export function MemberDetail({
             <Calendar className="h-5 w-5 text-primary" />
             수업권 내역
           </CardTitle>
-          {canManage ? (
+          {canRegisterSessionPackages ? (
             <Link href={`/dashboard/members/${member.id}/packages/new`}>
               <Button size="sm">수업권 추가</Button>
             </Link>

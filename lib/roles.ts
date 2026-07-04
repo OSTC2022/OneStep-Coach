@@ -79,11 +79,26 @@ export function canSavePhysicalBaseline(role: AppRole): boolean {
   return role === 'admin'
 }
 
-/** 회원 등록·수정·수업권 관리 등 쓰기 전용 경로 */
+/** 수업권 신규 등록 경로 (강사 허용) */
+export function isSessionPackageRegisterPath(pathname: string): boolean {
+  return /\/dashboard\/members\/[^/]+\/packages\/new\/?$/.test(pathname)
+}
+
+/** 수업권 수정·삭제 등 관리자 전용 경로 */
+export function isSessionPackageManagePath(pathname: string): boolean {
+  return /\/dashboard\/members\/[^/]+\/packages\/[^/]+\/edit\/?$/.test(pathname)
+}
+
+export function canRegisterSessionPackages(role: AppRole): boolean {
+  return role === 'admin' || role === 'instructor'
+}
+
+/** 회원 등록·수정·수업권 수정 등 쓰기 전용 경로 */
 export function isMemberWritePath(pathname: string): boolean {
   if (pathname === '/dashboard/members/new') return true
   if (/\/dashboard\/members\/[^/]+\/edit\/?$/.test(pathname)) return true
-  if (/\/dashboard\/members\/[^/]+\/packages(\/|$)/.test(pathname)) return true
+  if (isSessionPackageRegisterPath(pathname)) return true
+  if (isSessionPackageManagePath(pathname)) return true
   return false
 }
 
@@ -119,6 +134,9 @@ export function canAccessPath(role: AppRole, pathname: string): boolean {
 
   if (pathname.startsWith('/dashboard/members')) {
     if (!canViewMembers(role)) return false
+    if (isSessionPackageRegisterPath(pathname) && canRegisterSessionPackages(role)) {
+      return true
+    }
     return !isMemberWritePath(pathname)
   }
 

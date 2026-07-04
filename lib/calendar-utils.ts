@@ -455,18 +455,28 @@ export function findLessonStatusScrollSlotStart(
   slots: { start: string }[],
   now = new Date(),
 ): string {
-  if (slots.length === 0) return ''
+  const withStart = slots.filter((slot) => slot.start)
+  if (withStart.length === 0) return ''
+
   const nowKey = format(now, 'HH:mm')
-  let target = slots[0]?.start ?? ''
-  for (const slot of slots) {
-    if (!slot.start) continue
-    if (slot.start <= nowKey) {
-      target = slot.start
-      continue
-    }
-    break
+  const toMinutes = (time: string) => {
+    const [hour, minute] = time.split(':').map(Number)
+    return hour * 60 + minute
   }
-  return target
+  const nowMinutes = toMinutes(nowKey)
+
+  const next = withStart.find((slot) => slot.start >= nowKey)
+  const previous = [...withStart].reverse().find((slot) => slot.start <= nowKey)
+
+  if (next?.start && previous?.start && next.start !== previous.start) {
+    const minutesUntilNext = toMinutes(next.start) - nowMinutes
+    if (minutesUntilNext > 0 && minutesUntilNext <= 90) {
+      return next.start
+    }
+    return previous.start
+  }
+
+  return next?.start ?? previous?.start ?? withStart[0].start
 }
 
 export function buildLessonStatusTimeSlots(

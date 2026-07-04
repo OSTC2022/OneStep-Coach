@@ -20,6 +20,16 @@ import {
   resolveInstructorIdUpdate,
   resolveLessonTypeUpdate,
 } from '@/lib/calendar-recurrence/resolve-field-update'
+import { touchAndScheduleGoogleLessonPush } from '@/lib/google-calendar/push-scheduler'
+
+async function scheduleRecurrenceGooglePush(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  lessonIds: Array<string | undefined | null>,
+) {
+  const ids = [...new Set(lessonIds.filter((id): id is string => Boolean(id)))]
+  if (!ids.length) return
+  await touchAndScheduleGoogleLessonPush(ids, supabase)
+}
 
 const MASTER_SELECT =
   'id, lesson_date, start_time, end_time, member_id, title, instructor_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, event_status, session_deducted, google_event_id, google_sync_status'
@@ -312,6 +322,10 @@ export async function updateRecurringMasterSeries(
       if (insertError) return { error: insertError.message }
       if (data) updatedLessons.push(data as Lesson)
 
+      await scheduleRecurrenceGooglePush(supabase, [
+        masterId,
+        ...updatedLessons.map((lesson) => lesson.id),
+      ])
       revalidateCalendarPaths()
       return { data: updatedLessons, deletedIds }
     }
@@ -360,6 +374,10 @@ export async function updateRecurringMasterSeries(
       if (data) updatedLessons.push(data as Lesson)
     }
 
+    await scheduleRecurrenceGooglePush(supabase, [
+      masterId,
+      ...updatedLessons.map((lesson) => lesson.id),
+    ])
     revalidateCalendarPaths()
     return { data: updatedLessons, deletedIds }
   }
@@ -410,6 +428,10 @@ export async function updateRecurringMasterSeries(
     )
     deletedIds.push(...groupPurged)
 
+    await scheduleRecurrenceGooglePush(supabase, [
+      masterId,
+      ...updatedLessons.map((lesson) => lesson.id),
+    ])
     revalidateCalendarPaths()
     return { data: updatedLessons, deletedIds: [...new Set(deletedIds)] }
   }
@@ -529,6 +551,11 @@ export async function updateRecurringMasterSeries(
   )
 
   if (newMaster) updatedLessons.push(newMaster as Lesson)
+  await scheduleRecurrenceGooglePush(supabase, [
+    masterId,
+    newMasterId,
+    ...updatedLessons.map((lesson) => lesson.id),
+  ])
   revalidateCalendarPaths()
   return { data: updatedLessons, deletedIds: [...new Set(deletedIds)] }
 }

@@ -1013,7 +1013,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
         `[data-lesson-status-slot="${scrollTargetStart}"]`,
       ) as HTMLElement | null
       el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    }, 120)
+    }, 200)
     return () => window.clearTimeout(timer)
   }, [autoScrollToNow, scrollTargetStart, lessons])
 
@@ -1046,7 +1046,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
             <div
               key={slot.start || 'none'}
               data-lesson-status-slot={slot.start || 'none'}
-              className="rounded-md border border-border bg-muted/20 p-3"
+              className="scroll-mt-20 rounded-md border border-border bg-muted/20 p-3 lg:scroll-mt-4"
               onClick={(event) => {
                 if (event.target === event.currentTarget) {
                   setExpandedAthleteId(null)
@@ -1140,7 +1140,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
             data-lesson-status-slot={
               rowIndex === 0 ? slot.start || 'none' : undefined
             }
-            className="flex items-start gap-2 rounded-md border border-border bg-muted/20 px-2 py-1.5"
+            className="flex scroll-mt-20 items-start gap-2 rounded-md border border-border bg-muted/20 px-2 py-1.5 lg:scroll-mt-4"
           >
             <div className="w-11 shrink-0 pt-1 text-center">
               {rowIndex === 0 ? (
@@ -1451,11 +1451,7 @@ export function LessonStatusView({
 
   useEffect(() => {
     if (searchParams.has('date')) return
-    const savedDate =
-      typeof window !== 'undefined'
-        ? window.sessionStorage.getItem(LESSON_STATUS_LAST_DATE_KEY)
-        : null
-    const targetDate = savedDate || format(new Date(), 'yyyy-MM-dd')
+    const targetDate = format(new Date(), 'yyyy-MM-dd')
     syncUrl(targetDate, initialViewMode)
     if (selectedDate === targetDate) return
     setCurrentDate(targetDate)

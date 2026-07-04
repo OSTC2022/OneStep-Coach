@@ -6,7 +6,10 @@ import {
   type RecurrenceCapableLesson,
 } from '@/lib/calendar-recurrence/types'
 import { querySessionPackageIdForDeduction } from '@/lib/actions/sessions'
-import { touchAppModifiedAt } from '@/lib/google-calendar/push-scheduler'
+import {
+  scheduleGoogleLessonPush,
+  touchAppModifiedAt,
+} from '@/lib/google-calendar/push-scheduler'
 
 const MASTER_SELECT =
   'id, lesson_date, start_time, end_time, member_id, title, content, instructor_id, session_package_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, event_status, attendance_status'
@@ -120,5 +123,6 @@ export async function resolvePersistedLessonIdForWrite(
     }
   }
 
+  scheduleGoogleLessonPush(inserted.id)
   return { lessonId: inserted.id, materialized: true }
 }

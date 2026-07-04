@@ -1,4 +1,4 @@
-import { filterAndSortKoreanNames } from '@/lib/korean-search'
+import { filterSortMembersForPicker } from '@/lib/korean-search'
 
 export type MemoQuickAddParseResult = {
   memberQuery: string
@@ -87,14 +87,14 @@ export function stripMemberDisplayMeta(query: string): string {
   return (idx >= 0 ? trimmed.slice(0, idx) : trimmed).trim()
 }
 
-export function getMemoMemberSuggestions<T extends { id: string; name: string }>(
+export function getMemoMemberSuggestions<T extends { id: string; name: string; sport?: string | null }>(
   members: T[],
   query: string,
-  limit = 8,
+  limit = 15,
 ): T[] {
   const q = stripMemberDisplayMeta(query)
   if (!q) return []
-  return filterAndSortKoreanNames(members, q, limit)
+  return filterSortMembersForPicker(members, q, { limit })
 }
 
 export function resolveMemoMember<T extends { id: string; name: string }>(

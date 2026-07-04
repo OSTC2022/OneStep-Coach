@@ -648,7 +648,7 @@ function normalizeOptionalDate(value?: string | null): string | null {
 }
 
 export async function createSessionPackage(formData: SessionPackageFormData): Promise<{ data?: SessionPackage; error?: string }> {
-  await requireRole(['admin'])
+  await requireRole(['admin', 'instructor'])
   const supabase = await sessionWriteClient()
 
   const totalSessions = formData.total_sessions

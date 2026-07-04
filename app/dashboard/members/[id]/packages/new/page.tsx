@@ -1,5 +1,5 @@
 import { getMember } from '@/lib/actions/members'
-import { requireMemberManager } from '@/lib/auth/member-access'
+import { requireSessionPackageRegistrar } from '@/lib/auth/member-access'
 import { notFound } from 'next/navigation'
 import { SessionPackageForm } from './session-package-form'
 
@@ -8,7 +8,7 @@ export default async function NewPackagePage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  await requireMemberManager()
+  await requireSessionPackageRegistrar()
   const { id } = await params
   const member = await getMember(id)
 

@@ -969,6 +969,8 @@ async function createRecurringMasterLesson(
     session_deducted: false,
     lesson_no: null as number | null,
     created_by: user?.id ?? null,
+    app_modified_at: touchAppModifiedAt(),
+    sync_origin: 'app',
   }
 
   if (memberId) {

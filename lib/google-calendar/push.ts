@@ -224,11 +224,11 @@ async function loadLessonForPush(lessonId: string): Promise<Lesson | null> {
     .eq('id', lessonId)
     .maybeSingle()
 
-  if (!error) {
-    return data ? (data as unknown as Lesson) : null
-  }
+  let lesson: Lesson | null = null
 
-  if (isMissingSyncColumn(error)) {
+  if (!error) {
+    lesson = data ? (data as unknown as Lesson) : null
+  } else if (isMissingSyncColumn(error)) {
     const legacy = await supabase
       .from('lessons')
       .select(LESSON_PUSH_SELECT_LEGACY)
@@ -238,10 +238,27 @@ async function loadLessonForPush(lessonId: string): Promise<Lesson | null> {
       console.error('[google-calendar] load lesson for push failed:', legacy.error.message)
       return null
     }
-    return legacy.data ? (legacy.data as unknown as Lesson) : null
+    lesson = legacy.data ? (legacy.data as unknown as Lesson) : null
+  } else {
+    throw new Error(error.message)
   }
 
-  throw new Error(error.message)
+  if (lesson?.member_id && !lesson.member) {
+    const { data: member } = await supabase
+      .from('members')
+      .select('id, name, sport, age, birth_date')
+      .eq('id', lesson.member_id)
+      .maybeSingle()
+    if (member) {
+      lesson = { ...lesson, member: member as Lesson['member'] }
+    }
+  }
+
+  return lesson
+}
+
+function logPushSkip(lessonId: string, reason: string) {
+  console.warn('[google-calendar] push skipped', { lessonId, reason })
 }
 
 async function resolveLinkedGoogleEvent(
@@ -330,10 +347,20 @@ async function removeDuplicateGoogleEvents(
 
 async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
   const row = await getGoogleCalendarSyncRow()
-  if (!row?.sync_enabled || !row.refresh_token || !row.calendar_id) return
+  if (!row?.sync_enabled || !row.refresh_token || !row.calendar_id) {
+    logPushSkip(lessonId, 'sync_disabled_or_not_connected')
+    return
+  }
 
   const lesson = await loadLessonForPush(lessonId)
-  if (!lesson || !shouldPushAppLesson(lesson)) return
+  if (!lesson) {
+    logPushSkip(lessonId, 'lesson_not_found')
+    return
+  }
+  if (!shouldPushAppLesson(lesson)) {
+    logPushSkip(lessonId, `should_not_push:${lesson.event_type ?? 'unknown'}`)
+    return
+  }
 
   const body = lessonToGoogleEventBody(lesson)
   if (!body) {
@@ -344,6 +371,8 @@ async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
         google_calendar_id: lesson.google_calendar_id,
         google_account_id: lesson.google_account_id ?? row.connected_email,
       })
+    } else {
+      logPushSkip(lessonId, 'empty_event_body')
     }
     return
   }
@@ -354,7 +383,10 @@ async function pushLessonToGoogleInternal(lessonId: string): Promise<void> {
     row,
     lesson.instructor_id,
   )
-  if (!target) return
+  if (!target) {
+    logPushSkip(lessonId, 'no_calendar_target')
+    return
+  }
 
   const googleAccountId = row.connected_email ?? 'default'
 

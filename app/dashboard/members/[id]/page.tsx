@@ -30,7 +30,7 @@ export default async function MemberDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  const { canManage, role } = await requireMemberViewer()
+  const { canManage, canRegisterSessionPackages, role } = await requireMemberViewer()
   const { id } = await params
   const linkedProfileRole = await getMemberLinkedProfileRole(id)
   const [member, packagesResult, trashCount, accountEmailInfo, canEditBasicInfo, centerSettings, canAddBodyRecord, runningLeagueHome, instructorsResult] =
@@ -152,6 +152,7 @@ export default async function MemberDetailPage({
         bodyRecords={bodyRecords}
         bodyTableReady={bodyTableReady}
         canManage={canManage}
+        canRegisterSessionPackages={canRegisterSessionPackages}
         canEditBasicInfo={canEditBasicInfo}
         canShowPhysicalEditButton={canViewPhysicalEditButton(role)}
         canSavePhysicalInitial={canSavePhysicalBaseline(role)}

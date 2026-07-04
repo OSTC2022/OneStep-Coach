@@ -18,6 +18,7 @@ import {
   resolveInstructorIdUpdate,
   resolveLessonTypeUpdate,
 } from '@/lib/calendar-recurrence/resolve-field-update'
+import { touchAndScheduleGoogleLessonPush } from '@/lib/google-calendar/push-scheduler'
 
 const LESSON_SELECT =
   'id, lesson_date, start_time, end_time, member_id, title, instructor_id, lesson_type, recurrence, recurrence_pattern, recurrence_group_id, event_type, recurring_master_id, session_deducted'
@@ -308,6 +309,7 @@ export async function convertLessonToRecurringSeries(
     )
 
     revalidateCalendarPaths()
+    await touchAndScheduleGoogleLessonPush([anchorRow.id], supabase)
     return {
       data: data ? [data as Lesson] : undefined,
       deletedIds: [
@@ -370,6 +372,7 @@ export async function convertLessonToRecurringSeries(
     ...(virtual && virtual.masterId !== masterId ? [lessonId] : []),
   ]
 
+  await touchAndScheduleGoogleLessonPush([masterId], supabase)
   return {
     data: [updated as Lesson],
     deletedIds,

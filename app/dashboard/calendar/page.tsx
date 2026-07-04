@@ -1,6 +1,35 @@
 import { getLessonsForMonth } from '@/lib/actions/lessons'
 import { getInstructorForCurrentUser, getInstructors } from '@/lib/actions/instructors'
+import { listMembersForCalendarPicker } from '@/lib/actions/members'
 import { CalendarView } from './calendar-view'
+
+type CalendarMemberOption = {
+  id: string
+  name: string
+  sport?: string | null
+  age?: number | null
+  birth_date?: string | null
+}
+
+function mergeCalendarMemberOptions(
+  pickerMembers: CalendarMemberOption[],
+  lessons: Awaited<ReturnType<typeof getLessonsForMonth>>,
+): CalendarMemberOption[] {
+  const map = new Map(pickerMembers.map((member) => [member.id, member]))
+  for (const lesson of lessons) {
+    if (!lesson.member || map.has(lesson.member.id)) continue
+    map.set(lesson.member.id, {
+      id: lesson.member.id,
+      name: lesson.member.name,
+      sport: lesson.member.sport,
+      age: lesson.member.age,
+      birth_date: lesson.member.birth_date,
+    })
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, 'ko'),
+  )
+}
 
 export default async function CalendarPage() {
   const now = new Date()
@@ -17,10 +46,11 @@ export default async function CalendarPage() {
     })
   }
 
-  const [lessons, instructors, currentInstructor] = await Promise.all([
+  const [lessons, instructors, currentInstructor, pickerMembers] = await Promise.all([
     getLessonsForMonth(year, month),
     getInstructors({ isActive: true, calendar: true, limit: 80 }),
     getInstructorForCurrentUser(),
+    listMembersForCalendarPicker(),
   ])
 
   if (process.env.NODE_ENV === 'development') {
@@ -28,32 +58,7 @@ export default async function CalendarPage() {
     console.log('[calendar] fetch end')
   }
 
-  const members = (() => {
-    const map = new Map<
-      string,
-      {
-        id: string
-        name: string
-        sport?: string | null
-        age?: number | null
-        birth_date?: string | null
-      }
-    >()
-    for (const lesson of lessons) {
-      if (lesson.member && !map.has(lesson.member.id)) {
-        map.set(lesson.member.id, {
-          id: lesson.member.id,
-          name: lesson.member.name,
-          sport: lesson.member.sport,
-          age: lesson.member.age,
-          birth_date: lesson.member.birth_date,
-        })
-      }
-    }
-    return Array.from(map.values()).sort((a, b) =>
-      a.name.localeCompare(b.name, 'ko'),
-    )
-  })()
+  const members = mergeCalendarMemberOptions(pickerMembers, lessons)
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">

@@ -6,6 +6,7 @@ import { getMemberForCurrentUser } from '@/lib/actions/auth'
 import {
   canEditMemberBasicInfo,
   canManageMembers,
+  canRegisterSessionPackages,
   canViewMembers,
   profileRoleToAppRole,
   type AppRole,
@@ -18,6 +19,7 @@ export function canAddMemberBodyRecordRole(role: AppRole): boolean {
 export async function requireMemberViewer(): Promise<{
   role: AppRole
   canManage: boolean
+  canRegisterSessionPackages: boolean
   userId: string
 }> {
   const user = await getDashboardProfile()
@@ -26,12 +28,22 @@ export async function requireMemberViewer(): Promise<{
   const role = profileRoleToAppRole(user.role)
   if (!canViewMembers(role)) redirect('/unauthorized')
 
-  return { role, canManage: canManageMembers(role), userId: user.id }
+  return {
+    role,
+    canManage: canManageMembers(role),
+    canRegisterSessionPackages: canRegisterSessionPackages(role),
+    userId: user.id,
+  }
 }
 
 export async function requireMemberManager(): Promise<void> {
   const { canManage } = await requireMemberViewer()
   if (!canManage) redirect('/unauthorized')
+}
+
+export async function requireSessionPackageRegistrar(): Promise<void> {
+  const { canRegisterSessionPackages } = await requireMemberViewer()
+  if (!canRegisterSessionPackages) redirect('/unauthorized')
 }
 
 export async function canEditMemberBasicInfoFor(memberId: string): Promise<boolean> {
