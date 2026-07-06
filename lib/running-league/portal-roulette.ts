@@ -1,4 +1,5 @@
 import type { AttendanceKingRow } from '@/lib/running-league/attendance-king'
+import { getMemberChartColor } from '@/lib/running-league/chart-member-colors'
 
 export type PortalRouletteSlotKind = 'mileage' | 'beat_rival' | 'attendance' | 'pb'
 
@@ -19,17 +20,6 @@ const SLOT_COLORS = {
 } as const
 
 export const PORTAL_ROULETTE_CATEGORY_COLORS = SLOT_COLORS
-
-const ATTENDANCE_PALETTE = [
-  '#38bdf8',
-  '#22d3ee',
-  '#2dd4bf',
-  '#34d399',
-  '#4ade80',
-  '#60a5fa',
-  '#818cf8',
-  '#c084fc',
-] as const
 
 function pushAttendanceMemberSlots(
   slots: PortalRouletteSlot[],
@@ -52,6 +42,8 @@ function pushAttendanceMemberSlots(
 
 export function buildPortalRouletteSlots(input: {
   attendanceRows: ReadonlyArray<AttendanceKingRow>
+  memberColorMap: Map<string, string>
+  beatRivalMemberId?: string | null
 }): PortalRouletteSlot[] {
   const slots: PortalRouletteSlot[] = []
 
@@ -65,11 +57,15 @@ export function buildPortalRouletteSlots(input: {
       weight: 0,
     })
   } else {
-    input.attendanceRows.forEach((row, index) => {
+    input.attendanceRows.forEach((row) => {
       pushAttendanceMemberSlots(
         slots,
         row,
-        ATTENDANCE_PALETTE[index % ATTENDANCE_PALETTE.length],
+        getMemberChartColor(
+          row.memberId,
+          input.memberColorMap,
+          input.beatRivalMemberId,
+        ),
       )
     })
   }
@@ -120,6 +116,10 @@ export function formatPortalRouletteHint(slots: ReadonlyArray<PortalRouletteSlot
 /** 출석왕 룰렛 범례 — 멤버별 색·칸 수 */
 export function buildPortalRouletteAttendanceLegend(
   attendanceRows: ReadonlyArray<AttendanceKingRow>,
+  options: {
+    memberColorMap: Map<string, string>
+    beatRivalMemberId?: string | null
+  },
 ): Array<{
   memberId: string
   memberName: string
@@ -128,12 +128,16 @@ export function buildPortalRouletteAttendanceLegend(
   color: string
   slotCount: number
 }> {
-  return attendanceRows.map((row, index) => ({
+  return attendanceRows.map((row) => ({
     memberId: row.memberId,
     memberName: row.memberName,
     attendanceCount: row.attendanceCount,
     rank: row.rank,
-    color: ATTENDANCE_PALETTE[index % ATTENDANCE_PALETTE.length],
+    color: getMemberChartColor(
+      row.memberId,
+      options.memberColorMap,
+      options.beatRivalMemberId,
+    ),
     slotCount: row.attendanceCount,
   }))
 }

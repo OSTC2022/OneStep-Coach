@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { buildAttendanceKingLeaderboard } from '@/lib/running-league/attendance-king'
 import type { MemberRunningLeagueHome } from '@/lib/running-league/member-ranking-types'
+import { buildPortalRouletteMemberColorMap } from '@/lib/running-league/portal-member-color-sync'
 import { buildPortalRouletteSlots } from '@/lib/running-league/portal-roulette'
 import { resolveEffectiveRankingPeriod } from '@/lib/running-league/ranking-period'
 import type { RunningLeagueMileageLog, RunningLeagueParticipant } from '@/lib/types'
@@ -95,9 +96,26 @@ export function PortalHeaderRoulette({
     [mileageLogs, participants, period],
   )
 
+  const memberColorMap = useMemo(
+    () =>
+      buildPortalRouletteMemberColorMap({
+        participants,
+        mileageLogs,
+        period,
+        beatRivalMemberId,
+        attendanceMemberIds: attendanceRows.map((row) => row.memberId),
+      }),
+    [attendanceRows, beatRivalMemberId, mileageLogs, participants, period],
+  )
+
   const slots = useMemo(
-    () => buildPortalRouletteSlots({ attendanceRows }),
-    [attendanceRows],
+    () =>
+      buildPortalRouletteSlots({
+        attendanceRows,
+        memberColorMap,
+        beatRivalMemberId,
+      }),
+    [attendanceRows, beatRivalMemberId, memberColorMap],
   )
 
   return (
@@ -134,6 +152,8 @@ export function PortalHeaderRoulette({
                 key="portal-roulette-game"
                 slots={slots}
                 attendanceRows={attendanceRows}
+                memberColorMap={memberColorMap}
+                beatRivalMemberId={beatRivalMemberId}
               />
             ) : null}
           </div>

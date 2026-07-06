@@ -7,12 +7,19 @@ import { cn } from '@/lib/utils'
 
 export function PortalRouletteAttendanceList({
   attendanceRows,
+  memberColorMap,
+  beatRivalMemberId = null,
   className,
 }: {
   attendanceRows: ReadonlyArray<AttendanceKingRow>
+  memberColorMap: Map<string, string>
+  beatRivalMemberId?: string | null
   className?: string
 }) {
-  const legend = buildPortalRouletteAttendanceLegend(attendanceRows)
+  const legend = buildPortalRouletteAttendanceLegend(attendanceRows, {
+    memberColorMap,
+    beatRivalMemberId,
+  })
 
   return (
     <div className={cn('space-y-2', className)}>

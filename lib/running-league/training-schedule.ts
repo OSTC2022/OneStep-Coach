@@ -147,3 +147,62 @@ export function buildFullWeekScheduleDays(
 export function isVotableTrainingScheduleDay(day: RunningLeagueTrainingScheduleDayView): boolean {
   return !day.is_hidden && day.training_summary.trim().length > 0
 }
+
+export function normalizeTrainingScheduleDate(
+  value: string | null | undefined,
+): string | null {
+  const raw = value?.trim().slice(0, 10)
+  return raw || null
+}
+
+/** 스케줄 저장 시 참여 투표 초기화 여부 판단용 */
+export function centerTrainingDayVoteFingerprint(day: {
+  schedule_date?: string | null
+  training_summary?: string | null
+  is_hidden?: boolean | null
+}): string {
+  return [
+    normalizeTrainingScheduleDate(day.schedule_date) ?? '',
+    day.training_summary?.trim() ?? '',
+    day.is_hidden ? '1' : '0',
+  ].join('|')
+}
+
+export function shouldResetCenterTrainingSignups(
+  oldRows: Array<{
+    weekday: number
+    schedule_date?: string | null
+    training_summary?: string | null
+    is_hidden?: boolean | null
+  }>,
+  newRows: Array<{
+    weekday: number
+    schedule_date?: string | null
+    training_summary?: string | null
+    is_hidden?: boolean | null
+  }>,
+): boolean {
+  for (let weekday = 0; weekday <= 6; weekday += 1) {
+    const oldRow = oldRows.find((row) => row.weekday === weekday)
+    const newRow = newRows.find((row) => row.weekday === weekday)
+    const oldFingerprint = centerTrainingDayVoteFingerprint(
+      oldRow ?? { training_summary: '', is_hidden: false },
+    )
+    const newFingerprint = centerTrainingDayVoteFingerprint(
+      newRow ?? { training_summary: '', is_hidden: false },
+    )
+    if (oldFingerprint !== newFingerprint) return true
+  }
+  return false
+}
+
+/** 참여 신청이 해당 요일의 이번 주 날짜와 일치하는지 */
+export function trainingSignupMatchesScheduleDate(
+  signupScheduleDate: string | null | undefined,
+  dayScheduleDate: string | null | undefined,
+): boolean {
+  const dayDate = normalizeTrainingScheduleDate(dayScheduleDate)
+  const signupDate = normalizeTrainingScheduleDate(signupScheduleDate)
+  if (dayDate) return signupDate === dayDate
+  return signupDate == null
+}

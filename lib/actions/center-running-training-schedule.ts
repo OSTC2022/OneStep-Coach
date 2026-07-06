@@ -11,7 +11,10 @@ import { createClient } from '@/lib/supabase/server'
 import {
   createEmptyTrainingScheduleDays,
   formatTrainingScheduleDateLabel,
+  normalizeTrainingScheduleDate,
   resolveTrainingScheduleMapHref,
+  shouldResetCenterTrainingSignups,
+  trainingSignupMatchesScheduleDate,
   trainingWeekdayLabel,
   type RunningLeagueTrainingScheduleDayInput,
   type RunningLeagueTrainingScheduleDayView,
@@ -105,6 +108,7 @@ type CenterSignupRow = {
   weekday: number
   member_id: string
   created_at: string
+  schedule_date?: string | null
   member: { name: string } | { name: string }[] | null
 }
 
@@ -190,6 +194,30 @@ function isVotableCenterDay(day: {
   return !day.is_hidden && Boolean(day.training_summary?.trim())
 }
 
+async function clearAllCenterTrainingScheduleSignups(
+  supabase: Awaited<ReturnType<typeof scheduleClient>>,
+) {
+  const { error } = await supabase
+    .from('center_running_training_schedule_signups')
+    .delete()
+    .gte('weekday', 0)
+
+  if (error && !isMissingTableError(error)) {
+    console.error('clearAllCenterTrainingScheduleSignups', error)
+  }
+}
+
+function filterSignupsForDay(
+  rawRows: CenterSignupRow[],
+  scheduleDate: string | null,
+): RunningLeagueTrainingScheduleSignup[] {
+  return rawRows
+    .filter((row) =>
+      trainingSignupMatchesScheduleDate(row.schedule_date, scheduleDate),
+    )
+    .map((row) => mapSignupRow(row))
+}
+
 export async function fetchCenterRunningTrainingSchedule(
   currentMemberId: string | null = null,
   options: { includeHidden?: boolean } = {},
@@ -213,26 +241,45 @@ export async function fetchCenterRunningTrainingSchedule(
   }
 
   const weekdays = days.map((day) => day.weekday)
-  const { data: signupRows, error: signupError } = await supabase
+  let signupSelect =
+    'id, weekday, member_id, created_at, schedule_date, member:members(name)'
+  let signupResult = await supabase
     .from('center_running_training_schedule_signups')
-    .select('id, weekday, member_id, created_at, member:members(name)')
+    .select(signupSelect)
     .in('weekday', weekdays)
     .order('created_at', { ascending: true })
+
+  if (isMissingColumnError(signupResult.error, 'schedule_date')) {
+    signupSelect = 'id, weekday, member_id, created_at, member:members(name)'
+    signupResult = await supabase
+      .from('center_running_training_schedule_signups')
+      .select(signupSelect)
+      .in('weekday', weekdays)
+      .order('created_at', { ascending: true })
+  }
+
+  const { data: signupRows, error: signupError } = signupResult
 
   if (signupError && !isMissingTableError(signupError)) {
     console.error('fetchCenterRunningTrainingSchedule.signups', signupError)
   }
 
-  const signupsByWeekday = new Map<number, RunningLeagueTrainingScheduleSignup[]>()
+  const signupsByWeekday = new Map<number, CenterSignupRow[]>()
   for (const row of (signupRows ?? []) as CenterSignupRow[]) {
-    const mapped = mapSignupRow(row)
     const list = signupsByWeekday.get(row.weekday) ?? []
-    list.push(mapped)
+    list.push(row)
     signupsByWeekday.set(row.weekday, list)
   }
 
   const views = days
-    .map((row) => buildCenterDayView(row, signupsByWeekday.get(row.weekday) ?? [], currentMemberId))
+    .map((row) => {
+      const dayDate = normalizeTrainingScheduleDate(row.schedule_date)
+      const daySignups = filterSignupsForDay(
+        signupsByWeekday.get(row.weekday) ?? [],
+        dayDate,
+      )
+      return buildCenterDayView(row, daySignups, currentMemberId)
+    })
     .filter((day) => includeHidden || !day.is_hidden)
 
   return { days: views, tableReady: true }
@@ -288,6 +335,17 @@ export async function saveCenterRunningTrainingSchedule(
 
   const supabase = await scheduleClient()
 
+  const { data: existingDayRows, error: existingDayError } =
+    await fetchCenterScheduleDayRows(supabase)
+  if (existingDayError && !isMissingTableError(existingDayError)) {
+    console.error('saveCenterRunningTrainingSchedule.existing', existingDayError)
+  }
+
+  const shouldResetSignups = shouldResetCenterTrainingSignups(
+    (existingDayRows ?? []) as CenterScheduleDayRow[],
+    normalized,
+  )
+
   let warning: string | undefined
   let result = await supabase
     .from('center_running_training_schedule_days')
@@ -319,6 +377,10 @@ export async function saveCenterRunningTrainingSchedule(
   if (error) {
     console.error('saveCenterRunningTrainingSchedule', error)
     return { ok: false, error: formatSaveScheduleError(error) }
+  }
+
+  if (shouldResetSignups) {
+    await clearAllCenterTrainingScheduleSignups(supabase)
   }
 
   revalidateCenterTrainingSchedulePaths()
@@ -378,15 +440,23 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
   }
 
-  const scheduleDate =
-    (dayRow as { schedule_date?: string | null }).schedule_date ?? null
+  const scheduleDate = normalizeTrainingScheduleDate(
+    (dayRow as { schedule_date?: string | null }).schedule_date,
+  )
 
-  const { data: existing, error: existingError } = await supabase
+  let existingQuery = supabase
     .from('center_running_training_schedule_signups')
     .select('id')
     .eq('weekday', weekday)
     .eq('member_id', member.id)
-    .maybeSingle()
+
+  if (scheduleDate) {
+    existingQuery = existingQuery.eq('schedule_date', scheduleDate)
+  } else {
+    existingQuery = existingQuery.is('schedule_date', null)
+  }
+
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle()
 
   if (existingError && !isMissingTableError(existingError)) {
     console.error('toggleCenterRunningTrainingScheduleSignup.existing', existingError)
@@ -418,12 +488,32 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       }
     }
   } else {
-    const { error: insertError } = await supabase
+    const insertPayload: {
+      weekday: number
+      member_id: string
+      schedule_date?: string | null
+    } = {
+      weekday,
+      member_id: member.id,
+    }
+    if (scheduleDate) {
+      insertPayload.schedule_date = scheduleDate
+    }
+
+    let insertResult = await supabase
       .from('center_running_training_schedule_signups')
-      .insert({
-        weekday,
-        member_id: member.id,
-      })
+      .insert(insertPayload)
+
+    if (isMissingColumnError(insertResult.error, 'schedule_date')) {
+      insertResult = await supabase
+        .from('center_running_training_schedule_signups')
+        .insert({
+          weekday,
+          member_id: member.id,
+        })
+    }
+
+    const { error: insertError } = insertResult
 
     if (insertError) {
       console.error('toggleCenterRunningTrainingScheduleSignup.insert', insertError)
@@ -449,10 +539,18 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     }
   }
 
-  const { count, error: countError } = await supabase
+  let countQuery = supabase
     .from('center_running_training_schedule_signups')
     .select('id', { count: 'exact', head: true })
     .eq('weekday', weekday)
+
+  if (scheduleDate) {
+    countQuery = countQuery.eq('schedule_date', scheduleDate)
+  } else {
+    countQuery = countQuery.is('schedule_date', null)
+  }
+
+  const { count, error: countError } = await countQuery
 
   if (countError) {
     console.error('toggleCenterRunningTrainingScheduleSignup.count', countError)
@@ -474,9 +572,7 @@ export async function saveMemberCenterTrainingScheduleVote(
 
   const supabase = await scheduleClient()
 
-  const { data: dayRows, error: dayError } = await supabase
-    .from('center_running_training_schedule_days')
-    .select('weekday, is_hidden, training_summary')
+  const { data: dayRows, error: dayError } = await fetchCenterScheduleDayRows(supabase)
 
   if (isMissingTableError(dayError)) {
     return { ok: false, error: '러닝 스케줄 기능이 준비되지 않았습니다.' }
@@ -486,10 +582,11 @@ export async function saveMemberCenterTrainingScheduleVote(
     return { ok: false, error: '스케줄을 불러오지 못했습니다.' }
   }
 
+  const scheduleDays = (dayRows ?? []) as CenterScheduleDayRow[]
+  const dayByWeekday = new Map(scheduleDays.map((day) => [day.weekday, day]))
+
   const votableWeekdays = new Set(
-    ((dayRows ?? []) as CenterScheduleDayRow[])
-      .filter(isVotableCenterDay)
-      .map((day) => day.weekday),
+    scheduleDays.filter(isVotableCenterDay).map((day) => day.weekday),
   )
 
   const targetWeekdays = new Set(
@@ -498,10 +595,21 @@ export async function saveMemberCenterTrainingScheduleVote(
       .filter((weekday): weekday is number => weekday != null && votableWeekdays.has(weekday)),
   )
 
-  const { data: existingRows, error: existingError } = await supabase
+  let existingSelect = 'id, weekday, schedule_date'
+  let existingResult = await supabase
     .from('center_running_training_schedule_signups')
-    .select('id, weekday')
+    .select(existingSelect)
     .eq('member_id', member.id)
+
+  if (isMissingColumnError(existingResult.error, 'schedule_date')) {
+    existingSelect = 'id, weekday'
+    existingResult = await supabase
+      .from('center_running_training_schedule_signups')
+      .select(existingSelect)
+      .eq('member_id', member.id)
+  }
+
+  const { data: existingRows, error: existingError } = existingResult
 
   if (existingError && !isMissingTableError(existingError)) {
     console.error('saveMemberCenterTrainingScheduleVote.existing', existingError)
@@ -509,10 +617,16 @@ export async function saveMemberCenterTrainingScheduleVote(
   }
 
   const existingByWeekday = new Map(
-    ((existingRows ?? []) as Array<{ id: string; weekday: number }>).map((row) => [
-      row.weekday,
-      row.id,
-    ]),
+    ((existingRows ?? []) as Array<{ id: string; weekday: number; schedule_date?: string | null }>)
+      .filter((row) => {
+        const day = dayByWeekday.get(row.weekday)
+        if (!day) return false
+        return trainingSignupMatchesScheduleDate(
+          row.schedule_date,
+          day.schedule_date ?? null,
+        )
+      })
+      .map((row) => [row.weekday, row.id] as const),
   )
 
   const toDelete = [...existingByWeekday.entries()]
@@ -534,12 +648,37 @@ export async function saveMemberCenterTrainingScheduleVote(
   }
 
   if (toInsert.length > 0) {
-    const { error: insertError } = await supabase.from('center_running_training_schedule_signups').insert(
-      toInsert.map((weekday) => ({
+    const insertRows = toInsert.map((weekday) => {
+      const day = dayByWeekday.get(weekday)
+      const scheduleDate = normalizeTrainingScheduleDate(day?.schedule_date)
+      const row: {
+        weekday: number
+        member_id: string
+        schedule_date?: string | null
+      } = {
         weekday,
         member_id: member.id,
-      })),
-    )
+      }
+      if (scheduleDate) row.schedule_date = scheduleDate
+      return row
+    })
+
+    let insertResult = await supabase
+      .from('center_running_training_schedule_signups')
+      .insert(insertRows)
+
+    if (isMissingColumnError(insertResult.error, 'schedule_date')) {
+      insertResult = await supabase
+        .from('center_running_training_schedule_signups')
+        .insert(
+          toInsert.map((weekday) => ({
+            weekday,
+            member_id: member.id,
+          })),
+        )
+    }
+
+    const { error: insertError } = insertResult
 
     if (insertError) {
       console.error('saveMemberCenterTrainingScheduleVote.insert', insertError)
