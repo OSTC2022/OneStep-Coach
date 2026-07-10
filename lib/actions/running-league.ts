@@ -41,7 +41,11 @@ import {
   type MileageDistanceLeaderboard,
 } from '@/lib/running-league/mileage-leaderboard'
 import { format, subMonths } from 'date-fns'
-import { currentMonthDateRange, formatCurrentMonthRankingLabel } from '@/lib/running-league/month-range'
+import { getCenterSettingsCached } from '@/lib/data/center-settings-read'
+import {
+  formatRankingCycleLabel,
+  portalRankingDateRange,
+} from '@/lib/running-league/portal-ranking-cycle'
 import { resolveAdultRunningMemberIds } from '@/lib/running-league/resolve-adult-running-member-ids'
 import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import {
@@ -1157,7 +1161,8 @@ async function fetchMemberRunningLeagueView(memberId: string): Promise<{
     : null
 
   if (participant) {
-    const { start, end } = currentMonthDateRange()
+    const center = await getCenterSettingsCached()
+    const { start, end } = portalRankingDateRange(center.adult_running_portal_ranking_cycle_start_date)
     const [
       { data: recordRows },
       { data: recoveryRows },
@@ -1726,11 +1731,16 @@ async function assertMemberOwnsParticipant(
   return { ok: true }
 }
 
+async function getPortalRankingDateRangeForSync(): Promise<{ start: string; end: string }> {
+  const center = await getCenterSettingsCached()
+  return portalRankingDateRange(center.adult_running_portal_ranking_cycle_start_date)
+}
+
 async function syncParticipantMileageFromLogs(
   supabase: Awaited<ReturnType<typeof leagueClient>>,
   participantId: string,
 ): Promise<number> {
-  const { start, end } = currentMonthDateRange()
+  const { start, end } = await getPortalRankingDateRangeForSync()
   const { data, error } = await supabase
     .from('running_league_mileage_logs')
     .select('distance_km')
@@ -1840,7 +1850,8 @@ async function fetchMemberRunningLeagueHome(
 ): Promise<MemberRunningLeagueHome> {
   const rankingsOnly = options?.rankingsOnly === true
   const supabase = await createClient()
-  const { start, end } = currentMonthDateRange()
+  const center = await getCenterSettingsCached()
+  const { start, end } = portalRankingDateRange(center.adult_running_portal_ranking_cycle_start_date)
 
   let league: RunningLeague | null = null
   try {
@@ -2271,9 +2282,9 @@ export async function deleteMemberMileageLog(
   }
 }
 
-/** 성인 러닝 포털 — 이번 달 마일리지 로그만 남기고 이전·이후 월 기록 삭제 */
-export async function resetPreviousMonthsMileageLogs(): Promise<
-  | { ok: true; deletedCount: number; keptMonthLabel: string }
+/** 성인 러닝 포털 — 마일리지·출석 기간 수동 초기화 (오늘부터 새 기간) */
+export async function resetPortalRankingCycle(): Promise<
+  | { ok: true; deletedCount: number; cycleStartDate: string; cycleLabel: string }
   | { ok: false; error: string }
 > {
   await requireRole(['admin'])
@@ -2294,14 +2305,14 @@ export async function resetPreviousMonthsMileageLogs(): Promise<
   }
 
   const supabase = await leagueClient()
-  const { start, end } = currentMonthDateRange()
-  const keptMonthLabel = formatCurrentMonthRankingLabel()
+  const cycleStartDate = format(new Date(), 'yyyy-MM-dd')
+  const cycleLabel = formatRankingCycleLabel(cycleStartDate, cycleStartDate)
 
   const { data: toDelete, error: selectError } = await supabase
     .from('running_league_mileage_logs')
     .select('id')
     .eq('league_id', league.id)
-    .or(`logged_at.lt.${start},logged_at.gt.${end}`)
+    .lt('logged_at', cycleStartDate)
 
   if (selectError) {
     if (isMissingTableError(selectError)) {
@@ -2314,17 +2325,48 @@ export async function resetPreviousMonthsMileageLogs(): Promise<
   }
 
   const ids = (toDelete ?? []).map((row) => String(row.id))
-  if (ids.length === 0) {
-    return { ok: true, deletedCount: 0, keptMonthLabel }
+  if (ids.length > 0) {
+    const { error: deleteError } = await supabase
+      .from('running_league_mileage_logs')
+      .delete()
+      .in('id', ids)
+
+    if (deleteError) {
+      return { ok: false, error: deleteError.message }
+    }
   }
 
-  const { error: deleteError } = await supabase
-    .from('running_league_mileage_logs')
-    .delete()
-    .in('id', ids)
+  const center = await getCenterSettingsCached()
+  let settingsSupabase: Awaited<ReturnType<typeof leagueClient>>
+  try {
+    settingsSupabase = createServiceRoleClient()
+  } catch {
+    settingsSupabase = await leagueClient()
+  }
+  const { error: cycleUpdateError } = await settingsSupabase.from('center_settings').upsert({
+    id: 'default',
+    name: center.name,
+    kakao_id: center.kakao_id,
+    instagram_id: center.instagram_id,
+    blog_url: center.blog_url,
+    center_phone: center.center_phone ?? null,
+    naver_place_url: center.naver_place_url ?? null,
+    center_address: center.center_address ?? null,
+    business_hours: center.business_hours ?? null,
+    show_instructor_contact: center.show_instructor_contact ?? false,
+    adult_running_portal_league_label: center.adult_running_portal_league_label,
+    adult_running_portal_title: center.adult_running_portal_title,
+    adult_running_portal_notice: center.adult_running_portal_notice,
+    adult_running_portal_ranking_reference_date: center.adult_running_portal_ranking_reference_date,
+    adult_running_portal_ranking_cycle_start_date: cycleStartDate,
+    adult_running_portal_ranking_caption: center.adult_running_portal_ranking_caption,
+    adult_running_portal_header_style: center.adult_running_portal_header_style,
+    adult_running_portal_ranking_caption_style: center.adult_running_portal_ranking_caption_style,
+    updated_at: new Date().toISOString(),
+  })
 
-  if (deleteError) {
-    return { ok: false, error: deleteError.message }
+  if (cycleUpdateError && cycleUpdateError.code !== '42703') {
+    return { ok: false, error: cycleUpdateError.message }
   }
 
   const { data: participants, error: participantsError } = await supabase
@@ -2342,9 +2384,26 @@ export async function resetPreviousMonthsMileageLogs(): Promise<
 
   revalidateMemberMileagePaths()
   revalidateRunningLeaguePaths(league.id)
+  revalidateTag('center-settings')
+  revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG)
   revalidatePath('/dashboard/settings/adult-running-portal')
+  revalidatePath('/dashboard/my')
 
-  return { ok: true, deletedCount: ids.length, keptMonthLabel }
+  return { ok: true, deletedCount: ids.length, cycleStartDate, cycleLabel }
+}
+
+/** @deprecated resetPortalRankingCycle 사용 */
+export async function resetPreviousMonthsMileageLogs(): Promise<
+  | { ok: true; deletedCount: number; keptMonthLabel: string }
+  | { ok: false; error: string }
+> {
+  const result = await resetPortalRankingCycle()
+  if (!result.ok) return result
+  return {
+    ok: true,
+    deletedCount: result.deletedCount,
+    keptMonthLabel: result.cycleLabel,
+  }
 }
 
 export async function updateMemberMileageLogForm(

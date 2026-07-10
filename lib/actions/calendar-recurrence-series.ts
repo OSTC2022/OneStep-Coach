@@ -154,13 +154,17 @@ export async function deleteRecurringMasterSeries(
     const storedDeleteIds = await deleteStoredOccurrenceRows(supabase, row, occurrenceDate)
     deletedIds.push(...storedDeleteIds)
 
-    await supabase
+    const { error: exdateError } = await supabase
       .from('lessons')
       .update({
         recurrence: addExdateToRecurrence(row.recurrence, occurrenceDate, row.start_time),
         app_modified_at: touchAppModifiedAt(),
       })
       .eq('id', masterId)
+
+    if (exdateError) {
+      return { error: exdateError.message }
+    }
 
     scheduleGoogleLessonPush(masterId)
 

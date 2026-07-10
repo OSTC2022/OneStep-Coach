@@ -22,6 +22,7 @@ type PortalHeaderRouletteProps = {
   mileageLogs: ReadonlyArray<RunningLeagueMileageLog>
   participants: ReadonlyArray<RunningLeagueParticipant>
   rankingReferenceDate?: string | null
+  rankingCycleStartDate?: string | null
   beatRivalMemberId?: string | null
   className?: string
 }
@@ -32,6 +33,7 @@ export function resolvePortalHeaderRouletteProps(input: {
     'mileageLogs' | 'rankingBundle' | 'league'
   > | null
   rankingReferenceDate?: string | null
+  rankingCycleStartDate?: string | null
   beatRivalMemberId?: string | null
 }): PortalHeaderRouletteProps | null {
   const bundle = input.runningLeagueHome?.rankingBundle
@@ -46,6 +48,7 @@ export function resolvePortalHeaderRouletteProps(input: {
     mileageLogs,
     participants: bundle.participants,
     rankingReferenceDate: input.rankingReferenceDate ?? null,
+    rankingCycleStartDate: input.rankingCycleStartDate ?? null,
     beatRivalMemberId:
       input.beatRivalMemberId ??
       input.runningLeagueHome?.league?.beat_rival_member_id ??
@@ -56,6 +59,7 @@ export function resolvePortalHeaderRouletteProps(input: {
 export function MemberPortalHeaderRoulette({
   runningLeagueHome,
   rankingReferenceDate,
+  rankingCycleStartDate,
   beatRivalMemberId,
   className,
 }: {
@@ -64,6 +68,7 @@ export function MemberPortalHeaderRoulette({
     'mileageLogs' | 'rankingBundle' | 'league'
   > | null
   rankingReferenceDate?: string | null
+  rankingCycleStartDate?: string | null
   beatRivalMemberId?: string | null
   className?: string
 }) {
@@ -72,9 +77,10 @@ export function MemberPortalHeaderRoulette({
       resolvePortalHeaderRouletteProps({
         runningLeagueHome,
         rankingReferenceDate,
+        rankingCycleStartDate,
         beatRivalMemberId,
       }),
-    [beatRivalMemberId, rankingReferenceDate, runningLeagueHome],
+    [beatRivalMemberId, rankingCycleStartDate, rankingReferenceDate, runningLeagueHome],
   )
 
   if (!props) return null
@@ -85,12 +91,18 @@ export function PortalHeaderRoulette({
   mileageLogs,
   participants,
   rankingReferenceDate,
+  rankingCycleStartDate,
   beatRivalMemberId,
   className,
 }: PortalHeaderRouletteProps) {
   const [open, setOpen] = useState(false)
 
-  const { period } = resolveEffectiveRankingPeriod(null, null, rankingReferenceDate ?? null)
+  const { period } = resolveEffectiveRankingPeriod(
+    null,
+    null,
+    rankingReferenceDate ?? null,
+    rankingCycleStartDate ?? null,
+  )
   const attendanceRows = useMemo(
     () => buildAttendanceKingLeaderboard(participants, mileageLogs, period),
     [mileageLogs, participants, period],

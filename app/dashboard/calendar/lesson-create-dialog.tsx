@@ -838,10 +838,14 @@ export function LessonCreateDialog({
     setIsDeleting(true)
 
     try {
+      // 시리즈 앵커는 폼에서 바꾼 날짜가 아니라 원래 발생일 기준
+      const seriesAnchorDate =
+        originalLessonDateRef.current || lesson.lesson_date
+
       const result = await deleteLessonsInSeries(
         lesson.id,
         scope,
-        date || originalLessonDateRef.current || lesson.lesson_date,
+        seriesAnchorDate,
       )
 
       if (result.error) {
@@ -910,10 +914,9 @@ export function LessonCreateDialog({
     setIsLoading(true)
     setSaveScopeOpen(false)
 
+    // 시리즈 앵커는 원래 발생일. 새 날짜는 updates.lesson_date 로만 전달
     const anchorDate =
-      updates.lesson_date ||
-      originalLessonDateRef.current ||
-      lesson.lesson_date
+      originalLessonDateRef.current || lesson.lesson_date
 
     if (recurrencePattern === 'none' && hasRecurringContext) {
       const result = await removeLessonRecurrence(lesson.id, scope, anchorDate, updates)
@@ -1007,13 +1010,23 @@ export function LessonCreateDialog({
     if (result.deletedIds?.length) {
       onDeleted?.(result.deletedIds)
     }
-    result.data?.forEach((item) => onSaved(item))
+
+    const saved = result.data ?? []
+    if (saved.length === 0 && scope === 'single') {
+      setIsLoading(false)
+      toast.error('수업 수정 실패', {
+        description: '변경이 저장되지 않았습니다. 새로고침 후 다시 시도해주세요.',
+      })
+      return
+    }
+
+    saved.forEach((item) => onSaved(item))
     showSaveWarning(result.warning)
 
     setIsLoading(false)
 
-    if ((result.data?.length ?? 0) > 1) {
-      toast.success(`${result.data?.length ?? 0}개 수업이 수정되었습니다.`)
+    if (saved.length > 1) {
+      toast.success(`${saved.length}개 수업이 수정되었습니다.`)
     } else {
       toast.success('수업이 수정되었습니다.')
     }
@@ -1786,7 +1799,7 @@ export function LessonCreateDialog({
           className={cn(
             'sm:max-w-md',
             touchFriendly &&
-              'max-lg:flex max-lg:max-h-[inherit] max-lg:flex-col max-lg:gap-0 max-lg:overflow-hidden max-lg:p-0',
+              'max-lg:flex max-lg:min-h-0 max-lg:flex-col max-lg:gap-0 max-lg:overflow-hidden max-lg:p-0',
           )}
         >
           <DialogHeader

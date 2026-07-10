@@ -167,6 +167,7 @@ export function MemberMyPage({
             headerStyle={portalDisplay?.headerStyle}
             runningLeagueHome={runningLeagueHome}
             rankingReferenceDate={portalDisplay?.rankingReferenceDate}
+            rankingCycleStartDate={portalDisplay?.rankingCycleStartDate}
             beatRivalMemberId={
               portalDisplay?.beatRivalMemberId ??
               runningLeagueHome?.league?.beat_rival_member_id ??
@@ -204,6 +205,7 @@ export function MemberMyPage({
               portalLeagueLabel={portalDisplay?.leagueLabel}
               portalTitle={portalDisplay?.portalTitle}
               portalRankingReferenceDate={portalDisplay?.rankingReferenceDate ?? null}
+              portalRankingCycleStartDate={portalDisplay?.rankingCycleStartDate ?? null}
               portalRankingCaption={portalDisplay?.rankingCaption ?? null}
               portalHeaderStyle={portalDisplay?.headerStyle}
               portalRankingCaptionStyle={portalDisplay?.rankingCaptionStyle}

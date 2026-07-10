@@ -162,6 +162,11 @@ export function LessonCalendar({
   })
   const lessonsRef = useRef(lessons)
   lessonsRef.current = lessons
+  const mutationSyncTimerRef = useRef<number | null>(null)
+  const currentDateRef = useRef(currentDate)
+  currentDateRef.current = currentDate
+  const viewRef = useRef(view)
+  viewRef.current = view
   const {
     selectedIds: selectedLessonIds,
     count: selectionCount,
@@ -371,6 +376,27 @@ export function LessonCalendar({
     },
     [lessonHistory, syncMonthPool],
   )
+
+  const scheduleMutationSync = useCallback(() => {
+    if (mutationSyncTimerRef.current != null) {
+      window.clearTimeout(mutationSyncTimerRef.current)
+    }
+    mutationSyncTimerRef.current = window.setTimeout(() => {
+      mutationSyncTimerRef.current = null
+      void syncRange(currentDateRef.current, viewRef.current, {
+        force: true,
+        refreshing: true,
+      })
+    }, 180)
+  }, [syncRange])
+
+  useEffect(() => {
+    return () => {
+      if (mutationSyncTimerRef.current != null) {
+        window.clearTimeout(mutationSyncTimerRef.current)
+      }
+    }
+  }, [])
 
   const navigateRange = useCallback(
     (
@@ -867,21 +893,91 @@ export function LessonCalendar({
       lessonHistory.pushLessonDelete(lesson)
     }
 
-    void syncRange(currentDate, view, { force: true, refreshing: true })
+    void scheduleMutationSync()
   }
 
   const handleLessonSaved = useCallback(
     (lesson: Lesson) => {
+      const isVirtual = parseVirtualLessonId(lesson.id) != null
+      const isMaster = lesson.event_type === 'recurring_master'
+      const isExceptionOrStored =
+        lesson.event_type === 'exception' ||
+        lesson.event_type === 'single' ||
+        lesson.event_type === 'materialized' ||
+        (!isMaster && !isVirtual)
+
+      // 예외/단일 저장 결과는 즉시 반영 (모바일에서 sync 대기 중 미반영 방지)
+      if (isExceptionOrStored) {
+        const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
+        const before = lessonsRef.current.find((item) => item.id === enriched.id)
+
+        if (before && before.lesson_date !== enriched.lesson_date) {
+          setAgendaSelectedDate(new Date(`${enriched.lesson_date}T12:00:00`))
+        }
+
+        setLessons((prev) => {
+          const prevBefore = prev.find((item) => item.id === enriched.id)
+          const exists = Boolean(prevBefore)
+
+          if (prevBefore) {
+            lessonHistory.pushLessonUpdate(prevBefore, enriched)
+          } else {
+            lessonHistory.pushLessonCreate(enriched)
+          }
+
+          // 같은 마스터·같은 원래 날짜의 가상 발생은 예외로 대체
+          const withoutReplacedVirtual = prev.filter((item) => {
+            if (item.id === enriched.id) return true
+            const virtual = parseVirtualLessonId(item.id)
+            if (!virtual || !enriched.recurring_master_id) return true
+            if (virtual.masterId !== enriched.recurring_master_id) return true
+            const originalDate =
+              typeof enriched.original_start_time === 'string'
+                ? enriched.original_start_time.slice(0, 10)
+                : enriched.lesson_date
+            return virtual.occurrenceDate !== originalDate && virtual.occurrenceDate !== enriched.lesson_date
+          })
+
+          const next = exists
+            ? withoutReplacedVirtual.map((l) => (l.id === enriched.id ? enriched : l))
+            : [...withoutReplacedVirtual.filter((l) => l.id !== enriched.id), enriched]
+          const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+          setCachedLessons(cacheKey, next)
+          return next
+        })
+        setSearchPoolLessons((prev) => {
+          const withoutReplacedVirtual = prev.filter((item) => {
+            if (item.id === enriched.id) return true
+            const virtual = parseVirtualLessonId(item.id)
+            if (!virtual || !enriched.recurring_master_id) return true
+            if (virtual.masterId !== enriched.recurring_master_id) return true
+            const originalDate =
+              typeof enriched.original_start_time === 'string'
+                ? enriched.original_start_time.slice(0, 10)
+                : enriched.lesson_date
+            return virtual.occurrenceDate !== originalDate && virtual.occurrenceDate !== enriched.lesson_date
+          })
+          const exists = withoutReplacedVirtual.some((item) => item.id === enriched.id)
+          if (exists) {
+            return withoutReplacedVirtual.map((l) => (l.id === enriched.id ? enriched : l))
+          }
+          return [...withoutReplacedVirtual, enriched]
+        })
+      }
+
       const needsRecurrenceRefresh =
-        lesson.event_type === 'recurring_master' ||
-        parseVirtualLessonId(lesson.id) != null ||
+        isMaster ||
+        isVirtual ||
         isPersistedRecurringLesson(lesson) ||
-        Boolean(lesson.recurrence_pattern && lesson.recurrence_pattern !== 'none')
+        Boolean(lesson.recurrence_pattern && lesson.recurrence_pattern !== 'none') ||
+        lesson.event_type === 'exception'
 
       if (needsRecurrenceRefresh) {
-        void syncRange(currentDate, view, { force: true, refreshing: true })
+        scheduleMutationSync()
         return
       }
+
+      if (isExceptionOrStored) return
 
       const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
       const before = lessonsRef.current.find((item) => item.id === enriched.id)
@@ -917,7 +1013,7 @@ export function LessonCalendar({
         return [...prev, enriched]
       })
     },
-    [lessonHistory, currentDate, view, instructors, syncRange],
+    [lessonHistory, currentDate, view, instructors, scheduleMutationSync],
   )
 
   const lessonSavedRef = useRef(handleLessonSaved)

@@ -1,12 +1,14 @@
-/** 모바일·태블릿 — 하단 시트형 Dialog (키보드 대응 포함) */
+/** 모바일·태블릿 — 하단 시트형 Dialog (키보드·visualViewport 대응) */
 export const MOBILE_SHEET_DIALOG_CLASSES = [
   'max-lg:inset-x-0 max-lg:top-auto',
   'max-lg:bottom-[var(--visual-viewport-bottom-offset,0px)]',
-  'max-lg:max-h-[min(92dvh,calc(100dvh-var(--visual-viewport-bottom-offset,0px)))]',
+  /* dvh 대신 visualViewport 높이를 우선해 키보드에 잘리지 않게 */
+  'max-lg:max-h-[min(92dvh,calc(var(--visual-viewport-height,100dvh)*0.92))]',
   'max-lg:translate-x-0 max-lg:translate-y-0',
   'max-lg:overflow-y-auto max-lg:overscroll-contain',
   'max-lg:rounded-b-none max-lg:rounded-t-2xl max-lg:border-b-0',
   'max-lg:pb-[max(1rem,env(safe-area-inset-bottom))]',
+  'max-lg:[touch-action:pan-y]',
   'lg:top-[50%] lg:left-[50%] lg:translate-x-[-50%] lg:translate-y-[-50%]',
 ] as const
 

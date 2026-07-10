@@ -322,12 +322,14 @@ export async function updateRecurringMasterSeries(
       if (insertError) return { error: insertError.message }
       if (data) updatedLessons.push(data as Lesson)
 
+      deletedIds.push(buildVirtualLessonId(masterId, occurrenceDate))
+
       await scheduleRecurrenceGooglePush(supabase, [
         masterId,
         ...updatedLessons.map((lesson) => lesson.id),
       ])
       revalidateCalendarPaths()
-      return { data: updatedLessons, deletedIds }
+      return { data: updatedLessons, deletedIds: [...new Set(deletedIds)] }
     }
 
     const slotMatchTarget = buildSlotMatchTargetFromMaster(row, occurrenceDate)
@@ -374,12 +376,14 @@ export async function updateRecurringMasterSeries(
       if (data) updatedLessons.push(data as Lesson)
     }
 
+    deletedIds.push(buildVirtualLessonId(masterId, occurrenceDate))
+
     await scheduleRecurrenceGooglePush(supabase, [
       masterId,
       ...updatedLessons.map((lesson) => lesson.id),
     ])
     revalidateCalendarPaths()
-    return { data: updatedLessons, deletedIds }
+    return { data: updatedLessons, deletedIds: [...new Set(deletedIds)] }
   }
 
   if (scope === 'all') {

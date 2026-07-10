@@ -9,14 +9,15 @@ import { bestPbSecondsAsOf } from '@/lib/running-league/ranking-history'
 import { formatSecondsToRunningTime } from '@/lib/running-league/records'
 import type { RunningLeagueMileageLog, RunningLeagueParticipant, RunningLeagueRecord } from '@/lib/types'
 import { currentMonthDateRange, formatCurrentMonthRankingLabel } from '@/lib/running-league/month-range'
+import { rankingPeriodFromCycleStart } from '@/lib/running-league/portal-ranking-cycle'
 
 export type RankingPeriod = {
   start: string
   end: string
   label: string
   monthKey: string
-  /** 월 전체 vs 특정 일 기준 */
-  mode: 'month' | 'day'
+  /** 월 전체 vs 특정 일 vs 수동 기간(초기화 전까지) */
+  mode: 'month' | 'day' | 'cycle'
   asOfDate: string
 }
 
@@ -48,6 +49,7 @@ export function resolveEffectiveRankingPeriod(
   memberMonthKey: string | null | undefined,
   memberAsOfDate: string | null | undefined,
   adminReferenceDate: string | null | undefined,
+  rankingCycleStartDate?: string | null,
 ): { period: RankingPeriod; auto: boolean } {
   const memberDate = memberAsOfDate?.trim().slice(0, 10) || null
   const memberMonth = memberMonthKey?.trim() || null
@@ -69,6 +71,11 @@ export function resolveEffectiveRankingPeriod(
     if (monthKey) {
       return { period: rankingPeriodFromMonthKey(monthKey), auto: true }
     }
+  }
+
+  const cycleStart = rankingCycleStartDate?.trim().slice(0, 10)
+  if (cycleStart) {
+    return { period: rankingPeriodFromCycleStart(cycleStart), auto: true }
   }
 
   const monthKey = format(new Date(), 'yyyy-MM')

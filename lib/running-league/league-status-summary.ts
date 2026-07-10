@@ -48,13 +48,18 @@ function resolveMonthlyMileageKm(input: {
   participant: RunningLeagueParticipant | null
   mileageLogs: ReadonlyArray<RunningLeagueMileageLog>
   mileageLeaderboard: MileageDistanceLeaderboard
+  periodStart?: string
+  periodEnd?: string
 }): number {
   const fromLeaderboard = input.mileageLeaderboard.ranked.find(
     (row) => row.memberId === input.memberId,
   )?.mileageKm
   if (fromLeaderboard != null && fromLeaderboard > 0) return fromLeaderboard
 
-  const { start, end } = currentMonthDateRange()
+  const { start, end } =
+    input.periodStart && input.periodEnd
+      ? { start: input.periodStart, end: input.periodEnd }
+      : currentMonthDateRange()
   const monthLogs = input.mileageLogs.filter(
     (log) =>
       log.member_id === input.memberId &&

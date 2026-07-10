@@ -29,11 +29,6 @@ import {
   getPbGapLabelForRow,
 } from '@/lib/running-league/competition-snapshot'
 import {
-  currentMonthDateRange,
-  formatCurrentMonthRankingLabel,
-  formatNextMonthRankingResetLabel,
-} from '@/lib/running-league/month-range'
-import {
   buildLeagueMomentumSnapshot,
   type LeagueMomentumMember,
 } from '@/lib/running-league/league-momentum'
@@ -330,6 +325,7 @@ function RankingFiltersPanel({
   onPbDistanceChange,
   genderFilterBlocked,
   unclassifiedCount,
+  rankingPeriodLabel,
   compact = false,
 }: {
   rankingView: RankingView
@@ -340,6 +336,7 @@ function RankingFiltersPanel({
   onPbDistanceChange: (value: PbLeaderboardDistance) => void
   genderFilterBlocked: boolean
   unclassifiedCount: number
+  rankingPeriodLabel?: string
   compact?: boolean
 }) {
   return (
@@ -361,14 +358,14 @@ function RankingFiltersPanel({
             onChange={onPbDistanceChange}
             compact={compact}
           />
-        ) : compact ? (
+        ) : compact && rankingPeriodLabel && rankingView !== 'pb' ? (
           <p className="text-[10px] text-zinc-500">
-            {formatCurrentMonthRankingLabel()} · 매월 1일 초기화
+            {rankingPeriodLabel} · 관리자 초기화 전까지 누적
           </p>
         ) : null}
       </div>
       {rankingView === 'mileage' || rankingView === 'beat_rival' ? (
-        !compact ? <RankingPeriodBanner /> : null
+        !compact ? <RankingPeriodBanner periodLabel={rankingPeriodLabel} /> : null
       ) : null}
       <GenderFilterNotice
         genderFilter={genderFilter}
@@ -725,6 +722,7 @@ interface MemberRunningLeagueRankingsProps {
   portalLeagueLabel?: string
   portalTitle?: string
   portalRankingReferenceDate?: string | null
+  portalRankingCycleStartDate?: string | null
   portalRankingCaption?: string | null
   portalHeaderStyle?: AdultRunningPortalHeaderStyle
   portalRankingCaptionStyle?: PortalTextStyleConfig
@@ -737,12 +735,12 @@ type MemberRankSummary =
 
 type RankedRow = PbDistanceRankRow | MileageDistanceRankRow | RunningLeagueRankRow
 
-function RankingPeriodBanner() {
+function RankingPeriodBanner({ periodLabel }: { periodLabel?: string }) {
   return (
     <div className="rounded-lg border border-lime-500/15 bg-lime-500/5 px-3 py-2 text-xs leading-relaxed text-zinc-400">
-      <span className="font-medium text-lime-200/90">{formatCurrentMonthRankingLabel()}</span>
+      <span className="font-medium text-lime-200/90">{periodLabel ?? '현재 기간'}</span>
       {' · '}
-      마일리지 랭킹은 매월 1일({formatNextMonthRankingResetLabel()})에 새로 시작됩니다.
+      마일리지·출석은 월말에 자동 초기화되지 않습니다. 관리자가 초기화할 때 새 기간이 시작됩니다.
     </div>
   )
 }
@@ -883,6 +881,7 @@ function MemberPortalBrandHeader({
   roulette,
   runningLeagueHome,
   rankingReferenceDate,
+  rankingCycleStartDate,
   beatRivalMemberId,
   leagueLabel = DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   portalTitle = DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
@@ -892,6 +891,7 @@ function MemberPortalBrandHeader({
   roulette?: ReactNode
   runningLeagueHome?: MemberRunningLeagueHome | null
   rankingReferenceDate?: string | null
+  rankingCycleStartDate?: string | null
   beatRivalMemberId?: string | null
   leagueLabel?: string
   portalTitle?: string
@@ -909,6 +909,7 @@ function MemberPortalBrandHeader({
       <MemberPortalHeaderRoulette
         runningLeagueHome={runningLeagueHome}
         rankingReferenceDate={rankingReferenceDate}
+        rankingCycleStartDate={rankingCycleStartDate}
         beatRivalMemberId={beatRivalMemberId}
       />
     ) : null)
@@ -2220,6 +2221,7 @@ export function MemberRunningLeagueRankings({
   portalLeagueLabel,
   portalTitle,
   portalRankingReferenceDate = null,
+  portalRankingCycleStartDate = null,
   portalRankingCaption = null,
   portalHeaderStyle,
   portalRankingCaptionStyle,
@@ -2262,8 +2264,14 @@ export function MemberRunningLeagueRankings({
   }, [pbDistance, portalPbDistance])
 
   const rankingPeriod = useMemo(
-    () => resolveEffectiveRankingPeriod(null, null, portalRankingReferenceDate).period,
-    [portalRankingReferenceDate],
+    () =>
+      resolveEffectiveRankingPeriod(
+        null,
+        null,
+        portalRankingReferenceDate,
+        portalRankingCycleStartDate,
+      ).period,
+    [portalRankingCycleStartDate, portalRankingReferenceDate],
   )
 
   const filteredRankings = useMemo(() => {
@@ -2342,10 +2350,11 @@ export function MemberRunningLeagueRankings({
             : null
         }
         rankingReferenceDate={portalRankingReferenceDate}
+        rankingCycleStartDate={portalRankingCycleStartDate}
         beatRivalMemberId={beatRivalMemberId}
       />
     ),
-    [beatRivalMemberId, mileageLogs, portalRankingReferenceDate, rankingBundle],
+    [beatRivalMemberId, mileageLogs, portalRankingCycleStartDate, portalRankingReferenceDate, rankingBundle],
   )
 
   const isExplicitSelection = selectedMember != null
@@ -2580,6 +2589,9 @@ export function MemberRunningLeagueRankings({
           portalTitle={portalTitle}
           headerStyle={portalHeaderStyle}
           roulette={headerRoulette}
+          rankingReferenceDate={portalRankingReferenceDate}
+          rankingCycleStartDate={portalRankingCycleStartDate}
+          beatRivalMemberId={beatRivalMemberId}
         />
       ) : null}
       {brandHeaderBelow}

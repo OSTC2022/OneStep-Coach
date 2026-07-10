@@ -2,13 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { format } from 'date-fns'
-import { ko } from 'date-fns/locale'
 import { Loader2, RotateCcw, Save, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateAdultRunningPortalSettings } from '@/lib/actions/adult-running-portal-settings'
-import { resetPreviousMonthsMileageLogs } from '@/lib/actions/running-league'
+import { resetPortalRankingCycle } from '@/lib/actions/running-league'
 import type { AdultRunningPortalAdminSettings } from '@/lib/actions/adult-running-portal-settings'
+import { formatRankingCycleLabel } from '@/lib/running-league/portal-ranking-cycle'
 import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
@@ -54,7 +53,10 @@ export function AdultRunningPortalSettingsPanel({
   const [pending, startTransition] = useTransition()
   const [resetOpen, setResetOpen] = useState(false)
   const [resetPending, setResetPending] = useState(false)
-  const currentMonthLabel = format(new Date(), 'yyyy년 M월', { locale: ko })
+  const currentCycleLabel = formatRankingCycleLabel(
+    settings.rankingCycleStartDate,
+    new Date().toISOString().slice(0, 10),
+  )
   const [leagueLabel, setLeagueLabel] = useState(settings.leagueLabel)
   const [portalTitle, setPortalTitle] = useState(settings.portalTitle)
   const [notice, setNotice] = useState(settings.notice ?? '')
@@ -92,9 +94,9 @@ export function AdultRunningPortalSettingsPanel({
     })
   }
 
-  async function handleResetPreviousMileage() {
+  async function handleResetRankingCycle() {
     setResetPending(true)
-    const result = await resetPreviousMonthsMileageLogs()
+    const result = await resetPortalRankingCycle()
     setResetPending(false)
     setResetOpen(false)
 
@@ -104,12 +106,12 @@ export function AdultRunningPortalSettingsPanel({
     }
 
     if (result.deletedCount === 0) {
-      toast.message('삭제할 이전 마일리지 기록이 없습니다.', {
-        description: `${result.keptMonthLabel} 기록만 유지 중입니다.`,
+      toast.success('랭킹 기간을 초기화했습니다.', {
+        description: `${result.cycleLabel}부터 새로 집계합니다.`,
       })
     } else {
-      toast.success('이전 달 마일리지를 초기화했습니다.', {
-        description: `${result.deletedCount}건 삭제 · ${result.keptMonthLabel} 기록 유지`,
+      toast.success('마일리지·출석 기간을 초기화했습니다.', {
+        description: `${result.deletedCount}건 삭제 · ${result.cycleLabel}부터 새 기간`,
       })
     }
 
@@ -277,10 +279,13 @@ export function AdultRunningPortalSettingsPanel({
 
         <div className="space-y-2 rounded-lg border border-rose-500/20 bg-rose-500/5 p-3">
           <div>
-            <p className="text-sm font-semibold text-rose-100">마일리지 월 초기화</p>
+            <p className="text-sm font-semibold text-rose-100">마일리지·출석 기간 초기화</p>
             <p className="mt-1 text-[11px] text-zinc-500">
-              <strong className="text-zinc-300">{currentMonthLabel}</strong> 기록만 남기고, 그 이전·이후
-              달 마일리지 로그를 모두 삭제합니다. (예: 7월이면 7월 1일 기록은 유지)
+              현재 집계 기간:{' '}
+              <strong className="text-zinc-300">{currentCycleLabel}</strong>
+              <br />
+              초기화하면 오늘부터 새 기간이 시작되고, 오늘 이전 마일리지 기록이 삭제됩니다. 월말에
+              자동으로 초기화되지 않습니다.
             </p>
           </div>
           <Button
@@ -296,7 +301,7 @@ export function AdultRunningPortalSettingsPanel({
             ) : (
               <RotateCcw className="mr-2 h-4 w-4" />
             )}
-            이전 달 마일리지 초기화
+            기간 초기화
           </Button>
         </div>
 
@@ -314,14 +319,14 @@ export function AdultRunningPortalSettingsPanel({
       <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>이전 달 마일리지를 초기화할까요?</AlertDialogTitle>
+            <AlertDialogTitle>마일리지·출석 기간을 초기화할까요?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  <strong className="text-foreground">{currentMonthLabel}</strong>에 기록된 마일리지만
-                  남기고, 그 외 모든 마일리지 로그가 삭제됩니다.
+                  오늘부터 새 랭킹 기간이 시작되고, <strong className="text-foreground">오늘 이전</strong>
+                  마일리지 기록이 모두 삭제됩니다.
                 </p>
-                <p>참가자별 이번 달 마일리지 합계·랭킹 점수도 다시 계산됩니다. 되돌릴 수 없습니다.</p>
+                <p>출석왕·룰렛·그래프도 새 기간 기준으로 다시 집계됩니다. 되돌릴 수 없습니다.</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -332,7 +337,7 @@ export function AdultRunningPortalSettingsPanel({
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={(event) => {
                 event.preventDefault()
-                void handleResetPreviousMileage()
+                void handleResetRankingCycle()
               }}
             >
               {resetPending ? '초기화 중…' : '초기화'}

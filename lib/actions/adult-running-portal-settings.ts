@@ -1,5 +1,6 @@
 'use server'
 
+import { format, startOfMonth } from 'date-fns'
 import { requireRole } from '@/lib/actions/auth'
 import {
   getCenterSettingsCached,
@@ -11,6 +12,7 @@ import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
 } from '@/lib/running-league/adult-running-portal-defaults'
+import { resolvePortalRankingCycleStartDate } from '@/lib/running-league/portal-ranking-cycle'
 import type {
   AdultRunningPortalHeaderStyle,
   PortalTextStyleConfig,
@@ -28,6 +30,7 @@ export type AdultRunningPortalDisplaySettings = {
   notice: string | null
   beatRivalMemberId: string | null
   rankingReferenceDate: string | null
+  rankingCycleStartDate: string
   rankingCaption: string | null
   headerStyle: AdultRunningPortalHeaderStyle
   rankingCaptionStyle: PortalTextStyleConfig
@@ -57,19 +60,65 @@ function mapDisplayFromCenter(
     notice: center.adult_running_portal_notice?.trim() || null,
     beatRivalMemberId,
     rankingReferenceDate: center.adult_running_portal_ranking_reference_date ?? null,
+    rankingCycleStartDate: resolvePortalRankingCycleStartDate(
+      center.adult_running_portal_ranking_cycle_start_date,
+    ),
     rankingCaption: center.adult_running_portal_ranking_caption?.trim() || null,
     headerStyle: readAdultRunningPortalHeaderStyle(center),
     rankingCaptionStyle: readAdultRunningPortalRankingCaptionStyle(center),
   }
 }
 
+async function ensurePortalRankingCycleStartDate(): Promise<string> {
+  const center = await getCenterSettingsCached()
+  const stored = center.adult_running_portal_ranking_cycle_start_date?.trim().slice(0, 10)
+  if (stored) return stored
+
+  const defaultStart = format(startOfMonth(new Date()), 'yyyy-MM-dd')
+  const supabase = await settingsClient()
+  const { error } = await supabase.from('center_settings').upsert({
+    id: CENTER_SETTINGS_ID,
+    name: center.name,
+    kakao_id: center.kakao_id,
+    instagram_id: center.instagram_id,
+    blog_url: center.blog_url,
+    center_phone: center.center_phone ?? null,
+    naver_place_url: center.naver_place_url ?? null,
+    center_address: center.center_address ?? null,
+    business_hours: center.business_hours ?? null,
+    show_instructor_contact: center.show_instructor_contact ?? false,
+    adult_running_portal_league_label: center.adult_running_portal_league_label,
+    adult_running_portal_title: center.adult_running_portal_title,
+    adult_running_portal_notice: center.adult_running_portal_notice,
+    adult_running_portal_ranking_reference_date: center.adult_running_portal_ranking_reference_date,
+    adult_running_portal_ranking_cycle_start_date: defaultStart,
+    adult_running_portal_ranking_caption: center.adult_running_portal_ranking_caption,
+    adult_running_portal_header_style: center.adult_running_portal_header_style,
+    adult_running_portal_ranking_caption_style: center.adult_running_portal_ranking_caption_style,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) {
+    if (error.code === '42703' || error.message.includes('ranking_cycle_start')) {
+      return defaultStart
+    }
+    console.error('ensurePortalRankingCycleStartDate', error)
+    return defaultStart
+  }
+
+  revalidateTag('center-settings')
+  return defaultStart
+}
+
 export async function getAdultRunningPortalDisplaySettings(): Promise<AdultRunningPortalDisplaySettings> {
-  const [center, league] = await Promise.all([
+  const [center, league, cycleStartDate] = await Promise.all([
     getCenterSettingsCached(),
     ensureCenterPortalRankingLeague().catch(() => null),
+    ensurePortalRankingCycleStartDate(),
   ])
 
-  return mapDisplayFromCenter(center, league?.beat_rival_member_id ?? null)
+  const display = mapDisplayFromCenter(center, league?.beat_rival_member_id ?? null)
+  return { ...display, rankingCycleStartDate: cycleStartDate }
 }
 
 export async function getAdultRunningPortalAdminSettings(
@@ -77,9 +126,10 @@ export async function getAdultRunningPortalAdminSettings(
 ): Promise<AdultRunningPortalAdminSettings> {
   await requireRole(['admin'])
 
-  const [center, league] = await Promise.all([
+  const [center, league, cycleStartDate] = await Promise.all([
     getCenterSettingsCached(),
     ensureCenterPortalRankingLeague().catch(() => null),
+    ensurePortalRankingCycleStartDate(),
   ])
 
   const adultMemberOptions = participantOptions
@@ -91,6 +141,7 @@ export async function getAdultRunningPortalAdminSettings(
 
   return {
     ...mapDisplayFromCenter(center, league?.beat_rival_member_id ?? null),
+    rankingCycleStartDate: cycleStartDate,
     leagueId: league?.id ?? null,
     adultMemberOptions,
   }

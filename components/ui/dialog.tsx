@@ -9,6 +9,22 @@ import {
   MOBILE_SHEET_ANIMATION_CLASSES,
   MOBILE_SHEET_DIALOG_CLASSES,
 } from '@/lib/mobile-dialog-styles'
+import { useMobileSheetPan } from '@/hooks/use-mobile-sheet-pan'
+import { useTouchFriendlyLayout } from '@/hooks/use-touch-friendly-layout'
+
+type MobileSheetPanContextValue = {
+  enabled: boolean
+  handleProps: React.HTMLAttributes<HTMLElement>
+}
+
+const MobileSheetPanContext = React.createContext<MobileSheetPanContextValue>({
+  enabled: false,
+  handleProps: {},
+})
+
+function useMobileSheetPanContext() {
+  return React.useContext(MobileSheetPanContext)
+}
 
 function Dialog({
   ...props
@@ -50,54 +66,111 @@ function DialogOverlay({
   )
 }
 
-function DialogContent({
-  className,
-  children,
-  showCloseButton = true,
-  mobileSheet = false,
-  ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & {
-  showCloseButton?: boolean
-  mobileSheet?: boolean
-}) {
+function MobileSheetDragHandle() {
+  const { enabled, handleProps } = useMobileSheetPanContext()
+  if (!enabled) return null
+
   return (
-    <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        data-slot="dialog-content"
-        className={cn(
-          'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed z-50 grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-lg border shadow-lg duration-200',
-          mobileSheet
-            ? cn(
-                'gap-3 p-4 sm:max-w-lg',
-                MOBILE_SHEET_DIALOG_CLASSES,
-                MOBILE_SHEET_ANIMATION_CLASSES,
-              )
-            : 'top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] gap-4 p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:max-w-lg',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-          >
-            <XIcon />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
-    </DialogPortal>
+    <div
+      data-slot="mobile-sheet-drag-handle"
+      className="flex shrink-0 cursor-grab touch-none items-center justify-center pb-1 pt-2 active:cursor-grabbing max-lg:flex lg:hidden"
+      aria-label="시트를 위아래로 이동"
+      {...handleProps}
+    >
+      <div className="h-1 w-10 rounded-full bg-muted-foreground/35" />
+    </div>
   )
 }
 
+const DialogContent = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<typeof DialogPrimitive.Content> & {
+    showCloseButton?: boolean
+    mobileSheet?: boolean
+  }
+>(function DialogContent(
+  {
+    className,
+    children,
+    showCloseButton = true,
+    mobileSheet = false,
+    style,
+    ...props
+  },
+  forwardedRef,
+) {
+  const touchFriendly = useTouchFriendlyLayout()
+  const panEnabled = mobileSheet && touchFriendly
+  const { sheetRef, sheetStyle, handleProps } = useMobileSheetPan(panEnabled)
+
+  const setRefs = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      sheetRef.current = node
+      if (typeof forwardedRef === 'function') forwardedRef(node)
+      else if (forwardedRef) forwardedRef.current = node
+    },
+    [forwardedRef, sheetRef],
+  )
+
+  const panContext = React.useMemo(
+    () => ({ enabled: panEnabled, handleProps }),
+    [panEnabled, handleProps],
+  )
+
+  return (
+    <DialogPortal data-slot="dialog-portal">
+      <DialogOverlay />
+      <MobileSheetPanContext.Provider value={panContext}>
+        <DialogPrimitive.Content
+          data-slot="dialog-content"
+          ref={setRefs}
+          className={cn(
+            'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed z-50 grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-lg border shadow-lg duration-200',
+            mobileSheet
+              ? cn(
+                  'gap-3 p-4 sm:max-w-lg',
+                  MOBILE_SHEET_DIALOG_CLASSES,
+                  MOBILE_SHEET_ANIMATION_CLASSES,
+                  panEnabled && 'max-lg:will-change-transform',
+                )
+              : 'top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] gap-4 p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:max-w-lg',
+            className,
+          )}
+          style={{ ...style, ...sheetStyle }}
+          {...props}
+        >
+          {panEnabled ? <MobileSheetDragHandle /> : null}
+          {children}
+          {showCloseButton && (
+            <DialogPrimitive.Close
+              data-slot="dialog-close"
+              className={cn(
+                'ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4',
+                panEnabled ? 'top-3' : 'top-4',
+              )}
+            >
+              <XIcon />
+              <span className="sr-only">Close</span>
+            </DialogPrimitive.Close>
+          )}
+        </DialogPrimitive.Content>
+      </MobileSheetPanContext.Provider>
+    </DialogPortal>
+  )
+})
+
 function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
+  const { enabled, handleProps } = useMobileSheetPanContext()
+
   return (
     <div
       data-slot="dialog-header"
-      className={cn('flex flex-col gap-2 text-center sm:text-left', className)}
+      className={cn(
+        'flex flex-col gap-2 text-center sm:text-left',
+        enabled && 'max-lg:cursor-grab max-lg:touch-none max-lg:active:cursor-grabbing',
+        className,
+      )}
+      {...(enabled ? handleProps : {})}
       {...props}
     />
   )
@@ -153,4 +226,6 @@ export {
   DialogPortal,
   DialogTitle,
   DialogTrigger,
+  MobileSheetDragHandle,
+  useMobileSheetPanContext,
 }

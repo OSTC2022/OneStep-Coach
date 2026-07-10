@@ -19,7 +19,7 @@ export type { AdultRunningPortalHeaderStyle, PortalTextStyleConfig }
 const CENTER_SETTINGS_ID = 'default'
 
 const CENTER_SETTINGS_SELECT =
-  'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, adult_running_portal_league_label, adult_running_portal_title, adult_running_portal_notice, adult_running_portal_ranking_reference_date, adult_running_portal_ranking_caption, adult_running_portal_header_style, adult_running_portal_ranking_caption_style, updated_at'
+  'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, adult_running_portal_league_label, adult_running_portal_title, adult_running_portal_notice, adult_running_portal_ranking_reference_date, adult_running_portal_ranking_cycle_start_date, adult_running_portal_ranking_caption, adult_running_portal_header_style, adult_running_portal_ranking_caption_style, updated_at'
 
 const CENTER_SETTINGS_SELECT_LEGACY =
   'id, name, kakao_id, instagram_id, blog_url, center_phone, naver_place_url, center_address, business_hours, show_instructor_contact, updated_at'
@@ -39,6 +39,7 @@ export const DEFAULT_CENTER_SETTINGS: CenterSettings = {
   adult_running_portal_title: DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
   adult_running_portal_notice: null,
   adult_running_portal_ranking_reference_date: null,
+  adult_running_portal_ranking_cycle_start_date: null,
   adult_running_portal_ranking_caption: null,
   adult_running_portal_header_style: null,
   adult_running_portal_ranking_caption_style: null,
@@ -66,6 +67,8 @@ export function normalizeCenterSettingsRow(data: Record<string, unknown>): Cente
       (data.adult_running_portal_notice as string | null)?.trim() || null,
     adult_running_portal_ranking_reference_date:
       (data.adult_running_portal_ranking_reference_date as string | null) ?? null,
+    adult_running_portal_ranking_cycle_start_date:
+      (data.adult_running_portal_ranking_cycle_start_date as string | null) ?? null,
     adult_running_portal_ranking_caption:
       (data.adult_running_portal_ranking_caption as string | null)?.trim() || null,
     adult_running_portal_header_style:

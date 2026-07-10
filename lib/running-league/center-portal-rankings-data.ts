@@ -2,6 +2,7 @@ import 'server-only'
 
 import { format, subMonths } from 'date-fns'
 import { unstable_cache } from 'next/cache'
+import { getCenterSettingsCached } from '@/lib/data/center-settings-read'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/running-league/member-ranking-types'
@@ -26,6 +27,7 @@ import {
   mapLeagueRecordRow,
   runPortalParticipantSelectQuery,
 } from '@/lib/running-league/league-row-mappers'
+import { resolvePortalRankingCycleStartDate } from '@/lib/running-league/portal-ranking-cycle'
 import { buildLeaderboard, type RunningLeagueRankRow } from '@/lib/running-league/scoring'
 import type { PbDistanceLeaderboard } from '@/lib/running-league/pb-leaderboard'
 
@@ -213,11 +215,14 @@ export async function loadCenterPortalLeagueRankingsData(
   }
 }
 
-export function getCachedCenterPortalLeagueRankings(leagueId: string) {
-  const monthKey = format(new Date(), 'yyyy-MM')
+export async function getCachedCenterPortalLeagueRankings(leagueId: string) {
+  const center = await getCenterSettingsCached()
+  const cycleStart = resolvePortalRankingCycleStartDate(
+    center.adult_running_portal_ranking_cycle_start_date,
+  )
   return unstable_cache(
     () => loadCenterPortalLeagueRankingsData(leagueId),
-    ['center-portal-league-rankings', leagueId, monthKey],
+    ['center-portal-league-rankings', leagueId, cycleStart],
     { revalidate: 45, tags: [CENTER_PORTAL_RANKINGS_CACHE_TAG] },
   )()
 }
