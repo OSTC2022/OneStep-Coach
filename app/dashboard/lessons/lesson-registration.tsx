@@ -614,7 +614,7 @@ export function LessonRegistration({
 
       {/* Signature Dialog */}
       <Dialog open={showSignature} onOpenChange={setShowSignature}>
-        <DialogContent className="max-w-md">
+        <DialogContent opaqueBackdrop className="max-w-md">
           <DialogHeader>
             <DialogTitle>서명</DialogTitle>
             <DialogDescription>

@@ -226,6 +226,7 @@ export function SignaturePadDialog({
     >
       <DialogContent
         mobileSheet
+        opaqueBackdrop
         className={cn(
           'max-w-3xl gap-0 overflow-hidden p-0',
           touchFriendly && 'max-lg:flex max-lg:max-h-[inherit] max-lg:flex-col',

@@ -87,6 +87,8 @@ const DialogContent = React.forwardRef<
   React.ComponentProps<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean
     mobileSheet?: boolean
+    /** 뒤 화면(스케줄 등) 완전 가림 — 서명·프라이버시용 */
+    opaqueBackdrop?: boolean
   }
 >(function DialogContent(
   {
@@ -94,6 +96,7 @@ const DialogContent = React.forwardRef<
     children,
     showCloseButton = true,
     mobileSheet = false,
+    opaqueBackdrop = false,
     style,
     ...props
   },
@@ -119,7 +122,9 @@ const DialogContent = React.forwardRef<
 
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay
+        className={opaqueBackdrop ? 'bg-zinc-950' : undefined}
+      />
       <MobileSheetPanContext.Provider value={panContext}>
         <DialogPrimitive.Content
           data-slot="dialog-content"
