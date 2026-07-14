@@ -14,6 +14,7 @@ import {
 } from '@/lib/member-portal-routes'
 import type { User } from '@/lib/types'
 import { VisualViewportOffsetHandler } from '@/components/visual-viewport-offset-handler'
+import { AuthSessionKeepAlive } from '@/components/auth/auth-session-keep-alive'
 
 interface DashboardShellProps {
   user: User
@@ -28,6 +29,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
   if (memberPortal) {
     return (
       <div className="flex min-h-svh flex-col bg-background">
+        <AuthSessionKeepAlive />
         <VisualViewportOffsetHandler />
         <MemberPortalScrollHandler />
         <MemberPortalHeader user={user} />
@@ -44,6 +46,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
 
   return (
     <SidebarProvider className="flex min-h-svh w-full min-w-0 overflow-x-clip">
+      <AuthSessionKeepAlive />
       <VisualViewportOffsetHandler />
       <DashboardSidebar user={user} />
       <SidebarInset className="flex h-svh max-h-svh min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">

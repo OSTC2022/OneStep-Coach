@@ -403,7 +403,7 @@ export default function LoginPage() {
                       onCheckedChange={(checked) => setRememberMe(checked === true)}
                       disabled={loginPending}
                     />
-                    <span>자동 로그인</span>
+                    <span>자동 로그인 (이 기기 최대 90일)</span>
                   </label>
                   <Button
                     type="submit"

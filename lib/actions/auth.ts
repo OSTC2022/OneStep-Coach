@@ -50,16 +50,19 @@ async function applyRememberMeCookies(rememberMe: boolean) {
       cookieStore.set(
         cookie.name,
         cookie.value,
-        applyRememberMeToSupabaseCookieOptions(cookie.name, { path: '/', sameSite: 'lax', secure }, true),
+        applyRememberMeToSupabaseCookieOptions(
+          cookie.name,
+          { path: '/', sameSite: 'lax', secure },
+          true,
+        ),
       )
     }
     return
   }
 
-  cookieStore.set(REMEMBER_ME_COOKIE, '', {
+  cookieStore.set(REMEMBER_ME_COOKIE, '0', {
     path: '/',
-    maxAge: 0,
-    expires: new Date(0),
+    maxAge: REMEMBER_ME_MAX_AGE_SECONDS,
     sameSite: 'lax',
     secure,
     httpOnly: true,
