@@ -1330,6 +1330,9 @@ export function LessonCreateDialog({
               : undefined
           }
         />
+        <p className="text-[11px] text-muted-foreground">
+          등록된 회원이 아니어도 이름을 입력해 캘린더 일정으로 추가할 수 있습니다.
+        </p>
       </LessonFormSection>
 
       <LessonFormSection

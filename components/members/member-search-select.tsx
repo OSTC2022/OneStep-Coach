@@ -1,7 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronsUpDown, Clock, Loader2, Search } from 'lucide-react'
+import {
+  Check,
+  ChevronsUpDown,
+  Clock,
+  Loader2,
+  Search,
+  UserRoundPlus,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   addMemberRecentQuery,
@@ -197,6 +204,14 @@ export function MemberSearchSelect({
     query.trim().length >= 1 &&
     isSearching &&
     !hasLocalMatches
+  const canUseFreeText =
+    allowFreeText &&
+    Boolean(query.trim()) &&
+    !filtered.some(
+      (member) =>
+        member.name.trim().toLocaleLowerCase() ===
+        query.trim().toLocaleLowerCase(),
+    )
 
   function isMemberDisabled(member: MemberSearchOption) {
     return disabledIds.includes(member.id) && member.id !== value
@@ -243,6 +258,15 @@ export function MemberSearchSelect({
     bumpAndRefresh({ id: member.id, name: member.name })
     onValueChange(member.id, member)
     setQuery(member.name)
+    closePickers()
+  }
+
+  function selectFreeText() {
+    const trimmed = query.trim()
+    if (!trimmed) return
+    onValueChange('')
+    setQuery(trimmed)
+    bumpAndRefresh({ name: trimmed })
     closePickers()
   }
 
@@ -384,7 +408,9 @@ export function MemberSearchSelect({
               ))}
             </div>
           )}
-          {searchOpen && query.trim() && (filtered.length > 0 || showSearchingHint) && (
+          {searchOpen &&
+            query.trim() &&
+            (filtered.length > 0 || showSearchingHint || canUseFreeText) && (
             <div
               data-inline-picker-open="true"
               className={suggestionListClass}
@@ -420,6 +446,23 @@ export function MemberSearchSelect({
                   </button>
                 )
               })}
+              {canUseFreeText && !isSearching ? (
+                <button
+                  type="button"
+                  className="mt-1 flex w-full items-center gap-2 border-t border-border/60 px-2 py-2 text-left text-sm text-foreground hover:bg-muted/70"
+                  onClick={selectFreeText}
+                >
+                  <UserRoundPlus className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">
+                      “{query.trim()}” 이름으로 일정 추가
+                    </span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      회원 등록 없이 캘린더에만 저장
+                    </span>
+                  </span>
+                </button>
+              ) : null}
               {isSearching && filtered.length > 0 ? (
                 <p className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
                   <Loader2 className="h-2.5 w-2.5 animate-spin" />
