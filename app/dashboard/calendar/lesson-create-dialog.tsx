@@ -110,7 +110,10 @@ interface LessonCreateDialogProps {
   instructors: Instructor[]
   defaultInstructorId?: string | null
   onSaved: (lesson: Lesson) => void
-  onDeleted?: (lessonIds: string[]) => void
+  onDeleted?: (
+    lessonIds: string[],
+    meta?: { scope?: LessonSeriesScope; anchorDate?: string },
+  ) => void
   onEditDraftChange?: (draft: { instructorId: string }) => void
   variant?: 'dialog' | 'popup'
   anchor?: LessonEditAnchor | null
@@ -558,9 +561,28 @@ export function LessonCreateDialog({
       setStartTime(draft.startTime)
       setEndTime('')
       editDurationMinutesRef.current = null
+      setIsAddingToSlot(false)
+      setSeriesGroupId(null)
       setRecurrencePattern('none')
-      setRecurrenceEndDate(defaultRecurrenceEndDate(draft.date))
+      setRecurrenceEndDate('')
+      return
     }
+
+    // 신규 등록 — 이전 폼의 반복 설정을 절대 이어받지 않음
+    setMemberId('')
+    setEntryText('')
+    setCalendarDisplayText('')
+    setInstructorId(initialInstructorId)
+    setLessonType('개인레슨')
+    setSessionPackageId('')
+    setDate('')
+    setStartTime('')
+    setEndTime('')
+    editDurationMinutesRef.current = null
+    setIsAddingToSlot(false)
+    setSeriesGroupId(null)
+    setRecurrencePattern('none')
+    setRecurrenceEndDate('')
   }, [open, lesson, draft, sameSlotLessons, initialInstructorId])
 
   useEffect(() => {
@@ -731,8 +753,12 @@ export function LessonCreateDialog({
       title: string | null
     },
     successLabel: string,
+    options?: { forceNoRecurrence?: boolean },
   ) {
-    if (recurrencePattern !== 'none') {
+    const useRecurrence =
+      !options?.forceNoRecurrence && recurrencePattern !== 'none'
+
+    if (useRecurrence) {
       if (!validateLessonIdentityForRecurrence()) {
         setIsLoading(false)
         return
@@ -786,6 +812,8 @@ export function LessonCreateDialog({
     const result = await createLesson({
       ...schedulePayload,
       ...identityPayload,
+      recurrence_pattern: 'none',
+      recurrence_group_id: null,
       preserve_title_identity:
         !identityPayload.member_id && Boolean(identityPayload.title),
     })
@@ -811,8 +839,11 @@ export function LessonCreateDialog({
     setEntryText('')
     setCalendarDisplayText('')
     setInstructorId(lesson.instructor_id || initialInstructorId)
+    // 같은 슬롯에 추가하는 수업은 반복을 상속하지 않음
+    recurrenceUserEditedRef.current = true
+    setSeriesGroupId(null)
     setRecurrencePattern('none')
-    setRecurrenceEndDate(defaultRecurrenceEndDate(lesson.lesson_date))
+    setRecurrenceEndDate('')
   }
 
   async function handleDeleteRequest() {
@@ -864,7 +895,10 @@ export function LessonCreateDialog({
       const deletedIds = result.deletedIds ?? []
       if (deletedIds.length === 0) {
         if (scope === 'future') {
-          onDeleted?.([lesson.id])
+          onDeleted?.([lesson.id], {
+            scope,
+            anchorDate: seriesAnchorDate,
+          })
           toast.success('이후 반복 일정이 삭제되었습니다.')
           handleOpenChange(false)
           return
@@ -876,11 +910,18 @@ export function LessonCreateDialog({
         return
       }
 
-      onDeleted?.(deletedIds)
+      onDeleted?.(deletedIds, {
+        scope,
+        anchorDate: seriesAnchorDate,
+      })
       toast.success(
-        deletedIds.length > 1
-          ? `${deletedIds.length}개 수업이 삭제되었습니다.`
-          : '수업이 삭제되었습니다.',
+        scope === 'all'
+          ? '반복 일정이 삭제되었습니다.'
+          : scope === 'future'
+            ? '이후 반복 일정이 삭제되었습니다.'
+            : deletedIds.length > 1
+              ? `${deletedIds.length}개 수업이 삭제되었습니다.`
+              : '수업이 삭제되었습니다.',
       )
       handleOpenChange(false)
     } catch (error) {
@@ -1148,7 +1189,12 @@ export function LessonCreateDialog({
         return
       }
 
-      await saveNewLessons(schedulePayload, identityPayload, '수업이 추가되었습니다.')
+      // 슬롯 추가·신규 등록은 반복 설정 없이 단일 수업만 생성
+      recurrenceUserEditedRef.current = true
+      setRecurrencePattern('none')
+      await saveNewLessons(schedulePayload, identityPayload, '수업이 추가되었습니다.', {
+        forceNoRecurrence: true,
+      })
       return
     }
 
@@ -1422,35 +1468,52 @@ export function LessonCreateDialog({
       >
         <div className="space-y-0.5">
           <Label className={isCompactForm ? POPUP_FIELD_LABEL : undefined}>반복</Label>
-          <Select
-            value={recurrencePattern}
-            onValueChange={(value) => {
-              const next = value as LessonRecurrencePattern
-              recurrenceUserEditedRef.current = true
-              setRecurrencePattern(next)
-              setRecurrenceEndDate(defaultRecurrenceEndDate(date, next))
-            }}
-          >
-            <SelectTrigger
-              className={
-                isCompactForm
-                  ? 'h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none'
-                  : undefined
-              }
+          {isAddingToSlot ? (
+            <>
+              <p
+                className={
+                  isCompactForm
+                    ? 'text-xs font-semibold text-foreground'
+                    : 'text-sm font-medium'
+                }
+              >
+                반복 없음
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                같은 시간에 추가하는 수업은 반복 없이 한 번만 등록됩니다.
+              </p>
+            </>
+          ) : (
+            <Select
+              value={recurrencePattern}
+              onValueChange={(value) => {
+                const next = value as LessonRecurrencePattern
+                recurrenceUserEditedRef.current = true
+                setRecurrencePattern(next)
+                setRecurrenceEndDate(defaultRecurrenceEndDate(date, next))
+              }}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LESSON_RECURRENCE_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <SelectTrigger
+                className={
+                  isCompactForm
+                    ? 'h-7 border-0 bg-transparent px-0 text-xs font-semibold shadow-none'
+                    : undefined
+                }
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LESSON_RECURRENCE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
-        {recurrencePattern !== 'none' ? (
+        {!isAddingToSlot && recurrencePattern !== 'none' ? (
           <div className="space-y-1">
             {isOpenEndedRecurrencePattern(recurrencePattern) ? (
               <p className="text-[11px] text-muted-foreground">

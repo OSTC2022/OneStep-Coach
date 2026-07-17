@@ -271,16 +271,18 @@ export function MonthMemoInput({
             {suggestions.map((member, index) => {
               const color = getInstructorCalendarColor(null)
               const label = formatMemberCalendarLabel(member)
+              const isArmed = index === activeIndex && armedIndex === index
+              const isActive = index === activeIndex
               return (
-                <li key={member.id} role="option" aria-selected={index === activeIndex}>
+                <li key={member.id} role="option" aria-selected={isActive}>
                   <button
                     type="button"
                     className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-accent active:bg-accent',
-                      index === activeIndex && 'bg-accent',
-                      index === activeIndex &&
-                        armedIndex === index &&
-                        'ring-2 ring-inset ring-primary/60',
+                      'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors',
+                      'hover:bg-muted/70 active:bg-muted',
+                      isActive && !isArmed && 'bg-muted text-foreground',
+                      isArmed &&
+                        'bg-primary/15 text-foreground ring-2 ring-inset ring-primary/50',
                     )}
                     onMouseEnter={() => {
                       setActiveIndex(index)
@@ -302,7 +304,9 @@ export function MonthMemoInput({
                       className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: color }}
                     />
-                    <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                      {label}
+                    </span>
                     {parsed.startTime && (
                       <span className="shrink-0 text-xs text-muted-foreground">
                         {parsed.startTime}

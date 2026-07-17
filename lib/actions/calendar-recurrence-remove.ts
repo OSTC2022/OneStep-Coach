@@ -439,10 +439,31 @@ async function removeRecurringMasterRecurrence(
   const deletedIds: string[] = [masterId]
 
   if (scope === 'single') {
+    // EXDATE만 넣고 RRULE이 없으면 확장이 pattern을 못 읽어 예외일이 무시될 수 있음
+    let recurrenceLines = [...(row.recurrence ?? [])]
+    if (!recurrenceLines.some((line) => line.startsWith('RRULE:'))) {
+      const pattern = row.recurrence_pattern
+      if (pattern && pattern !== 'none') {
+        const { patternToRRuleLines } = await import('@/lib/calendar-recurrence/types')
+        const { parseLessonRecurrencePattern } = await import('@/lib/lesson-recurrence')
+        recurrenceLines = [
+          ...patternToRRuleLines(
+            parseLessonRecurrencePattern(pattern),
+            row.lesson_date,
+          ),
+          ...recurrenceLines,
+        ]
+      }
+    }
+
     await supabase
       .from('lessons')
       .update({
-        recurrence: addExdateToRecurrence(row.recurrence, occurrenceDate, row.start_time),
+        recurrence: addExdateToRecurrence(
+          recurrenceLines,
+          occurrenceDate,
+          row.start_time,
+        ),
       })
       .eq('id', masterId)
 

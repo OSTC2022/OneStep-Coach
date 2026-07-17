@@ -7,9 +7,11 @@ import {
   buildVirtualLessonId,
   isDisplayStoredLesson,
   isRecurringMaster,
+  patternToRRuleLines,
   rruleLinesToPattern,
   type RecurrenceCapableLesson,
 } from '@/lib/calendar-recurrence/types'
+import { parseLessonRecurrencePattern } from '@/lib/lesson-recurrence'
 
 function toDateKey(date: Date) {
   return format(date, 'yyyy-MM-dd')
@@ -145,7 +147,15 @@ function shouldPreferRecurringMasterForOccurrence(
 
 function buildRRuleFromMaster(master: RecurrenceCapableLesson): RRule | null {
   const lines = master.recurrence ?? []
-  const rruleLine = lines.find((line) => line.startsWith('RRULE:'))
+  let rruleLine = lines.find((line) => line.startsWith('RRULE:'))
+
+  // 레거시: pattern만 있고 RRULE 문자열이 없는 마스터도 확장·EXDATE가 동작하도록
+  if (!rruleLine) {
+    const pattern = parseLessonRecurrencePattern(master.recurrence_pattern)
+    if (pattern && pattern !== 'none') {
+      rruleLine = patternToRRuleLines(pattern, master.lesson_date)[0]
+    }
+  }
   if (!rruleLine) return null
 
   const dtstart = parseLessonDateTime(master.lesson_date, master.start_time)

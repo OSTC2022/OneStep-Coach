@@ -849,7 +849,10 @@ export function LessonCalendar({
     void syncRange(lessonDate, nextView, { force: true, refreshing: true })
   }
 
-  function handleLessonDeleted(lessonIds: string[]) {
+  function handleLessonDeleted(
+    lessonIds: string[],
+    meta?: { scope?: 'single' | 'future' | 'all'; anchorDate?: string },
+  ) {
     const idSet = new Set(lessonIds)
     const virtualOccurrences = new Map<string, Set<string>>()
 
@@ -864,12 +867,33 @@ export function LessonCalendar({
     const shouldRemove = (lesson: Lesson) => {
       if (idSet.has(lesson.id)) return true
 
+      const virtual = parseVirtualLessonId(lesson.id)
+
+      // 마스터 행이 삭제된 경우(전체 삭제) — 가상 발생 전부 제거
+      if (virtual && idSet.has(virtual.masterId)) return true
+      if (
+        lesson.recurring_master_id &&
+        idSet.has(lesson.recurring_master_id)
+      ) {
+        return true
+      }
+
       for (const [masterId, dates] of virtualOccurrences) {
-        const virtual = parseVirtualLessonId(lesson.id)
         if (virtual?.masterId === masterId && dates.has(virtual.occurrenceDate)) {
           return true
         }
         if (lesson.recurring_master_id === masterId && dates.has(lesson.lesson_date)) {
+          return true
+        }
+
+        // 이후 모두 삭제 — 앵커일 이후 가상/파생 발생 제거
+        if (
+          meta?.scope === 'future' &&
+          meta.anchorDate &&
+          (virtual?.masterId === masterId ||
+            lesson.recurring_master_id === masterId) &&
+          lesson.lesson_date >= meta.anchorDate
+        ) {
           return true
         }
       }

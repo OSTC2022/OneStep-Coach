@@ -131,8 +131,41 @@ export async function deleteRecurringMasterSeries(
       .select('id')
       .eq('recurring_master_id', masterId)
 
-    const ids = [masterId, ...(exceptions ?? []).map((item) => item.id)]
-    const { error: deleteError } = await supabase.from('lessons').delete().in('id', ids)
+    const ids = new Set<string>([masterId, ...(exceptions ?? []).map((item) => item.id)])
+
+    if (row.recurrence_group_id) {
+      const { data: groupRows } = await supabase
+        .from('lessons')
+        .select('id')
+        .eq('recurrence_group_id', row.recurrence_group_id)
+
+      for (const item of groupRows ?? []) {
+        ids.add(item.id)
+      }
+    }
+
+    if (row.member_id) {
+      const startKey = (row.start_time ?? '').slice(0, 5)
+      const { data: slotRows } = await supabase
+        .from('lessons')
+        .select('id, start_time, event_type, recurrence_group_id')
+        .eq('member_id', row.member_id)
+
+      for (const slotRow of slotRows ?? []) {
+        if (slotRow.id === masterId) continue
+        if ((slotRow.start_time ?? '').slice(0, 5) !== startKey) continue
+        if (
+          slotRow.recurrence_group_id &&
+          row.recurrence_group_id &&
+          slotRow.recurrence_group_id === row.recurrence_group_id
+        ) {
+          ids.add(slotRow.id)
+        }
+      }
+    }
+
+    const idList = [...ids]
+    const { error: deleteError } = await supabase.from('lessons').delete().in('id', idList)
     if (deleteError) return { error: deleteError.message }
     scheduleGoogleLessonDeletes([
       {
@@ -147,17 +180,36 @@ export async function deleteRecurringMasterSeries(
       },
     ])
     revalidateCalendarPaths()
-    return { deletedIds: ids }
+    return { deletedIds: idList }
   }
 
   if (scope === 'single') {
     const storedDeleteIds = await deleteStoredOccurrenceRows(supabase, row, occurrenceDate)
     deletedIds.push(...storedDeleteIds)
 
+    // EXDATE만 넣고 RRULE이 없으면 확장이 pattern을 못 읽어 예외일이 무시될 수 있음
+    let recurrenceLines = [...(row.recurrence ?? [])]
+    if (!recurrenceLines.some((line) => line.startsWith('RRULE:'))) {
+      const pattern = row.recurrence_pattern
+      if (pattern && pattern !== 'none') {
+        recurrenceLines = [
+          ...patternToRRuleLines(
+            parseLessonRecurrencePattern(pattern),
+            row.lesson_date,
+          ),
+          ...recurrenceLines,
+        ]
+      }
+    }
+
     const { error: exdateError } = await supabase
       .from('lessons')
       .update({
-        recurrence: addExdateToRecurrence(row.recurrence, occurrenceDate, row.start_time),
+        recurrence: addExdateToRecurrence(
+          recurrenceLines,
+          occurrenceDate,
+          row.start_time,
+        ),
         app_modified_at: touchAppModifiedAt(),
       })
       .eq('id', masterId)
