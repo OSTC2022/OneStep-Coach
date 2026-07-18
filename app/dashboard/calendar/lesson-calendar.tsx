@@ -49,6 +49,10 @@ import type { Instructor, Lesson } from '@/lib/types'
 import { InstructorColorLabel } from '@/components/instructors/instructor-color-label'
 import { CalendarSearch } from './calendar-search'
 import { CalendarInstructorList } from './calendar-instructor-list'
+import { LessonStatusMemoBoard } from '@/components/lesson-status/lesson-status-memo-board'
+import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
+import type { StaffMemoNote } from '@/lib/actions/staff-memo-notes'
+import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 import { addWeeks } from 'date-fns'
 import {
   isEditableTarget,
@@ -118,6 +122,9 @@ interface LessonCalendarProps {
   instructors: Instructor[]
   members: MemberOption[]
   defaultInstructorId?: string | null
+  initialMemoNotes?: StaffMemoNote[]
+  memoMigrationWarning?: string
+  initialRunningSchedule?: CenterRunningTrainingScheduleBundle | null
 }
 
 export function LessonCalendar({
@@ -125,6 +132,9 @@ export function LessonCalendar({
   instructors,
   members,
   defaultInstructorId = null,
+  initialMemoNotes = [],
+  memoMigrationWarning,
+  initialRunningSchedule = null,
 }: LessonCalendarProps) {
   const [view, setView] = useState<CalendarView>('month')
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -1316,6 +1326,15 @@ export function LessonCalendar({
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+          <LessonStatusMemoBoard
+            initialNotes={initialMemoNotes}
+            migrationWarning={memoMigrationWarning}
+            triggerClassName="h-8 text-xs"
+          />
+          <RunningScheduleToolbarButton
+            initialBundle={initialRunningSchedule}
+            triggerClassName="h-8 text-xs"
+          />
           <Select value={instructorFilter} onValueChange={setInstructorFilter}>
             <SelectTrigger className="w-[130px]">
               {instructorFilter !== 'all' ? (

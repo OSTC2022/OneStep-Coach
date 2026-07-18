@@ -119,7 +119,11 @@ import {
 import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
 import { LessonMemberLinkDialog } from '@/components/lesson-status/lesson-member-link-dialog'
 import { LessonStatusWeightInput } from '@/components/lesson-status/lesson-status-weight-input'
+import { LessonStatusMemoBoard } from '@/components/lesson-status/lesson-status-memo-board'
+import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
 import type { LessonStatusBodyWeightSnapshot } from '@/lib/actions/member-body-records'
+import type { StaffMemoNote } from '@/lib/actions/staff-memo-notes'
+import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 
 const SignaturePadDialog = dynamic(
   () =>
@@ -155,6 +159,9 @@ interface LessonStatusViewProps {
   showAddSchedule?: boolean
   isAdmin?: boolean
   initialBodyWeightByKey?: Record<string, LessonStatusBodyWeightSnapshot>
+  initialMemoNotes?: StaffMemoNote[]
+  memoMigrationWarning?: string
+  initialRunningSchedule?: CenterRunningTrainingScheduleBundle | null
 }
 
 const VIEW_MODE_OPTIONS: { value: LessonStatusViewMode; label: string }[] = [
@@ -1219,6 +1226,9 @@ export function LessonStatusView({
   showAddSchedule = false,
   isAdmin = false,
   initialBodyWeightByKey = EMPTY_BODY_WEIGHT_BY_KEY,
+  initialMemoNotes = [],
+  memoMigrationWarning,
+  initialRunningSchedule = null,
 }: LessonStatusViewProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -2223,6 +2233,15 @@ export function LessonStatusView({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <LessonStatusMemoBoard
+            initialNotes={initialMemoNotes}
+            migrationWarning={memoMigrationWarning}
+            triggerClassName="h-8 text-xs"
+          />
+          <RunningScheduleToolbarButton
+            initialBundle={initialRunningSchedule}
+            triggerClassName="h-8 text-xs"
+          />
           <Link href="/dashboard/calendar">
             <Button type="button" variant="outline" size="sm" className="h-8 text-xs">
               <CalendarDays className="h-3.5 w-3.5 mr-1" />

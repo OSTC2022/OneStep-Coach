@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import { getLessonsForStatusView } from '@/lib/actions/lessons'
 import { getInstructors } from '@/lib/actions/instructors'
 import { getMemberBodyWeightsForLessons } from '@/lib/actions/member-body-records'
+import { listStaffMemoNotes } from '@/lib/actions/staff-memo-notes'
+import { getCenterRunningTrainingScheduleForStaff } from '@/lib/actions/center-running-training-schedule'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { getRangeForView, type CalendarView } from '@/lib/calendar-utils'
 import { buildLessonStatusEntryPath } from '@/lib/lesson-status-date'
@@ -59,7 +61,7 @@ export default async function LessonStatusPage({
       ? { date: selectedDate }
       : getRangeForView(parseISO(selectedDate), rangeView)
 
-  const [lessons, instructors] = await Promise.all([
+  const [lessons, instructors, memoResult, runningSchedule] = await Promise.all([
     viewMode === 'day'
       ? getLessonsForStatusView({
           date: selectedDate,
@@ -74,6 +76,8 @@ export default async function LessonStatusPage({
       calendar: true,
       limit: INSTRUCTOR_PICKER_LIMIT,
     }),
+    listStaffMemoNotes(),
+    getCenterRunningTrainingScheduleForStaff(),
   ])
 
   const bodyWeightByKey = await getMemberBodyWeightsForLessons(
@@ -89,7 +93,7 @@ export default async function LessonStatusPage({
     <div className="space-y-3 pt-12 lg:pt-0">
       <div>
         <h1 className="text-xl font-bold lg:text-2xl">수업현황</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
+        <p className="mt-0.5 text-xs text-muted-foreground">
           시간대별 선수 · 출석/취소로 바로 변경
         </p>
       </div>
@@ -102,6 +106,9 @@ export default async function LessonStatusPage({
         showAddSchedule={userRole === 'admin'}
         isAdmin={userRole === 'admin'}
         initialBodyWeightByKey={bodyWeightByKey}
+        initialMemoNotes={memoResult.data}
+        memoMigrationWarning={memoResult.warning}
+        initialRunningSchedule={runningSchedule}
       />
     </div>
   )

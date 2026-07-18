@@ -41,7 +41,10 @@ import {
   convertLessonToRecurringSeries as convertLessonToRecurringSeriesInternal,
 } from '@/lib/actions/calendar-recurrence-convert'
 import { buildAppRecurringMasterPayload } from '@/lib/calendar-recurrence/google-sync-mapper'
-import { parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
+import {
+  parseVirtualLessonId,
+  rruleLinesToPattern,
+} from '@/lib/calendar-recurrence/types'
 import {
   scheduleGoogleLessonPush,
   scheduleGoogleLessonDeletes,
@@ -56,7 +59,6 @@ import {
   encodeRecurrenceInSpecialNote,
   enrichLessonRecurrenceFields,
   filterLessonsByRecurringSlotMatch,
-  inferRecurrenceFromSlotLessons,
   resolveLessonRecurrence,
   stripRecurrenceFromSpecialNote,
 } from '@/lib/lesson-recurrence-legacy'
@@ -1527,110 +1529,75 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
 
   let { data: lesson, error } = await supabase
     .from('lessons')
-    .select(LESSON_SERIES_SELECT)
+    .select(
+      `${LESSON_SERIES_SELECT}, event_type, recurrence, recurring_master_id`,
+    )
     .eq('id', resolvedId)
     .maybeSingle()
 
-  if (error && isMissingRecurrenceColumn(error)) {
+  if (
+    error &&
+    (isMissingRecurrenceColumn(error) ||
+      (error.message?.toLowerCase().includes('event_type') ?? false) ||
+      (error.message?.toLowerCase().includes('recurrence') ?? false))
+  ) {
     const legacy = await supabase
       .from('lessons')
       .select(LESSON_SERIES_SELECT_LEGACY)
       .eq('id', resolvedId)
       .maybeSingle()
-    lesson = legacy.data
+    lesson = legacy.data as typeof lesson
     error = legacy.error
   }
 
   if (error && !isRowNotFoundError(error)) return null
   if (!lesson) return null
 
+  // 편집 폼용: DB에 명시된 반복만 반환.
+  // 같은 회원·시간 일정 간격으로 weekly/biweekly를 "추정"하면
+  // 단발 수업이 2주마다로 뜨고, 저장 시 진짜 반복으로 바뀌는 버그가 난다.
   const resolved = resolveLessonRecurrence(lesson)
-  if (resolved.groupId && resolved.pattern !== 'none') {
+  const explicitGroupId =
+    resolved.groupId && !resolved.groupId.startsWith('slot:')
+      ? resolved.groupId
+      : null
+  const explicitPattern =
+    resolved.pattern !== 'none' ? resolved.pattern : ('none' as const)
+
+  if (explicitGroupId && explicitPattern !== 'none') {
     let endDate: string | null = null
 
-    if (resolved.groupId.startsWith('slot:')) {
-      if (lesson.member_id) {
-        const { data: candidates } = await supabase
-          .from('lessons')
-          .select(LESSON_SERIES_SELECT)
-          .eq('member_id', lesson.member_id)
-        const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
-        endDate = inferred?.endDate ?? null
-      } else {
-        const title = resolveLessonTitle(lesson)
-        if (title) {
-          const { data: candidates } = await supabase
-            .from('lessons')
-            .select(LESSON_SERIES_SELECT)
-            .eq('title', title)
-            .is('member_id', null)
-          const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
-          endDate = inferred?.endDate ?? null
-        }
-      }
+    const { data: groupSiblings, error: groupError } = await supabase
+      .from('lessons')
+      .select('lesson_date')
+      .eq('recurrence_group_id', explicitGroupId)
+      .order('lesson_date', { ascending: false })
+      .limit(1)
+
+    if (!groupError && groupSiblings?.length) {
+      endDate = groupSiblings[0].lesson_date
     } else {
-      const { data: groupSiblings, error: groupError } = await supabase
+      const legacy = await supabase
         .from('lessons')
-        .select('lesson_date')
-        .eq('recurrence_group_id', resolved.groupId)
+        .select('lesson_date, special_note')
+        .ilike('special_note', `%${explicitGroupId}%`)
         .order('lesson_date', { ascending: false })
         .limit(1)
-
-      if (!groupError && groupSiblings?.length) {
-        endDate = groupSiblings[0].lesson_date
-      } else {
-        const legacy = await supabase
-          .from('lessons')
-          .select('lesson_date, special_note')
-          .ilike('special_note', `%${resolved.groupId}%`)
-          .order('lesson_date', { ascending: false })
-          .limit(1)
-        endDate = legacy.data?.[0]?.lesson_date ?? null
-      }
+      endDate = legacy.data?.[0]?.lesson_date ?? null
     }
 
     return {
-      pattern: resolved.pattern,
-      groupId: resolved.groupId,
-      endDate: isOpenEndedRecurrencePattern(resolved.pattern) ? null : endDate,
+      pattern: explicitPattern,
+      groupId: explicitGroupId,
+      endDate: isOpenEndedRecurrencePattern(explicitPattern) ? null : endDate,
     }
   }
 
-  if (lesson.member_id) {
-    const { data: candidates } = await supabase
-      .from('lessons')
-      .select(LESSON_SERIES_SELECT)
-      .eq('member_id', lesson.member_id)
-
-    const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
-    if (inferred) {
-      return {
-        pattern: inferred.pattern,
-        groupId: inferred.groupId,
-        endDate: inferred.endDate,
-      }
-    }
-  }
-
-  const title = resolveLessonTitle(lesson)
-  if (title && !lesson.member_id) {
-    const { data: candidates } = await supabase
-      .from('lessons')
-      .select(LESSON_SERIES_SELECT)
-      .eq('title', title)
-      .is('member_id', null)
-
-    const inferred = inferRecurrenceFromSlotLessons(lesson, candidates ?? [])
-    if (inferred) {
-      return {
-        pattern: inferred.pattern,
-        groupId: inferred.groupId,
-        endDate: inferred.endDate,
-      }
-    }
-  }
-
-  const recurringTarget = await resolveRecurringDeleteTarget(lessonId, lesson.lesson_date)
+  // 가상 발생 / 마스터 / 예외 — 마스터에 저장된 패턴만 사용
+  const recurringTarget = await resolveRecurringDeleteTarget(
+    lessonId,
+    lesson.lesson_date,
+  )
   if (recurringTarget) {
     const { data: master } = await supabase
       .from('lessons')
@@ -1640,14 +1607,51 @@ export async function getLessonRecurrenceInfo(lessonId: string): Promise<{
 
     if (master) {
       const masterResolved = resolveLessonRecurrence(master)
-      if (masterResolved.groupId && masterResolved.pattern !== 'none') {
+      const masterGroupId =
+        masterResolved.groupId && !masterResolved.groupId.startsWith('slot:')
+          ? masterResolved.groupId
+          : master.id
+      if (masterResolved.pattern !== 'none') {
         return {
           pattern: masterResolved.pattern,
-          groupId: masterResolved.groupId,
+          groupId: masterGroupId,
           endDate: isOpenEndedRecurrencePattern(masterResolved.pattern)
             ? null
             : null,
         }
+      }
+
+      // RRULE만 있고 pattern 컬럼이 비어 있는 경우
+      const { data: masterWithRule } = await supabase
+        .from('lessons')
+        .select('recurrence, recurrence_pattern, event_type')
+        .eq('id', recurringTarget.masterId)
+        .maybeSingle()
+      const fromRrule = rruleLinesToPattern(
+        (masterWithRule as { recurrence?: string[] | null } | null)?.recurrence,
+      )
+      if (fromRrule !== 'none') {
+        return {
+          pattern: fromRrule,
+          groupId: masterGroupId,
+          endDate: null,
+        }
+      }
+    }
+  }
+
+  // event_type=recurring_master 이고 pattern/RRULE이 있는 경우
+  if ((lesson as { event_type?: string | null }).event_type === 'recurring_master') {
+    const fromRrule = rruleLinesToPattern(
+      (lesson as { recurrence?: string[] | null }).recurrence,
+    )
+    const pattern =
+      explicitPattern !== 'none' ? explicitPattern : fromRrule
+    if (pattern !== 'none') {
+      return {
+        pattern,
+        groupId: explicitGroupId ?? lesson.id,
+        endDate: isOpenEndedRecurrencePattern(pattern) ? null : null,
       }
     }
   }

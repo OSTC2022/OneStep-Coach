@@ -127,7 +127,7 @@ export function MonthView({
   const today = new Date()
 
   const monthCalendarGrid = (
-    <>
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <div className="grid shrink-0 grid-cols-7 border-b border-border bg-muted/30">
         {WEEKDAY_LABELS.map((label, i) => (
           <div
@@ -142,11 +142,11 @@ export function MonthView({
         ))}
       </div>
 
-      <div className="flex shrink-0 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {visibleWeeks.map((week, wi) => (
           <div
             key={wi}
-            className="grid shrink-0 grid-cols-7 border-b border-border last:border-b-0"
+            className="grid h-full min-h-0 flex-1 grid-cols-7 border-b border-border last:border-b-0"
             style={{ minHeight: MIN_WEEK_ROW_PX }}
           >
             {week.map((date) => {
@@ -163,7 +163,7 @@ export function MonthView({
                   key={dateKey}
                   type="button"
                   className={cn(
-                    'flex min-h-0 flex-col overflow-hidden border-r border-border p-0 text-left last:border-r-0 md:p-0.5',
+                    'flex h-full min-h-0 flex-col overflow-hidden border-r border-border p-0 text-left last:border-r-0 md:p-0.5',
                     !inMonth && 'bg-muted/20',
                     isToday && !isSelected && 'bg-primary/5',
                     isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/50',
@@ -214,7 +214,7 @@ export function MonthView({
           </div>
         ))}
       </div>
-    </>
+    </div>
   )
 
   const dayPanel = (
@@ -281,7 +281,14 @@ export function MonthView({
         </>
       ) : (
         <>
-          <div className="flex shrink-0 flex-col overflow-hidden">{monthCalendarGrid}</div>
+          <div
+            className="flex shrink-0 flex-col overflow-hidden"
+            style={{
+              height: WEEKDAY_HEADER_PX + MIN_WEEK_ROW_PX + 4,
+            }}
+          >
+            {monthCalendarGrid}
+          </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{dayPanel}</div>
         </>
       )}

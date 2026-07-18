@@ -55,7 +55,11 @@ export function resolveLessonRecurrence(lesson: {
   recurrence_pattern?: string | null
   special_note?: string | null
 }): { groupId: string | null; pattern: LessonRecurrencePattern } {
-  if (lesson.recurrence_group_id) {
+  // slot: 접두사는 과거 "간격 추정"용 가상 키 — 실제 반복 시리즈가 아님
+  if (
+    lesson.recurrence_group_id &&
+    !lesson.recurrence_group_id.startsWith('slot:')
+  ) {
     return {
       groupId: lesson.recurrence_group_id,
       pattern: parseLessonRecurrencePattern(lesson.recurrence_pattern),
@@ -63,7 +67,7 @@ export function resolveLessonRecurrence(lesson: {
   }
 
   const legacy = parseRecurrenceFromSpecialNote(lesson.special_note)
-  if (legacy) {
+  if (legacy && !legacy.groupId.startsWith('slot:')) {
     return {
       groupId: legacy.groupId,
       pattern: legacy.pattern,
@@ -199,7 +203,8 @@ function diffDays(a: string, b: string) {
   return Math.round(ms / (24 * 60 * 60 * 1000))
 }
 
-/** DB 메타 없을 때 같은 시간대 반복 일정 추정 */
+/** DB 메타 없을 때 같은 시간대 형제 일정 추정 (삭제 범위용).
+ * 편집 폼의 반복 표시에는 사용하지 말 것 — 우연한 14일 간격을 biweekly로 오인함. */
 export function inferRecurrenceFromSlotLessons(
   target: LessonSeriesRow,
   candidates: LessonSeriesRow[],

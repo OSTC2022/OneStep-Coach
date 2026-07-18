@@ -350,7 +350,11 @@ export function LessonCreateDialog({
   )
 
   function getActiveSeriesGroupId(targetLesson?: typeof lesson) {
-    return seriesGroupId ?? resolveLessonRecurrence(targetLesson ?? lesson ?? {}).groupId
+    const raw =
+      seriesGroupId ??
+      resolveLessonRecurrence(targetLesson ?? lesson ?? {}).groupId
+    if (!raw || raw.startsWith('slot:')) return null
+    return raw
   }
 
   const memberOptions = useMemo(
@@ -535,16 +539,24 @@ export function LessonCreateDialog({
       )
       void getLessonRecurrenceInfo(lesson.id).then((info) => {
         if (!info || initKeyRef.current !== initKey) return
-        setSeriesGroupId(info.groupId)
+        const safeGroupId =
+          info.groupId && !info.groupId.startsWith('slot:')
+            ? info.groupId
+            : null
+        setSeriesGroupId(safeGroupId)
         if (!recurrenceUserEditedRef.current) {
-          setRecurrencePattern(info.pattern)
+          setRecurrencePattern(info.pattern === 'none' ? 'none' : info.pattern)
         }
         if (
           info.endDate &&
+          info.pattern !== 'none' &&
           !isOpenEndedRecurrencePattern(info.pattern) &&
           !recurrenceUserEditedRef.current
         ) {
           setRecurrenceEndDate(info.endDate)
+        }
+        if (info.pattern === 'none' && !recurrenceUserEditedRef.current) {
+          setRecurrenceEndDate('')
         }
       })
       return
@@ -850,7 +862,8 @@ export function LessonCreateDialog({
     if (!isEditing || !lesson || isDeleting || isLoading) return
 
     const hasSeries =
-      Boolean(seriesGroupId) || recurrencePattern !== 'none'
+      isPersistedRecurringLesson(lesson) ||
+      (Boolean(getActiveSeriesGroupId()) && recurrencePattern !== 'none')
 
     if (hasSeries) {
       setDeleteScopeOpen(true)

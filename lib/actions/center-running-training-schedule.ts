@@ -399,6 +399,12 @@ export async function getCenterRunningTrainingScheduleAdminPreview(): Promise<Ce
   return fetchCenterRunningTrainingSchedule(null, { includeHidden: true })
 }
 
+/** 캘린더·수업현황 툴바 팝업용 — admin/instructor */
+export async function getCenterRunningTrainingScheduleForStaff(): Promise<CenterRunningTrainingScheduleBundle> {
+  await requireRole(['admin', 'instructor'])
+  return fetchCenterRunningTrainingSchedule(null, { includeHidden: true })
+}
+
 export async function toggleCenterRunningTrainingScheduleSignup(
   scheduleDayId: string,
 ): Promise<

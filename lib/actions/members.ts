@@ -23,6 +23,10 @@ import {
   type MemberListOrderBy,
 } from '@/lib/member-list-sort'
 import {
+  filterSortMembersForPicker,
+  isChosungOnlyQuery,
+} from '@/lib/korean-search'
+import {
   MEMBER_DETAIL_SELECT,
   MEMBER_LIST_SELECT,
   MEMBER_LIST_SELECT_LEGACY,
@@ -486,12 +490,29 @@ export async function listAdultRunningMembersForPicker(limit = 200): Promise<Mem
 export async function searchMembersForPicker(search: string) {
   const q = search.trim()
   if (!q) return []
+
+  // 초성(ㅇㅎ)은 DB ilike로 못 찾음 → 활성 회원 로드 후 메모리 매칭
+  if (isChosungOnlyQuery(q)) {
+    const { data } = await getMembers({
+      isActive: true,
+      limit: 800,
+      orderBy: 'name',
+      orderAsc: true,
+    })
+    return mapMembersToPickerOptions(
+      filterSortMembersForPicker(data, q, { limit: LIST_PAGE_SIZE }),
+    )
+  }
+
   const { data } = await getMembers({
     search: q,
     isActive: true,
     limit: LIST_PAGE_SIZE,
   })
-  return mapMembersToPickerOptions(data)
+  // 서버 부분일치 + 초성/한글 점수 재정렬
+  return mapMembersToPickerOptions(
+    filterSortMembersForPicker(data, q, { limit: LIST_PAGE_SIZE }),
+  )
 }
 
 /** 클라이언트 검색 — 동일 쿼리 재요청·캐시 재사용 */

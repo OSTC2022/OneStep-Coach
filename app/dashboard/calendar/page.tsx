@@ -1,6 +1,8 @@
 import { getLessonsForMonth } from '@/lib/actions/lessons'
 import { getInstructorForCurrentUser, getInstructors } from '@/lib/actions/instructors'
 import { listMembersForCalendarPicker } from '@/lib/actions/members'
+import { listStaffMemoNotes } from '@/lib/actions/staff-memo-notes'
+import { getCenterRunningTrainingScheduleForStaff } from '@/lib/actions/center-running-training-schedule'
 import { CalendarView } from './calendar-view'
 
 type CalendarMemberOption = {
@@ -46,12 +48,15 @@ export default async function CalendarPage() {
     })
   }
 
-  const [lessons, instructors, currentInstructor, pickerMembers] = await Promise.all([
-    getLessonsForMonth(year, month),
-    getInstructors({ isActive: true, calendar: true, limit: 80 }),
-    getInstructorForCurrentUser(),
-    listMembersForCalendarPicker(),
-  ])
+  const [lessons, instructors, currentInstructor, pickerMembers, memoResult, runningSchedule] =
+    await Promise.all([
+      getLessonsForMonth(year, month),
+      getInstructors({ isActive: true, calendar: true, limit: 80 }),
+      getInstructorForCurrentUser(),
+      listMembersForCalendarPicker(),
+      listStaffMemoNotes(),
+      getCenterRunningTrainingScheduleForStaff(),
+    ])
 
   if (process.env.NODE_ENV === 'development') {
     console.log('[calendar] fetch success', lessons.length)
@@ -67,6 +72,9 @@ export default async function CalendarPage() {
         instructors={instructors}
         members={members}
         defaultInstructorId={currentInstructor?.id ?? null}
+        initialMemoNotes={memoResult.data}
+        memoMigrationWarning={memoResult.warning}
+        initialRunningSchedule={runningSchedule}
       />
     </div>
   )
