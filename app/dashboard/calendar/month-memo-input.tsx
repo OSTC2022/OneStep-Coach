@@ -47,7 +47,6 @@ export function MonthMemoInput({
   const [memo, setMemo] = useState('')
   const [selectedMember, setSelectedMember] = useState<MemoMember | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
-  const [armedIndex, setArmedIndex] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
@@ -115,7 +114,6 @@ export function MonthMemoInput({
 
   useEffect(() => {
     setActiveIndex(0)
-    setArmedIndex(null)
   }, [memo, suggestions.length])
 
   useEffect(() => {
@@ -202,24 +200,19 @@ export function MonthMemoInput({
     if (showSuggestions) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setArmedIndex(null)
         setActiveIndex((i) => (i + 1) % suggestions.length)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setArmedIndex(null)
         setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
         return
       }
       if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
         e.preventDefault()
         const member = suggestions[activeIndex]
-        if (member && armedIndex === activeIndex) {
+        if (member) {
           applyMember(member)
-          setArmedIndex(null)
-        } else if (member) {
-          setArmedIndex(activeIndex)
         } else {
           void submitMemo()
         }
@@ -260,7 +253,7 @@ export function MonthMemoInput({
             onPointerDown={(e) => e.preventDefault()}
           >
             <li className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-              한 번 눌러 표시 · 같은 항목을 다시 눌러 선택
+              클릭하면 바로 선택됩니다
             </li>
             {isSearching && suggestions.length === 0 ? (
               <li className="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground">
@@ -271,7 +264,6 @@ export function MonthMemoInput({
             {suggestions.map((member, index) => {
               const color = getInstructorCalendarColor(null)
               const label = formatMemberCalendarLabel(member)
-              const isArmed = index === activeIndex && armedIndex === index
               const isActive = index === activeIndex
               return (
                 <li key={member.id} role="option" aria-selected={isActive}>
@@ -280,24 +272,13 @@ export function MonthMemoInput({
                     className={cn(
                       'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors',
                       'hover:bg-muted/70 active:bg-muted',
-                      isActive && !isArmed && 'bg-muted text-foreground',
-                      isArmed &&
-                        'bg-primary/15 text-foreground ring-2 ring-inset ring-primary/50',
+                      isActive && 'bg-muted text-foreground',
                     )}
-                    onMouseEnter={() => {
-                      setActiveIndex(index)
-                      setArmedIndex(null)
-                    }}
+                    onMouseEnter={() => setActiveIndex(index)}
                     onPointerDown={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      if (armedIndex === index) {
-                        applyMember(member)
-                        setArmedIndex(null)
-                      } else {
-                        setActiveIndex(index)
-                        setArmedIndex(index)
-                      }
+                      applyMember(member)
                     }}
                   >
                     <span

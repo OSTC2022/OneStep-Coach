@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Redo2, RefreshCw, Undo2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ListChecks, Loader2, Redo2, RefreshCw, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -1335,6 +1335,12 @@ export function LessonCalendar({
             initialBundle={initialRunningSchedule}
             triggerClassName="h-8 text-xs"
           />
+          <Link href="/dashboard/lesson-status">
+            <Button type="button" variant="outline" size="sm" className="h-8 text-xs">
+              <ListChecks className="mr-1 h-3.5 w-3.5" />
+              수업현황
+            </Button>
+          </Link>
           <Select value={instructorFilter} onValueChange={setInstructorFilter}>
             <SelectTrigger className="w-[130px]">
               {instructorFilter !== 'all' ? (
