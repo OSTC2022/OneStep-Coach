@@ -1,6 +1,13 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
@@ -39,6 +46,11 @@ interface MonthMemoInputProps {
   onSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
 }
 
+const REMOTE_SEARCH_DEBOUNCE_MS = 280
+/** 로컬 회원 목록이 충분하면 서버 검색을 건너뛰어 입력 지연을 막음 */
+const LOCAL_CATALOG_SKIP_REMOTE = 40
+const LOCAL_MATCH_SKIP_REMOTE = 6
+
 export function MonthMemoInput({
   selectedDate,
   members,
@@ -55,6 +67,7 @@ export function MonthMemoInput({
   const searchGenerationRef = useRef(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const parsed = useMemo(() => parseMemoQuickAdd(memo), [memo])
   const memberQuery = useMemo(
@@ -62,38 +75,20 @@ export function MonthMemoInput({
     [parsed.memberQuery],
   )
 
-  useEffect(() => {
-    const q = memberQuery.trim()
-    if (!q) {
-      setRemoteMatches([])
-      setIsSearching(false)
-      return
+  const localSuggestions = useMemo(() => {
+    if (selectedMember && memberQuery === selectedMember.name) {
+      return [] as MemoMember[]
     }
-
-    const generation = ++searchGenerationRef.current
-    setIsSearching(true)
-
-    void searchMembersForPickerCached(q)
-      .then((rows) => {
-        if (searchGenerationRef.current !== generation) return
-        setRemoteMatches(rows)
-        setIsSearching(false)
-      })
-      .catch(() => {
-        if (searchGenerationRef.current === generation) {
-          setIsSearching(false)
-        }
-      })
-  }, [memberQuery])
+    return getMemoMemberSuggestions(members, memberQuery)
+  }, [members, memberQuery, selectedMember])
 
   const suggestions = useMemo(() => {
     if (selectedMember && memberQuery === selectedMember.name) {
-      return []
+      return [] as MemoMember[]
     }
 
-    const local = getMemoMemberSuggestions(members, memberQuery)
     const merged = new Map<string, MemoMember>()
-    for (const member of local) {
+    for (const member of localSuggestions) {
       merged.set(member.id, member)
     }
     for (const member of remoteMatches) {
@@ -102,8 +97,12 @@ export function MonthMemoInput({
       }
     }
 
+    if (remoteMatches.length === 0) {
+      return localSuggestions
+    }
+
     return getMemoMemberSuggestions(Array.from(merged.values()), memberQuery)
-  }, [members, memberQuery, selectedMember, remoteMatches])
+  }, [localSuggestions, memberQuery, selectedMember, remoteMatches])
 
   const showSuggestions =
     parsed.memberQuery.length > 0 && (suggestions.length > 0 || isSearching)
@@ -114,12 +113,68 @@ export function MonthMemoInput({
 
   useEffect(() => {
     setActiveIndex(0)
-  }, [memo, suggestions.length])
+  }, [memberQuery])
 
   useEffect(() => {
     setMemo('')
     setSelectedMember(null)
+    setRemoteMatches([])
   }, [selectedDate])
+
+  // 서버 검색은 디바운스 + 로컬 결과가 부족할 때만 (키마다 800명 조회 방지)
+  useEffect(() => {
+    const q = memberQuery.trim()
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+    }
+
+    if (!q) {
+      searchGenerationRef.current += 1
+      setRemoteMatches([])
+      setIsSearching(false)
+      return
+    }
+
+    if (
+      members.length >= LOCAL_CATALOG_SKIP_REMOTE &&
+      localSuggestions.length >= LOCAL_MATCH_SKIP_REMOTE
+    ) {
+      searchGenerationRef.current += 1
+      setRemoteMatches([])
+      setIsSearching(false)
+      return
+    }
+
+    // 로컬에 이미 결과가 있으면 검색 표시 없이 백그라운드만
+    if (localSuggestions.length === 0) {
+      setIsSearching(true)
+    }
+
+    const generation = ++searchGenerationRef.current
+    debounceTimerRef.current = setTimeout(() => {
+      void searchMembersForPickerCached(q)
+        .then((rows) => {
+          if (searchGenerationRef.current !== generation) return
+          startTransition(() => {
+            setRemoteMatches(rows)
+            setIsSearching(false)
+          })
+        })
+        .catch(() => {
+          if (searchGenerationRef.current === generation) {
+            setIsSearching(false)
+          }
+        })
+    }, REMOTE_SEARCH_DEBOUNCE_MS)
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+    }
+  }, [memberQuery, members.length, localSuggestions.length])
 
   useLayoutEffect(() => {
     if (!showSuggestions) {
@@ -130,7 +185,18 @@ export function MonthMemoInput({
     function updateAnchor() {
       const el = inputRef.current
       if (!el) return
-      setAnchorRect(el.getBoundingClientRect())
+      const next = el.getBoundingClientRect()
+      setAnchorRect((prev) => {
+        if (
+          prev &&
+          prev.left === next.left &&
+          prev.top === next.top &&
+          prev.width === next.width
+        ) {
+          return prev
+        }
+        return next
+      })
     }
 
     updateAnchor()
@@ -147,10 +213,12 @@ export function MonthMemoInput({
       window.removeEventListener('scroll', updateAnchor, true)
       window.removeEventListener('resize', updateAnchor)
     }
-  }, [showSuggestions, suggestions])
+  }, [showSuggestions])
 
   function applyMember(member: MemoMember) {
     setSelectedMember(member)
+    setRemoteMatches([])
+    setIsSearching(false)
     const label = formatMemberCalendarLabel(member)
     const current = parseMemoQuickAdd(memo)
     if (current.startTime) {
@@ -177,27 +245,36 @@ export function MonthMemoInput({
     }
 
     setIsSubmitting(true)
-    const result = await onSubmit({
-      date: format(selectedDate, 'yyyy-MM-dd'),
-      memberId: member?.id ?? null,
-      title: member ? null : parsed.memberQuery,
-      startTime,
-      endTime,
-    })
-    setIsSubmitting(false)
+    try {
+      const result = await onSubmit({
+        date: format(selectedDate, 'yyyy-MM-dd'),
+        memberId: member?.id ?? null,
+        title: member ? null : parsed.memberQuery,
+        startTime,
+        endTime,
+      })
 
-    if (result?.error) {
-      toast.error('일정 추가 실패', { description: result.error })
-      return
+      if (result?.error) {
+        toast.error('일정 추가 실패', { description: result.error })
+        return
+      }
+
+      setMemo('')
+      setSelectedMember(null)
+      setRemoteMatches([])
+      toast.success('일정이 추가되었습니다.')
+    } catch (error) {
+      console.error('submitMemo:', error)
+      toast.error('일정 추가 실패', {
+        description: '네트워크가 느릴 수 있습니다. 잠시 후 다시 시도해주세요.',
+      })
+    } finally {
+      setIsSubmitting(false)
     }
-
-    setMemo('')
-    setSelectedMember(null)
-    toast.success('일정이 추가되었습니다.')
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (showSuggestions) {
+    if (showSuggestions && suggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setActiveIndex((i) => (i + 1) % suggestions.length)
@@ -228,6 +305,7 @@ export function MonthMemoInput({
     if (e.key === 'Escape') {
       setMemo('')
       setSelectedMember(null)
+      setRemoteMatches([])
     }
   }
 
@@ -303,14 +381,18 @@ export function MonthMemoInput({
       : null
 
   return (
-    <div ref={containerRef} className="relative shrink-0 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 pr-20 md:pr-24">
+    <div
+      ref={containerRef}
+      className="relative shrink-0 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 pr-20 md:pr-24"
+    >
       <div className="relative">
         <Input
           ref={inputRef}
           value={memo}
           onChange={(e) => {
-            setMemo(e.target.value)
-            if (selectedMember && !e.target.value.includes(selectedMember.name)) {
+            const next = e.target.value
+            setMemo(next)
+            if (selectedMember && !next.includes(selectedMember.name)) {
               setSelectedMember(null)
             }
           }}
@@ -321,6 +403,7 @@ export function MonthMemoInput({
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
+          enterKeyHint="done"
         />
         {isSubmitting && (
           <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />

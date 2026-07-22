@@ -435,9 +435,6 @@ function mapMembersToPickerOptions(
   }))
 }
 
-const pickerSearchCache = new Map<string, MemberPickerOption[]>()
-const pickerSearchInflight = new Map<string, Promise<MemberPickerOption[]>>()
-
 /** 캘린더 회원 검색·메모 입력 — 활성 회원 전체 (월간 수업 유무와 무관) */
 export async function listMembersForCalendarPicker(
   limit = 500,
@@ -487,21 +484,43 @@ export async function listAdultRunningMembersForPicker(limit = 200): Promise<Mem
   return mapMembersToPickerOptions(source.slice(0, limit))
 }
 
+const pickerSearchCache = new Map<string, MemberPickerOption[]>()
+const pickerSearchInflight = new Map<string, Promise<MemberPickerOption[]>>()
+let chosungCatalogCache: MemberPickerOption[] | null = null
+let chosungCatalogInflight: Promise<MemberPickerOption[]> | null = null
+
+async function loadChosungMemberCatalog(): Promise<MemberPickerOption[]> {
+  if (chosungCatalogCache) return chosungCatalogCache
+  if (chosungCatalogInflight) return chosungCatalogInflight
+
+  chosungCatalogInflight = getMembers({
+    isActive: true,
+    limit: 800,
+    orderBy: 'name',
+    orderAsc: true,
+  })
+    .then(({ data }) => {
+      const options = mapMembersToPickerOptions(data)
+      chosungCatalogCache = options
+      chosungCatalogInflight = null
+      return options
+    })
+    .catch((error) => {
+      chosungCatalogInflight = null
+      throw error
+    })
+
+  return chosungCatalogInflight
+}
+
 export async function searchMembersForPicker(search: string) {
   const q = search.trim()
   if (!q) return []
 
-  // 초성(ㅇㅎ)은 DB ilike로 못 찾음 → 활성 회원 로드 후 메모리 매칭
+  // 초성(ㅇㅎ)은 DB ilike로 못 찾음 → 활성 회원 카탈로그 캐시 후 메모리 매칭
   if (isChosungOnlyQuery(q)) {
-    const { data } = await getMembers({
-      isActive: true,
-      limit: 800,
-      orderBy: 'name',
-      orderAsc: true,
-    })
-    return mapMembersToPickerOptions(
-      filterSortMembersForPicker(data, q, { limit: LIST_PAGE_SIZE }),
-    )
+    const catalog = await loadChosungMemberCatalog()
+    return filterSortMembersForPicker(catalog, q, { limit: LIST_PAGE_SIZE })
   }
 
   const { data } = await getMembers({
