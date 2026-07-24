@@ -34,6 +34,16 @@ export function getRoleLabel(role: AppRole): string {
   }
 }
 
+/** 성인회원 세부 표기 (종목 기준) */
+export function getAdultMemberRoleLabel(sport?: string | null): string {
+  const value = (sport ?? '').trim()
+  if (value.includes('일반')) return '성인회원(일반)'
+  if (value.includes('육상') || value.includes('러닝') || value.includes('성인')) {
+    return '성인회원(육상)'
+  }
+  return '성인회원(육상)'
+}
+
 export function getDefaultDashboardPath(role: AppRole): string {
   switch (role) {
     case 'member':

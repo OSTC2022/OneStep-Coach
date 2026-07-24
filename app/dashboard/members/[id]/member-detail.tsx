@@ -33,6 +33,7 @@ import {
   ArrowLeft,
   Edit,
   Trophy,
+  Scale,
   Calendar,
   Target,
   AlertTriangle,
@@ -41,6 +42,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { formatPrimaryInstructorName } from '@/lib/member-utils'
+import { isAdultGeneralSport } from '@/lib/adult-member-programs'
 import { mergeMemberWithDetailPatch } from '@/lib/member-detail-sync'
 import { MemberNewSignupBadge } from '@/components/members/member-new-signup-badge'
 import { MemberContactEditor } from '@/components/members/member-contact-editor'
@@ -276,17 +278,16 @@ export function MemberDetail({
               {canManage ? (
                 <MemberNewSignupBadge badgeUntil={memberState.new_member_badge_until} />
               ) : null}
-              <Badge variant={memberState.is_active ? 'default' : 'secondary'}>
-                {memberState.is_active ? '활성' : '비활성'}
-              </Badge>
             </div>
             <p className="text-muted-foreground">
               등록일:{' '}
-              {new Date(memberState.registered_at).toLocaleDateString('ko-KR')}
+              {new Date(memberState.registered_at as string).toLocaleDateString('ko-KR')}
             </p>
             {linkedProfileRole === 'adult_member' ? (
               <p className="text-sm text-muted-foreground">
-                {memberState.sport ? `${memberState.sport}` : '성인 러닝'}
+                {memberState.sport?.trim()
+                  ? memberState.sport
+                  : '성인회원(육상)'}
                 {' · '}
                 담당 코치 {formatPrimaryInstructorName(memberState.primary_instructor)}
               </p>
@@ -296,12 +297,21 @@ export function MemberDetail({
         {canManage ? (
           <div className="flex flex-wrap items-center gap-2">
             {linkedProfileRole === 'adult_member' ? (
-              <Link href={`/dashboard/members/${memberState.id}/running-portal`}>
-                <Button variant="outline">
-                  <Trophy className="mr-2 h-4 w-4" />
-                  러닝 포털 보기
-                </Button>
-              </Link>
+              isAdultGeneralSport(memberState.sport) ? (
+                <Link href={`/dashboard/members/${memberState.id}/weight-portal`}>
+                  <Button variant="outline">
+                    <Scale className="mr-2 h-4 w-4" />
+                    체중 관리 포털
+                  </Button>
+                </Link>
+              ) : (
+                <Link href={`/dashboard/members/${memberState.id}/running-portal`}>
+                  <Button variant="outline">
+                    <Trophy className="mr-2 h-4 w-4" />
+                    러닝 포털 보기
+                  </Button>
+                </Link>
+              )
             ) : null}
             <Link href={`/dashboard/members/${memberState.id}/edit`}>
               <Button>
@@ -313,7 +323,8 @@ export function MemberDetail({
         ) : null}
       </div>
 
-      {linkedProfileRole === 'adult_member' ? (
+      {linkedProfileRole === 'adult_member' &&
+      !isAdultGeneralSport(memberState.sport) ? (
         <MemberStaffLeagueSummary
           memberId={memberState.id}
           runningLeagueHome={runningLeagueHome}
@@ -330,6 +341,7 @@ export function MemberDetail({
           birthDate={memberState.birth_date}
           age={memberState.age}
           grade={memberState.grade}
+          sport={memberState.sport ?? null}
           school={memberState.school ?? null}
           canEdit={canEditBasicInfo}
           onSaved={(data) => setMemberState((prev) => ({ ...prev, ...data }))}
@@ -779,16 +791,6 @@ export function MemberDetail({
             prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
           )
           setDetailLesson((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev))
-          if (updated.instructor_id) {
-            setMemberState((prev) => ({
-              ...prev,
-              primary_instructor_id: updated.instructor_id ?? prev.primary_instructor_id,
-              primary_instructor:
-                updated.instructor ??
-                instructors.find((item) => item.id === updated.instructor_id) ??
-                prev.primary_instructor,
-            }))
-          }
         }}
       />
 

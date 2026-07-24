@@ -1,9 +1,10 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { getMemberPortalDataForStaff } from '@/lib/actions/member-portal'
 import { getCenterRunningTrainingScheduleForMember } from '@/lib/actions/center-running-training-schedule'
 import { getMemberRunningLeagueHomeForStaff } from '@/lib/actions/running-league'
 import { getMemberLinkedProfileRole } from '@/lib/actions/member-account'
 import { requireMemberViewer } from '@/lib/auth/member-access'
+import { isAdultGeneralSport } from '@/lib/adult-member-programs'
 import { MemberRunningPortalAdminBanner } from '@/components/dashboard/member-running-portal-admin-banner'
 import { MemberMyPage } from '@/app/dashboard/my/member-my-page'
 
@@ -27,6 +28,10 @@ export default async function MemberRunningPortalPreviewPage({
   ])
 
   if (!data) notFound()
+
+  if (isAdultGeneralSport(data.member.sport)) {
+    redirect(`/dashboard/members/${id}/weight-portal`)
+  }
 
   return (
     <div className="space-y-4">

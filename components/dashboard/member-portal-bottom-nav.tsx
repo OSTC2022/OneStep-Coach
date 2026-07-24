@@ -3,8 +3,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, ClipboardList, Home, LineChart, Trophy } from 'lucide-react'
+import {
+  CalendarDays,
+  ChartLine,
+  ClipboardList,
+  Home,
+  Scale,
+  Trophy,
+  Utensils,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { AdultMemberProgram } from '@/lib/adult-member-programs'
 
 const ATHLETE_NAV_ITEMS = [
   {
@@ -23,7 +32,7 @@ const ATHLETE_NAV_ITEMS = [
   {
     href: '/dashboard/my/body#report-top',
     label: '리포트',
-    icon: LineChart,
+    icon: ChartLine,
     isActive: (path: string, hash: string) =>
       path.startsWith('/dashboard/my/body') &&
       (hash === '#report-top' || hash === ''),
@@ -36,7 +45,7 @@ const ATHLETE_NAV_ITEMS = [
   },
 ] as const
 
-const ADULT_NAV_ITEMS = [
+const ADULT_RUNNING_NAV_ITEMS = [
   {
     href: '/dashboard/my',
     label: '홈',
@@ -64,19 +73,54 @@ const ADULT_NAV_ITEMS = [
   },
 ] as const
 
+const ADULT_GENERAL_NAV_ITEMS = [
+  {
+    href: '/dashboard/my',
+    label: '홈',
+    icon: Home,
+    isActive: (path: string, _hash: string) =>
+      path === '/dashboard/my' || path.startsWith('/dashboard/my/weight-portal'),
+  },
+  {
+    href: '/dashboard/my/weight-portal#nutrition-record',
+    label: '기록',
+    icon: Utensils,
+    isActive: (path: string, hash: string) =>
+      path.startsWith('/dashboard/my/weight-portal') && hash === '#nutrition-record',
+  },
+  {
+    href: '/dashboard/my/weight-portal#weight-chart',
+    label: '그래프',
+    icon: Scale,
+    isActive: (path: string, hash: string) =>
+      path.startsWith('/dashboard/my/weight-portal') && hash === '#weight-chart',
+  },
+  {
+    href: '/dashboard/my/sessions',
+    label: '수업',
+    icon: CalendarDays,
+    isActive: (path: string, _hash: string) => path.startsWith('/dashboard/my/sessions'),
+  },
+] as const
+
 interface MemberPortalBottomNavProps {
   role?: string | null
+  adultProgram?: AdultMemberProgram | null
 }
 
-export function MemberPortalBottomNav({ role }: MemberPortalBottomNavProps) {
+export function MemberPortalBottomNav({
+  role,
+  adultProgram = null,
+}: MemberPortalBottomNavProps) {
   const pathname = usePathname()
   const [hash, setHash] = useState('')
   const isAdultMember = role === 'adult_member'
 
-  const navItems = useMemo(
-    () => (isAdultMember ? ADULT_NAV_ITEMS : ATHLETE_NAV_ITEMS),
-    [isAdultMember],
-  )
+  const navItems = useMemo(() => {
+    if (!isAdultMember) return ATHLETE_NAV_ITEMS
+    if (adultProgram === 'general') return ADULT_GENERAL_NAV_ITEMS
+    return ADULT_RUNNING_NAV_ITEMS
+  }, [adultProgram, isAdultMember])
 
   useEffect(() => {
     function syncHash() {

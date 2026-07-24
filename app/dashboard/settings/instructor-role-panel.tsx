@@ -43,7 +43,7 @@ import { cn } from '@/lib/utils'
 
 const GRANT_ROLES: { value: SettingsAssignableRole; label: string }[] = [
   { value: 'member', label: '회원' },
-  { value: 'adult_member', label: '성인회원' },
+  { value: 'adult_member', label: '성인회원(육상)' },
   { value: 'guardian', label: '학부모' },
   { value: 'instructor', label: '강사' },
 ]

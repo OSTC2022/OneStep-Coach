@@ -16,7 +16,7 @@ import {
   convertLessonToRecurringSeries,
   type LessonSeriesScope,
 } from '@/lib/actions/lessons'
-import { getRecurrenceDisplayLabel, isPersistedRecurringLesson } from '@/lib/calendar-recurrence/types'
+import { getRecurrenceDisplayLabel, isPersistedRecurringLesson, parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
 import { resolveLessonRecurrence } from '@/lib/lesson-recurrence-legacy'
 import {
   defaultRecurrenceEndDate,
@@ -879,13 +879,38 @@ export function LessonCreateDialog({
     if (!lesson) return
 
     setDeleteScopeOpen(false)
+
+    // 시리즈 앵커는 폼에서 바꾼 날짜가 아니라 원래 발생일 기준
+    const seriesAnchorDate =
+      originalLessonDateRef.current || lesson.lesson_date
+
+    // 단일 일정은 서버 기다리지 않고 즉시 닫고 목록에서 제거
+    const canOptimisticSingle =
+      scope === 'single' &&
+      !isPersistedRecurringLesson(lesson) &&
+      !parseVirtualLessonId(lesson.id)
+
+    if (canOptimisticSingle) {
+      onDeleted?.([lesson.id], {
+        scope,
+        anchorDate: seriesAnchorDate,
+      })
+      toast.success('수업이 삭제되었습니다.')
+      handleOpenChange(false)
+
+      void deleteLessonsInSeries(lesson.id, scope, seriesAnchorDate).then((result) => {
+        if (result.error && !result.error.includes('찾을 수 없습니다')) {
+          toast.error('수업 삭제 실패', {
+            description: `${result.error} 새로고침 후 다시 확인해 주세요.`,
+          })
+        }
+      })
+      return
+    }
+
     setIsDeleting(true)
 
     try {
-      // 시리즈 앵커는 폼에서 바꾼 날짜가 아니라 원래 발생일 기준
-      const seriesAnchorDate =
-        originalLessonDateRef.current || lesson.lesson_date
-
       const result = await deleteLessonsInSeries(
         lesson.id,
         scope,

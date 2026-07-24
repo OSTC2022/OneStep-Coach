@@ -5,6 +5,8 @@ export type ProteinGoalMode =
   | 'training'
   | 'high_intensity'
   | 'recovery'
+  /** 일반 성인 여성 감량(비선수) — 체중 × 1.2g */
+  | 'weight_loss'
 
 export type MemberProteinSettings = {
   protein_goal_multiplier: number
@@ -16,11 +18,18 @@ export const PROTEIN_GOAL_MODE_MULTIPLIERS: Record<ProteinGoalMode, number> = {
   training: 1.5,
   high_intensity: 1.7,
   recovery: 1.9,
+  weight_loss: 1.2,
 }
 
 export const DEFAULT_MEMBER_PROTEIN_SETTINGS: MemberProteinSettings = {
   protein_goal_multiplier: 1.5,
   protein_goal_mode: 'training',
+}
+
+/** 성인회원(일반) 포털 — 일반 성인 여성 다이어트 단백질 기준 */
+export const ADULT_GENERAL_PROTEIN_SETTINGS: MemberProteinSettings = {
+  protein_goal_multiplier: 1.2,
+  protein_goal_mode: 'weight_loss',
 }
 
 /** 빠른 입력 — 추후 관리자 설정으로 교체 가능 */

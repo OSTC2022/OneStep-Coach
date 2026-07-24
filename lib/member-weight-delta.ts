@@ -17,8 +17,9 @@ export function calculateWeightDeltaKg(
 
   if (!previous) return null
 
-  const previousWeight = roundBodyMetric(previous.weight_kg) ?? previous.weight_kg
-  const nextWeight = roundBodyMetric(newWeightKg) ?? newWeightKg
+  const previousWeight = roundBodyMetric(previous.weight_kg) ?? Number(previous.weight_kg)
+  const nextWeight = roundBodyMetric(newWeightKg) ?? Number(newWeightKg)
+  if (!Number.isFinite(previousWeight) || !Number.isFinite(nextWeight)) return null
   return Number((nextWeight - previousWeight).toFixed(1))
 }
 
@@ -46,4 +47,39 @@ export function weightDeltaTextClass(deltaKg: number | null): string {
   if (deltaKg == null || deltaKg === 0) return 'text-muted-foreground'
   if (deltaKg > 0) return 'text-blue-500'
   return 'text-red-500'
+}
+
+/** 이전 키 대비 변화량 (cm) */
+export function calculateHeightDeltaCm(
+  previousHeightCm: number | null | undefined,
+  nextHeightCm: number,
+): number | null {
+  const previous = roundBodyMetric(previousHeightCm)
+  const next = roundBodyMetric(nextHeightCm)
+  if (previous == null || next == null) return null
+  return Number((next - previous).toFixed(1))
+}
+
+export function formatHeightDeltaLabel(deltaCm: number | null): string | null {
+  if (deltaCm == null) return null
+  if (deltaCm === 0) return '0cm'
+  const formatted = formatBodyMetric(Math.abs(deltaCm)) ?? String(Math.abs(deltaCm))
+  return deltaCm > 0 ? `+${formatted}cm` : `-${formatted}cm`
+}
+
+export function formatHeightDeltaShort(deltaCm: number | null): string | null {
+  if (deltaCm == null) return null
+  if (deltaCm === 0) return '0'
+  const formatted = formatBodyMetric(Math.abs(deltaCm)) ?? String(Math.abs(deltaCm))
+  return deltaCm > 0 ? `+${formatted}` : `-${formatted}`
+}
+
+export function formatHeightDeltaInParens(deltaCm: number | null): string | null {
+  const deltaShort = formatHeightDeltaShort(deltaCm)
+  if (!deltaShort) return null
+  return `(${deltaShort})`
+}
+
+export function heightDeltaTextClass(deltaCm: number | null): string {
+  return weightDeltaTextClass(deltaCm)
 }

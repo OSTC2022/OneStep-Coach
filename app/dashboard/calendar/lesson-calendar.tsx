@@ -117,10 +117,18 @@ interface CalendarHighlight {
   lessonIds: string[]
 }
 
+interface CalendarMemberOption {
+  id: string
+  name: string
+  sport?: string | null
+  age?: number | null
+  birth_date?: string | null
+}
+
 interface LessonCalendarProps {
   initialLessons: Lesson[]
   instructors: Instructor[]
-  members: MemberOption[]
+  members: CalendarMemberOption[]
   defaultInstructorId?: string | null
   initialMemoNotes?: StaffMemoNote[]
   memoMigrationWarning?: string
@@ -186,7 +194,6 @@ export function LessonCalendar({
     registerDeleteSelected,
     registerLessonSaved,
     setLessonFormOpen,
-    setIsDeleting,
   } = useCalendarSelection()
 
   useEffect(() => {
@@ -706,43 +713,46 @@ export function LessonCalendar({
       return
     }
 
-    setIsDeleting(true)
-    const results = await Promise.all(
-      targets.map((lesson) => deleteLesson(lesson.id)),
+    const removedIds = new Set(targets.map((lesson) => lesson.id))
+    // 서버 응답 전에 목록에서 즉시 제거
+    setLessons((prev) => {
+      const next = prev.filter((lesson) => !removedIds.has(lesson.id))
+      const { cacheKey } = resolveRangeKey(currentDateRef.current, viewRef.current, 'all')
+      setCachedLessons(cacheKey, next)
+      return next
+    })
+    setSearchPoolLessons((prev) =>
+      prev.filter((lesson) => !removedIds.has(lesson.id)),
     )
-    setIsDeleting(false)
-
-    const failed = results.filter((result) => result.error)
-    const removed = targets.filter((_, index) => !results[index].error)
-
-    if (removed.length > 0) {
-      const removedIds = new Set(removed.map((lesson) => lesson.id))
-      setLessons((prev) => prev.filter((lesson) => !removedIds.has(lesson.id)))
-      setSearchPoolLessons((prev) =>
-        prev.filter((lesson) => !removedIds.has(lesson.id)),
-      )
-      lessonHistory.pushLessonBulkDelete(removed)
-    }
-
+    lessonHistory.pushLessonBulkDelete(targets)
     clearLessonSelection()
     setEditOpen(false)
     setEditingLesson(null)
     setEditAnchor(null)
+    toast.success(`${targets.length}개 수업을 삭제했습니다.`)
 
-    if (failed.length > 0) {
-      toast.error('일부 수업 삭제 실패', {
-        description: failed[0].error ?? `${failed.length}건 실패`,
-      })
-    }
-    if (removed.length > 0) {
-      toast.success(`${removed.length}개 수업을 삭제했습니다.`)
-    }
+    const results = await Promise.all(
+      targets.map((lesson) => deleteLesson(lesson.id)),
+    )
+
+    const failed = targets.filter((_, index) => results[index].error)
+    if (failed.length === 0) return
+
+    setLessons((prev) => {
+      const next = mergeLessonsById(prev, failed)
+      const { cacheKey } = resolveRangeKey(currentDateRef.current, viewRef.current, 'all')
+      setCachedLessons(cacheKey, next)
+      return next
+    })
+    setSearchPoolLessons((prev) => mergeLessonsById(prev, failed))
+    toast.error('일부 수업 삭제 실패', {
+      description: results.find((result) => result.error)?.error ?? `${failed.length}건 실패`,
+    })
   }, [
     selectionCount,
     selectedLessonIds,
     searchLessons,
     clearLessonSelection,
-    setIsDeleting,
     lessonHistory,
   ])
 
@@ -1059,28 +1069,104 @@ export function LessonCalendar({
   }, [registerLessonSaved])
 
   async function handleMemoSubmit(payload: MemoQuickAddPayload) {
-    const result = await createLesson({
+    const tempId = `optimistic-${crypto.randomUUID()}`
+    const instructorId = normalizePrimaryInstructorId(defaultInstructorId) || null
+    const instructor = instructorId
+      ? instructors.find((item) => item.id === instructorId) ?? undefined
+      : undefined
+    const memberOption = payload.memberId
+      ? members.find((item) => item.id === payload.memberId)
+      : undefined
+
+    const optimistic: Lesson = {
+      id: tempId,
+      member_id: payload.memberId,
+      instructor_id: instructorId,
+      session_package_id: null,
+      lesson_date: payload.date,
+      start_time: payload.startTime,
+      end_time: payload.endTime,
+      lesson_type: '개인레슨',
+      title: payload.title,
+      content: null,
+      calendar_font_size: null,
+      special_note: null,
+      attendance_status: 'present',
+      session_deducted: false,
+      lesson_no: null,
+      signature_id: null,
+      created_at: new Date().toISOString(),
+      created_by: null,
+      event_type: 'single',
+      member: memberOption
+        ? ({
+            id: memberOption.id,
+            name: memberOption.name,
+            sport: memberOption.sport ?? null,
+            age: memberOption.age ?? null,
+            birth_date: memberOption.birth_date ?? null,
+          } as Lesson['member'])
+        : undefined,
+      instructor,
+    }
+
+    setLessons((prev) => {
+      const next = [...prev, optimistic]
+      const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+      setCachedLessons(cacheKey, next)
+      return next
+    })
+    setSearchPoolLessons((prev) => [...prev, optimistic])
+    toast.success('일정이 추가되었습니다.')
+
+    // 낙관적 UI 즉시 반영 — 서버 저장은 백그라운드
+    void createLesson({
       lesson_date: payload.date,
       member_id: payload.memberId,
       title: payload.title,
       start_time: payload.startTime,
       end_time: payload.endTime,
-      instructor_id: normalizePrimaryInstructorId(defaultInstructorId) || undefined,
+      instructor_id: instructorId || undefined,
       lesson_type: '개인레슨',
       preserve_title_identity: !payload.memberId && Boolean(payload.title),
+    }).then((result) => {
+      if (result.error) {
+        setLessons((prev) => {
+          const next = prev.filter((lesson) => lesson.id !== tempId)
+          const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+          setCachedLessons(cacheKey, next)
+          return next
+        })
+        setSearchPoolLessons((prev) =>
+          prev.filter((lesson) => lesson.id !== tempId),
+        )
+        toast.error('일정 추가 실패', { description: result.error })
+        return
+      }
+
+      if (result.data) {
+        const enriched = enrichLessonWithInstructorCatalog(
+          result.data,
+          instructors,
+        )
+        setLessons((prev) => {
+          const next = prev.map((lesson) =>
+            lesson.id === tempId ? enriched : lesson,
+          )
+          const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+          setCachedLessons(cacheKey, next)
+          return next
+        })
+        setSearchPoolLessons((prev) =>
+          prev.map((lesson) => (lesson.id === tempId ? enriched : lesson)),
+        )
+        lessonHistory.pushLessonCreate(enriched)
+      }
+
+      if (result.warning) {
+        toast.warning('DB 마이그레이션 필요', { description: result.warning })
+      }
     })
-
-    if (result.error) {
-      return { error: result.error }
-    }
-
-    if (result.data) {
-      handleLessonSaved(result.data)
-    }
-
-    if (result.warning) {
-      toast.warning('DB 마이그레이션 필요', { description: result.warning })
-    }
 
     return {}
   }
@@ -1182,6 +1268,26 @@ export function LessonCalendar({
       }
     }
 
+    const optimistic = enrichLessonWithInstructorCatalog(
+      {
+        ...lesson,
+        title,
+        start_time: startTime ?? lesson.start_time,
+        end_time: endTime ?? lesson.end_time,
+      },
+      instructors,
+    )
+
+    setLessons((prev) => {
+      const next = prev.map((item) => (item.id === lesson.id ? optimistic : item))
+      const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+      setCachedLessons(cacheKey, next)
+      return next
+    })
+    setSearchPoolLessons((prev) =>
+      prev.map((item) => (item.id === lesson.id ? optimistic : item)),
+    )
+
     const result = await updateLesson(lesson.id, {
       member_id: memberId,
       title,
@@ -1190,6 +1296,15 @@ export function LessonCalendar({
     })
 
     if (result.error) {
+      setLessons((prev) => {
+        const next = prev.map((item) => (item.id === lesson.id ? lesson : item))
+        const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+        setCachedLessons(cacheKey, next)
+        return next
+      })
+      setSearchPoolLessons((prev) =>
+        prev.map((item) => (item.id === lesson.id ? lesson : item)),
+      )
       toast.error('일정 저장 실패', { description: result.error })
       return
     }

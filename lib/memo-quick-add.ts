@@ -107,9 +107,8 @@ export function resolveMemoMember<T extends { id: string; name: string }>(
   if (!q) return null
   const exact = members.find((m) => m.name === q)
   if (exact) return exact
-  const suggestions = getMemoMemberSuggestions(members, q, 1)
-  if (suggestions.length === 1 && suggestions[0].name === q) {
-    return suggestions[0]
-  }
+  const suggestions = getMemoMemberSuggestions(members, q, 2)
+  // 후보가 하나면 Enter만으로도 바로 연결
+  if (suggestions.length === 1) return suggestions[0]
   return null
 }

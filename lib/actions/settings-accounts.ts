@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
 import {
   appRoleToProfileRole,
+  getAdultMemberRoleLabel,
   getRoleLabel,
   profileRoleToAppRole,
 } from '@/lib/roles'
@@ -77,7 +78,10 @@ async function mapRegisteredAccounts(
   const rows = await fetchAllProfiles(admin)
   const ids = rows.map((p) => p.id)
   const instructorByUserId = new Map<string, string>()
-  const memberByUserId = new Map<string, { id: string; name: string }>()
+  const memberByUserId = new Map<
+    string,
+    { id: string; name: string; sport: string | null }
+  >()
 
   if (ids.length > 0) {
     const [{ data: instructors }, { data: byAuth }, { data: byUser }] =
@@ -85,11 +89,11 @@ async function mapRegisteredAccounts(
         admin.from('instructors').select('name, user_id').in('user_id', ids),
         admin
           .from('members')
-          .select('id, name, auth_user_id, user_id')
+          .select('id, name, sport, auth_user_id, user_id')
           .in('auth_user_id', ids),
         admin
           .from('members')
-          .select('id, name, auth_user_id, user_id')
+          .select('id, name, sport, auth_user_id, user_id')
           .in('user_id', ids),
       ])
 
@@ -107,7 +111,11 @@ async function mapRegisteredAccounts(
       seenMemberIds.add(row.id)
       const uid = row.auth_user_id ?? row.user_id
       if (uid) {
-        memberByUserId.set(uid, { id: row.id, name: row.name })
+        memberByUserId.set(uid, {
+          id: row.id,
+          name: row.name,
+          sport: (row.sport as string | null) ?? null,
+        })
       }
     }
   }
@@ -121,6 +129,12 @@ async function mapRegisteredAccounts(
       row.email,
       row.approval_status as ProfileApprovalStatus | null | undefined,
     )
+    const linked = memberByUserId.get(row.id)
+    const roleLabel = protectedAccount
+      ? '관리자'
+      : appRole === 'adult_member'
+        ? getAdultMemberRoleLabel(linked?.sport)
+        : getRoleLabel(appRole)
 
     return {
       id: row.id,
@@ -129,13 +143,14 @@ async function mapRegisteredAccounts(
       full_name: row.full_name,
       profileRole,
       appRole,
-      roleLabel: protectedAccount ? '관리자' : getRoleLabel(appRole),
+      roleLabel,
       approvalStatus,
       approvalLabel: getApprovalStatusLabel(approvalStatus, row.email),
       created_at: row.created_at,
       linkedInstructorName: instructorByUserId.get(row.id) ?? null,
-      linkedMemberId: memberByUserId.get(row.id)?.id ?? null,
-      linkedMemberName: memberByUserId.get(row.id)?.name ?? null,
+      linkedMemberId: linked?.id ?? null,
+      linkedMemberName: linked?.name ?? null,
+      linkedMemberSport: linked?.sport ?? null,
       isProtected: protectedAccount,
     }
   })
@@ -415,6 +430,8 @@ export type UpdateAccountRoleOptions = {
   skipApprovalCheck?: boolean
   /** 회원 권한 시 연결할 센터 회원 ID */
   memberId?: string | null
+  /** 성인회원 프로그램: 육상 | 일반(체중관리). running은 육상과 동일 */
+  adultProgram?: 'athletics' | 'general' | 'running' | null
 }
 
 export async function updateAccountRole(
@@ -508,6 +525,18 @@ export async function updateAccountRole(
         role: profileRole,
       })
       if (linked.error) return linked
+
+      if (profileRole === 'adult_member' && options?.adultProgram) {
+        const { adultProgramSportLabel } = await import('@/lib/adult-member-programs')
+        const sport = adultProgramSportLabel(options.adultProgram)
+        const { error: sportError } = await admin
+          .from('members')
+          .update({ sport })
+          .eq('id', memberId)
+        if (sportError) {
+          console.error('updateAccountRole sport:', sportError)
+        }
+      }
     }
   } else {
     await unlinkInstructorUser(admin, userId)

@@ -173,13 +173,49 @@ export async function mergeMemberIntoTarget(
       auth_user_id: null,
       user_id: null,
       member_login_enabled: false,
+      account_link_status: 'dismissed',
+      duplicate_of_member_id: null,
+      duplicate_match_reason: null,
       memo: `[통합됨 → ${keep.name}] ${typeof discard.memo === 'string' ? discard.memo : ''}`.trim(),
     })
     .eq('id', discardMemberId)
 
   if (discardUpdateError) {
-    return { error: `중복 회원 정리 실패: ${discardUpdateError.message}` }
+    // 신규 컬럼 없는 DB — 최소 필드로 재시도
+    if (
+      discardUpdateError.message.includes('account_link_status') ||
+      discardUpdateError.code === 'PGRST204'
+    ) {
+      const retry = await admin
+        .from('members')
+        .update({
+          deleted_at: new Date().toISOString(),
+          is_active: false,
+          auth_user_id: null,
+          user_id: null,
+          member_login_enabled: false,
+          memo: `[통합됨 → ${keep.name}] ${typeof discard.memo === 'string' ? discard.memo : ''}`.trim(),
+        })
+        .eq('id', discardMemberId)
+      if (retry.error) {
+        return { error: `중복 회원 정리 실패: ${retry.error.message}` }
+      }
+    } else {
+      return { error: `중복 회원 정리 실패: ${discardUpdateError.message}` }
+    }
   }
+
+  await admin
+    .from('members')
+    .update({
+      account_link_status: 'linked',
+      linked_at: new Date().toISOString(),
+      duplicate_of_member_id: null,
+      duplicate_match_reason: null,
+      duplicate_group_id: null,
+      duplicate_review_note: null,
+    })
+    .eq('id', keepMemberId)
 
   try {
     await admin.rpc('sync_member_remaining_sessions', {

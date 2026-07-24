@@ -25,11 +25,18 @@ export const MEMBER_LIST_SELECT_LEGACY_NO_BADGE =
 export const MEMBER_LIST_SELECT_NO_NEW_BADGE =
   `${MEMBER_LIST_SELECT_LEGACY_NO_BADGE}, deleted_at`
 
+/** 가입경로·연동·회원권 상태 (add-member-duplicate-link.sql) */
+export const MEMBER_ACCOUNT_STATUS_SELECT =
+  'auth_user_id, user_id, remaining_sessions, invite_email, source_type, account_link_status, membership_status, duplicate_of_member_id, duplicate_match_reason, linked_at'
+
 export const MEMBER_LIST_SELECT =
-  `${MEMBER_LIST_SELECT_LEGACY}, deleted_at`
+  `${MEMBER_LIST_SELECT_LEGACY}, deleted_at, ${MEMBER_ACCOUNT_STATUS_SELECT}`
 
 export const MEMBER_LIST_SELECT_NO_SCHOOL =
-  `${MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL}, deleted_at`
+  `${MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL}, deleted_at, ${MEMBER_ACCOUNT_STATUS_SELECT}`
+
+export const MEMBER_LIST_SELECT_WITHOUT_ACCOUNT_STATUS =
+  `${MEMBER_LIST_SELECT_LEGACY}, deleted_at`
 
 export const MEMBER_PICKER_SELECT = 'id, name, sport, age, birth_date, phone'
 
@@ -88,20 +95,20 @@ export const ATTENDANCE_LESSON_SELECT = `
   session_deducted,
   signature_id,
   lesson_sessions(checked_in_at),
-  member:members(id, name, phone, sport),
+  member:members(id, name, phone, sport, height_cm),
   instructor:instructors(id, name, calendar_color)
 `
 
 export const LESSON_CALENDAR_SELECT_LEGACY = `
   ${LESSON_CORE_SELECT},
-  member:members(id, name, sport, age, birth_date),
+  member:members(id, name, sport, age, birth_date, height_cm),
   instructor:instructors(id, name, calendar_color)
 `
 
 export const LESSON_CALENDAR_SELECT = `
   ${LESSON_CORE_SELECT},
   ${LESSON_RECURRENCE_SELECT},
-  member:members(id, name, sport, age, birth_date),
+  member:members(id, name, sport, age, birth_date, height_cm),
   instructor:instructors(id, name, calendar_color)
 `
 

@@ -1,4 +1,8 @@
 import type { ProfileRole } from '@/lib/types'
+import {
+  isAdultGeneralSport,
+  isAdultRunningSport,
+} from '@/lib/adult-member-programs'
 
 export type AdultRunningMemberRecord = {
   id: string
@@ -8,20 +12,7 @@ export type AdultRunningMemberRecord = {
   grade?: string | null
 }
 
-/** lib/actions/members.ts listAdultRunningMembersForPicker 와 동일 기준 + 육상 */
-export function isAdultRunningSport(sport: string | null | undefined): boolean {
-  const value = (sport ?? '').toLowerCase().trim()
-  if (!value) return false
-  return (
-    value.includes('러닝') ||
-    value.includes('running') ||
-    value.includes('성인') ||
-    value.includes('마라톤') ||
-    value.includes('10k') ||
-    value.includes('5k') ||
-    value.includes('육상')
-  )
-}
+export { isAdultRunningSport }
 
 /** 선수반·학생부 등 학생 회원 학년 표기 */
 export function isStudentAthleteGrade(grade: string | null | undefined): boolean {
@@ -32,7 +23,7 @@ export function isStudentAthleteGrade(grade: string | null | undefined): boolean
 
 /**
  * 성인 러닝 리그 랭킹 대상 여부
- * - 1순위: 연결 계정 profiles.role === adult_member
+ * - adult_member 이어도 성인회원(일반)은 제외
  * - 계정이 member/guardian(선수·학부모)이면 제외
  * - 계정 없음: 학생 학년이 아니고 sport가 성인 러닝반인 경우만 포함
  */
@@ -40,10 +31,15 @@ export function isAdultRunningLeagueMember(
   member: AdultRunningMemberRecord,
   profileRoleByUserId: ReadonlyMap<string, ProfileRole>,
 ): boolean {
+  if (isAdultGeneralSport(member.sport)) return false
+
   const linkedUserId = member.auth_user_id ?? member.user_id
   if (linkedUserId) {
     const role = profileRoleByUserId.get(linkedUserId)
-    if (role === 'adult_member') return true
+    if (role === 'adult_member') {
+      // sport 미지정 성인회원은 기존처럼 러닝으로 취급
+      return !isAdultGeneralSport(member.sport)
+    }
     if (role === 'member' || role === 'guardian') return false
     if (role === 'admin' || role === 'coach') {
       return isAdultRunningSport(member.sport)

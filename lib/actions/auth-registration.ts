@@ -13,7 +13,7 @@ import {
   upsertUserProfile,
 } from '@/lib/profiles-admin'
 import type { ProfileApprovalStatus, ProfileRole } from '@/lib/types'
-import { formatLoginEmailForDisplay } from '@/lib/auth-email'
+import { formatLoginEmailForDisplay, parseRequiredEmail } from '@/lib/auth-email'
 import { resolveApprovalStatus } from '@/lib/profile-approval'
 import {
   executePublicSignup,
@@ -212,6 +212,7 @@ export async function approveAccount(
   role: SettingsAssignableRole,
   instructorId?: string | null,
   memberId?: string | null,
+  adultProgram?: 'athletics' | 'general' | 'running' | null,
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
 
@@ -242,12 +243,27 @@ export async function approveAccount(
   }
 
   let linkedInstructorId = instructorId ?? null
+  let resolvedAdultProgram =
+    role === 'adult_member' ? adultProgram ?? null : null
   if (role === 'instructor' && !linkedInstructorId) {
     try {
       const { data: authData } = await admin.auth.admin.getUserById(userId)
       const meta = authData.user?.user_metadata ?? {}
       linkedInstructorId =
         (meta.requested_instructor_id as string | null | undefined) ?? null
+    } catch {
+      /* ignore */
+    }
+  }
+  if (role === 'adult_member' && !resolvedAdultProgram) {
+    try {
+      const { data: authData } = await admin.auth.admin.getUserById(userId)
+      const meta = authData.user?.user_metadata ?? {}
+      const requested = meta.requested_adult_program as string | undefined
+      if (requested === 'general') resolvedAdultProgram = 'general'
+      else if (requested === 'athletics' || requested === 'running') {
+        resolvedAdultProgram = 'athletics'
+      }
     } catch {
       /* ignore */
     }
@@ -331,6 +347,7 @@ export async function approveAccount(
     const result = await updateAccountRole(userId, role, {
       skipApprovalCheck: true,
       memberId: requiresMemberLinkRole(role) ? resolvedMemberId : null,
+      adultProgram: role === 'adult_member' ? resolvedAdultProgram ?? 'athletics' : null,
     })
     if (result.error) return result
   }
@@ -368,6 +385,111 @@ export async function rejectAccount(userId: string): Promise<{ error?: string }>
   return {}
 }
 
+/** 보류 계정 목록 */
+export async function listOnHoldAccounts(): Promise<PendingAccountRow[]> {
+  await requireRole(['admin'])
+
+  const admin = createServiceRoleClient()
+  const ordered = { ascending: false as const }
+
+  let { data, error } = await admin
+    .from('profiles')
+    .select('id, email, full_name, role, approval_status, created_at')
+    .eq('approval_status', 'on_hold')
+    .order('created_at', ordered)
+    .limit(80)
+
+  if (error && isMissingApprovalColumn(error.message)) {
+    return []
+  }
+
+  if (error) {
+    console.error('listOnHoldAccounts:', error)
+    return []
+  }
+
+  return (data ?? []).map((row) => mapPendingAccountRow(row))
+}
+
+/** 승인 대기·승인됨 → 보류 (로그인 차단) */
+export async function putAccountOnHold(
+  userId: string,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+
+  const admin = createServiceRoleClient()
+  const allProfiles = await fetchAllProfiles(admin)
+  const profile = allProfiles.find((p) => p.id === userId)
+
+  if (!profile) return { error: '계정을 찾을 수 없습니다.' }
+  if (isProtectedAdminAccount(profile.email)) {
+    return { error: '시스템 관리자 계정입니다.' }
+  }
+
+  const holdResult = await upsertUserProfile(admin, {
+    id: userId,
+    email: profile.email,
+    full_name: profile.full_name,
+    role: profile.role as ProfileRole,
+    approval_status: 'on_hold',
+  })
+  if (holdResult.error) return { error: holdResult.error }
+
+  try {
+    await admin.auth.admin.updateUserById(userId, {
+      user_metadata: {
+        approval_status: 'on_hold',
+        full_name: profile.full_name ?? undefined,
+      },
+    })
+  } catch (e) {
+    console.error('putAccountOnHold metadata:', e)
+  }
+
+  revalidatePath('/dashboard/settings')
+  revalidatePath('/auth/login')
+  return {}
+}
+
+/** 보류 → 승인 대기로 되돌리기 */
+export async function restoreAccountToPending(
+  userId: string,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+
+  const admin = createServiceRoleClient()
+  const allProfiles = await fetchAllProfiles(admin)
+  const profile = allProfiles.find((p) => p.id === userId)
+
+  if (!profile) return { error: '계정을 찾을 수 없습니다.' }
+  if (isProtectedAdminAccount(profile.email)) {
+    return { error: '시스템 관리자 계정입니다.' }
+  }
+
+  const result = await upsertUserProfile(admin, {
+    id: userId,
+    email: profile.email,
+    full_name: profile.full_name,
+    role: profile.role as ProfileRole,
+    approval_status: 'pending',
+  })
+  if (result.error) return { error: result.error }
+
+  try {
+    await admin.auth.admin.updateUserById(userId, {
+      user_metadata: {
+        approval_status: 'pending',
+        full_name: profile.full_name ?? undefined,
+      },
+    })
+  } catch (e) {
+    console.error('restoreAccountToPending metadata:', e)
+  }
+
+  revalidatePath('/dashboard/settings')
+  return {}
+}
+
 export type AdminCreateAccountInput = {
   fullName: string
   email: string
@@ -375,6 +497,8 @@ export type AdminCreateAccountInput = {
   passwordConfirm: string
   role: SettingsAssignableRole
   instructorId?: string | null
+  /** 성인회원(육상/일반) — role이 adult_member일 때 */
+  adultProgram?: 'athletics' | 'general' | 'running' | null
 }
 
 function isAlreadyRegisteredError(message: string) {
@@ -482,6 +606,12 @@ export async function createAccountByAdmin(
     role: input.role === 'instructor' ? 'instructor' : input.role,
     requested_role: input.role,
     requested_instructor_id: input.instructorId ?? null,
+    requested_adult_program:
+      input.role === 'adult_member'
+        ? input.adultProgram === 'general'
+          ? 'general'
+          : 'athletics'
+        : null,
     approval_status: 'pending' as const,
   }
 
@@ -579,6 +709,6 @@ export async function redirectIfNotApproved(): Promise<void> {
     profile?.approval_status as ProfileApprovalStatus | null | undefined,
     user.user_metadata?.approval_status as ProfileApprovalStatus | undefined,
   )
-  if (status === 'pending') redirect('/auth/pending')
+  if (status === 'pending' || status === 'on_hold') redirect('/auth/pending')
   if (status === 'rejected') redirect('/auth/rejected')
 }

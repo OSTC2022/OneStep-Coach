@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import type { Lesson, LessonFormData, AttendanceStatus } from '@/lib/types'
 import { getCurrentUser, requireRole } from './auth'
 import { checkInLesson, syncLessonSessionRow } from './lesson-sessions'
@@ -28,7 +29,7 @@ import {
   fetchAttendanceRecordsForRange,
 } from '@/lib/actions/attendance-records'
 import {
-  findDisplayableMemberSlotConflict,
+  findFastMemberSlotConflict,
   purgeOrphanMemberSlotRows,
 } from '@/lib/actions/member-slot-conflict'
 import {
@@ -191,6 +192,26 @@ function normalizeLessonRecord(lesson: Lesson): Lesson {
     return { ...enriched, title }
   }
   return enriched
+}
+
+/** 응답을 막지 않도록 대시보드 캐시 무효화는 요청 이후로 미룸 */
+function revalidateLessonDashboardPaths(
+  memberId?: string | null,
+  options?: { skipCalendar?: boolean },
+) {
+  after(() => {
+    revalidatePath('/dashboard/lessons')
+    revalidatePath('/dashboard/attendance')
+    if (!options?.skipCalendar) {
+      revalidatePath('/dashboard/calendar')
+    }
+    revalidatePath('/dashboard/lesson-status')
+    revalidatePath('/dashboard/instructors')
+    revalidatePath('/dashboard/reports')
+    if (memberId) {
+      revalidatePath(`/dashboard/members/${memberId}`)
+    }
+  })
 }
 
 function withLegacyRecurrenceNote(
@@ -584,7 +605,7 @@ async function assertMemberSlotAvailable(
 ): Promise<{ error?: string }> {
   if (!params.memberId) return {}
 
-  const conflict = await findDisplayableMemberSlotConflict({
+  const conflict = await findFastMemberSlotConflict(supabase, {
     lessonDate: params.lessonDate,
     startTime: params.startTime,
     memberId: params.memberId,
@@ -592,11 +613,14 @@ async function assertMemberSlotAvailable(
   })
   if (conflict) return { error: MEMBER_SLOT_CONFLICT_MESSAGE }
 
-  await purgeOrphanMemberSlotRows(supabase, {
-    lessonDate: params.lessonDate,
-    startTime: params.startTime,
-    memberId: params.memberId,
-    excludeLessonIds: params.excludeLessonIds,
+  // 고아 슬롯 정리는 생성/수정 응답을 막지 않음
+  after(() => {
+    void purgeOrphanMemberSlotRows(supabase, {
+      lessonDate: params.lessonDate,
+      startTime: params.startTime,
+      memberId: params.memberId,
+      excludeLessonIds: params.excludeLessonIds,
+    })
   })
 
   return {}
@@ -815,45 +839,57 @@ export async function getTodayLessons(): Promise<Lesson[]> {
 }
 
 export async function createLesson(formData: LessonFormData): Promise<LessonMutationResult> {
-  await requireRole(['admin', 'instructor'])
+  const user = await requireRole(['admin', 'instructor'])
   const supabase = await lessonWriteClient()
-  const user = await getCurrentUser()
 
-  const enriched = await enrichLessonIdentity(supabase, formData)
-  const memberId = enriched.memberId
-  const title = enriched.title
-  const sessionPackageId = enriched.sessionPackageId
+  // 캘린더 빠른 등록: 회원 ID/제목이 이미 있으면 이름 조회·수업권 조회를 응답 경로에서 제외
+  let memberId = formData.member_id?.trim() || null
+  let title = formData.title?.trim() || null
+
+  if (!memberId && title && !formData.preserve_title_identity) {
+    memberId = await lookupMemberIdByName(
+      supabase,
+      extractMemberNameFromCalendarLabel(title),
+    )
+  }
 
   if (!memberId && !title) {
     return { error: '이름을 입력해주세요.' }
   }
 
-  const slotConflict = await assertMemberSlotAvailable(supabase, {
-    lessonDate: formData.lesson_date,
-    startTime: formData.start_time,
-    memberId,
-  })
+  const sessionPackageIdFromForm = formData.session_package_id?.trim() || null
+
+  const [slotConflict, lastLessonResult] = await Promise.all([
+    assertMemberSlotAvailable(supabase, {
+      lessonDate: formData.lesson_date,
+      startTime: formData.start_time,
+      memberId,
+    }),
+    memberId
+      ? supabase
+          .from('lessons')
+          .select('lesson_no')
+          .eq('member_id', memberId)
+          .order('lesson_no', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null as { lesson_no: number | null } | null }),
+  ])
   if (slotConflict.error) return { error: slotConflict.error }
 
-  let lessonNo: number | null = null
-  if (memberId) {
-    const { data: lastLesson } = await supabase
-      .from('lessons')
-      .select('lesson_no')
-      .eq('member_id', memberId)
-      .order('lesson_no', { ascending: false })
-      .limit(1)
-      .single()
-
-    lessonNo = (lastLesson?.lesson_no || 0) + 1
-  }
+  const lessonNo = memberId
+    ? (lastLessonResult.data?.lesson_no || 0) + 1
+    : null
 
   const payload = buildInsertPayload(
-    { ...formData, session_package_id: sessionPackageId ?? formData.session_package_id },
+    {
+      ...formData,
+      session_package_id: sessionPackageIdFromForm ?? undefined,
+    },
     memberId,
     title,
     lessonNo,
-    user?.id || null,
+    user.id,
   )
 
   let warning: string | undefined
@@ -869,7 +905,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
       memberId,
       title,
       lessonNo,
-      user?.id || null,
+      user.id,
       { useTitleFallback: true },
     )
     const retry = await supabase
@@ -898,16 +934,31 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
   }
 
   const lesson = normalizeLessonRecord(data as Lesson)
-  await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
+  const createdMemberId = memberId
+
+  after(() => {
+    void (async () => {
+      try {
+        if (createdMemberId && !lesson.session_package_id) {
+          const packageId = await queryActiveSessionPackageId(supabase, createdMemberId)
+          if (packageId) {
+            await supabase
+              .from('lessons')
+              .update({ session_package_id: packageId })
+              .eq('id', lesson.id)
+            lesson.session_package_id = packageId
+          }
+        }
+        await syncTrialPayForLesson(supabase, lesson, user.id)
+      } catch (error) {
+        console.error('createLesson after:', error)
+      }
+    })()
+  })
 
   scheduleGoogleLessonPush(lesson.id)
-
-  revalidatePath('/dashboard/lessons')
-  revalidatePath('/dashboard/attendance')
-  revalidatePath('/dashboard/calendar')
-  revalidatePath('/dashboard/lesson-status')
-  revalidatePath('/dashboard/instructors')
-  revalidatePath('/dashboard/reports')
+  // 캘린더는 클라이언트 낙관적 갱신 — revalidate로 RSC 새로고침 유발하지 않음
+  revalidateLessonDashboardPaths(lesson.member_id, { skipCalendar: true })
   return { data: lesson, warning }
 }
 
@@ -1019,12 +1070,7 @@ async function createRecurringMasterLesson(
   scheduleGoogleLessonPush(lesson.id)
 
   if (!options.silent) {
-    revalidatePath('/dashboard/lessons')
-    revalidatePath('/dashboard/attendance')
-    revalidatePath('/dashboard/calendar')
-    revalidatePath('/dashboard/lesson-status')
-    revalidatePath('/dashboard/instructors')
-    revalidatePath('/dashboard/reports')
+    revalidateLessonDashboardPaths(lesson.member_id)
   }
 
   return {
@@ -1273,12 +1319,7 @@ export async function createRecurringLessons(
   scheduleGoogleLessonPush(savedLessons.map((lesson) => lesson.id))
 
   if (!options.silent) {
-    revalidatePath('/dashboard/lessons')
-    revalidatePath('/dashboard/attendance')
-    revalidatePath('/dashboard/calendar')
-    revalidatePath('/dashboard/lesson-status')
-    revalidatePath('/dashboard/instructors')
-    revalidatePath('/dashboard/reports')
+    revalidateLessonDashboardPaths()
   }
 
   return {
@@ -1290,7 +1331,7 @@ export async function createRecurringLessons(
 }
 
 export async function updateLesson(id: string, updates: Partial<LessonFormData>): Promise<LessonMutationResult> {
-  await requireRole(['admin', 'instructor'])
+  const user = await requireRole(['admin', 'instructor'])
 
   const virtual = parseVirtualLessonId(id)
   if (virtual) {
@@ -1324,33 +1365,54 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   payload.sync_origin = 'app'
 
   if ('member_id' in updates || 'title' in updates) {
-    const enriched = await enrichLessonIdentity(supabase, {
-      ...updates,
-      lesson_date: updates.lesson_date ?? existing?.lesson_date ?? '',
-    })
-    const memberId = enriched.memberId
-    const title = enriched.title
-    if (!memberId && !title) {
+    let memberId =
+      updates.member_id !== undefined
+        ? updates.member_id?.trim() || null
+        : existing?.member_id ?? null
+    let title =
+      updates.title !== undefined ? updates.title?.trim() || null : null
+
+    if (
+      !memberId &&
+      title &&
+      !updates.preserve_title_identity
+    ) {
+      memberId = await lookupMemberIdByName(
+        supabase,
+        extractMemberNameFromCalendarLabel(title),
+      )
+    }
+
+    if (!memberId && updates.title !== undefined && !title) {
       return { error: '이름을 입력해주세요.' }
     }
-    payload.member_id = memberId
-    titleForFallback = title
-    payload.title = title
+    if (
+      updates.member_id !== undefined &&
+      updates.title !== undefined &&
+      !memberId &&
+      !title
+    ) {
+      return { error: '이름을 입력해주세요.' }
+    }
+
+    if (updates.member_id !== undefined) {
+      payload.member_id = memberId
+    }
+    if (updates.title !== undefined) {
+      titleForFallback = title
+      payload.title = title
+    }
+
     if (memberId) {
       payload.google_sync_status = null
       if (existing?.special_note?.includes('[구글 캘린더]')) {
         payload.special_note = null
       }
     }
-    if (enriched.sessionPackageId && !updates.session_package_id) {
-      payload.session_package_id = enriched.sessionPackageId
-    }
+    // session_package 자동 연결은 after()에서 — 이름/시간 저장 응답을 막지 않음
   }
 
   if ('instructor_id' in updates) {
-    const memberId =
-      (updates.member_id !== undefined ? updates.member_id : existing?.member_id) ??
-      null
     const normalizedInstructor = normalizePrimaryInstructorId(updates.instructor_id)
 
     console.info('[lesson-sync] instructor change', {
@@ -1358,24 +1420,8 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
       instructor_id: normalizedInstructor,
       sync_origin: 'app',
     })
-
-    if (memberId && normalizedInstructor) {
-      await supabase
-        .from('members')
-        .update({ primary_instructor_id: normalizedInstructor })
-        .eq('id', memberId)
-    }
-
-    if (
-      memberId &&
-      !('session_package_id' in updates) &&
-      !existing?.session_deducted
-    ) {
-      const autoPackageId = await queryActiveSessionPackageId(supabase, memberId)
-      if (autoPackageId) {
-        payload.session_package_id = autoPackageId
-      }
-    }
+    // 수업(캘린더/수업현황) 강사는 해당 일정에만 적용.
+    // 회원 프로필의 담당 강사(primary_instructor_id)는 회원 관리에서만 변경.
   }
 
   let warning: string | undefined
@@ -1436,27 +1482,39 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
   }
 
   const lesson = normalizeLessonRecord(data as Lesson)
-  const user = await getCurrentUser()
-  await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
-
-  if ('instructor_id' in updates || 'session_package_id' in payload) {
-    await syncLessonSessionRow(supabase, id, {
-      instructor_id: lesson.instructor_id,
-      session_package_id: lesson.session_package_id,
-    })
-  }
+  after(() => {
+    void (async () => {
+      try {
+        if (
+          lesson.member_id &&
+          !lesson.session_package_id &&
+          !updates.session_package_id &&
+          !existing?.session_deducted
+        ) {
+          const packageId = await queryActiveSessionPackageId(supabase, lesson.member_id)
+          if (packageId) {
+            await supabase
+              .from('lessons')
+              .update({ session_package_id: packageId })
+              .eq('id', id)
+            lesson.session_package_id = packageId
+          }
+        }
+        await syncTrialPayForLesson(supabase, lesson, user.id)
+        if ('instructor_id' in updates || 'session_package_id' in payload) {
+          await syncLessonSessionRow(supabase, id, {
+            instructor_id: lesson.instructor_id,
+            session_package_id: lesson.session_package_id,
+          })
+        }
+      } catch (error) {
+        console.error('updateLesson after:', error)
+      }
+    })()
+  })
 
   scheduleGoogleLessonPush(lesson.id)
-
-  revalidatePath('/dashboard/lessons')
-  revalidatePath('/dashboard/attendance')
-  revalidatePath('/dashboard/calendar')
-  revalidatePath('/dashboard/lesson-status')
-  revalidatePath('/dashboard/instructors')
-  revalidatePath('/dashboard/reports')
-  if (lesson.member_id) {
-    revalidatePath(`/dashboard/members/${lesson.member_id}`)
-  }
+  revalidateLessonDashboardPaths(lesson.member_id)
   return { data: lesson, warning }
 }
 
@@ -1809,12 +1867,7 @@ export async function updateLessonSeries(
     }
   }
 
-  revalidatePath('/dashboard/lessons')
-  revalidatePath('/dashboard/attendance')
-  revalidatePath('/dashboard/calendar')
-  revalidatePath('/dashboard/lesson-status')
-  revalidatePath('/dashboard/instructors')
-  revalidatePath('/dashboard/reports')
+  revalidateLessonDashboardPaths()
 
   scheduleGoogleLessonPush(updatedLessons.map((lesson) => lesson.id))
 
@@ -1924,10 +1977,7 @@ export async function deleteLessonsInSeries(
     }
   }
 
-  revalidatePath('/dashboard/lessons')
-  revalidatePath('/dashboard/attendance')
-  revalidatePath('/dashboard/calendar')
-  revalidatePath('/dashboard/lesson-status')
+  revalidateLessonDashboardPaths()
 
   const deletedSet = new Set(uniqueDeletedIds)
   scheduleGoogleLessonDeletes(
@@ -1938,7 +1988,72 @@ export async function deleteLessonsInSeries(
 }
 
 export async function deleteLesson(id: string): Promise<{ error?: string }> {
-  const result = await deleteLessonsInSeries(id, 'single', '')
-  if (result.error) return { error: result.error }
+  const virtual = parseVirtualLessonId(id)
+  if (virtual) {
+    const result = await deleteLessonsInSeries(id, 'single', virtual.occurrenceDate)
+    if (result.error) return { error: result.error }
+    return {}
+  }
+
+  await requireRole(['admin', 'instructor'])
+  const supabase = await lessonDeleteClient()
+
+  const { data: lesson, error: fetchError } = await supabase
+    .from('lessons')
+    .select(
+      'id, lesson_date, start_time, member_id, event_type, recurring_master_id, recurrence_group_id, google_event_id, google_calendar_id, google_account_id, session_deducted',
+    )
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError) {
+    return { error: mapLessonError(fetchError.message) }
+  }
+  if (!lesson) {
+    return { error: '수업을 찾을 수 없습니다.' }
+  }
+
+  // 반복/예외는 기존 시리즈 삭제 경로
+  if (
+    lesson.event_type === 'recurring_master' ||
+    lesson.event_type === 'exception' ||
+    lesson.recurring_master_id ||
+    lesson.recurrence_group_id
+  ) {
+    const result = await deleteLessonsInSeries(id, 'single', lesson.lesson_date)
+    if (result.error) return { error: result.error }
+    return {}
+  }
+
+  let targetIds = [lesson.id]
+  if (lesson.member_id) {
+    const slotIds = await findMemberSlotRowIds(supabase, {
+      lessonDate: lesson.lesson_date,
+      startTime: lesson.start_time,
+      memberId: lesson.member_id,
+    })
+    if (slotIds.length > 0) {
+      targetIds = slotIds
+    }
+  }
+
+  const uniqueTargetIds = [...new Set(targetIds)]
+  const { error } = await supabase.from('lessons').delete().in('id', uniqueTargetIds)
+  if (error) {
+    console.error('Error deleting lesson:', error)
+    return { error: mapLessonError(error.message) }
+  }
+
+  scheduleGoogleLessonDeletes(
+    uniqueTargetIds.map((targetId) => ({
+      id: targetId,
+      google_event_id: targetId === lesson.id ? lesson.google_event_id : null,
+      google_calendar_id: targetId === lesson.id ? lesson.google_calendar_id : null,
+      google_account_id: targetId === lesson.id ? lesson.google_account_id : null,
+      event_type: targetId === lesson.id ? lesson.event_type : null,
+      session_deducted: targetId === lesson.id ? lesson.session_deducted : false,
+    })),
+  )
+  revalidateLessonDashboardPaths(lesson.member_id)
   return {}
 }

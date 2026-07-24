@@ -10,6 +10,8 @@ export const MEMBER_SPORT_OPTIONS = [
   '골프',
   '수영',
   '헬스',
+  '성인회원(육상)',
+  '성인회원(일반)',
 ] as const
 
 export const SPORT_OTHER = '기타'
@@ -50,9 +52,12 @@ export function roundBodyMetric(
 }
 
 /** 키·몸무게 표시·입력용 (소수 1자리, 예: 65.1) */
-export function formatBodyMetric(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return ''
-  return (Math.round(value * 10) / 10).toFixed(1)
+export function formatBodyMetric(
+  value: number | string | null | undefined,
+): string {
+  const rounded = roundBodyMetric(value)
+  if (rounded == null) return ''
+  return rounded.toFixed(1)
 }
 
 /** 입력 필드 blur 시 소수 1자리로 정리 */
@@ -64,20 +69,23 @@ export function normalizeBodyMetricInput(value: string): string {
 
 /** 키(cm)·몸무게(kg)로 BMI 계산 (소수 1자리) */
 export function calculateMemberBmi(
-  heightCm?: number | null,
-  weightKg?: number | null,
+  heightCm?: number | string | null,
+  weightKg?: number | string | null,
 ): number | null {
-  if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) return null
-  return Number((weightKg / Math.pow(heightCm / 100, 2)).toFixed(1))
+  const height = roundBodyMetric(heightCm)
+  const weight = roundBodyMetric(weightKg)
+  if (height == null || weight == null) return null
+  return Number((weight / Math.pow(height / 100, 2)).toFixed(1))
 }
 
 /** DB bmi 없을 때 키·몸무게로 보완 */
 export function resolveMemberBmi(member: {
-  bmi?: number | null
-  height_cm?: number | null
-  weight_kg?: number | null
+  bmi?: number | string | null
+  height_cm?: number | string | null
+  weight_kg?: number | string | null
 }): number | null {
-  if (member.bmi != null && member.bmi > 0) return member.bmi
+  const stored = roundBodyMetric(member.bmi)
+  if (stored != null) return stored
   return calculateMemberBmi(member.height_cm, member.weight_kg)
 }
 
@@ -347,6 +355,9 @@ export const MEMBER_SPORT_COLORS: Record<string, string> = {
   골프: '#818CF8',
   수영: '#A78BFA',
   헬스: '#22D3EE',
+  성인회원: '#84CC16',
+  '성인회원(육상)': '#84CC16',
+  '성인회원(일반)': '#A3E635',
   기타: '#84CC16',
 }
 

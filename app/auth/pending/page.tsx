@@ -22,10 +22,9 @@ export default function PendingApprovalPage() {
           </div>
           <BrandPulseAppIcon className="mx-auto h-16 w-16 translate-y-2" />
           <div>
-            <CardTitle className="text-2xl font-bold">승인 대기 중</CardTitle>
+            <CardTitle className="text-2xl font-bold">회원가입 대기중</CardTitle>
             <CardDescription className="text-muted-foreground mt-2">
-              가입 신청이 접수되었습니다. 관리자가 승인하면 로그인하여 이용할 수
-              있습니다.
+              계정이 승인·보류 상태입니다. 관리자 확인 후 로그인할 수 있습니다.
             </CardDescription>
           </div>
         </CardHeader>

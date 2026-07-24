@@ -1,5 +1,8 @@
 import { redirect } from 'next/navigation'
-import { listPendingAccounts } from '@/lib/actions/auth-registration'
+import {
+  listOnHoldAccounts,
+  listPendingAccounts,
+} from '@/lib/actions/auth-registration'
 import {
   listInstructorsForSettings,
   listRegisteredAccounts,
@@ -11,10 +14,11 @@ export default async function SettingsPage() {
   const user = await requireDashboardProfile()
   if (user.role !== 'admin') redirect('/unauthorized')
 
-  const [accounts, instructors, pending] = await Promise.all([
+  const [accounts, instructors, pending, hold] = await Promise.all([
     listRegisteredAccounts(),
     listInstructorsForSettings(),
     listPendingAccounts(),
+    listOnHoldAccounts(),
   ])
 
   return (
@@ -22,6 +26,7 @@ export default async function SettingsPage() {
       initialAccounts={accounts}
       initialInstructors={instructors}
       initialPending={pending}
+      initialHold={hold}
     />
   )
 }

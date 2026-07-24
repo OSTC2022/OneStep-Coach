@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2, Search, X } from 'lucide-react'
+import { Check, Loader2, PauseCircle, RotateCcw, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   approveAccount,
-  listPendingAccounts,
-  putAccountOnHold,
+  listOnHoldAccounts,
   rejectAccount,
+  restoreAccountToPending,
   type PendingAccountRow,
 } from '@/lib/actions/auth-registration'
 import type {
@@ -18,8 +18,6 @@ import type {
 import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { MemberNameWithStaffBadges } from '@/components/members/member-new-signup-badge'
-import { Badge } from '@/components/ui/badge'
 import {
   Card,
   CardContent,
@@ -43,7 +41,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
-import { formatBirthDateDisplay } from '@/lib/member-utils'
 import {
   adultProgramFromRoleSelect,
   type AdultMemberProgram,
@@ -53,7 +50,6 @@ type RoleSelectValue =
   | SettingsAssignableRole
   | 'adult_member_athletics'
   | 'adult_member_general'
-  | 'on_hold'
 
 const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
   { value: 'member', label: '회원' },
@@ -62,26 +58,17 @@ const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
   { value: 'guardian', label: '학부모' },
   { value: 'admin', label: '관리자' },
   { value: 'instructor', label: '강사' },
-  { value: 'on_hold', label: '보류' },
 ]
 
 function parseRoleSelect(value: RoleSelectValue): {
-  role: SettingsAssignableRole | null
+  role: SettingsAssignableRole
   adultProgram: AdultMemberProgram | null
-  onHold: boolean
 } {
-  if (value === 'on_hold') {
-    return { role: null, adultProgram: null, onHold: true }
-  }
   const adultProgram = adultProgramFromRoleSelect(value)
   if (adultProgram) {
-    return { role: 'adult_member', adultProgram, onHold: false }
+    return { role: 'adult_member', adultProgram }
   }
-  return {
-    role: value as SettingsAssignableRole,
-    adultProgram: null,
-    onHold: false,
-  }
+  return { role: value as SettingsAssignableRole, adultProgram: null }
 }
 
 function formatDate(iso: string) {
@@ -98,52 +85,49 @@ function formatDate(iso: string) {
   }
 }
 
-interface PendingApprovalsPanelProps {
-  initialPending: PendingAccountRow[]
+interface HoldAccountsPanelProps {
+  initialHold: PendingAccountRow[]
   instructors: InstructorRoleRow[]
   onChanged?: () => void | Promise<void>
-  onMovedToHold?: () => void | Promise<void>
 }
 
-export function PendingApprovalsPanel({
-  initialPending,
+export function HoldAccountsPanel({
+  initialHold,
   instructors,
   onChanged,
-  onMovedToHold,
-}: PendingApprovalsPanelProps) {
+}: HoldAccountsPanelProps) {
   const router = useRouter()
-  const [pending, setPending] = useState(initialPending)
+  const [rows, setRows] = useState(initialHold)
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [approveRoleSelect, setApproveRoleSelect] =
     useState<RoleSelectValue>('member')
-  const [instructorId, setInstructorId] = useState<string>('')
-  const [memberId, setMemberId] = useState<string>('')
+  const [instructorId, setInstructorId] = useState('')
+  const [memberId, setMemberId] = useState('')
   const [busy, setBusy] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
-    setPending(initialPending)
-  }, [initialPending])
+    setRows(initialHold)
+  }, [initialHold])
 
   const approveParsed = parseRoleSelect(approveRoleSelect)
   const approveRole = approveParsed.role
   const adultProgram = approveParsed.adultProgram
-  const isOnHoldAction = approveParsed.onHold
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return pending
-    return pending.filter((p) =>
+    if (!q) return rows
+    return rows.filter((p) =>
       [p.full_name, p.email, p.loginEmail, p.roleLabel]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(q),
     )
-  }, [pending, query])
+  }, [rows, query])
 
-  const selected = pending.find((p) => p.id === selectedId) ?? null
+  const selected = rows.find((p) => p.id === selectedId) ?? null
 
   const unlinkedInstructors = useMemo(
     () => instructors.filter((i) => i.is_active && !i.hasCoachAccess),
@@ -153,7 +137,7 @@ export function PendingApprovalsPanel({
   async function refresh() {
     setRefreshing(true)
     try {
-      setPending(await listPendingAccounts())
+      setRows(await listOnHoldAccounts())
     } catch {
       toast.error('목록을 불러오지 못했습니다.')
     } finally {
@@ -163,27 +147,6 @@ export function PendingApprovalsPanel({
 
   async function handleApprove() {
     if (!selected) return
-
-    if (isOnHoldAction) {
-      setBusy(true)
-      const result = await putAccountOnHold(selected.id)
-      setBusy(false)
-      if (result.error) {
-        toast.error('보류 실패', { description: result.error })
-        return
-      }
-      toast.success('보류로 이동했습니다.', {
-        description: '로그인 시 회원가입 대기중으로 안내됩니다.',
-      })
-      const heldId = selected.id
-      setSelectedId(null)
-      setPending((prev) => prev.filter((p) => p.id !== heldId))
-      await onMovedToHold?.()
-      router.refresh()
-      return
-    }
-
-    if (!approveRole) return
     if (approveRole === 'instructor' && !instructorId) {
       toast.error('강사 프로필을 선택해주세요.')
       return
@@ -214,16 +177,29 @@ export function PendingApprovalsPanel({
       return
     }
 
-    const loginHint = result.loginEmail
-      ? `로그인: ${result.loginEmail}`
-      : '이메일 없이 가입 — 발급된 로그인 ID를 안내해주세요.'
-
-    toast.success('가입이 승인되었습니다.', { description: loginHint })
+    toast.success('보류 계정을 승인했습니다.')
     const approvedId = selected.id
     setSelectedId(null)
     setInstructorId('')
     setMemberId('')
-    setPending((prev) => prev.filter((p) => p.id !== approvedId))
+    setRows((prev) => prev.filter((p) => p.id !== approvedId))
+    await onChanged?.()
+    router.refresh()
+  }
+
+  async function handleRestorePending() {
+    if (!selected) return
+    setBusy(true)
+    const result = await restoreAccountToPending(selected.id)
+    setBusy(false)
+    if (result.error) {
+      toast.error('되돌리기 실패', { description: result.error })
+      return
+    }
+    toast.success('승인 대기로 이동했습니다.')
+    const id = selected.id
+    setSelectedId(null)
+    setRows((prev) => prev.filter((p) => p.id !== id))
     await onChanged?.()
     router.refresh()
   }
@@ -233,14 +209,14 @@ export function PendingApprovalsPanel({
     setBusy(true)
     const result = await rejectAccount(selected.id)
     setBusy(false)
-
     if (result.error) {
       toast.error('거절 실패', { description: result.error })
       return
     }
-
-    toast.success('가입 신청을 거절했습니다.')
+    toast.success('가입을 거절했습니다.')
+    const id = selected.id
     setSelectedId(null)
+    setRows((prev) => prev.filter((p) => p.id !== id))
     await onChanged?.()
     router.refresh()
   }
@@ -249,10 +225,13 @@ export function PendingApprovalsPanel({
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">승인 대기</CardTitle>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <PauseCircle className="h-5 w-5 text-amber-500" />
+            보류
+          </CardTitle>
           <CardDescription>
-            로그인 화면 회원가입·계정 만들기로 등록된 <strong>승인 대기</strong>{' '}
-            계정입니다. 승인해야 로그인할 수 있습니다.
+            일시 정지·보류된 계정입니다. 로그인할 수 없으며, 승인하면 다시
+            이용할 수 있습니다.
           </CardDescription>
         </CardHeader>
         <CardContent className="min-w-0 space-y-3">
@@ -265,15 +244,14 @@ export function PendingApprovalsPanel({
               className="pl-8"
             />
           </div>
-
-          <div className="min-w-0 overflow-hidden rounded-md border">
-            <Table fitContainer>
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>이름</TableHead>
                   <TableHead>이메일</TableHead>
-                  <TableHead>신청 유형</TableHead>
-                  <TableHead className="hidden sm:table-cell">신청일</TableHead>
+                  <TableHead className="hidden sm:table-cell">권한</TableHead>
+                  <TableHead className="hidden md:table-cell">등록일</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -281,44 +259,32 @@ export function PendingApprovalsPanel({
                   <TableRow>
                     <TableCell
                       colSpan={4}
-                      className="text-center text-muted-foreground py-8"
+                      className="py-8 text-center text-muted-foreground"
                     >
-                      승인 대기 중인 계정이 없습니다.
+                      보류 계정이 없습니다.
                     </TableCell>
                   </TableRow>
                 ) : (
                   filtered.map((row) => (
                     <TableRow
                       key={row.id}
-                      data-state={selectedId === row.id ? 'selected' : undefined}
                       className="cursor-pointer"
+                      data-state={selectedId === row.id ? 'selected' : undefined}
                       onClick={() => {
                         setSelectedId(row.id)
                         setMemberId(row.signupMemberId ?? '')
-                        setApproveRole(
-                          row.role === 'guardian'
-                            ? 'guardian'
-                            : row.role === 'admin'
-                              ? 'admin'
-                              : 'member',
-                        )
                       }}
                     >
-                      <TableCell className="max-w-0 font-medium">
-                        <MemberNameWithStaffBadges
-                          name={row.full_name || '—'}
-                          badgeUntil={row.newMemberBadgeUntil}
-                          showStaffBadges
-                        />
+                      <TableCell className="font-medium">
+                        {row.full_name || '—'}
                       </TableCell>
-                      <TableCell className="max-w-0 truncate text-sm text-muted-foreground">
-                        {row.email ||
-                          (row.loginEmail ? `로그인 ID: ${row.loginEmail}` : '(이메일 없음)')}
+                      <TableCell className="max-w-[10rem] truncate text-muted-foreground">
+                        {row.email || row.loginEmail}
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{row.roleLabel}</Badge>
+                      <TableCell className="hidden sm:table-cell">
+                        {row.roleLabel}
                       </TableCell>
-                      <TableCell className="hidden sm:table-cell text-sm text-muted-foreground tabular-nums">
+                      <TableCell className="hidden md:table-cell text-muted-foreground">
                         {formatDate(row.created_at)}
                       </TableCell>
                     </TableRow>
@@ -327,7 +293,6 @@ export function PendingApprovalsPanel({
               </TableBody>
             </Table>
           </div>
-
           <div className="flex justify-end">
             <Button
               type="button"
@@ -336,7 +301,9 @@ export function PendingApprovalsPanel({
               disabled={refreshing}
               onClick={() => void refresh()}
             >
-              {refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {refreshing ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : null}
               새로고침
             </Button>
           </div>
@@ -345,57 +312,24 @@ export function PendingApprovalsPanel({
 
       <Card className="h-fit lg:sticky lg:top-4">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">승인 · 거절</CardTitle>
-          <CardDescription>권한을 정한 뒤 승인하면 바로 로그인할 수 있습니다.</CardDescription>
+          <CardTitle className="text-lg">보류 처리</CardTitle>
+          <CardDescription>
+            승인하면 바로 로그인할 수 있습니다. 승인 대기로 되돌릴 수도
+            있습니다.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {!selected ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              왼쪽에서 신청을 선택하세요.
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              왼쪽에서 보류 계정을 선택하세요.
             </p>
           ) : (
             <>
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
                 <p className="font-medium">{selected.full_name || '이름 없음'}</p>
-                <p className="text-muted-foreground truncate">
-                  {selected.email ||
-                    (selected.loginEmail
-                      ? `로그인 ID: ${selected.loginEmail}`
-                      : '이메일 없음 — 승인 후 로그인 ID 안내')}
+                <p className="truncate text-muted-foreground">
+                  {selected.email || selected.loginEmail}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  신청: {selected.roleLabel}
-                </p>
-                {(selected.birth_date || selected.phone || selected.parent_phone) && (
-                  <dl className="mt-2 space-y-0.5 text-xs text-muted-foreground">
-                    {selected.birth_date ? (
-                      <div className="flex justify-between gap-2">
-                        <dt>생년월일</dt>
-                        <dd className="text-foreground tabular-nums">
-                          {formatBirthDateDisplay(selected.birth_date)}
-                        </dd>
-                      </div>
-                    ) : null}
-                    {selected.phone ? (
-                      <div className="flex justify-between gap-2">
-                        <dt>개인 연락처</dt>
-                        <dd className="text-foreground">{selected.phone}</dd>
-                      </div>
-                    ) : null}
-                    {selected.parent_phone ? (
-                      <div className="flex justify-between gap-2">
-                        <dt>보호자 연락처</dt>
-                        <dd className="text-foreground">{selected.parent_phone}</dd>
-                      </div>
-                    ) : null}
-                  </dl>
-                )}
-                {selected.signupMemberId ? (
-                  <p className="mt-2 text-[11px] text-primary">
-                    가입 시 자동 생성된 회원 프로필이 있습니다. 센터에 먼저 등록한
-                    회원을 선택하면 하나로 통합됩니다.
-                  </p>
-                ) : null}
               </div>
 
               <div className="space-y-1.5">
@@ -406,12 +340,8 @@ export function PendingApprovalsPanel({
                     const next = v as RoleSelectValue
                     setApproveRoleSelect(next)
                     const parsed = parseRoleSelect(next)
-                    if (parsed.onHold || parsed.role !== 'instructor') {
-                      setInstructorId('')
-                    }
-                    if (parsed.onHold || !parsed.role || !requiresMemberLinkRole(parsed.role)) {
-                      setMemberId('')
-                    }
+                    if (parsed.role !== 'instructor') setInstructorId('')
+                    if (!requiresMemberLinkRole(parsed.role)) setMemberId('')
                   }}
                 >
                   <SelectTrigger>
@@ -425,18 +355,9 @@ export function PendingApprovalsPanel({
                     ))}
                   </SelectContent>
                 </Select>
-                {isOnHoldAction ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    보류로 보내면 승인 대기 목록에서 빠지고, 로그인 시
-                    「회원가입 대기중」으로 안내됩니다.
-                  </p>
-                ) : null}
               </div>
 
-              {!isOnHoldAction &&
-              approveRole &&
-              requiresMemberLinkRole(approveRole) &&
-              selected ? (
+              {requiresMemberLinkRole(approveRole) ? (
                 <AccountMemberLinkSelect
                   accountUserId={selected.id}
                   value={memberId}
@@ -444,7 +365,7 @@ export function PendingApprovalsPanel({
                 />
               ) : null}
 
-              {!isOnHoldAction && approveRole === 'instructor' && (
+              {approveRole === 'instructor' ? (
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">연결할 강사</label>
                   <Select value={instructorId} onValueChange={setInstructorId}>
@@ -466,7 +387,7 @@ export function PendingApprovalsPanel({
                     </SelectContent>
                   </Select>
                 </div>
-              )}
+              ) : null}
 
               <Button
                 type="button"
@@ -479,7 +400,18 @@ export function PendingApprovalsPanel({
                 ) : (
                   <Check className="mr-2 h-4 w-4" />
                 )}
-                {isOnHoldAction ? '보류로 이동' : '승인'}
+                승인
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={busy}
+                onClick={() => void handleRestorePending()}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                승인 대기로
               </Button>
 
               <Button
@@ -489,11 +421,7 @@ export function PendingApprovalsPanel({
                 disabled={busy}
                 onClick={() => void handleReject()}
               >
-                {busy ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <X className="mr-2 h-4 w-4" />
-                )}
+                <X className="mr-2 h-4 w-4" />
                 거절
               </Button>
             </>

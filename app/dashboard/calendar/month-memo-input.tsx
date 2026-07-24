@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import {
   getMemoMemberSuggestions,
   parseMemoQuickAdd,
+  resolveMemoMember,
   stripMemberDisplayMeta,
 } from '@/lib/memo-quick-add'
 import { searchMembersForPickerCached } from '@/lib/actions/members'
@@ -47,9 +48,9 @@ interface MonthMemoInputProps {
 }
 
 const REMOTE_SEARCH_DEBOUNCE_MS = 280
-/** 로컬 회원 목록이 충분하면 서버 검색을 건너뛰어 입력 지연을 막음 */
-const LOCAL_CATALOG_SKIP_REMOTE = 40
-const LOCAL_MATCH_SKIP_REMOTE = 6
+/** 캘린더에 회원 목록이 있으면 원격 검색 없이 로컬만 사용 (검색중… 방지) */
+const LOCAL_CATALOG_SKIP_REMOTE = 20
+const LOCAL_MATCH_SKIP_REMOTE = 1
 
 export function MonthMemoInput({
   selectedDate,
@@ -59,7 +60,6 @@ export function MonthMemoInput({
   const [memo, setMemo] = useState('')
   const [selectedMember, setSelectedMember] = useState<MemoMember | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const [remoteMatches, setRemoteMatches] = useState<MemoMember[]>([])
@@ -68,6 +68,7 @@ export function MonthMemoInput({
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const submittingRef = useRef(false)
 
   const parsed = useMemo(() => parseMemoQuickAdd(memo), [memo])
   const memberQuery = useMemo(
@@ -121,7 +122,7 @@ export function MonthMemoInput({
     setRemoteMatches([])
   }, [selectedDate])
 
-  // 서버 검색은 디바운스 + 로컬 결과가 부족할 때만 (키마다 800명 조회 방지)
+  // 서버 검색은 로컬 카탈로그가 비었을 때만 (검색중…·입력 지연 방지)
   useEffect(() => {
     const q = memberQuery.trim()
     if (debounceTimerRef.current) {
@@ -136,20 +137,18 @@ export function MonthMemoInput({
       return
     }
 
-    if (
-      members.length >= LOCAL_CATALOG_SKIP_REMOTE &&
+    const preferLocalOnly =
+      members.length >= LOCAL_CATALOG_SKIP_REMOTE ||
       localSuggestions.length >= LOCAL_MATCH_SKIP_REMOTE
-    ) {
+
+    if (preferLocalOnly) {
       searchGenerationRef.current += 1
       setRemoteMatches([])
       setIsSearching(false)
       return
     }
 
-    // 로컬에 이미 결과가 있으면 검색 표시 없이 백그라운드만
-    if (localSuggestions.length === 0) {
-      setIsSearching(true)
-    }
+    setIsSearching(true)
 
     const generation = ++searchGenerationRef.current
     debounceTimerRef.current = setTimeout(() => {
@@ -231,46 +230,76 @@ export function MonthMemoInput({
     inputRef.current?.focus()
   }
 
-  async function submitMemo() {
-    const text = memo.trim()
-    if (!text) return
+  function submitWithMember(member: MemoMember | null, textOverride?: string) {
+    if (submittingRef.current) return
 
-    const member = selectedMember
-    const startTime = parsed.startTime ?? '09:00'
-    const endTime = parsed.endTime ?? '10:00'
+    const text = (textOverride ?? memo).trim()
+    if (!text && !member) return
 
-    if (!member && !parsed.memberQuery) {
+    const current = parseMemoQuickAdd(text || memo)
+    const startTime = current.startTime ?? '09:00'
+    const endTime = current.endTime ?? '10:00'
+    const resolved =
+      member ??
+      resolveMemoMember(members, current.memberQuery, selectedMember)
+
+    if (!resolved && !current.memberQuery) {
       toast.error('회원 이름 또는 메모를 입력해주세요.')
       return
     }
 
-    setIsSubmitting(true)
-    try {
-      const result = await onSubmit({
+    submittingRef.current = true
+    setMemo('')
+    setSelectedMember(null)
+    setRemoteMatches([])
+    setIsSearching(false)
+
+    const snapshotMemo = text || memo
+    const snapshotMember = resolved ?? selectedMember
+
+    // 서버 대기 없이 즉시 등록 — 실패 시 입력 복구
+    void Promise.resolve(
+      onSubmit({
         date: format(selectedDate, 'yyyy-MM-dd'),
-        memberId: member?.id ?? null,
-        title: member ? null : parsed.memberQuery,
+        memberId: resolved?.id ?? null,
+        title: resolved ? null : current.memberQuery,
         startTime,
         endTime,
+      }),
+    )
+      .then((result) => {
+        if (result?.error) {
+          setMemo(snapshotMemo)
+          setSelectedMember(snapshotMember)
+          toast.error('일정 추가 실패', { description: result.error })
+        }
       })
-
-      if (result?.error) {
-        toast.error('일정 추가 실패', { description: result.error })
-        return
-      }
-
-      setMemo('')
-      setSelectedMember(null)
-      setRemoteMatches([])
-      toast.success('일정이 추가되었습니다.')
-    } catch (error) {
-      console.error('submitMemo:', error)
-      toast.error('일정 추가 실패', {
-        description: '네트워크가 느릴 수 있습니다. 잠시 후 다시 시도해주세요.',
+      .catch((error) => {
+        console.error('submitMemo:', error)
+        setMemo(snapshotMemo)
+        setSelectedMember(snapshotMember)
+        toast.error('일정 추가 실패', {
+          description: '네트워크가 느릴 수 있습니다. 잠시 후 다시 시도해주세요.',
+        })
       })
-    } finally {
-      setIsSubmitting(false)
+      .finally(() => {
+        submittingRef.current = false
+      })
+  }
+
+  function submitMemo() {
+    const resolved =
+      selectedMember ?? resolveMemoMember(members, parsed.memberQuery, null)
+    submitWithMember(resolved)
+  }
+
+  function selectMember(member: MemoMember) {
+    // 시간이 이미 있으면 클릭 한 번에 바로 등록
+    if (parsed.startTime) {
+      submitWithMember(member, memo)
+      return
     }
+    applyMember(member)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -289,9 +318,9 @@ export function MonthMemoInput({
         e.preventDefault()
         const member = suggestions[activeIndex]
         if (member) {
-          applyMember(member)
+          selectMember(member)
         } else {
-          void submitMemo()
+          submitMemo()
         }
         return
       }
@@ -299,7 +328,7 @@ export function MonthMemoInput({
 
     if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      void submitMemo()
+      submitMemo()
     }
 
     if (e.key === 'Escape') {
@@ -331,7 +360,9 @@ export function MonthMemoInput({
             onPointerDown={(e) => e.preventDefault()}
           >
             <li className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-              클릭하면 바로 선택됩니다
+              {parsed.startTime
+                ? '클릭하면 바로 등록됩니다'
+                : '클릭하면 바로 선택됩니다'}
             </li>
             {isSearching && suggestions.length === 0 ? (
               <li className="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground">
@@ -356,7 +387,7 @@ export function MonthMemoInput({
                     onPointerDown={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      applyMember(member)
+                      selectMember(member)
                     }}
                   >
                     <span
@@ -397,7 +428,6 @@ export function MonthMemoInput({
             }
           }}
           onKeyDown={handleKeyDown}
-          disabled={isSubmitting}
           placeholder={`${dateHint} 메모 · 시간 이름`}
           className="h-11 border-dashed bg-muted/30 pr-10"
           autoComplete="off"
@@ -405,9 +435,6 @@ export function MonthMemoInput({
           spellCheck={false}
           enterKeyHint="done"
         />
-        {isSubmitting && (
-          <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-        )}
       </div>
 
       {timeHint && (

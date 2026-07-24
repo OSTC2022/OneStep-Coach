@@ -26,6 +26,7 @@ export function MemberBodyWeightChart({ points, className }: MemberBodyWeightCha
       metricLabel="체중"
       unit="kg"
       formatValue={(value) => `${formatBodyMetric(value)}kg`}
+      showPreviousDelta
       className={className}
     />
   )

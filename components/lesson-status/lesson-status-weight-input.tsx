@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -9,10 +9,17 @@ import {
 } from '@/lib/actions/member-body-records'
 import { WeightWithDeltaText } from '@/components/members/weight-with-delta-text'
 import {
+  calculateHeightDeltaCm,
+  formatHeightDeltaInParens,
   formatWeightDeltaInParens,
+  heightDeltaTextClass,
   weightDeltaTextClass,
 } from '@/lib/member-weight-delta'
-import { formatBodyMetric } from '@/lib/member-utils'
+import {
+  calculateMemberBmi,
+  formatBodyMetric,
+} from '@/lib/member-utils'
+import { resolveRecordHeight } from '@/lib/member-body-analysis'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -23,18 +30,38 @@ interface LessonStatusWeightInputProps {
   lessonDate: string
   initialWeight?: number | null
   initialWeightDelta?: number | null
+  initialHeightCm?: number | null
+  baselineHeightCm?: number | null
   disabled?: boolean
   className?: string
-  onWeightChange?: (weight: number | null, deltaKg?: number | null) => void
+  onWeightChange?: (
+    weight: number | null,
+    deltaKg?: number | null,
+    heightCm?: number | null,
+  ) => void
 }
 
-function showWeightDeltaToast(deltaKg: number | null, savedWeightKg: number) {
-  const deltaLabel = formatWeightDeltaInParens(deltaKg)
-  if (deltaLabel) {
+function showWeightDeltaToast(
+  deltaKg: number | null,
+  savedWeightKg: number,
+  heightDeltaCm: number | null,
+) {
+  const weightDeltaLabel = formatWeightDeltaInParens(deltaKg)
+  const heightDeltaLabel = formatHeightDeltaInParens(heightDeltaCm)
+  if (weightDeltaLabel || heightDeltaLabel) {
     toast.success(
       <span className="font-semibold tabular-nums">
         {formatBodyMetric(savedWeightKg)}
-        <span className={cn('ml-1', weightDeltaTextClass(deltaKg))}>{deltaLabel}</span>
+        {weightDeltaLabel ? (
+          <span className={cn('ml-1', weightDeltaTextClass(deltaKg))}>
+            {weightDeltaLabel}
+          </span>
+        ) : null}
+        {heightDeltaLabel ? (
+          <span className={cn('ml-1.5', heightDeltaTextClass(heightDeltaCm))}>
+            키 {heightDeltaLabel}
+          </span>
+        ) : null}
       </span>,
     )
     return
@@ -48,19 +75,30 @@ export function LessonStatusWeightInput({
   lessonDate,
   initialWeight,
   initialWeightDelta = null,
+  initialHeightCm = null,
+  baselineHeightCm = null,
   disabled,
   className,
   onWeightChange,
 }: LessonStatusWeightInputProps) {
   const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState('')
+  const [weightDraft, setWeightDraft] = useState('')
+  const [heightDraft, setHeightDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [savedWeight, setSavedWeight] = useState<number | null>(
     initialWeight ?? null,
   )
-  const [weightDeltaKg, setWeightDeltaKg] = useState<number | null>(null)
+  const [savedHeight, setSavedHeight] = useState<number | null>(
+    initialHeightCm ?? null,
+  )
+  const [weightDeltaKg, setWeightDeltaKg] = useState<number | null>(
+    initialWeightDelta,
+  )
+  const [heightDeltaCm, setHeightDeltaCm] = useState<number | null>(null)
   const boundRef = useRef({ memberId, lessonDate })
-  const inputRef = useRef<HTMLInputElement>(null)
+  const weightInputRef = useRef<HTMLInputElement>(null)
+  /** 다이얼로그 열 때 기준 키 — 저장 전 성장량 비교용 */
+  const heightCompareRef = useRef<number | null>(null)
 
   useEffect(() => {
     const memberOrDateChanged =
@@ -70,9 +108,12 @@ export function LessonStatusWeightInput({
 
     if (memberOrDateChanged) {
       setSavedWeight(initialWeight ?? null)
+      setSavedHeight(initialHeightCm ?? null)
       setWeightDeltaKg(initialWeightDelta)
+      setHeightDeltaCm(null)
       setOpen(false)
-      setDraft('')
+      setWeightDraft('')
+      setHeightDraft('')
       return
     }
 
@@ -80,32 +121,66 @@ export function LessonStatusWeightInput({
       setSavedWeight(initialWeight)
       setWeightDeltaKg(initialWeightDelta)
     }
-  }, [initialWeight, initialWeightDelta, memberId, lessonDate])
+    if (initialHeightCm != null) {
+      setSavedHeight(initialHeightCm)
+    }
+  }, [
+    initialWeight,
+    initialWeightDelta,
+    initialHeightCm,
+    memberId,
+    lessonDate,
+  ])
 
   useEffect(() => {
     if (!open) return
     const timer = window.setTimeout(() => {
-      inputRef.current?.focus()
-      inputRef.current?.select()
+      weightInputRef.current?.focus()
+      weightInputRef.current?.select()
     }, 0)
     return () => window.clearTimeout(timer)
   }, [open])
 
+  const previousHeightForDelta = baselineHeightCm ?? null
+
+  const heightDraftDelta = useMemo(() => {
+    const trimmed = heightDraft.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed) || parsed <= 50 || parsed >= 250) return null
+    const compareTo = heightCompareRef.current ?? previousHeightForDelta
+    return calculateHeightDeltaCm(compareTo, parsed)
+  }, [heightDraft, previousHeightForDelta, open])
+
   function openEditor() {
-    setDraft(savedWeight != null ? formatBodyMetric(savedWeight) : '')
+    setWeightDraft(savedWeight != null ? formatBodyMetric(savedWeight) : '')
+    // 키는 항상 미입력 — 입력할 때만 성장량 표시
+    setHeightDraft('')
+    heightCompareRef.current = previousHeightForDelta
     setOpen(true)
   }
 
   function closeEditor() {
     setOpen(false)
-    setDraft('')
+    setWeightDraft('')
+    setHeightDraft('')
   }
 
   async function handleConfirm() {
-    const trimmed = draft.trim()
-    const parsed = trimmed ? Number(trimmed) : NaN
+    const trimmedWeight = weightDraft.trim()
+    const parsedWeight = trimmedWeight ? Number(trimmedWeight) : NaN
     const shouldClear =
-      !trimmed || (Number.isFinite(parsed) && parsed === 0)
+      !trimmedWeight || (Number.isFinite(parsedWeight) && parsedWeight === 0)
+
+    const trimmedHeight = heightDraft.trim()
+    const parsedHeight = trimmedHeight ? Number(trimmedHeight) : NaN
+    const heightCm =
+      trimmedHeight &&
+      Number.isFinite(parsedHeight) &&
+      parsedHeight > 50 &&
+      parsedHeight < 250
+        ? parsedHeight
+        : null
 
     if (shouldClear) {
       if (savedWeight == null) {
@@ -127,25 +202,46 @@ export function LessonStatusWeightInput({
       }
 
       setSavedWeight(null)
+      setSavedHeight(null)
       setWeightDeltaKg(null)
+      setHeightDeltaCm(null)
       onWeightChange?.(null)
       closeEditor()
       return
     }
 
-    const weight = parsed
+    const weight = parsedWeight
     if (!Number.isFinite(weight) || weight <= 0 || weight >= 500) {
       toast.error('체중을 올바르게 입력해주세요.')
       return
     }
 
-    if (savedWeight === weight) {
+    if (trimmedHeight && heightCm == null) {
+      toast.error('키를 올바르게 입력해주세요. (예: 170)')
+      return
+    }
+
+    if (savedWeight === weight && heightCm == null) {
+      closeEditor()
+      return
+    }
+
+    if (
+      savedWeight === weight &&
+      heightCm != null &&
+      savedHeight === heightCm
+    ) {
       closeEditor()
       return
     }
 
     setSaving(true)
-    const result = await recordLessonStatusWeight(memberId, lessonDate, weight)
+    const result = await recordLessonStatusWeight(
+      memberId,
+      lessonDate,
+      weight,
+      heightCm,
+    )
     setSaving(false)
 
     if (result.error) {
@@ -158,15 +254,35 @@ export function LessonStatusWeightInput({
     }
 
     const saved = result.savedWeightKg ?? weight
+    const nextHeight = result.savedHeightCm ?? heightCm ?? savedHeight
+    const nextHeightDelta =
+      heightCm != null
+        ? calculateHeightDeltaCm(
+            heightCompareRef.current ?? previousHeightForDelta,
+            heightCm,
+          )
+        : heightDeltaCm
+
     setSavedWeight(saved)
+    setSavedHeight(nextHeight)
     setWeightDeltaKg(result.weightDeltaKg ?? null)
-    onWeightChange?.(saved, result.weightDeltaKg ?? null)
-    showWeightDeltaToast(result.weightDeltaKg ?? null, saved)
+    if (heightCm != null) {
+      setHeightDeltaCm(nextHeightDelta)
+    }
+    onWeightChange?.(saved, result.weightDeltaKg ?? null, nextHeight)
+    showWeightDeltaToast(
+      result.weightDeltaKg ?? null,
+      saved,
+      heightCm != null ? nextHeightDelta : null,
+    )
     closeEditor()
   }
 
   const hasSaved = savedWeight != null
-  const buttonLabel = hasSaved ? null : '체중 kg'
+  const displayHeight = resolveRecordHeight(baselineHeightCm, savedHeight)
+  const displayBmi = calculateMemberBmi(displayHeight, savedWeight)
+  const buttonLabel = hasSaved ? null : '체중 · 키'
+  const heightDeltaLabel = formatHeightDeltaInParens(heightDeltaCm)
 
   return (
     <>
@@ -187,12 +303,27 @@ export function LessonStatusWeightInput({
         {saving ? (
           <Loader2 className="h-3 w-3 animate-spin" />
         ) : hasSaved ? (
-          <WeightWithDeltaText
-            weightKg={savedWeight}
-            deltaKg={weightDeltaKg}
-            className="text-[10px] font-semibold"
-            weightClassName="text-primary"
-          />
+          <span className="min-w-0 truncate">
+            <WeightWithDeltaText
+              weightKg={savedWeight}
+              deltaKg={weightDeltaKg}
+              className="text-[10px] font-semibold"
+              weightClassName="text-primary"
+            />
+            {heightDeltaLabel ? (
+              <span
+                className={cn(
+                  'ml-1 font-semibold tabular-nums',
+                  heightDeltaTextClass(heightDeltaCm),
+                )}
+              >
+                키{heightDeltaLabel}
+              </span>
+            ) : null}
+            {displayBmi != null ? (
+              <span className="ml-1 text-muted-foreground">BMI {displayBmi}</span>
+            ) : null}
+          </span>
         ) : (
           <span>{buttonLabel}</span>
         )}
@@ -222,37 +353,104 @@ export function LessonStatusWeightInput({
           }}
         >
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <DialogTitle className="text-xs font-medium">체중 (kg)</DialogTitle>
-              <Input
-                ref={inputRef}
-                type="number"
-                inputMode="decimal"
-                step="0.1"
-                min="0"
-                max="500"
-                placeholder="예: 65.5"
-                value={draft}
-                disabled={saving}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void handleConfirm()
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    closeEditor()
-                  }
-                }}
-                className="h-9 tabular-nums"
-              />
-              {hasSaved ? (
-                <p className="text-[10px] text-muted-foreground">
-                  삭제하려면 0 입력 후 확인
-                </p>
-              ) : null}
+            <DialogTitle className="text-xs font-medium">체중 · 키</DialogTitle>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">체중 (kg)</p>
+                <Input
+                  ref={weightInputRef}
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  max="500"
+                  placeholder="체중"
+                  value={weightDraft}
+                  disabled={saving}
+                  onChange={(e) => setWeightDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleConfirm()
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      closeEditor()
+                    }
+                  }}
+                  className="h-9 tabular-nums"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">키 (cm)</p>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  max="250"
+                  placeholder="키"
+                  value={heightDraft}
+                  disabled={saving}
+                  onChange={(e) => setHeightDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleConfirm()
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      closeEditor()
+                    }
+                  }}
+                  className="h-9 tabular-nums"
+                />
+              </div>
             </div>
+            {(() => {
+              const w = Number(weightDraft)
+              const h = Number(heightDraft)
+              const hasHeightDraft =
+                Boolean(heightDraft.trim()) && Number.isFinite(h) && h > 0
+              const preview = calculateMemberBmi(
+                hasHeightDraft ? h : displayHeight,
+                Number.isFinite(w) && w > 0 ? w : savedWeight,
+              )
+              const heightDeltaLabelLive =
+                formatHeightDeltaInParens(heightDraftDelta)
+              return (
+                <div className="space-y-1">
+                  {heightDeltaLabelLive ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      키 변화:{' '}
+                      <span
+                        className={cn(
+                          'font-medium tabular-nums',
+                          heightDeltaTextClass(heightDraftDelta),
+                        )}
+                      >
+                        {heightDeltaLabelLive}
+                      </span>
+                    </p>
+                  ) : null}
+                  {preview != null ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      BMI 자동 계산:{' '}
+                      <span className="font-medium text-foreground">{preview}</span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      키를 함께 입력하면 BMI가 자동 계산됩니다.
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
+            {hasSaved ? (
+              <p className="text-[10px] text-muted-foreground">
+                체중 삭제하려면 0 입력 후 확인
+              </p>
+            ) : null}
             <div className="flex gap-2">
               <Button
                 type="button"

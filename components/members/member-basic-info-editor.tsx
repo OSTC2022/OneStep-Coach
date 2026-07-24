@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BirthDateInput } from '@/components/members/birth-date-input'
+import { SportSelectField } from '@/components/members/sport-select-field'
 import {
   formatBirthDateDisplay,
   formatMemberAge,
@@ -21,6 +22,7 @@ interface MemberBasicInfoEditorProps {
   birthDate: string | null
   age: number | null
   grade: string | null
+  sport: string | null
   school: string | null
   canEdit: boolean
   compact?: boolean
@@ -28,6 +30,7 @@ interface MemberBasicInfoEditorProps {
     birth_date?: string | null
     age?: number | null
     grade?: string | null
+    sport?: string | null
     school?: string | null
   }) => void
 }
@@ -37,11 +40,24 @@ function displayValue(value: string | null | undefined) {
   return trimmed ? trimmed : '-'
 }
 
+function displayPair(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  const a = left?.trim()
+  const b = right?.trim()
+  if (!a && !b) return '-'
+  if (!a) return b!
+  if (!b) return a
+  return `${a} / ${b}`
+}
+
 export function MemberBasicInfoEditor({
   memberId,
   birthDate,
   age,
   grade,
+  sport,
   school,
   canEdit,
   compact = false,
@@ -54,6 +70,7 @@ export function MemberBasicInfoEditor({
     birth_date: birthDate?.split('T')[0] || '',
     age: age ?? undefined,
     grade: grade || '',
+    sport: sport || '',
     school: school || '',
   })
 
@@ -63,16 +80,18 @@ export function MemberBasicInfoEditor({
         birth_date: birthDate?.split('T')[0] || '',
         age: age ?? undefined,
         grade: grade || '',
+        sport: sport || '',
         school: school || '',
       })
     }
-  }, [birthDate, age, grade, school, isEditing])
+  }, [birthDate, age, grade, sport, school, isEditing])
 
   function handleCancel() {
     setFormData({
       birth_date: birthDate?.split('T')[0] || '',
       age: age ?? undefined,
       grade: grade || '',
+      sport: sport || '',
       school: school || '',
     })
     setIsEditing(false)
@@ -84,6 +103,7 @@ export function MemberBasicInfoEditor({
       birth_date: formData.birth_date || undefined,
       age: formData.age,
       grade: formData.grade,
+      sport: formData.sport,
       school: formData.school,
     })
     setIsSaving(false)
@@ -103,6 +123,7 @@ export function MemberBasicInfoEditor({
       birth_date: toNullableTrimmed(formData.birth_date),
       age: formData.age ?? null,
       grade: toNullableTrimmed(formData.grade),
+      sport: toNullableTrimmed(formData.sport),
       school: toNullableTrimmed(formData.school),
     }
     onSaved?.(patch)
@@ -111,6 +132,9 @@ export function MemberBasicInfoEditor({
     router.refresh()
   }
 
+  const ageLabel = formatMemberAge({ age, birth_date: birthDate })
+  const ageText = ageLabel === '-' ? null : ageLabel
+
   const viewContent = (
     <div className="space-y-3">
       <div className="space-y-0.5">
@@ -118,12 +142,14 @@ export function MemberBasicInfoEditor({
         <p className="tabular-nums">{formatBirthDateDisplay(birthDate)}</p>
       </div>
       <div className="space-y-0.5">
-        <p className="text-muted-foreground">나이</p>
-        <p className="tabular-nums">{formatMemberAge({ age, birth_date: birthDate })}</p>
+        <p className="text-muted-foreground">나이 / 학년</p>
+        <p className="break-keep leading-snug tabular-nums">
+          {displayPair(ageText, grade)}
+        </p>
       </div>
       <div className="space-y-0.5">
-        <p className="text-muted-foreground">학년 / 포지션</p>
-        <p className="break-keep leading-snug">{displayValue(grade)}</p>
+        <p className="text-muted-foreground">종목 / 포지션</p>
+        <p className="break-keep leading-snug">{displayValue(sport)}</p>
       </div>
       <div className="space-y-0.5">
         <p className="text-muted-foreground">학교 / 소속팀</p>
@@ -144,33 +170,44 @@ export function MemberBasicInfoEditor({
           }))
         }
       />
-      <div className="space-y-2">
-        <label htmlFor={`member-age-${memberId}`} className="text-sm text-muted-foreground">
-          나이
-        </label>
-        <Input
-          id={`member-age-${memberId}`}
-          type="number"
-          min={0}
-          max={120}
-          value={formData.age ?? ''}
-          onChange={(e) =>
-            setFormData((prev) => ({
-              ...prev,
-              age: e.target.value ? Number(e.target.value) : undefined,
-            }))
-          }
-          placeholder="생년월일 입력 시 자동 계산"
-        />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2">
+          <label htmlFor={`member-age-${memberId}`} className="text-sm text-muted-foreground">
+            나이
+          </label>
+          <Input
+            id={`member-age-${memberId}`}
+            type="number"
+            min={0}
+            max={120}
+            value={formData.age ?? ''}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                age: e.target.value ? Number(e.target.value) : undefined,
+              }))
+            }
+            placeholder="생년월일 입력 시 자동 계산"
+          />
+        </div>
+        <div className="space-y-2">
+          <label htmlFor={`member-grade-${memberId}`} className="text-sm text-muted-foreground">
+            학년
+          </label>
+          <Input
+            id={`member-grade-${memberId}`}
+            value={formData.grade}
+            onChange={(e) => setFormData((prev) => ({ ...prev, grade: e.target.value }))}
+            placeholder="예: 초4, 중3"
+          />
+        </div>
       </div>
-      <div className="space-y-2">
-        <label className="text-sm text-muted-foreground">학년 / 포지션</label>
-        <Input
-          value={formData.grade}
-          onChange={(e) => setFormData((prev) => ({ ...prev, grade: e.target.value }))}
-          placeholder="예: 중3 / 공격수"
-        />
-      </div>
+      <SportSelectField
+        id={`member-sport-${memberId}`}
+        label="종목 / 포지션"
+        value={formData.sport}
+        onChange={(nextSport) => setFormData((prev) => ({ ...prev, sport: nextSport }))}
+      />
       <div className="space-y-2">
         <label className="text-sm text-muted-foreground">학교 / 소속팀</label>
         <Input

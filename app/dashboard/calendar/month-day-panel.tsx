@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getLessonCalendarDisplayLine,
@@ -48,7 +47,6 @@ export function MonthDayPanel({
   const activateLesson = onLessonActivate ?? ((lesson) => onLessonEdit?.(lesson))
   const [inlineEditId, setInlineEditId] = useState<string | null>(null)
   const [inlineEditText, setInlineEditText] = useState('')
-  const [savingId, setSavingId] = useState<string | null>(null)
   const skipClickRef = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -87,15 +85,10 @@ export function MonthDayPanel({
     setInlineEditId(null)
 
     if (trimmed === current) return
-
     if (!onLessonLineUpdate) return
 
-    setSavingId(lesson.id)
-    try {
-      await onLessonLineUpdate(lesson, trimmed)
-    } finally {
-      setSavingId(null)
-    }
+    // 낙관적 반영 — 서버 완료를 기다리지 않음
+    void onLessonLineUpdate(lesson, trimmed)
   }
 
   function cancelInlineEdit() {
@@ -128,7 +121,6 @@ export function MonthDayPanel({
               const instructorName = resolveLessonInstructorName(lesson, instructors)
               const displayLine = getLessonCalendarDisplayLine(lesson)
               const isEditing = inlineEditId === lesson.id
-              const isSaving = savingId === lesson.id
               const isMultiSelected = isLessonSelected?.(lesson.id)
 
               return (
@@ -146,30 +138,24 @@ export function MonthDayPanel({
                     />
                     <div className="min-w-0 flex-1">
                       {isEditing ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            ref={inputRef}
-                            value={inlineEditText}
-                            onChange={(e) => setInlineEditText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                                e.preventDefault()
-                                void saveInlineEdit(lesson)
-                              }
-                              if (e.key === 'Escape') {
-                                e.preventDefault()
-                                cancelInlineEdit()
-                              }
-                            }}
-                            onBlur={() => void saveInlineEdit(lesson)}
-                            disabled={isSaving}
-                            placeholder="16:00 이름(39축구)"
-                            className="h-8 text-sm"
-                          />
-                          {isSaving && (
-                            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                          )}
-                        </div>
+                        <Input
+                          ref={inputRef}
+                          value={inlineEditText}
+                          onChange={(e) => setInlineEditText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                              e.preventDefault()
+                              void saveInlineEdit(lesson)
+                            }
+                            if (e.key === 'Escape') {
+                              e.preventDefault()
+                              cancelInlineEdit()
+                            }
+                          }}
+                          onBlur={() => void saveInlineEdit(lesson)}
+                          placeholder="16:00 이름(39축구)"
+                          className="h-8 text-sm"
+                        />
                       ) : (
                         <button
                           type="button"

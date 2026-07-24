@@ -15,13 +15,19 @@ import {
 import type { User } from '@/lib/types'
 import { VisualViewportOffsetHandler } from '@/components/visual-viewport-offset-handler'
 import { AuthSessionKeepAlive } from '@/components/auth/auth-session-keep-alive'
+import type { AdultMemberProgram } from '@/lib/adult-member-programs'
 
 interface DashboardShellProps {
   user: User
   children: ReactNode
+  adultProgram?: AdultMemberProgram | null
 }
 
-export function DashboardShell({ user, children }: DashboardShellProps) {
+export function DashboardShell({
+  user,
+  children,
+  adultProgram = null,
+}: DashboardShellProps) {
   const pathname = usePathname()
   const memberPortal =
     isMemberPortalRole(user.role) && isMemberPortalPath(pathname)
@@ -39,7 +45,7 @@ export function DashboardShell({ user, children }: DashboardShellProps) {
         >
           {children}
         </main>
-        <MemberPortalBottomNav role={user.role} />
+        <MemberPortalBottomNav role={user.role} adultProgram={adultProgram} />
       </div>
     )
   }

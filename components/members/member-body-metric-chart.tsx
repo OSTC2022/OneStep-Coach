@@ -1,8 +1,6 @@
 'use client'
 
 import { useId, useMemo } from 'react'
-import { format, parseISO } from 'date-fns'
-import { ko } from 'date-fns/locale'
 import {
   Area,
   CartesianGrid,
@@ -14,8 +12,11 @@ import {
 import {
   ChartContainer,
   ChartTooltip,
-  ChartTooltipContent,
 } from '@/components/ui/chart'
+import {
+  formatWeightDeltaLabel,
+  weightDeltaTextClass,
+} from '@/lib/member-weight-delta'
 import { cn } from '@/lib/utils'
 
 export type MetricChartPoint = {
@@ -24,12 +25,18 @@ export type MetricChartPoint = {
   value: number
 }
 
+type ChartRow = MetricChartPoint & {
+  deltaFromPrevious: number | null
+}
+
 interface MemberBodyMetricChartProps {
   points: MetricChartPoint[]
   metricKey?: string
   metricLabel?: string
   unit?: string
   formatValue?: (value: number) => string
+  /** 호버 지점의 직전(시간순 이전) 값 대비 변화량 표시 */
+  showPreviousDelta?: boolean
   className?: string
 }
 
@@ -47,7 +54,9 @@ const CHART_SURFACE =
   '[&_.recharts-cartesian-axis-tick_text]:fill-foreground/90 [&_.recharts-cartesian-axis-tick_text]:text-[11px] [&_.recharts-cartesian-axis-tick_text]:font-medium [&_.recharts-cartesian-grid_line]:stroke-border/70'
 
 function defaultFormat(value: number, unit: string) {
-  const text = Number.isInteger(value) ? String(value) : value.toFixed(1)
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return unit ? `-${unit}` : '-'
+  const text = Number.isInteger(n) ? String(n) : n.toFixed(1)
   return unit ? `${text}${unit}` : text
 }
 
@@ -57,15 +66,34 @@ export function MemberBodyMetricChart({
   metricLabel = '지표',
   unit = '',
   formatValue,
+  showPreviousDelta = false,
   className,
 }: MemberBodyMetricChartProps) {
   const gradientId = useId().replace(/:/g, '')
-  const format = formatValue ?? ((value: number) => defaultFormat(value, unit))
+  const formatMetric = (raw: number | string) => {
+    const n = typeof raw === 'number' ? raw : Number(raw)
+    if (!Number.isFinite(n)) return '-'
+    return formatValue ? formatValue(n) : defaultFormat(n, unit)
+  }
 
-  const sortedPoints = useMemo(
-    () => [...points].sort((a, b) => a.date.localeCompare(b.date)),
-    [points],
-  )
+  const sortedPoints = useMemo((): ChartRow[] => {
+    const sorted = [...points]
+      .map((point) => ({
+        ...point,
+        value: Number(point.value),
+      }))
+      .filter((point) => Number.isFinite(point.value))
+      .sort((a, b) => a.date.localeCompare(b.date))
+
+    return sorted.map((point, index) => {
+      const previous = index > 0 ? sorted[index - 1] : null
+      const deltaFromPrevious =
+        previous != null
+          ? Number((point.value - previous.value).toFixed(1))
+          : null
+      return { ...point, deltaFromPrevious }
+    })
+  }, [points])
 
   const yDomain = useMemo(() => {
     const values = sortedPoints.map((point) => point.value)
@@ -77,14 +105,17 @@ export function MemberBodyMetricChart({
 
   const yAxisWidth = useMemo(() => {
     const [min, max] = yDomain
-    const longest = format(max).length
-    const shortest = format(min).length
+    const longest = formatMetric(max).length
+    const shortest = formatMetric(min).length
     const chars = Math.max(longest, shortest)
     return Math.max(48, chars * 7 + 12)
-  }, [yDomain, format])
+  }, [yDomain])
 
   const config = {
-    [metricKey]: chartConfig.metric,
+    [metricKey]: {
+      ...chartConfig.metric,
+      label: metricLabel,
+    },
   }
 
   return (
@@ -98,8 +129,16 @@ export function MemberBodyMetricChart({
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={`var(--color-${metricKey})`} stopOpacity={0.4} />
-            <stop offset="100%" stopColor={`var(--color-${metricKey})`} stopOpacity={0.02} />
+            <stop
+              offset="0%"
+              stopColor={`var(--color-${metricKey})`}
+              stopOpacity={0.4}
+            />
+            <stop
+              offset="100%"
+              stopColor={`var(--color-${metricKey})`}
+              stopOpacity={0.02}
+            />
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -118,7 +157,7 @@ export function MemberBodyMetricChart({
           tickMargin={8}
           width={yAxisWidth}
           tick={{ fontSize: 11, fill: 'currentColor' }}
-          tickFormatter={(value: number) => format(value)}
+          tickFormatter={(value: number) => formatMetric(value)}
         />
         <ChartTooltip
           cursor={{
@@ -126,21 +165,53 @@ export function MemberBodyMetricChart({
             strokeWidth: 1.5,
             strokeOpacity: 0.5,
           }}
-          content={
-            <ChartTooltipContent
-              hideIndicator
-              labelFormatter={(_, payload) => {
-                const row = payload?.[0]?.payload as MetricChartPoint | undefined
-                if (!row) return metricLabel
-                return format(parseISO(row.date), 'yyyy.M.d (EEE)', { locale: ko })
-              }}
-              formatter={(value) => (
-                <span className="text-sm font-bold tabular-nums text-primary">
-                  {format(Number(value))}
-                </span>
-              )}
-            />
-          }
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null
+            const item =
+              payload.find((row) => row.name === metricLabel) ?? payload[0]
+            const row = item?.payload as ChartRow | undefined
+            if (!row || !Number.isFinite(row.value)) return null
+
+            const delta = showPreviousDelta ? row.deltaFromPrevious : null
+            const deltaLabel =
+              unit === 'kg'
+                ? formatWeightDeltaLabel(delta)
+                : delta == null
+                  ? null
+                  : delta === 0
+                    ? `0${unit}`
+                    : `${delta > 0 ? '+' : ''}${delta.toFixed(1)}${unit}`
+
+            return (
+              <div className="grid min-w-[7rem] gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-muted-foreground">{metricLabel}</span>
+                  <span className="font-semibold tabular-nums text-primary">
+                    {formatMetric(row.value)}
+                  </span>
+                </div>
+                {showPreviousDelta ? (
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-muted-foreground">직전</span>
+                    <span
+                      className={cn(
+                        'font-semibold tabular-nums',
+                        unit === 'kg'
+                          ? weightDeltaTextClass(delta)
+                          : delta == null || delta === 0
+                            ? 'text-muted-foreground'
+                            : delta > 0
+                              ? 'text-blue-500'
+                              : 'text-red-500',
+                      )}
+                    >
+                      {deltaLabel ?? '-'}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            )
+          }}
         />
         <Area
           type="linear"
@@ -148,10 +219,13 @@ export function MemberBodyMetricChart({
           fill={`url(#${gradientId})`}
           stroke="none"
           isAnimationActive={false}
+          legendType="none"
+          activeDot={false}
         />
         <Line
           type="linear"
           dataKey="value"
+          name={metricLabel}
           stroke={`var(--color-${metricKey})`}
           strokeWidth={3}
           connectNulls

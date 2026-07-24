@@ -26,11 +26,13 @@ import {
   MONTHLY_RECURRING_PLAN_LABEL,
   PACKAGE_PRESETS,
   UNLIMITED_SESSIONS_DISPLAY,
+  addDaysToDate,
   addMonthsToDate,
   adjustPriceForPaymentMethod,
   calculateMonthlyPlanExpiryDate,
   calculateMonthlyRecurringExpiryDate,
   clearMonthlyPlanNote,
+  diffCalendarDays,
   formatPackageRemainingDisplay,
   formatPackageSessionsDisplay,
   getDefaultMonthlyRecurringPaidAt,
@@ -211,13 +213,70 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     applyMonthlyPeriod(months)
   }
 
-  function handleExtendPeriod() {
-    const currentMonths = periodMonths ?? parseMonthlyPlanMonthsFromNote(formData.note) ?? 1
+  /** 만료일·잔여·총회차를 일수만큼 중첩(+) 연장 */
+  function applyStackedExtension(days: number, options?: { addPeriodMonths?: number }) {
+    if (!Number.isFinite(days) || days <= 0) return
+
+    const today = new Date().toISOString().split('T')[0]
     setExpiresAtManual(false)
-    applyMonthlyPeriod(currentMonths + 1, {
-      extendFromExpiry: Boolean(formData.expires_at),
-      autoExpiry: true,
+
+    const bumpPeriod =
+      Boolean(options?.addPeriodMonths) &&
+      options!.addPeriodMonths! > 0 &&
+      (periodMonths != null || parseMonthlyPlanMonthsFromNote(formData.note) != null)
+
+    if (bumpPeriod) {
+      const currentMonths =
+        periodMonths ?? parseMonthlyPlanMonthsFromNote(formData.note) ?? 0
+      const nextMonths = Math.max(1, currentMonths + (options?.addPeriodMonths ?? 1))
+      const presetMatch = MONTHLY_PLAN_PRESETS.find((item) => item.months === nextMonths)
+      setPeriodMonths(nextMonths)
+      setActiveMonthlyMonths(presetMatch ? presetMatch.months : null)
+      setIsMonthlyRecurring(false)
+      setFormData((prev) => {
+        const base = prev.expires_at || prev.paid_at || today
+        const nextExpiry = addDaysToDate(base, days)
+        const nextRemaining = Math.max(0, prev.remaining_sessions) + days
+        const nextTotal =
+          prev.total_sessions > 0
+            ? prev.total_sessions + days
+            : nextRemaining
+        return {
+          ...prev,
+          expires_at: nextExpiry,
+          remaining_sessions: nextRemaining,
+          total_sessions: nextTotal,
+          note: mergeMonthlyPlanNote(prev.note, nextMonths),
+        }
+      })
+      return
+    }
+
+    setFormData((prev) => {
+      const base = prev.expires_at || prev.paid_at || today
+      const nextExpiry = addDaysToDate(base, days)
+      const nextRemaining = Math.max(0, prev.remaining_sessions) + days
+      const nextTotal =
+        prev.total_sessions > 0 ? prev.total_sessions + days : nextRemaining
+      return {
+        ...prev,
+        expires_at: nextExpiry,
+        remaining_sessions: nextRemaining,
+        total_sessions: nextTotal,
+      }
     })
+  }
+
+  function handleExtendByDays(days: number) {
+    applyStackedExtension(days)
+  }
+
+  function handleExtendByOneMonth() {
+    const today = new Date().toISOString().split('T')[0]
+    const base = formData.expires_at || formData.paid_at || today
+    const nextExpiry = addMonthsToDate(base, 1)
+    const days = diffCalendarDays(base, nextExpiry) ?? 30
+    applyStackedExtension(days, { addPeriodMonths: 1 })
   }
 
   function handleExpiresAtChange(expires_at: string) {
@@ -286,12 +345,21 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   }
 
   const isMonthlyPlanMode = periodMonths != null || isMonthlyRecurring
+  /** 연장으로 회차가 붙으면 무제한(-) 대신 숫자 표시·저장 */
+  const showSessionCounts =
+    !isMonthlyPlanMode ||
+    formData.total_sessions > 0 ||
+    formData.remaining_sessions > 0
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
 
-    const totalSessions = isMonthlyPlanMode ? 0 : formData.total_sessions
+    const totalSessions = showSessionCounts
+      ? formData.total_sessions
+      : isMonthlyPlanMode
+        ? 0
+        : formData.total_sessions
 
     const payload = {
       total_sessions: totalSessions,
@@ -305,7 +373,11 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     const result = isEditing && sessionPackage
       ? await updateSessionPackage(sessionPackage.id, {
           ...payload,
-          remaining_sessions: isMonthlyPlanMode ? 0 : formData.remaining_sessions,
+          remaining_sessions: showSessionCounts
+            ? formData.remaining_sessions
+            : isMonthlyPlanMode
+              ? 0
+              : formData.remaining_sessions,
           is_active: formData.is_active,
         })
       : await createSessionPackage({
@@ -474,15 +546,35 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!isMonthlyPlanMode || isMonthlyRecurring}
-                    onClick={handleExtendPeriod}
+                    disabled={isMonthlyRecurring}
+                    onClick={() => handleExtendByDays(1)}
                   >
-                    +1개월 연장
+                    +1일
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isMonthlyRecurring}
+                    onClick={() => handleExtendByDays(7)}
+                  >
+                    +일주일
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isMonthlyRecurring}
+                    onClick={handleExtendByOneMonth}
+                  >
+                    +1개월
                   </Button>
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                월정액은 횟수 제한 없음 · 금액 직접 입력 · 매월은 당월 1일 기준(결제일 변경 가능) · 기간형은 수정·연장 가능
+                연장 버튼을 누를 때마다 만료일·잔여회차가 중첩(+)됩니다. (예: +1일 +
+                일주일 = 8일) · 월정액은 횟수 제한 없음 · 금액 직접 입력 · 매월은 당월
+                1일 기준
               </p>
             </div>
 
@@ -496,15 +588,7 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     <span className="ml-1 text-primary">({periodMonths}개월)</span>
                   ) : null}
                 </Label>
-                {isMonthlyPlanMode ? (
-                  <Input
-                    id="total_sessions"
-                    value={UNLIMITED_SESSIONS_DISPLAY}
-                    readOnly
-                    disabled
-                    className="text-muted-foreground"
-                  />
-                ) : (
+                {showSessionCounts ? (
                   <Input
                     id="total_sessions"
                     type="number"
@@ -513,36 +597,44 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
                     onChange={(e) => handleSessionsChange(Number(e.target.value))}
                     required
                   />
+                ) : (
+                  <Input
+                    id="total_sessions"
+                    value={UNLIMITED_SESSIONS_DISPLAY}
+                    readOnly
+                    disabled
+                    className="text-muted-foreground"
+                  />
                 )}
               </div>
               {isEditing && (
                 <div className="space-y-2">
                   <Label htmlFor="remaining_sessions">잔여 회차</Label>
-                  {isMonthlyPlanMode ? (
+                  {showSessionCounts ? (
+                    <Input
+                      id="remaining_sessions"
+                      type="number"
+                      min="0"
+                      value={formData.remaining_sessions}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          remaining_sessions: Math.max(0, Number(e.target.value) || 0),
+                          total_sessions: Math.max(
+                            formData.total_sessions,
+                            Number(e.target.value) || 0,
+                          ),
+                        })
+                      }
+                      required
+                    />
+                  ) : (
                     <Input
                       id="remaining_sessions"
                       value={UNLIMITED_SESSIONS_DISPLAY}
                       readOnly
                       disabled
                       className="text-muted-foreground"
-                    />
-                  ) : (
-                    <Input
-                      id="remaining_sessions"
-                      type="number"
-                      min="0"
-                      max={formData.total_sessions}
-                      value={formData.remaining_sessions}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          remaining_sessions: Math.min(
-                            Number(e.target.value),
-                            formData.total_sessions,
-                          ),
-                        })
-                      }
-                      required
                     />
                   )}
                 </div>

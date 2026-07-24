@@ -792,7 +792,10 @@ export function MemberBodyAnalysisView({
                     points={bmiChartPoints}
                     metricKey="bmi"
                     metricLabel="BMI"
-                    formatValue={(value) => value.toFixed(1)}
+                    formatValue={(value) => {
+                      const n = Number(value)
+                      return Number.isFinite(n) ? n.toFixed(1) : '-'
+                    }}
                     className="h-[320px] w-full"
                   />
                   {renderChartTrendNotice()}

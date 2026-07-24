@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { createMember, deleteMember, getMembers, toggleMemberStatus } from '@/lib/actions/members'
+import { createMember, deleteMember, getMembers, toggleMemberStatus, type MemberListStatusFilter } from '@/lib/actions/members'
 import { createSessionPackage } from '@/lib/actions/sessions'
 import { getInstructors } from '@/lib/actions/instructors'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
@@ -19,6 +19,7 @@ import {
   formatPrimaryInstructorName,
 } from '@/lib/member-utils'
 import { MemberNameWithStaffBadges } from '@/components/members/member-new-signup-badge'
+import { MemberDuplicateReviewSection } from '@/components/members/member-duplicate-review-section'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { SportSelectField } from '@/components/members/sport-select-field'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
@@ -158,6 +159,8 @@ export function MemberList({
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [accountStatusFilter, setAccountStatusFilter] =
+    useState<MemberListStatusFilter>('all')
   const [pageLoading, setPageLoading] = useState(false)
   const skipFetchRef = useRef(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -205,13 +208,15 @@ export function MemberList({
           statusFilter === 'all'
             ? undefined
             : statusFilter === 'active',
+        statusFilter:
+          accountStatusFilter === 'all' ? undefined : accountStatusFilter,
       })
       setMembers(data)
       setListTotalCount(count)
     } finally {
       setPageLoading(false)
     }
-  }, [sortField, sortAsc, currentPage, pageSize, debouncedSearch, statusFilter])
+  }, [sortField, sortAsc, currentPage, pageSize, debouncedSearch, statusFilter, accountStatusFilter])
 
   useEffect(() => {
     if (skipFetchRef.current) {
@@ -408,6 +413,8 @@ export function MemberList({
 
   return (
     <div className="space-y-4">
+      {canManage ? <MemberDuplicateReviewSection canManage={canManage} /> : null}
+
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -434,6 +441,29 @@ export function MemberList({
               <SelectItem value="all">전체</SelectItem>
               <SelectItem value="active">활성</SelectItem>
               <SelectItem value="inactive">비활성</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={accountStatusFilter}
+            onValueChange={(v) => {
+              setAccountStatusFilter(v as MemberListStatusFilter)
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue placeholder="회원 구분" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">구분 전체</SelectItem>
+              <SelectItem value="membership_active">회원권 있음</SelectItem>
+              <SelectItem value="membership_none">회원권 없음</SelectItem>
+              <SelectItem value="membership_expired">만료됨</SelectItem>
+              <SelectItem value="admin_created">관리자 등록</SelectItem>
+              <SelectItem value="self_signup">직접 가입</SelectItem>
+              <SelectItem value="unlinked">계정 미연동</SelectItem>
+              <SelectItem value="linked">연동 완료</SelectItem>
+              <SelectItem value="duplicate_candidate">중복 후보</SelectItem>
+              <SelectItem value="needs_review">확인 필요</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -702,7 +732,7 @@ export function MemberList({
                 field="sport"
                 sortField={sortField}
                 sortAsc={sortAsc}
-                className="hidden w-[4rem] lg:table-cell"
+                className="hidden w-[10.5rem] lg:table-cell"
                 onSort={handleSortClick}
               />
               <SortableMemberHead
@@ -710,10 +740,10 @@ export function MemberList({
                 field="instructor"
                 sortField={sortField}
                 sortAsc={sortAsc}
-                className="hidden w-[5rem] lg:table-cell"
+                className="hidden w-[7rem] lg:table-cell"
                 onSort={handleSortClick}
               />
-              <TableHead className="hidden lg:table-cell">연락처</TableHead>
+              <TableHead className="hidden w-[8rem] lg:table-cell">연락처</TableHead>
               <TableHead className="w-[3.5rem] whitespace-nowrap text-center">
                 상태
               </TableHead>
@@ -765,13 +795,13 @@ export function MemberList({
                   <TableCell className="hidden w-[7rem] pl-0 pr-1 font-medium sm:table-cell whitespace-nowrap">
                     {formatMemberAge(member)}
                   </TableCell>
-                  <TableCell className="hidden w-[4rem] lg:table-cell text-xs whitespace-nowrap">
+                  <TableCell className="hidden w-[10.5rem] lg:table-cell text-xs whitespace-nowrap">
                     {member.sport || '-'}
                   </TableCell>
-                  <TableCell className="hidden w-[5rem] lg:table-cell text-xs whitespace-nowrap">
+                  <TableCell className="hidden w-[7rem] lg:table-cell text-xs whitespace-nowrap">
                     {formatPrimaryInstructorName(member.primary_instructor)}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell text-xs text-muted-foreground whitespace-nowrap">
+                  <TableCell className="hidden w-[8rem] lg:table-cell text-xs text-muted-foreground whitespace-nowrap">
                     {formatMemberContactDisplay(member)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">

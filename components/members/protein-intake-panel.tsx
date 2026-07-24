@@ -40,6 +40,8 @@ interface ProteinIntakePanelProps {
   proteinSettings?: Partial<MemberProteinSettings>
   disabled?: boolean
   onIntakeBySlotChange: (value: ProteinIntakeBySlot) => void
+  /** 목표 설명 — 성인 감량 포털 등 */
+  goalHint?: string
 }
 
 export function ProteinIntakePanel({
@@ -48,6 +50,7 @@ export function ProteinIntakePanel({
   proteinSettings,
   disabled = false,
   onIntakeBySlotChange,
+  goalHint,
 }: ProteinIntakePanelProps) {
   const [activeSlot, setActiveSlot] = useState<ProteinIntakeSlotId>('breakfast')
   const [quickRefreshKey, setQuickRefreshKey] = useState(0)
@@ -113,12 +116,18 @@ export function ProteinIntakePanel({
 
   return (
     <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-      <p className="text-xs font-semibold text-foreground">
-        오늘 단백질 목표{' '}
-        <span className="tabular-nums text-primary">
-          {targetG != null ? `${targetG}g` : '-'}
-        </span>
-      </p>
+      <div className="space-y-1">
+        <p className="text-xs font-semibold text-foreground">
+          오늘 단백질 목표{' '}
+          <span className="tabular-nums text-primary">
+            {targetG != null ? `${targetG}g` : '-'}
+          </span>
+        </p>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {goalHint ??
+            `체중 × ${multiplier}g 기준입니다.`}
+        </p>
+      </div>
 
       <div className="space-y-2">
         <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
@@ -241,14 +250,23 @@ export function ProteinIntakePanel({
         onStorageChange={() => setQuickRefreshKey((key) => key + 1)}
       />
 
-      <p className="text-[11px] leading-relaxed text-foreground/55">
-        성장기 선수 기본 기준은 체중 × {multiplier}g입니다. 고강도
-        훈련일에는 관리자 설정에 따라 목표가 조정될 수 있습니다.
-      </p>
-      <p className="text-[11px] leading-relaxed text-foreground/55">
-        단백질 보충제는 식사를 대체하지 않습니다. 기본 식사에서 단백질을 챙기는 것이
-        우선이며, 보충제 사용은 보호자와 함께 확인해주세요.
-      </p>
+      {goalHint ? (
+        <p className="text-[11px] leading-relaxed text-foreground/55">
+          체중을 입력하면 감량용 단백질 목표가 자동 계산됩니다. 아침·점심·저녁으로
+          나눠 입력하면 합계로 누적됩니다.
+        </p>
+      ) : (
+        <>
+          <p className="text-[11px] leading-relaxed text-foreground/55">
+            성장기 선수 기본 기준은 체중 × {multiplier}g입니다. 고강도
+            훈련일에는 관리자 설정에 따라 목표가 조정될 수 있습니다.
+          </p>
+          <p className="text-[11px] leading-relaxed text-foreground/55">
+            단백질 보충제는 식사를 대체하지 않습니다. 기본 식사에서 단백질을 챙기는
+            것이 우선이며, 보충제 사용은 보호자와 함께 확인해주세요.
+          </p>
+        </>
+      )}
     </div>
   )
 }

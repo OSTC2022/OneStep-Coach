@@ -52,6 +52,21 @@ export interface Member {
   is_active: boolean
   created_at: string
   deleted_at: string | null
+  auth_user_id?: string | null
+  invite_email?: string | null
+  remaining_sessions?: number
+  new_member_badge_until?: string | null
+  source_type?: 'admin_created' | 'self_signup' | null
+  account_link_status?:
+    | 'linked'
+    | 'unlinked'
+    | 'duplicate_candidate'
+    | 'dismissed'
+    | null
+  membership_status?: 'active' | 'none' | 'expired' | 'pending' | null
+  duplicate_of_member_id?: string | null
+  duplicate_match_reason?: string | null
+  linked_at?: string | null
   // Joined relations
   primary_instructor?: Instructor
 }

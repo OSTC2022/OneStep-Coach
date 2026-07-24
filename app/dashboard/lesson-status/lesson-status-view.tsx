@@ -248,6 +248,7 @@ interface AthleteTileProps {
     date: string,
     weight: number | null,
     deltaKg?: number | null,
+    heightCm?: number | null,
   ) => void
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onClearAttendanceCheck: (lessonId: string) => void
@@ -682,13 +683,19 @@ const AthleteTile = memo(function AthleteTile({
                 bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]?.deltaKg ??
                 null
               }
+              initialHeightCm={
+                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]?.heightCm ??
+                null
+              }
+              baselineHeightCm={lesson.member?.height_cm ?? null}
               disabled={isLoading || isCompleting || isCancelling}
-              onWeightChange={(weight, deltaKg) =>
+              onWeightChange={(weight, deltaKg, heightCm) =>
                 onBodyWeightChange(
                   lesson.member_id!,
                   lesson.lesson_date,
                   weight,
                   deltaKg,
+                  heightCm,
                 )
               }
             />
@@ -962,6 +969,7 @@ interface TimeSlotsPanelProps {
     date: string,
     weight: number | null,
     deltaKg?: number | null,
+    heightCm?: number | null,
   ) => void
   emptyMessage?: string
   autoScrollToNow?: boolean
@@ -1297,6 +1305,7 @@ export function LessonStatusView({
       date: string,
       weight: number | null,
       deltaKg?: number | null,
+      heightCm?: number | null,
     ) => {
       setBodyWeightByKey((prev) => {
         const key = bodyWeightKey(memberId, date)
@@ -1306,7 +1315,11 @@ export function LessonStatusView({
         }
         return {
           ...prev,
-          [key]: { weightKg: weight, deltaKg: deltaKg ?? null },
+          [key]: {
+            weightKg: weight,
+            deltaKg: deltaKg ?? null,
+            heightCm: heightCm ?? prev[key]?.heightCm ?? null,
+          },
         }
       })
     },

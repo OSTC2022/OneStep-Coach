@@ -53,7 +53,8 @@ const MAX_LINES = 3
 const LINE_HEIGHT = 2
 const COLLAPSE_BAR_PX = 36
 const WEEKDAY_HEADER_PX = 28
-const MIN_WEEK_ROW_PX = 26
+/** 날짜 숫자(24px) + 여백 — 마지막 주(다음달 1·2일)가 잘리지 않도록 */
+const MIN_WEEK_ROW_PX = 34
 const MIN_BOTTOM_PX = 160
 const DEFAULT_BOTTOM_PX = 420
 const RESIZE_HANDLE_PX = 20
@@ -142,11 +143,16 @@ export function MonthView({
         ))}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        className="grid min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        style={{
+          gridTemplateRows: `repeat(${visibleWeeks.length}, minmax(${MIN_WEEK_ROW_PX}px, 1fr))`,
+        }}
+      >
         {visibleWeeks.map((week, wi) => (
           <div
             key={wi}
-            className="grid h-full min-h-0 flex-1 grid-cols-7 border-b border-border last:border-b-0"
+            className="grid min-h-0 grid-cols-7 border-b border-border last:border-b-0"
             style={{ minHeight: MIN_WEEK_ROW_PX }}
           >
             {week.map((date) => {
@@ -265,7 +271,10 @@ export function MonthView({
         <>
           <div
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
-            style={{ minHeight: minCalendarGridPx }}
+            style={{
+              flex: `1 1 ${minCalendarGridPx}px`,
+              minHeight: minCalendarGridPx,
+            }}
           >
             {monthCalendarGrid}
           </div>
@@ -274,7 +283,11 @@ export function MonthView({
 
           <div
             className="flex min-h-0 shrink-0 flex-col overflow-hidden"
-            style={{ height: bottomPx }}
+            style={{
+              height: bottomPx,
+              flex: `0 1 ${bottomPx}px`,
+              maxHeight: `calc(100% - ${minTopPx}px)`,
+            }}
           >
             {dayPanel}
           </div>

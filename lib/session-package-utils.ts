@@ -136,6 +136,24 @@ export function addMonthsToDate(dateStr: string, months: number): string {
   return date.toISOString().split('T')[0]
 }
 
+/** 기준일로부터 days일 뒤 (YYYY-MM-DD) */
+export function addDaysToDate(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr.split('T')[0]}T12:00:00`)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().split('T')[0]
+}
+
+/** 두 날짜 사이 일수 (end - start). 잘못된 입력이면 null */
+export function diffCalendarDays(
+  startDateStr: string,
+  endDateStr: string,
+): number | null {
+  const start = new Date(`${startDateStr.split('T')[0]}T12:00:00`)
+  const end = new Date(`${endDateStr.split('T')[0]}T12:00:00`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+  return Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))
+}
+
 /** 해당 월 1일 (YYYY-MM-01) */
 export function toMonthStartDate(dateStr?: string | null): string {
   const base = dateStr?.split('T')[0] || new Date().toISOString().split('T')[0]

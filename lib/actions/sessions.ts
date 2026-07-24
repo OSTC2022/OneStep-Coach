@@ -700,6 +700,28 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
     console.warn('sync_member_remaining_sessions:', syncError.message)
   }
 
+  try {
+    const remaining = Math.max(0, remainingSessions)
+    await supabase
+      .from('members')
+      .update({
+        membership_status:
+          remaining > 0 || isPackageUsableForLesson({
+            remaining_sessions: remainingSessions,
+            expires_at: formData.expires_at ?? null,
+            is_active: true,
+            deleted_at: null,
+            note: formData.note ?? null,
+            total_sessions: totalSessions,
+          })
+            ? 'active'
+            : 'none',
+      })
+      .eq('id', formData.member_id)
+  } catch {
+    /* optional column */
+  }
+
   revalidatePath('/dashboard/members')
   revalidatePath(`/dashboard/members/${formData.member_id}`)
   revalidatePath('/dashboard/sessions')

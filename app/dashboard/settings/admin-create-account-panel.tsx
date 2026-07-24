@@ -8,6 +8,10 @@ import type {
   InstructorRoleRow,
   SettingsAssignableRole,
 } from '@/lib/settings-accounts-types'
+import {
+  adultProgramFromRoleSelect,
+  type AdultMemberProgram,
+} from '@/lib/adult-member-programs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,13 +29,30 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const ROLES: { value: SettingsAssignableRole; label: string }[] = [
+type RoleSelectValue =
+  | SettingsAssignableRole
+  | 'adult_member_athletics'
+  | 'adult_member_general'
+
+const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
   { value: 'member', label: '회원' },
-  { value: 'adult_member', label: '성인회원' },
+  { value: 'adult_member_athletics', label: '성인회원(육상)' },
+  { value: 'adult_member_general', label: '성인회원(일반)' },
   { value: 'guardian', label: '학부모' },
   { value: 'admin', label: '관리자' },
   { value: 'instructor', label: '강사' },
 ]
+
+function parseRoleSelect(value: RoleSelectValue): {
+  role: SettingsAssignableRole
+  adultProgram: AdultMemberProgram | null
+} {
+  const adultProgram = adultProgramFromRoleSelect(value)
+  if (adultProgram) {
+    return { role: 'adult_member', adultProgram }
+  }
+  return { role: value as SettingsAssignableRole, adultProgram: null }
+}
 
 interface AdminCreateAccountPanelProps {
   instructors: InstructorRoleRow[]
@@ -46,9 +67,11 @@ export function AdminCreateAccountPanel({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
-  const [role, setRole] = useState<SettingsAssignableRole>('member')
+  const [roleSelect, setRoleSelect] = useState<RoleSelectValue>('member')
   const [instructorId, setInstructorId] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const { role, adultProgram } = parseRoleSelect(roleSelect)
 
   const unlinkedInstructors = useMemo(
     () => instructors.filter((i) => i.is_active && !i.hasCoachAccess),
@@ -86,6 +109,7 @@ export function AdminCreateAccountPanel({
       passwordConfirm,
       role,
       instructorId: role === 'instructor' ? instructorId : null,
+      adultProgram,
     })
     setSaving(false)
 
@@ -108,7 +132,7 @@ export function AdminCreateAccountPanel({
     setEmail('')
     setPassword('')
     setPasswordConfirm('')
-    setRole('member')
+    setRoleSelect('member')
     setInstructorId('')
     await onAccountCreated?.()
   }
@@ -195,10 +219,13 @@ export function AdminCreateAccountPanel({
           <div className="space-y-1.5">
             <label className="text-sm font-medium">권한</label>
             <Select
-              value={role}
+              value={roleSelect}
               onValueChange={(v) => {
-                setRole(v as SettingsAssignableRole)
-                if (v !== 'instructor') setInstructorId('')
+                const next = v as RoleSelectValue
+                setRoleSelect(next)
+                if (parseRoleSelect(next).role !== 'instructor') {
+                  setInstructorId('')
+                }
               }}
               disabled={saving}
             >
@@ -206,13 +233,22 @@ export function AdminCreateAccountPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ROLES.map((r) => (
+                {ROLE_SELECT_OPTIONS.map((r) => (
                   <SelectItem key={r.value} value={r.value}>
                     {r.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {adultProgram === 'general' ? (
+              <p className="text-[11px] text-muted-foreground">
+                성인회원(일반): 승인 후 체중 관리 포털을 사용합니다.
+              </p>
+            ) : adultProgram === 'athletics' ? (
+              <p className="text-[11px] text-muted-foreground">
+                성인회원(육상): 승인 후 러닝·육상 포털을 사용합니다.
+              </p>
+            ) : null}
           </div>
 
           {role === 'instructor' && (

@@ -28,7 +28,7 @@ import {
 } from '@/lib/member-body-wellness'
 import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
 import { calculateWeightDeltaKg } from '@/lib/member-weight-delta'
-import { roundBodyMetric } from '@/lib/member-utils'
+import { calculateMemberBmi, roundBodyMetric } from '@/lib/member-utils'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 
@@ -454,6 +454,7 @@ const PROTEIN_GOAL_MODES: ProteinGoalMode[] = [
   'training',
   'high_intensity',
   'recovery',
+  'weight_loss',
 ]
 
 function parseProteinGoalMode(value: unknown): ProteinGoalMode {
@@ -614,6 +615,32 @@ export async function addMemberBodyRecord(
 
   const recordedAt = options?.recordedAt ?? format(new Date(), 'yyyy-MM-dd')
   const supabase = await memberBodyWriteClient()
+
+  const { data: existingToday } = await supabase
+    .from('member_body_records')
+    .select('id, height_cm')
+    .eq('member_id', memberId)
+    .eq('recorded_at', recordedAt)
+    .maybeSingle()
+
+  let recordHeightCm =
+    options?.heightCm != null ? roundBodyMetric(options.heightCm) : null
+
+  if (recordHeightCm == null && existingToday?.height_cm != null) {
+    recordHeightCm = roundBodyMetric(existingToday.height_cm as number | string)
+  }
+
+  if (recordHeightCm == null) {
+    const { data: memberRow } = await supabase
+      .from('members')
+      .select('height_cm')
+      .eq('id', memberId)
+      .maybeSingle()
+    if (memberRow?.height_cm != null) {
+      recordHeightCm = roundBodyMetric(memberRow.height_cm as number | string)
+    }
+  }
+
   const { data: priorWeightRows } = await supabase
     .from('member_body_records')
     .select('recorded_at, weight_kg')
@@ -628,15 +655,6 @@ export async function addMemberBodyRecord(
     recordedAt,
     weight,
   )
-
-  const recordHeightCm =
-    options?.heightCm != null ? roundBodyMetric(options.heightCm) : null
-  const { data: existingToday } = await supabase
-    .from('member_body_records')
-    .select('id')
-    .eq('member_id', memberId)
-    .eq('recorded_at', recordedAt)
-    .maybeSingle()
 
   const basePayload = {
     weight_kg: weight,
@@ -668,6 +686,23 @@ export async function addMemberBodyRecord(
 
   const saved = persistResult.record
 
+  if (recordHeightCm != null && options?.heightCm != null) {
+    const bmi = calculateMemberBmi(recordHeightCm, weight)
+    await supabase
+      .from('members')
+      .update({
+        height_cm: recordHeightCm,
+        weight_kg: weight,
+        ...(bmi != null ? { bmi } : {}),
+      })
+      .eq('id', memberId)
+  } else {
+    await supabase
+      .from('members')
+      .update({ weight_kg: weight })
+      .eq('id', memberId)
+  }
+
   if (!options?.skipDashboardRevalidate) {
     revalidatePath(`/dashboard/members/${memberId}`)
     revalidatePath(`/dashboard/members/${memberId}/body`)
@@ -689,14 +724,17 @@ export async function recordLessonStatusWeight(
   memberId: string,
   lessonDate: string,
   weightKg: number,
+  heightCm?: number | null,
 ): Promise<{
   error?: string
   migrationHint?: string
   weightDeltaKg?: number | null
   savedWeightKg?: number
+  savedHeightCm?: number | null
 }> {
   const result = await addMemberBodyRecord(memberId, weightKg, {
     recordedAt: lessonDate,
+    heightCm: heightCm ?? undefined,
     skipDashboardRevalidate: true,
   })
   if (result.error) {
@@ -705,6 +743,7 @@ export async function recordLessonStatusWeight(
   return {
     weightDeltaKg: result.weightDeltaKg ?? null,
     savedWeightKg: roundBodyMetric(weightKg) ?? weightKg,
+    savedHeightCm: result.record?.height_cm ?? heightCm ?? null,
   }
 }
 
@@ -763,6 +802,7 @@ function bodyWeightKey(memberId: string, date: string) {
 export type LessonStatusBodyWeightSnapshot = {
   weightKg: number
   deltaKg: number | null
+  heightCm: number | null
 }
 
 export async function getMemberBodyWeightsForLessons(
@@ -775,7 +815,7 @@ export async function getMemberBodyWeightsForLessons(
   const supabase = await createStaffDataClient()
   const { data, error } = await supabase
     .from('member_body_records')
-    .select('member_id, recorded_at, weight_kg')
+    .select('member_id, recorded_at, weight_kg, height_cm')
     .in('member_id', uniqueMemberIds)
     .order('recorded_at', { ascending: true })
 
@@ -786,13 +826,18 @@ export async function getMemberBodyWeightsForLessons(
     return {}
   }
 
-  const recordsByMember = new Map<string, WeightRecordPoint[]>()
+  const recordsByMember = new Map<
+    string,
+    Array<WeightRecordPoint & { height_cm: number | null }>
+  >()
   for (const row of data ?? []) {
     const memberId = String(row.member_id)
     const list = recordsByMember.get(memberId) ?? []
     list.push({
       recorded_at: String(row.recorded_at),
       weight_kg: Number(row.weight_kg),
+      height_cm:
+        row.height_cm != null ? Number(row.height_cm) : null,
     })
     recordsByMember.set(memberId, list)
   }
@@ -807,6 +852,7 @@ export async function getMemberBodyWeightsForLessons(
     map[bodyWeightKey(entry.memberId, entry.date)] = {
       weightKg,
       deltaKg: calculateWeightDeltaKg(memberRecords, entry.date, weightKg),
+      heightCm: weightRow.height_cm,
     }
   }
 

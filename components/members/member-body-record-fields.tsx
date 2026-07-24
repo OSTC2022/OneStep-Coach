@@ -84,7 +84,7 @@ export function memberBodyRecordToFormValues(
   record: MemberBodyRecord,
 ): MemberBodyRecordFormValues {
   return createEmptyBodyRecordFormValues({
-    date: record.recorded_at,
+    date: record.recorded_at.slice(0, 10),
     height: record.height_cm != null ? formatBodyMetric(record.height_cm) : '',
     weight: formatBodyMetric(record.weight_kg),
     sleepHours: record.sleep_hours ?? '',
@@ -164,6 +164,9 @@ interface MemberBodyRecordFieldsProps {
   proteinSettings?: Partial<MemberProteinSettings>
   disabled?: boolean
   onEnterSubmit?: () => void
+  defaultNutritionOpen?: boolean
+  /** 성인회원(일반): 키 → 체중 → 감량용 단백질 목표 순서 */
+  layoutVariant?: 'default' | 'adult_general'
 }
 
 export function MemberBodyRecordFields({
@@ -173,9 +176,14 @@ export function MemberBodyRecordFields({
   proteinSettings,
   disabled = false,
   onEnterSubmit,
+  defaultNutritionOpen = false,
+  layoutVariant = 'default',
 }: MemberBodyRecordFieldsProps) {
+  const isAdultGeneral = layoutVariant === 'adult_general'
+  const adultProteinGoalHint =
+    '일반 성인 여성 감량 기준 · 체중 × 1.2g (운동선수 기준 아님)'
   const [optionalOpen, setOptionalOpen] = useState(false)
-  const [nutritionOpen, setNutritionOpen] = useState(false)
+  const [nutritionOpen, setNutritionOpen] = useState(defaultNutritionOpen)
   const supplementConfig = useMemo(() => getDefaultSupplementConfig(), [])
   const visibleSupplements = useMemo(
     () => getVisibleSupplementItems(supplementConfig),
@@ -223,119 +231,171 @@ export function MemberBodyRecordFields({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor={`${idPrefix}-height`} className="text-xs text-foreground">
-            현재 키 (cm)
-          </Label>
-          <BodyMetricInput
-            id={`${idPrefix}-height`}
-            placeholder="170"
-            value={values.height}
-            onChange={(height) => patch({ height })}
+      {isAdultGeneral ? (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-height`} className="text-xs text-foreground">
+              키 (cm)
+            </Label>
+            <BodyMetricInput
+              id={`${idPrefix}-height`}
+              placeholder="160"
+              value={values.height}
+              onChange={(height) => patch({ height })}
+              disabled={disabled}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-weight`} className="text-xs text-foreground">
+              체중 (kg)
+            </Label>
+            <BodyMetricInput
+              id={`${idPrefix}-weight`}
+              placeholder="55"
+              value={values.weight}
+              onChange={(weight) => patch({ weight })}
+              disabled={disabled}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onEnterSubmit?.()
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-foreground/80">BMI (미리보기)</span>
+            <span className="font-medium tabular-nums text-primary">
+              {previewBmi != null ? previewBmi.toFixed(1) : '-'}
+            </span>
+          </div>
+          <ProteinIntakePanel
+            weightKg={weightKg}
+            proteinIntakeBySlot={values.proteinIntakeBySlot}
+            proteinSettings={proteinSettings}
             disabled={disabled}
+            goalHint={adultProteinGoalHint}
+            onIntakeBySlotChange={(proteinIntakeBySlot) =>
+              patch({ proteinIntakeBySlot })
+            }
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`${idPrefix}-weight`} className="text-xs text-foreground">
-            몸무게 (kg)
-          </Label>
-          <BodyMetricInput
-            id={`${idPrefix}-weight`}
-            placeholder="65"
-            value={values.weight}
-            onChange={(weight) => patch({ weight })}
-            disabled={disabled}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onEnterSubmit?.()
-            }}
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-between text-sm">
-        <span className="text-foreground/80">BMI (미리보기)</span>
-        <span className="font-medium tabular-nums text-primary">
-          {previewBmi != null ? previewBmi.toFixed(1) : '-'}
-        </span>
-      </div>
-
-      <div className="rounded-lg border border-border/70">
-        <button
-          type="button"
-          className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground"
-          onClick={() => setOptionalOpen((open) => !open)}
-        >
-          <span>추가 입력 (선택)</span>
-          <ChevronDown
-            className={cn('h-4 w-4 transition-transform', optionalOpen && 'rotate-180')}
-          />
-        </button>
-        {optionalOpen ? (
-          <div className="space-y-3 border-t border-border/60 px-3 py-3">
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">수면 시간</p>
-              <QuickChoiceButtons
-                value={values.sleepHours ?? ''}
-                options={SLEEP_HOUR_CHOICES}
-                toneCategory="sleep_hours"
-                onChange={(sleepHours) => patch({ sleepHours })}
+              <Label htmlFor={`${idPrefix}-height`} className="text-xs text-foreground">
+                현재 키 (cm)
+              </Label>
+              <BodyMetricInput
+                id={`${idPrefix}-height`}
+                placeholder="170"
+                value={values.height}
+                onChange={(height) => patch({ height })}
                 disabled={disabled}
               />
             </div>
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">오늘 컨디션</p>
-              <QuickChoiceButtons
-                value={values.condition ?? ''}
-                options={CONDITION_CHOICES}
-                toneCategory="condition"
-                onChange={(condition) => patch({ condition })}
+              <Label htmlFor={`${idPrefix}-weight`} className="text-xs text-foreground">
+                몸무게 (kg)
+              </Label>
+              <BodyMetricInput
+                id={`${idPrefix}-weight`}
+                placeholder="65"
+                value={values.weight}
+                onChange={(weight) => patch({ weight })}
                 disabled={disabled}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">피로도</p>
-              <QuickChoiceButtons
-                value={values.fatigue ?? ''}
-                options={FATIGUE_CHOICES}
-                toneCategory="fatigue"
-                onChange={(fatigue) => patch({ fatigue })}
-                disabled={disabled}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">근육통</p>
-              <QuickChoiceButtons
-                value={values.muscleSoreness ?? ''}
-                options={MUSCLE_SORENESS_CHOICES}
-                toneCategory="muscle_soreness"
-                onChange={(muscleSoreness) => patch({ muscleSoreness })}
-                disabled={disabled}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">통증 부위</p>
-              <PainAreaInput
-                painArea={values.painArea ?? ''}
-                painLevel={values.painLevel}
-                painAreaNote={values.painAreaNote}
-                onChange={(next) => patch(next)}
-                disabled={disabled}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">식사 상태</p>
-              <QuickChoiceButtons
-                value={values.mealStatus ?? ''}
-                options={MEAL_STATUS_CHOICES}
-                toneCategory="meal_status"
-                onChange={(mealStatus) => patch({ mealStatus })}
-                disabled={disabled}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onEnterSubmit?.()
+                }}
               />
             </div>
           </div>
-        ) : null}
-      </div>
+
+          <div className="flex justify-between text-sm">
+            <span className="text-foreground/80">BMI (미리보기)</span>
+            <span className="font-medium tabular-nums text-primary">
+              {previewBmi != null ? previewBmi.toFixed(1) : '-'}
+            </span>
+          </div>
+        </>
+      )}
+
+      {!isAdultGeneral ? (
+        <div className="rounded-lg border border-border/70">
+          <button
+            type="button"
+            className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground"
+            onClick={() => setOptionalOpen((open) => !open)}
+          >
+            <span>추가 입력 (선택)</span>
+            <ChevronDown
+              className={cn('h-4 w-4 transition-transform', optionalOpen && 'rotate-180')}
+            />
+          </button>
+          {optionalOpen ? (
+            <div className="space-y-3 border-t border-border/60 px-3 py-3">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">수면 시간</p>
+                <QuickChoiceButtons
+                  value={values.sleepHours ?? ''}
+                  options={SLEEP_HOUR_CHOICES}
+                  toneCategory="sleep_hours"
+                  onChange={(sleepHours) => patch({ sleepHours })}
+                  disabled={disabled}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">오늘 컨디션</p>
+                <QuickChoiceButtons
+                  value={values.condition ?? ''}
+                  options={CONDITION_CHOICES}
+                  toneCategory="condition"
+                  onChange={(condition) => patch({ condition })}
+                  disabled={disabled}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">피로도</p>
+                <QuickChoiceButtons
+                  value={values.fatigue ?? ''}
+                  options={FATIGUE_CHOICES}
+                  toneCategory="fatigue"
+                  onChange={(fatigue) => patch({ fatigue })}
+                  disabled={disabled}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">근육통</p>
+                <QuickChoiceButtons
+                  value={values.muscleSoreness ?? ''}
+                  options={MUSCLE_SORENESS_CHOICES}
+                  toneCategory="muscle_soreness"
+                  onChange={(muscleSoreness) => patch({ muscleSoreness })}
+                  disabled={disabled}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">통증 부위</p>
+                <PainAreaInput
+                  painArea={values.painArea ?? ''}
+                  painLevel={values.painLevel}
+                  painAreaNote={values.painAreaNote}
+                  onChange={(next) => patch(next)}
+                  disabled={disabled}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">식사 상태</p>
+                <QuickChoiceButtons
+                  value={values.mealStatus ?? ''}
+                  options={MEAL_STATUS_CHOICES}
+                  toneCategory="meal_status"
+                  onChange={(mealStatus) => patch({ mealStatus })}
+                  disabled={disabled}
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="rounded-lg border border-border/70">
         <button
@@ -343,34 +403,38 @@ export function MemberBodyRecordFields({
           className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-foreground"
           onClick={() => setNutritionOpen((open) => !open)}
         >
-          <span>회복 &amp; 영양 체크</span>
+          <span>{isAdultGeneral ? '식사·수분 체크' : '회복 & 영양 체크'}</span>
           <ChevronDown
             className={cn('h-4 w-4 transition-transform', nutritionOpen && 'rotate-180')}
           />
         </button>
         {nutritionOpen ? (
           <div className="space-y-3 border-t border-border/60 px-3 py-3">
-            <ProteinIntakePanel
-              weightKg={weightKg}
-              proteinIntakeBySlot={values.proteinIntakeBySlot}
-              proteinSettings={proteinSettings}
-              disabled={disabled}
-              onIntakeBySlotChange={(proteinIntakeBySlot) =>
-                patch({ proteinIntakeBySlot })
-              }
-            />
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">운동 후 회복식</p>
-              <QuickChoiceButtons
-                value={values.postWorkoutMealStatus ?? ''}
-                options={POST_WORKOUT_MEAL_CHOICES}
-                getTone={(value) =>
-                  getNutritionChoiceTone('post_workout_meal_status', value)
-                }
-                onChange={(postWorkoutMealStatus) => patch({ postWorkoutMealStatus })}
+            {!isAdultGeneral ? (
+              <ProteinIntakePanel
+                weightKg={weightKg}
+                proteinIntakeBySlot={values.proteinIntakeBySlot}
+                proteinSettings={proteinSettings}
                 disabled={disabled}
+                onIntakeBySlotChange={(proteinIntakeBySlot) =>
+                  patch({ proteinIntakeBySlot })
+                }
               />
-            </div>
+            ) : null}
+            {!isAdultGeneral ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-foreground">운동 후 회복식</p>
+                <QuickChoiceButtons
+                  value={values.postWorkoutMealStatus ?? ''}
+                  options={POST_WORKOUT_MEAL_CHOICES}
+                  getTone={(value) =>
+                    getNutritionChoiceTone('post_workout_meal_status', value)
+                  }
+                  onChange={(postWorkoutMealStatus) => patch({ postWorkoutMealStatus })}
+                  disabled={disabled}
+                />
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-foreground">수분 섭취</p>
               <QuickChoiceButtons
@@ -382,7 +446,7 @@ export function MemberBodyRecordFields({
               />
             </div>
 
-            {visibleSupplements.length > 0 ? (
+            {visibleSupplements.length > 0 && !isAdultGeneral ? (
               <div className="space-y-3">
                 <p className="text-xs font-medium text-foreground">영양제 / 보충제 체크</p>
                 {visibleSupplements.map((item) => (
@@ -404,10 +468,12 @@ export function MemberBodyRecordFields({
               </div>
             ) : null}
 
-            <p className="text-[11px] leading-relaxed text-foreground/55">
-              보충제는 식사를 대체하지 않습니다. 성장기 선수는 기본 식사, 수면, 회복이
-              우선이며 필요한 항목은 보호자와 함께 확인해주세요.
-            </p>
+            {!isAdultGeneral ? (
+              <p className="text-[11px] leading-relaxed text-foreground/55">
+                보충제는 식사를 대체하지 않습니다. 성장기 선수는 기본 식사, 수면, 회복이
+                우선이며 필요한 항목은 보호자와 함께 확인해주세요.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>

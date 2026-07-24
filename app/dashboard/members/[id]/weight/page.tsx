@@ -24,6 +24,7 @@ export default async function MemberWeightPage({
       memberId={member.id}
       memberName={member.name}
       memberSport={member.sport}
+      memberHeightCm={member.height_cm}
       initialRecords={records}
       tableReady={tableReady}
     />

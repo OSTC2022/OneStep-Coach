@@ -501,7 +501,8 @@ async function ensurePortalParticipantForMember(
     }
   }
 
-  revalidateRunningLeaguePaths(league.id)
+  // 페이지 렌더 중(ensure 경로)에는 revalidateTag를 호출하면 안 됨.
+  // 참가 행은 이미 이번 응답에 포함되며, 랭킹 캐시는 저장/수정 액션에서 무효화됩니다.
   return { ok: true, participant: mapParticipant(inserted as Record<string, unknown>) }
 }
 
@@ -2384,8 +2385,7 @@ export async function resetPortalRankingCycle(): Promise<
 
   revalidateMemberMileagePaths()
   revalidateRunningLeaguePaths(league.id)
-  revalidateTag('center-settings')
-  revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG)
+  revalidateTag('center-settings', 'max')
   revalidatePath('/dashboard/settings/adult-running-portal')
   revalidatePath('/dashboard/my')
 

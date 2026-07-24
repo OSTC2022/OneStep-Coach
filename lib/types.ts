@@ -2,7 +2,7 @@
 
 export type UserRole = 'admin' | 'instructor' | 'member' | 'guardian' | 'adult_member'
 export type ProfileRole = 'admin' | 'coach' | 'member' | 'guardian' | 'adult_member'
-export type ProfileApprovalStatus = 'pending' | 'approved' | 'rejected'
+export type ProfileApprovalStatus = 'pending' | 'approved' | 'rejected' | 'on_hold'
 
 export interface User {
   id: string
@@ -84,6 +84,19 @@ export interface Member {
   is_active: boolean
   created_at: string
   deleted_at: string | null
+  source_type?: 'admin_created' | 'self_signup' | null
+  account_link_status?:
+    | 'linked'
+    | 'unlinked'
+    | 'duplicate_candidate'
+    | 'dismissed'
+    | null
+  membership_status?: 'active' | 'none' | 'expired' | 'pending' | null
+  duplicate_of_member_id?: string | null
+  duplicate_match_reason?: string | null
+  duplicate_group_id?: string | null
+  duplicate_review_note?: string | null
+  linked_at?: string | null
   // Joined fields
   primary_instructor?: Instructor
 }

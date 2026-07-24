@@ -134,7 +134,8 @@ function resolveApprovalFast(
   if (
     metadataStatus === 'approved' ||
     metadataStatus === 'rejected' ||
-    metadataStatus === 'pending'
+    metadataStatus === 'pending' ||
+    metadataStatus === 'on_hold'
   ) {
     return metadataStatus
   }

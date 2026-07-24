@@ -14,6 +14,7 @@ import { formatKoreanPhoneInput } from '@/lib/phone-format'
 import { normalizeMemberGender } from '@/lib/running-league/ranking-gender'
 import type { MemberGender } from '@/lib/running-league/ranking-gender'
 import { resolveNewMemberBadgeUntil } from '@/lib/member-new-signup-badge'
+import { markSignupMemberDuplicateCandidates } from '@/lib/member-duplicate-match'
 
 export type PublicSignUpMemberType = 'student' | 'adult'
 export type PublicSignUpRole = 'member'
@@ -61,6 +62,10 @@ async function createSignupMemberProfile(
     is_active: true,
     memo: `로그인 화면 가입 신청 (${typeLabel}, 승인 대기)`,
     new_member_badge_until: resolveNewMemberBadgeUntil(),
+    source_type: 'self_signup',
+    account_link_status: 'linked',
+    membership_status: 'none',
+    linked_at: new Date().toISOString(),
   }
 
   if (payload.gender) {
@@ -76,6 +81,51 @@ async function createSignupMemberProfile(
   if (error && error.message.includes('new_member_badge_until')) {
     const { new_member_badge_until: _removed, ...legacyRow } = insertRow
     const retry = await admin.from('members').insert(legacyRow).select('id').single()
+    if (retry.error) {
+      // 신규 연동 컬럼 없는 DB 호환
+      if (
+        retry.error.message.includes('source_type') ||
+        retry.error.message.includes('account_link_status') ||
+        retry.error.code === 'PGRST204'
+      ) {
+        const {
+          source_type: _s,
+          account_link_status: _a,
+          membership_status: _m,
+          linked_at: _l,
+          ...minimal
+        } = legacyRow
+        const third = await admin.from('members').insert(minimal).select('id').single()
+        if (third.error) {
+          console.error('createSignupMemberProfile:', third.error)
+          return { error: `회원 정보 저장 실패: ${third.error.message}` }
+        }
+        return { memberId: third.data.id as string }
+      }
+      console.error('createSignupMemberProfile:', retry.error)
+      return { error: `회원 정보 저장 실패: ${retry.error.message}` }
+    }
+    return { memberId: retry.data.id as string }
+  }
+
+  if (
+    error &&
+    (error.message.includes('source_type') ||
+      error.message.includes('account_link_status') ||
+      error.code === 'PGRST204')
+  ) {
+    const {
+      source_type: _s,
+      account_link_status: _a,
+      membership_status: _m,
+      linked_at: _l,
+      ...withoutLinkCols
+    } = insertRow
+    const retry = await admin
+      .from('members')
+      .insert(withoutLinkCols)
+      .select('id')
+      .single()
     if (retry.error) {
       console.error('createSignupMemberProfile:', retry.error)
       return { error: `회원 정보 저장 실패: ${retry.error.message}` }
@@ -264,6 +314,17 @@ async function runPublicSignup(
       })
     } catch (e) {
       console.error('executePublicSignup signup_member_id metadata:', e)
+    }
+
+    try {
+      await markSignupMemberDuplicateCandidates(admin, memberResult.memberId, {
+        name: fullName,
+        phone,
+        parent_phone,
+        birth_date,
+      })
+    } catch (e) {
+      console.error('executePublicSignup duplicate detect:', e)
     }
   }
 

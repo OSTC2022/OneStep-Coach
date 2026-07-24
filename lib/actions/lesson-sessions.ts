@@ -1120,13 +1120,7 @@ export async function updateLessonRecord(
     const normalized = normalizePrimaryInstructorId(updates.instructor_id)
     payload.instructor_id = normalized
     syncPatch.instructor_id = normalized
-
-    if (lesson.member_id && normalized) {
-      await supabase
-        .from('members')
-        .update({ primary_instructor_id: normalized })
-        .eq('id', lesson.member_id)
-    }
+    // 수업 강사 변경이 회원 담당 강사를 덮어쓰지 않음
   }
 
   if ('lesson_type' in updates && updates.lesson_type) {

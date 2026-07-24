@@ -136,15 +136,13 @@ export async function signIn(
     !isProtectedAdminAccount(accountEmail) &&
     !isProfileAccessAllowed(approvalStatus, accountEmail)
   ) {
-    if (approvalStatus === 'pending') {
-      await applyRememberMeCookies(rememberMe)
-      return { redirectTo: '/auth/pending' }
+    await supabase.auth.signOut()
+    if (approvalStatus === 'pending' || approvalStatus === 'on_hold') {
+      return { error: '회원가입 대기중입니다.' }
     }
     if (approvalStatus === 'rejected') {
-      await supabase.auth.signOut()
       return { error: '가입 승인이 거절되었습니다. 관리자에게 문의해주세요.' }
     }
-    await supabase.auth.signOut()
     return { error: '가입 승인 후 로그인할 수 있습니다.' }
   }
 

@@ -29,6 +29,8 @@ export type RegisteredAccount = {
   linkedInstructorName: string | null
   linkedMemberId: string | null
   linkedMemberName: string | null
+  /** 연결 회원 종목 — 성인회원(육상/일반) 구분 */
+  linkedMemberSport: string | null
   /** 관리자·보호 계정 — 설정에서 권한 변경 불가 */
   isProtected: boolean
 }

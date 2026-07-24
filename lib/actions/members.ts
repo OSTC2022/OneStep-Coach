@@ -33,6 +33,7 @@ import {
   MEMBER_LIST_SELECT_LEGACY_NO_SCHOOL,
   MEMBER_LIST_SELECT_NO_NEW_BADGE,
   MEMBER_LIST_SELECT_NO_SCHOOL,
+  MEMBER_LIST_SELECT_WITHOUT_ACCOUNT_STATUS,
 } from '@/lib/supabase-selects'
 
 type InstructorSummary = {
@@ -158,6 +159,7 @@ function buildMembersQuery(
     isActive?: boolean
     instructorId?: string
     trash?: boolean
+    statusFilter?: MemberListStatusFilter
     limit?: number
     offset?: number
     orderBy: string
@@ -191,6 +193,37 @@ function buildMembersQuery(
   if (options.instructorId) {
     query = query.eq('primary_instructor_id', options.instructorId)
   }
+
+  switch (options.statusFilter) {
+    case 'membership_active':
+      query = query.eq('membership_status', 'active')
+      break
+    case 'membership_none':
+      query = query.eq('membership_status', 'none')
+      break
+    case 'membership_expired':
+      query = query.eq('membership_status', 'expired')
+      break
+    case 'admin_created':
+      query = query.eq('source_type', 'admin_created')
+      break
+    case 'self_signup':
+      query = query.eq('source_type', 'self_signup')
+      break
+    case 'unlinked':
+      query = query.eq('account_link_status', 'unlinked')
+      break
+    case 'linked':
+      query = query.eq('account_link_status', 'linked')
+      break
+    case 'duplicate_candidate':
+    case 'needs_review':
+      query = query.eq('account_link_status', 'duplicate_candidate')
+      break
+    default:
+      break
+  }
+
   if (options.limit != null && options.offset != null) {
     query = query.range(options.offset, options.offset + options.limit - 1)
   } else if (options.limit != null) {
@@ -200,6 +233,18 @@ function buildMembersQuery(
   return query
 }
 
+export type MemberListStatusFilter =
+  | 'all'
+  | 'membership_active'
+  | 'membership_none'
+  | 'membership_expired'
+  | 'admin_created'
+  | 'self_signup'
+  | 'unlinked'
+  | 'linked'
+  | 'duplicate_candidate'
+  | 'needs_review'
+
 async function fetchMembersRows(
   supabase: Awaited<ReturnType<typeof createClient>>,
   options?: {
@@ -207,6 +252,7 @@ async function fetchMembersRows(
     isActive?: boolean
     instructorId?: string
     trash?: boolean
+    statusFilter?: MemberListStatusFilter
     limit?: number
     offset?: number
     orderBy?: MemberListOrderBy
@@ -230,6 +276,7 @@ async function fetchMembersRows(
     isActive: options?.isActive,
     instructorId: options?.instructorId,
     trash: options?.trash,
+    statusFilter: options?.statusFilter,
     limit: useMemorySort ? undefined : limit,
     offset: useMemorySort ? undefined : offset,
     orderBy: dbOrderBy,
@@ -248,6 +295,26 @@ async function fetchMembersRows(
   }
 
   let result = await primaryQuery
+
+  if (
+    result.error &&
+    (result.error.message.includes('source_type') ||
+      result.error.message.includes('account_link_status') ||
+      result.error.message.includes('membership_status') ||
+      result.error.message.includes('duplicate_of_member_id') ||
+      result.error.message.includes('auth_user_id') ||
+      result.error.message.includes('remaining_sessions'))
+  ) {
+    const statusFallbackQuery = buildMembersQuery(supabase, {
+      ...baseOpts,
+      statusFilter: undefined,
+      select: MEMBER_LIST_SELECT_WITHOUT_ACCOUNT_STATUS,
+      useTrashFilter: true,
+    })
+    if (statusFallbackQuery) {
+      result = await statusFallbackQuery
+    }
+  }
 
   if (result.error && isNewMemberBadgeColumnMissingError(result.error.message, result.error.code)) {
     const badgeFallbackQuery = buildMembersQuery(supabase, {
@@ -343,6 +410,7 @@ export async function getMembers(options?: {
   isActive?: boolean
   instructorId?: string
   trash?: boolean
+  statusFilter?: MemberListStatusFilter
   limit?: number
   offset?: number
   orderBy?: MemberListOrderBy
@@ -459,7 +527,7 @@ export async function listMembersForPicker(limit = 80): Promise<MemberPickerOpti
   return mapMembersToPickerOptions(data)
 }
 
-/** 성인 러닝반 회원 우선 — sport에 러닝/성인 포함, 없으면 전체 활성 회원 */
+/** 성인 러닝반 회원 우선 — 성인회원(일반) 제외 */
 export async function listAdultRunningMembersForPicker(limit = 200): Promise<MemberPickerOption[]> {
   const { data } = await getMembers({
     isActive: true,
@@ -470,6 +538,7 @@ export async function listAdultRunningMembersForPicker(limit = 200): Promise<Mem
 
   const running = data.filter((member) => {
     const sport = (member.sport ?? '').toLowerCase()
+    if (sport.includes('일반')) return false
     return (
       sport.includes('러닝') ||
       sport.includes('running') ||
@@ -683,9 +752,50 @@ export async function createMember(formData: MemberFormData): Promise<{ data?: M
       injury_history: normalizeOptionalString(formData.injury_history),
       memo: normalizeOptionalString(formData.memo),
       primary_instructor_id: normalizePrimaryInstructorId(formData.primary_instructor_id),
+      source_type: 'admin_created',
+      account_link_status: 'unlinked',
+      membership_status: 'none',
     })
     .select()
     .single()
+
+  if (
+    error &&
+    (error.message.includes('source_type') ||
+      error.message.includes('account_link_status') ||
+      error.code === 'PGRST204')
+  ) {
+    const retry = await supabase
+      .from('members')
+      .insert({
+        name,
+        birth_date,
+        age,
+        grade: normalizeOptionalString(formData.grade),
+        school: normalizeOptionalString(formData.school),
+        phone: normalizeOptionalString(formData.phone),
+        parent_phone: normalizeOptionalString(formData.parent_phone),
+        sport: normalizeOptionalString(formData.sport),
+        gender: formData.gender ?? null,
+        height_cm: formData.height_cm ?? null,
+        weight_kg: formData.weight_kg ?? null,
+        bmi: calculateMemberBmi(formData.height_cm, formData.weight_kg),
+        goal: normalizeOptionalString(formData.goal),
+        injury_history: normalizeOptionalString(formData.injury_history),
+        memo: normalizeOptionalString(formData.memo),
+        primary_instructor_id: normalizePrimaryInstructorId(formData.primary_instructor_id),
+      })
+      .select()
+      .single()
+
+    if (retry.error) {
+      console.error('Error creating member:', retry.error)
+      return { error: mapMemberError(retry.error.message) }
+    }
+
+    revalidatePath('/dashboard/members')
+    return { data: retry.data as Member }
+  }
 
   if (error) {
     console.error('Error creating member:', error)
@@ -784,6 +894,7 @@ export type MemberBasicInfoFormData = {
   birth_date?: string
   age?: number
   grade?: string
+  sport?: string
   school?: string
 }
 
@@ -823,6 +934,9 @@ export async function updateMemberBasicInfo(
   }
   if (formData.grade !== undefined) {
     updateData.grade = normalizeOptionalString(formData.grade)
+  }
+  if (formData.sport !== undefined) {
+    updateData.sport = normalizeOptionalString(formData.sport)
   }
   if (formData.school !== undefined) {
     updateData.school = normalizeOptionalString(formData.school)

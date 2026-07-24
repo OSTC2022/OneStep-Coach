@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import Link from 'next/link'
-import { listPendingAccounts } from '@/lib/actions/auth-registration'
+import { listPendingAccounts, listOnHoldAccounts, putAccountOnHold } from '@/lib/actions/auth-registration'
+import { HoldAccountsPanel } from '@/components/settings/hold-accounts-panel'
 import { useRouter } from 'next/navigation'
 import { Loader2, Search, Shield, Trash2, UserMinus, Ban } from 'lucide-react'
 import { toast } from 'sonner'
@@ -61,17 +62,62 @@ import { AdminCreateAccountPanel } from './admin-create-account-panel'
 import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
 import type { PendingAccountRow } from '@/lib/actions/auth-registration'
 import type { InstructorRoleRow } from '@/lib/settings-accounts-types'
+import {
+  adultProgramDisplayLabel,
+  adultProgramFromRoleSelect,
+  resolveAdultMemberProgram,
+  roleSelectFromAdultProgram,
+  type AdultMemberProgram,
+} from '@/lib/adult-member-programs'
 
-const ASSIGNABLE_ROLES: {
-  value: SettingsAssignableRole
-  label: string
-}[] = [
+/** 설정 UI 권한 셀렉트 — 성인회원은 육상/일반로 분리 표시 */
+type RoleSelectValue =
+  | SettingsAssignableRole
+  | 'adult_member_athletics'
+  | 'adult_member_general'
+  | 'on_hold'
+
+const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
   { value: 'member', label: '회원' },
-  { value: 'adult_member', label: '성인회원' },
+  { value: 'adult_member_athletics', label: '성인회원(육상)' },
+  { value: 'adult_member_general', label: '성인회원(일반)' },
   { value: 'guardian', label: '학부모' },
   { value: 'admin', label: '관리자' },
   { value: 'instructor', label: '강사' },
+  { value: 'on_hold', label: '보류' },
 ]
+
+function parseRoleSelect(value: RoleSelectValue): {
+  role: SettingsAssignableRole | null
+  adultProgram: AdultMemberProgram | null
+  onHold: boolean
+} {
+  if (value === 'on_hold') {
+    return { role: null, adultProgram: null, onHold: true }
+  }
+  const adultProgram = adultProgramFromRoleSelect(value)
+  if (adultProgram) {
+    return { role: 'adult_member', adultProgram, onHold: false }
+  }
+  return {
+    role: value as SettingsAssignableRole,
+    adultProgram: null,
+    onHold: false,
+  }
+}
+
+function accountToRoleSelect(account: RegisteredAccount): RoleSelectValue | null {
+  if (account.isProtected) return null
+  if (account.appRole === 'instructor') return 'instructor'
+  if (account.appRole === 'guardian') return 'guardian'
+  if (account.appRole === 'admin') return 'admin'
+  if (account.appRole === 'adult_member') {
+    return roleSelectFromAdultProgram(
+      resolveAdultMemberProgram(account.linkedMemberSport),
+    )
+  }
+  return 'member'
+}
 
 function formatDate(iso: string) {
   try {
@@ -137,33 +183,28 @@ function AccountDisplayName({
   )
 }
 
-function appRoleToAssignable(account: RegisteredAccount): SettingsAssignableRole | null {
-  if (account.isProtected) return null
-  if (account.appRole === 'instructor') return 'instructor'
-  if (account.appRole === 'guardian') return 'guardian'
-  if (account.appRole === 'admin') return 'admin'
-  if (account.appRole === 'adult_member') return 'adult_member'
-  return 'member'
-}
-
 interface AccountRoleManagementProps {
   initialAccounts: RegisteredAccount[]
   initialInstructors: InstructorRoleRow[]
   initialPending: PendingAccountRow[]
+  initialHold: PendingAccountRow[]
 }
 
 export function AccountRoleManagement({
   initialAccounts,
   initialInstructors,
   initialPending,
+  initialHold,
 }: AccountRoleManagementProps) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('pending')
   const [accounts, setAccounts] = useState(initialAccounts)
   const [pending, setPending] = useState(initialPending)
+  const [hold, setHold] = useState(initialHold)
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [pendingRole, setPendingRole] = useState<SettingsAssignableRole>('member')
+  const [pendingRoleSelect, setPendingRoleSelect] =
+    useState<RoleSelectValue>('member')
   const [memberId, setMemberId] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -177,13 +218,19 @@ export function AccountRoleManagement({
     setPending(initialPending)
   }, [initialPending])
 
+  useEffect(() => {
+    setHold(initialHold)
+  }, [initialHold])
+
   async function refreshAccountLists() {
-    const [acc, pend] = await Promise.all([
+    const [acc, pend, held] = await Promise.all([
       listRegisteredAccounts(),
       listPendingAccounts(),
+      listOnHoldAccounts(),
     ])
     setAccounts(acc)
     setPending(pend)
+    setHold(held)
     router.refresh()
   }
 
@@ -230,10 +277,15 @@ export function AccountRoleManagement({
     await refreshAccountLists()
   }
 
+  const activeAccounts = useMemo(
+    () => accounts.filter((a) => a.approvalStatus !== 'on_hold'),
+    [accounts],
+  )
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return accounts
-    return accounts.filter((a) => {
+    if (!q) return activeAccounts
+    return activeAccounts.filter((a) => {
       const hay = [
         a.email,
         a.loginEmail,
@@ -246,23 +298,26 @@ export function AccountRoleManagement({
         .toLowerCase()
       return hay.includes(q)
     })
-  }, [accounts, query])
+  }, [activeAccounts, query])
 
-  const selected = accounts.find((a) => a.id === selectedId) ?? null
-  const selectedAssignable = selected ? appRoleToAssignable(selected) : null
+  const selected = activeAccounts.find((a) => a.id === selectedId) ?? null
+  const selectedRoleSelect = selected ? accountToRoleSelect(selected) : null
+  const pendingParsed = parseRoleSelect(pendingRoleSelect)
+  const pendingRole = pendingParsed.role
+  const adultProgram = pendingParsed.adultProgram
+  const isOnHoldAction = pendingParsed.onHold
 
   function selectAccount(account: RegisteredAccount) {
     setSelectedId(account.id)
-    const assignable = appRoleToAssignable(account)
-    if (assignable) setPendingRole(assignable)
+    const roleSelect = accountToRoleSelect(account)
+    if (roleSelect) setPendingRoleSelect(roleSelect)
     setMemberId(account.linkedMemberId ?? '')
   }
 
   async function handleRefresh() {
     setRefreshing(true)
     try {
-      const data = await listRegisteredAccounts()
-      setAccounts(data)
+      await refreshAccountLists()
     } catch {
       toast.error('계정 목록을 불러오지 못했습니다.')
     } finally {
@@ -271,7 +326,26 @@ export function AccountRoleManagement({
   }
 
   async function handleSaveRole() {
-    if (!selected || selectedAssignable === null) return
+    if (!selected || selectedRoleSelect === null) return
+
+    if (isOnHoldAction) {
+      setSaving(true)
+      const result = await putAccountOnHold(selected.id)
+      setSaving(false)
+      if (result.error) {
+        toast.error('보류 실패', { description: result.error })
+        return
+      }
+      toast.success('보류로 이동했습니다.', {
+        description: '로그인 시 회원가입 대기중으로 안내됩니다.',
+      })
+      setSelectedId(null)
+      await refreshAccountLists()
+      setActiveTab('hold')
+      return
+    }
+
+    if (!pendingRole) return
 
     if (
       requiresMemberLinkRole(pendingRole) &&
@@ -287,6 +361,7 @@ export function AccountRoleManagement({
       memberId: requiresMemberLinkRole(pendingRole)
         ? memberId || selected.linkedMemberId
         : null,
+      adultProgram,
     })
     setSaving(false)
 
@@ -301,23 +376,32 @@ export function AccountRoleManagement({
     if (updated?.linkedMemberId) {
       setMemberId(updated.linkedMemberId)
     }
+    if (updated) {
+      const nextSelect = accountToRoleSelect(updated)
+      if (nextSelect) setPendingRoleSelect(nextSelect)
+    }
+
+    const adultLabel = adultProgram
+      ? adultProgramDisplayLabel(adultProgram)
+      : null
 
     toast.success(
-      pendingRole === 'adult_member'
-        ? '성인회원 권한이 저장되었습니다.'
+      pendingRole === 'adult_member' && adultLabel
+        ? `${adultLabel} 권한이 저장되었습니다.`
         : requiresMemberLinkRole(pendingRole)
           ? '회원 연결이 저장되었습니다.'
           : '권한이 변경되었습니다.',
       {
         description:
-          pendingRole === 'adult_member'
-            ? `${selected.full_name || selected.email} → 성인회원${
+          pendingRole === 'adult_member' && adultLabel
+            ? `${selected.full_name || selected.email} → ${adultLabel}${
                 updated?.linkedMemberName ? ` (${updated.linkedMemberName})` : ''
               }`
             : requiresMemberLinkRole(pendingRole) && updated?.linkedMemberName
               ? `${selected.full_name || selected.email} → ${updated.linkedMemberName}`
               : `${selected.full_name || selected.email} → ${
-                  ASSIGNABLE_ROLES.find((r) => r.value === pendingRole)?.label
+                  ROLE_SELECT_OPTIONS.find((r) => r.value === pendingRoleSelect)
+                    ?.label
                 }`,
       },
     )
@@ -511,7 +595,7 @@ export function AccountRoleManagement({
             <p className="text-sm text-muted-foreground py-6 text-center">
               왼쪽 목록에서 계정을 선택하세요.
             </p>
-          ) : selectedAssignable === null ? (
+          ) : selectedRoleSelect === null ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
               {selected.isProtected
                 ? '시스템 관리자 계정은 권한을 변경할 수 없습니다.'
@@ -575,10 +659,16 @@ export function AccountRoleManagement({
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">변경할 권한</label>
                 <Select
-                  value={pendingRole}
+                  value={pendingRoleSelect}
                   onValueChange={(v) => {
-                    setPendingRole(v as SettingsAssignableRole)
-                    if (!requiresMemberLinkRole(v as SettingsAssignableRole)) {
+                    const next = v as RoleSelectValue
+                    setPendingRoleSelect(next)
+                    const parsed = parseRoleSelect(next)
+                    if (
+                      parsed.onHold ||
+                      !parsed.role ||
+                      !requiresMemberLinkRole(parsed.role)
+                    ) {
                       setMemberId('')
                     }
                   }}
@@ -587,7 +677,7 @@ export function AccountRoleManagement({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ASSIGNABLE_ROLES.map((r) => (
+                    {ROLE_SELECT_OPTIONS.map((r) => (
                       <SelectItem key={r.value} value={r.value}>
                         {r.label}
                       </SelectItem>
@@ -595,12 +685,15 @@ export function AccountRoleManagement({
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  강사: 캘린더·수업·출석 · 학부모: 보호자 마이페이지 · 회원: 일반 마이페이지 ·
-                  성인회원: 성인 전용 공지·리포트
+                  {isOnHoldAction
+                    ? '보류로 보내면 가입 계정 목록에서 빠지고, 로그인 시 「회원가입 대기중」으로 안내됩니다.'
+                    : '성인회원(육상): 러닝·육상 포털 · 성인회원(일반): 체중 관리 포털 · 회원: 일반 마이페이지 · 학부모: 보호자 · 강사: 캘린더·출석'}
                 </p>
               </div>
 
-              {requiresMemberLinkRole(pendingRole) ? (
+              {!isOnHoldAction &&
+              pendingRole &&
+              requiresMemberLinkRole(pendingRole) ? (
                 <AccountMemberLinkSelect
                   accountUserId={selected.id}
                   value={memberId}
@@ -613,8 +706,9 @@ export function AccountRoleManagement({
                 className="w-full"
                 disabled={
                   saving ||
-                  (pendingRole === selectedAssignable &&
-                    !requiresMemberLinkRole(pendingRole))
+                  (!isOnHoldAction &&
+                    pendingRoleSelect === selectedRoleSelect &&
+                    !(pendingRole && requiresMemberLinkRole(pendingRole)))
                 }
                 onClick={() => void handleSaveRole()}
               >
@@ -623,14 +717,17 @@ export function AccountRoleManagement({
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     저장 중…
                   </>
-                ) : requiresMemberLinkRole(pendingRole) ? (
+                ) : isOnHoldAction ? (
+                  '보류로 이동'
+                ) : pendingRole && requiresMemberLinkRole(pendingRole) ? (
                   '회원 연결 · 권한 저장'
                 ) : (
                   '권한 저장'
                 )}
               </Button>
 
-              {selected.appRole !== 'member' &&
+              {!isOnHoldAction &&
+                selected.appRole !== 'member' &&
                 selected.appRole !== 'adult_member' && (
                 <Button
                   type="button"
@@ -648,7 +745,7 @@ export function AccountRoleManagement({
                 </Button>
               )}
 
-              {accountDangerActions}
+              {!isOnHoldAction ? accountDangerActions : null}
             </>
           )}
         </CardContent>
@@ -657,10 +754,11 @@ export function AccountRoleManagement({
   )
 
   const pendingCount = pending.length
+  const holdCount = hold.length
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full min-w-0">
-      <TabsList className="w-full max-w-2xl grid grid-cols-2 sm:grid-cols-4 h-auto">
+      <TabsList className="w-full max-w-3xl grid grid-cols-2 sm:grid-cols-5 h-auto">
         <TabsTrigger value="pending" className="text-xs sm:text-sm">
           가입 승인
           {pendingCount > 0 ? ` (${pendingCount})` : ''}
@@ -674,11 +772,22 @@ export function AccountRoleManagement({
         <TabsTrigger value="accounts" className="text-xs sm:text-sm">
           가입 계정
         </TabsTrigger>
+        <TabsTrigger value="hold" className="text-xs sm:text-sm">
+          보류
+          {holdCount > 0 ? ` (${holdCount})` : ''}
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="pending" className="mt-4">
         <PendingApprovalsPanel
           initialPending={pending}
           instructors={initialInstructors}
+          onChanged={async () => {
+            await refreshAccountLists()
+          }}
+          onMovedToHold={async () => {
+            await refreshAccountLists()
+            setActiveTab('hold')
+          }}
         />
       </TabsContent>
       <TabsContent value="create" className="mt-4">
@@ -699,6 +808,15 @@ export function AccountRoleManagement({
       </TabsContent>
       <TabsContent value="accounts" className="mt-4">
         {accountsPanel}
+      </TabsContent>
+      <TabsContent value="hold" className="mt-4">
+        <HoldAccountsPanel
+          initialHold={hold}
+          instructors={initialInstructors}
+          onChanged={async () => {
+            await refreshAccountLists()
+          }}
+        />
       </TabsContent>
     </Tabs>
   )

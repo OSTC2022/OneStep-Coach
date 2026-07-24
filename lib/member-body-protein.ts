@@ -18,6 +18,7 @@ export type {
 } from '@/lib/member-body-protein-types'
 
 export {
+  ADULT_GENERAL_PROTEIN_SETTINGS,
   DEFAULT_MEMBER_PROTEIN_SETTINGS,
   PROTEIN_GOAL_MODE_MULTIPLIERS,
   PROTEIN_INTAKE_SLOTS,
