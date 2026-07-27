@@ -184,6 +184,7 @@ async function fetchSharedBodyReport(
         recorded_at: baselineDate,
         weight_kg: member.weight_kg,
         height_cm: member.height_cm,
+        max_speed_kmh: null,
         note: null,
         created_at: member.registered_at,
       } as MemberBodyRecord,

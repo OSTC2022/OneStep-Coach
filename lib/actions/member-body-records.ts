@@ -27,7 +27,7 @@ import {
   SLEEP_HOUR_CHOICES,
 } from '@/lib/member-body-wellness'
 import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
-import { calculateWeightDeltaKg } from '@/lib/member-weight-delta'
+import { calculateWeightDeltaKg, calculateHeightDeltaFromRecords } from '@/lib/member-weight-delta'
 import { calculateMemberBmi, roundBodyMetric } from '@/lib/member-utils'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -38,13 +38,17 @@ export type MemberBodyRecord = {
   recorded_at: string
   weight_kg: number
   height_cm: number | null
+  /** 최대 시속(km/h) — 스태프 전용, 포털 비노출 */
+  max_speed_kmh: number | null
   note: string | null
   created_at: string
 } & MemberBodyRecordWellness &
   MemberBodyRecordNutrition
 
-const BASIC_SELECT =
+const BASIC_SELECT_CORE =
   'id, member_id, recorded_at, weight_kg, height_cm, note, created_at'
+
+const BASIC_SELECT = `${BASIC_SELECT_CORE}, max_speed_kmh`
 
 const WELLNESS_SELECT =
   `${BASIC_SELECT}, sleep_hours, condition, fatigue, muscle_soreness, pain_area, meal_status`
@@ -62,6 +66,17 @@ const FULL_SELECT_WITHOUT_PROTEIN_SLOTS =
   `${WELLNESS_WITH_PAIN_SELECT}, protein_status, protein_target_g, protein_intake_g, protein_goal_multiplier, post_workout_meal_status, hydration_status, supplement_status, nutrition_note`
 
 const BODY_RECORD_SELECT = FULL_SELECT
+
+function stripMaxSpeedFromSelect(select: string) {
+  return select
+    .replace(/,\s*max_speed_kmh/gi, '')
+    .replace(/max_speed_kmh\s*,\s*/gi, '')
+}
+
+function isMissingMaxSpeedColumn(message: string | undefined) {
+  if (!message) return false
+  return message.toLowerCase().includes('max_speed_kmh')
+}
 
 function isMissingNutritionColumns(message: string | undefined) {
   if (!message) return false
@@ -159,7 +174,7 @@ function nutritionPayload(
 
 function payloadForTier(
   tier: BodyRecordSaveTier,
-  base: { weight_kg: number; height_cm: number | null },
+  base: { weight_kg: number; height_cm: number | null; max_speed_kmh?: number | null },
   wellness?: BodyWellnessInput,
   nutrition?: BodyNutritionInput,
   proteinSettings?: Partial<MemberProteinSettings>,
@@ -263,6 +278,10 @@ function normalizeRecord(row: Record<string, unknown>): MemberBodyRecord {
       row.height_cm != null
         ? roundBodyMetric(row.height_cm as number | string)
         : null,
+    max_speed_kmh:
+      row.max_speed_kmh != null && Number.isFinite(Number(row.max_speed_kmh))
+        ? Number((Number(row.max_speed_kmh)).toFixed(1))
+        : null,
     note: (row.note as string | null | undefined) ?? null,
     created_at: String(row.created_at),
     ...parseExtendedBodyRow(row),
@@ -284,27 +303,52 @@ async function queryMemberBodyRecords(
 
   let selectTier: BodyRecordSaveTier = 'full'
   let { data, error } = await run(FULL_SELECT)
+  if (error && isMissingMaxSpeedColumn(error.message)) {
+    const retry = await run(stripMaxSpeedFromSelect(FULL_SELECT))
+    data = retry.data
+    error = retry.error
+  }
   if (error && isMissingProteinIntakeBySlotColumn(error.message)) {
     const retry = await run(FULL_SELECT_WITHOUT_PROTEIN_SLOTS)
     data = retry.data
     error = retry.error
+    if (error && isMissingMaxSpeedColumn(error.message)) {
+      const retry2 = await run(stripMaxSpeedFromSelect(FULL_SELECT_WITHOUT_PROTEIN_SLOTS))
+      data = retry2.data
+      error = retry2.error
+    }
   }
   if (error && isMissingNutritionColumns(error.message)) {
     selectTier = 'wellness'
     const retry = await run(WELLNESS_WITH_PAIN_SELECT)
     data = retry.data
     error = retry.error
+    if (error && isMissingMaxSpeedColumn(error.message)) {
+      const retry2 = await run(stripMaxSpeedFromSelect(WELLNESS_WITH_PAIN_SELECT))
+      data = retry2.data
+      error = retry2.error
+    }
   }
   if (error && isMissingPainDetailColumns(error.message)) {
     const retry = await run(WELLNESS_SELECT)
     data = retry.data
     error = retry.error
+    if (error && isMissingMaxSpeedColumn(error.message)) {
+      const retry2 = await run(stripMaxSpeedFromSelect(WELLNESS_SELECT))
+      data = retry2.data
+      error = retry2.error
+    }
   }
   if (error && isMissingWellnessColumns(error.message)) {
     selectTier = 'basic'
     const retry = await run(BASIC_SELECT)
     data = retry.data
     error = retry.error
+    if (error && isMissingMaxSpeedColumn(error.message)) {
+      const retry2 = await run(BASIC_SELECT_CORE)
+      data = retry2.data
+      error = retry2.error
+    }
   }
 
   return { data, error, selectTier }
@@ -316,7 +360,11 @@ async function persistMemberBodyRecord(
     memberId: string
     recordedAt: string
     existingId?: string
-    basePayload: { weight_kg: number; height_cm: number | null }
+    basePayload: {
+      weight_kg: number
+      height_cm: number | null
+      max_speed_kmh?: number | null
+    }
     wellness?: BodyWellnessInput
     nutrition?: BodyNutritionInput
     proteinSettings?: Partial<MemberProteinSettings>
@@ -343,13 +391,13 @@ async function persistMemberBodyRecord(
       )
       const select = selectForTier(tier, tier === 'basic' ? undefined : { includePainDetail })
 
-      const runPersist = async (body: Record<string, unknown>) =>
+      const runPersist = async (body: Record<string, unknown>, selectClause: string) =>
         params.existingId
           ? await supabase
               .from('member_body_records')
               .update(body)
               .eq('id', params.existingId)
-              .select(select)
+              .select(selectClause)
               .single()
           : await supabase
               .from('member_body_records')
@@ -358,10 +406,22 @@ async function persistMemberBodyRecord(
                 recorded_at: params.recordedAt,
                 ...body,
               })
-              .select(select)
+              .select(selectClause)
               .single()
 
-      let result = await runPersist(payload)
+      let result = await runPersist(payload, select)
+
+      if (result.error && isMissingMaxSpeedColumn(result.error.message)) {
+        const { max_speed_kmh: _removed, ...withoutSpeed } = payload
+        result = await runPersist(withoutSpeed, stripMaxSpeedFromSelect(select))
+        if (!result.error && result.data) {
+          const saved = normalizeRecord(result.data as Record<string, unknown>)
+          return {
+            record: saved,
+            migrationHint: 'supabase/add-member-body-max-speed.sql',
+          }
+        }
+      }
 
       if (
         result.error &&
@@ -369,7 +429,7 @@ async function persistMemberBodyRecord(
         'protein_intake_by_slot' in payload
       ) {
         const { protein_intake_by_slot: _removed, ...fallbackPayload } = payload
-        result = await runPersist(fallbackPayload)
+        result = await runPersist(fallbackPayload, select)
         if (!result.error && result.data) {
           const saved = normalizeRecord(result.data as Record<string, unknown>)
           return {
@@ -427,6 +487,7 @@ function createBootstrapRecord(
     recorded_at: baselineDate,
     weight_kg: weight,
     height_cm: fallback.height_cm != null ? roundBodyMetric(fallback.height_cm) : null,
+    max_speed_kmh: null,
     note: '신체정보 초기 설정',
     created_at: fallback.registered_at,
     sleep_hours: null,
@@ -591,6 +652,7 @@ export async function addMemberBodyRecord(
   options?: {
     recordedAt?: string
     heightCm?: number | null
+    maxSpeedKmh?: number | null
     wellness?: BodyWellnessInput
     nutrition?: BodyNutritionInput
     proteinSettings?: Partial<MemberProteinSettings>
@@ -616,12 +678,28 @@ export async function addMemberBodyRecord(
   const recordedAt = options?.recordedAt ?? format(new Date(), 'yyyy-MM-dd')
   const supabase = await memberBodyWriteClient()
 
-  const { data: existingToday } = await supabase
+  const existingLookup = await supabase
     .from('member_body_records')
-    .select('id, height_cm')
+    .select('id, height_cm, max_speed_kmh')
     .eq('member_id', memberId)
     .eq('recorded_at', recordedAt)
     .maybeSingle()
+
+  let existingToday = existingLookup.data as
+    | { id: string; height_cm: number | string | null; max_speed_kmh?: number | string | null }
+    | null
+
+  if (existingLookup.error && isMissingMaxSpeedColumn(existingLookup.error.message)) {
+    const retry = await supabase
+      .from('member_body_records')
+      .select('id, height_cm')
+      .eq('member_id', memberId)
+      .eq('recorded_at', recordedAt)
+      .maybeSingle()
+    existingToday = retry.data
+  } else if (existingLookup.error) {
+    return { error: existingLookup.error.message }
+  }
 
   let recordHeightCm =
     options?.heightCm != null ? roundBodyMetric(options.heightCm) : null
@@ -641,6 +719,21 @@ export async function addMemberBodyRecord(
     }
   }
 
+  let recordMaxSpeedKmh: number | null | undefined = undefined
+  if (options?.maxSpeedKmh !== undefined) {
+    if (options.maxSpeedKmh == null) {
+      recordMaxSpeedKmh = null
+    } else {
+      const parsed = Number(options.maxSpeedKmh)
+      if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
+        return { error: '최대 시속을 올바르게 입력해주세요. (예: 28.5)' }
+      }
+      recordMaxSpeedKmh = Number(parsed.toFixed(1))
+    }
+  } else if (existingToday?.max_speed_kmh != null) {
+    recordMaxSpeedKmh = Number(existingToday.max_speed_kmh)
+  }
+
   const { data: priorWeightRows } = await supabase
     .from('member_body_records')
     .select('recorded_at, weight_kg')
@@ -656,9 +749,16 @@ export async function addMemberBodyRecord(
     weight,
   )
 
-  const basePayload = {
+  const basePayload: {
+    weight_kg: number
+    height_cm: number | null
+    max_speed_kmh?: number | null
+  } = {
     weight_kg: weight,
     height_cm: recordHeightCm,
+  }
+  if (recordMaxSpeedKmh !== undefined) {
+    basePayload.max_speed_kmh = recordMaxSpeedKmh
   }
 
   const proteinSettings =
@@ -725,16 +825,19 @@ export async function recordLessonStatusWeight(
   lessonDate: string,
   weightKg: number,
   heightCm?: number | null,
+  maxSpeedKmh?: number | null,
 ): Promise<{
   error?: string
   migrationHint?: string
   weightDeltaKg?: number | null
   savedWeightKg?: number
   savedHeightCm?: number | null
+  savedMaxSpeedKmh?: number | null
 }> {
   const result = await addMemberBodyRecord(memberId, weightKg, {
     recordedAt: lessonDate,
     heightCm: heightCm ?? undefined,
+    maxSpeedKmh,
     skipDashboardRevalidate: true,
   })
   if (result.error) {
@@ -744,6 +847,72 @@ export async function recordLessonStatusWeight(
     weightDeltaKg: result.weightDeltaKg ?? null,
     savedWeightKg: roundBodyMetric(weightKg) ?? weightKg,
     savedHeightCm: result.record?.height_cm ?? heightCm ?? null,
+    savedMaxSpeedKmh: result.record?.max_speed_kmh ?? maxSpeedKmh ?? null,
+  }
+}
+
+/** 수업 종료 서명 창 — 최근 신체기록 + 잔여 횟수 (스태프 전용) */
+export async function getLessonCompletionMemberInsight(
+  memberId: string,
+  lessonDate: string,
+): Promise<{
+  records: Array<{
+    date: string
+    weightKg: number
+    heightCm: number | null
+    bmi: number | null
+    maxSpeedKmh: number | null
+  }>
+  remainingSessions: number | null
+  todayWeightKg: number | null
+  todayHeightCm: number | null
+  todayMaxSpeedKmh: number | null
+  baselineHeightCm: number | null
+  error?: string
+}> {
+  await requireRole(['admin', 'instructor'])
+
+  const supabase = await createStaffDataClient()
+  const [{ records }, memberResult] = await Promise.all([
+    getMemberBodyRecords(memberId),
+    supabase
+      .from('members')
+      .select('remaining_sessions, height_cm, weight_kg')
+      .eq('id', memberId)
+      .maybeSingle(),
+  ])
+
+  const chartRecords = records
+    .filter((row) => !String(row.id).startsWith('bootstrap-'))
+    .slice(-14)
+    .map((row) => {
+      const heightCm = row.height_cm
+      const weightKg = row.weight_kg
+      return {
+        date: row.recorded_at.slice(0, 10),
+        weightKg,
+        heightCm,
+        bmi: calculateMemberBmi(heightCm, weightKg),
+        maxSpeedKmh: row.max_speed_kmh,
+      }
+    })
+
+  const today = chartRecords.find((row) => row.date === lessonDate) ?? null
+  const latest = chartRecords[chartRecords.length - 1] ?? null
+
+  return {
+    records: chartRecords,
+    remainingSessions:
+      memberResult.data?.remaining_sessions != null
+        ? Number(memberResult.data.remaining_sessions)
+        : null,
+    todayWeightKg: today?.weightKg ?? null,
+    todayHeightCm: today?.heightCm ?? latest?.heightCm ?? null,
+    todayMaxSpeedKmh: today?.maxSpeedKmh ?? null,
+    baselineHeightCm:
+      memberResult.data?.height_cm != null
+        ? roundBodyMetric(memberResult.data.height_cm as number | string)
+        : null,
   }
 }
 
@@ -803,6 +972,8 @@ export type LessonStatusBodyWeightSnapshot = {
   weightKg: number
   deltaKg: number | null
   heightCm: number | null
+  heightDeltaCm: number | null
+  maxSpeedKmh: number | null
 }
 
 export async function getMemberBodyWeightsForLessons(
@@ -813,11 +984,27 @@ export async function getMemberBodyWeightsForLessons(
   if (uniqueMemberIds.length === 0) return {}
 
   const supabase = await createStaffDataClient()
-  const { data, error } = await supabase
+  const selectWithSpeed = 'member_id, recorded_at, weight_kg, height_cm, max_speed_kmh'
+  const first = await supabase
     .from('member_body_records')
-    .select('member_id, recorded_at, weight_kg, height_cm')
+    .select(selectWithSpeed)
     .in('member_id', uniqueMemberIds)
     .order('recorded_at', { ascending: true })
+
+  let rows: Array<Record<string, unknown>> = []
+  let error = first.error
+
+  if (error && isMissingMaxSpeedColumn(error.message)) {
+    const retry = await supabase
+      .from('member_body_records')
+      .select('member_id, recorded_at, weight_kg, height_cm')
+      .in('member_id', uniqueMemberIds)
+      .order('recorded_at', { ascending: true })
+    rows = (retry.data ?? []) as Array<Record<string, unknown>>
+    error = retry.error
+  } else if (!error) {
+    rows = (first.data ?? []) as Array<Record<string, unknown>>
+  }
 
   if (error) {
     if (!isMissingBodyRecordsTable(error.message, error.code)) {
@@ -828,16 +1015,21 @@ export async function getMemberBodyWeightsForLessons(
 
   const recordsByMember = new Map<
     string,
-    Array<WeightRecordPoint & { height_cm: number | null }>
+    Array<WeightRecordPoint & { height_cm: number | null; max_speed_kmh: number | null }>
   >()
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const memberId = String(row.member_id)
     const list = recordsByMember.get(memberId) ?? []
+    const speedRaw = row.max_speed_kmh
     list.push({
       recorded_at: String(row.recorded_at),
       weight_kg: Number(row.weight_kg),
       height_cm:
         row.height_cm != null ? Number(row.height_cm) : null,
+      max_speed_kmh:
+        speedRaw != null && Number.isFinite(Number(speedRaw))
+          ? Number(Number(speedRaw).toFixed(1))
+          : null,
     })
     recordsByMember.set(memberId, list)
   }
@@ -849,10 +1041,17 @@ export async function getMemberBodyWeightsForLessons(
     if (!weightRow) continue
 
     const weightKg = Number(weightRow.weight_kg)
+    const heightCm = weightRow.height_cm
     map[bodyWeightKey(entry.memberId, entry.date)] = {
       weightKg,
       deltaKg: calculateWeightDeltaKg(memberRecords, entry.date, weightKg),
-      heightCm: weightRow.height_cm,
+      heightCm,
+      heightDeltaCm: calculateHeightDeltaFromRecords(
+        memberRecords,
+        entry.date,
+        heightCm,
+      ),
+      maxSpeedKmh: weightRow.max_speed_kmh,
     }
   }
 

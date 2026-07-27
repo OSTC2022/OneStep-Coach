@@ -2,7 +2,7 @@
 
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { ArrowLeft, Loader2, Scale } from 'lucide-react'
+import { ArrowLeft, Loader2, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
@@ -106,6 +106,7 @@ export function MemberWeightPageView({
   const [recordedAt, setRecordedAt] = useState(today)
   const [weightDraft, setWeightDraft] = useState('')
   const [heightDraft, setHeightDraft] = useState('')
+  const [speedDraft, setSpeedDraft] = useState('')
   const [saving, setSaving] = useState(false)
 
   const memberLabel = memberSport?.trim()
@@ -130,10 +131,14 @@ export function MemberWeightPageView({
       setWeightDraft(formatBodyMetric(existing.weight_kg) ?? String(existing.weight_kg))
       // 키는 미입력 — 새로 입력할 때만 성장량 비교
       setHeightDraft('')
+      setSpeedDraft(
+        existing.max_speed_kmh != null ? String(existing.max_speed_kmh) : '',
+      )
       return
     }
     setWeightDraft('')
     setHeightDraft('')
+    setSpeedDraft('')
   }, [recordedAt, recordsByDate])
 
   const previewBmi = useMemo(() => {
@@ -191,6 +196,45 @@ export function MemberWeightPageView({
     [chartRecordsAsc, baselineHeight],
   )
 
+  const heightChartPoints = useMemo(
+    () =>
+      chartRecordsAsc.flatMap((record) => {
+        const height = resolveRecordHeight(baselineHeight, record.height_cm)
+        if (height == null) return []
+        return [
+          {
+            date: record.recorded_at,
+            label: chartAxisLabel(record.recorded_at),
+            value: height,
+          },
+        ]
+      }),
+    [chartRecordsAsc, baselineHeight],
+  )
+
+  const speedChartPoints = useMemo(
+    () =>
+      chartRecordsAsc.flatMap((record) => {
+        const speed =
+          record.max_speed_kmh != null ? Number(record.max_speed_kmh) : null
+        if (speed == null || !Number.isFinite(speed)) return []
+        return [
+          {
+            date: record.recorded_at,
+            label: chartAxisLabel(record.recorded_at),
+            value: speed,
+          },
+        ]
+      }),
+    [chartRecordsAsc],
+  )
+
+  const hasAnyChart =
+    weightChartPoints.length > 0 ||
+    heightChartPoints.length > 0 ||
+    bmiChartPoints.length > 0 ||
+    speedChartPoints.length > 0
+
   async function handleSave() {
     const parsed = Number(weightDraft.trim())
     if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 500) {
@@ -209,15 +253,27 @@ export function MemberWeightPageView({
       heightCm = parsedHeight
     }
 
+    const speedRaw = speedDraft.trim()
+    let maxSpeedKmh: number | null | undefined = undefined
+    if (speedRaw) {
+      const parsedSpeed = Number(speedRaw)
+      if (!Number.isFinite(parsedSpeed) || parsedSpeed <= 0 || parsedSpeed >= 100) {
+        toast.error('최대 시속을 올바르게 입력해주세요. (예: 28.5)')
+        return
+      }
+      maxSpeedKmh = Number(parsedSpeed.toFixed(1))
+    }
+
     setSaving(true)
     try {
       const result = await addMemberBodyRecord(memberId, parsed, {
         recordedAt,
         heightCm: heightCm ?? undefined,
+        maxSpeedKmh,
       })
       if (result.error) {
         const migration = describeBodyRecordMigrationHint(result.migrationHint)
-        toast.error(migration?.title ?? '체중 기록 실패', {
+        toast.error(migration?.title ?? '성장 기록 실패', {
           description: migration?.description ?? result.error,
         })
         return
@@ -242,6 +298,11 @@ export function MemberWeightPageView({
       showWeightDeltaToast(result.weightDeltaKg ?? null, savedWeight, heightDelta)
       setWeightDraft(formatBodyMetric(savedWeight) ?? String(savedWeight))
       setHeightDraft('')
+      setSpeedDraft(
+        result.record?.max_speed_kmh != null
+          ? String(result.record.max_speed_kmh)
+          : speedRaw,
+      )
       router.refresh()
     } finally {
       setSaving(false)
@@ -249,7 +310,7 @@ export function MemberWeightPageView({
   }
 
   return (
-    <div className="mx-auto w-full max-w-lg space-y-6 pt-12 lg:pt-0">
+    <div className="mx-auto w-full max-w-3xl space-y-6 pt-12 lg:pt-0">
       <div className="flex items-start gap-3">
         <Button variant="ghost" size="icon" className="mt-0.5 shrink-0" asChild>
           <Link href={`/dashboard/members/${memberId}`} aria-label="회원 상세로">
@@ -258,15 +319,19 @@ export function MemberWeightPageView({
         </Button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Scale className="h-5 w-5 shrink-0 text-primary" />
-            <h1 className="truncate text-xl font-bold text-foreground">{memberLabel}</h1>
+            <TrendingUp className="h-5 w-5 shrink-0 text-primary" />
+            <h1 className="truncate text-xl font-bold text-foreground">
+              {memberLabel} · 성장 페이지
+            </h1>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">날짜별 체중·키·BMI 기록</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            키 · 체중 · BMI · 시속을 한눈에 확인
+          </p>
         </div>
       </div>
 
       <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold text-foreground">체중 · 키 입력</h2>
+        <h2 className="text-sm font-semibold text-foreground">성장 기록 입력</h2>
         <div className="space-y-1.5">
           <Label htmlFor="weight-date">날짜</Label>
           <Input
@@ -277,7 +342,7 @@ export function MemberWeightPageView({
             onChange={(event) => setRecordedAt(event.target.value)}
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="weight-kg">체중 (kg)</Label>
             <Input
@@ -320,6 +385,27 @@ export function MemberWeightPageView({
               }}
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="max-speed">시속</Label>
+            <Input
+              id="max-speed"
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              min="0"
+              max="100"
+              placeholder="km/h"
+              value={speedDraft}
+              disabled={saving}
+              onChange={(event) => setSpeedDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void handleSave()
+                }
+              }}
+            />
+          </div>
         </div>
         {previewHeightDelta != null ? (
           <p className="text-sm text-muted-foreground">
@@ -344,6 +430,10 @@ export function MemberWeightPageView({
             키가 있으면 BMI가 자동으로 계산되어 이력·그래프에 반영됩니다.
           </p>
         )}
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          최대시속은 강사·관리자 화면에서만 보이며, 회원·보호자 포털에는 표시되지
+          않습니다.
+        </p>
         {recordsByDate.has(recordedAt) ? (
           <p className="text-xs text-muted-foreground">
             이 날짜에 이미 기록이 있습니다. 저장하면 덮어씁니다.
@@ -364,17 +454,44 @@ export function MemberWeightPageView({
         ) : null}
       </section>
 
-      {weightChartPoints.length > 0 ? (
+      {hasAnyChart ? (
         <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-          <h2 className="text-sm font-semibold text-foreground">기록 그래프</h2>
-          <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-xs text-muted-foreground">체중</p>
-              <MemberBodyWeightChart points={weightChartPoints} className="h-[220px] w-full" />
+          <h2 className="text-sm font-semibold text-foreground">성장 그래프</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="min-w-0 rounded-lg border border-border/70 bg-background/40 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">체중</p>
+              {weightChartPoints.length > 0 ? (
+                <MemberBodyWeightChart
+                  points={weightChartPoints}
+                  className="h-[180px] w-full"
+                />
+              ) : (
+                <p className="flex h-[180px] items-center justify-center text-xs text-muted-foreground">
+                  기록 부족
+                </p>
+              )}
             </div>
-            {bmiChartPoints.length > 0 ? (
-              <div>
-                <p className="mb-2 text-xs text-muted-foreground">BMI (키 반영)</p>
+            <div className="min-w-0 rounded-lg border border-border/70 bg-background/40 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">키</p>
+              {heightChartPoints.length > 0 ? (
+                <MemberBodyMetricChart
+                  points={heightChartPoints}
+                  metricKey="height"
+                  metricLabel="키"
+                  unit="cm"
+                  formatValue={(value) => `${formatBodyMetric(value)}cm`}
+                  showPreviousDelta
+                  className="h-[180px] w-full"
+                />
+              ) : (
+                <p className="flex h-[180px] items-center justify-center text-xs text-muted-foreground">
+                  기록 부족
+                </p>
+              )}
+            </div>
+            <div className="min-w-0 rounded-lg border border-border/70 bg-background/40 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">BMI</p>
+              {bmiChartPoints.length > 0 ? (
                 <MemberBodyMetricChart
                   points={bmiChartPoints}
                   metricKey="bmi"
@@ -383,14 +500,35 @@ export function MemberWeightPageView({
                     const n = Number(value)
                     return Number.isFinite(n) ? n.toFixed(1) : '-'
                   }}
-                  className="h-[220px] w-full"
+                  showPreviousDelta
+                  className="h-[180px] w-full"
                 />
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                키를 입력하면 BMI 그래프가 함께 표시됩니다.
+              ) : (
+                <p className="flex h-[180px] items-center justify-center text-xs text-muted-foreground">
+                  키를 입력하면 BMI 그래프가 표시됩니다
+                </p>
+              )}
+            </div>
+            <div className="min-w-0 rounded-lg border border-border/70 bg-background/40 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                최대시속
+                <span className="ml-1 text-[10px] text-muted-foreground/70">내부</span>
               </p>
-            )}
+              {speedChartPoints.length > 0 ? (
+                <MemberBodyMetricChart
+                  points={speedChartPoints}
+                  metricKey="maxSpeed"
+                  metricLabel="시속"
+                  formatValue={(value) => String(value)}
+                  showPreviousDelta
+                  className="h-[180px] w-full"
+                />
+              ) : (
+                <p className="flex h-[180px] items-center justify-center text-xs text-muted-foreground">
+                  기록 부족
+                </p>
+              )}
+            </div>
           </div>
         </section>
       ) : null}
@@ -399,7 +537,7 @@ export function MemberWeightPageView({
         <h2 className="text-sm font-semibold text-foreground">날짜별 기록</h2>
         {records.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-            아직 체중 기록이 없습니다.
+            아직 성장 기록이 없습니다.
           </p>
         ) : (
           <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
@@ -438,22 +576,30 @@ export function MemberWeightPageView({
                     <p className="text-sm font-medium text-foreground">
                       {formatRecordDate(record.recorded_at)}
                     </p>
-                    {height != null ? (
-                      <p className="text-xs text-muted-foreground">
-                        키 {formatBodyMetric(height)}cm
-                        {heightDeltaLabel ? (
-                          <span
-                            className={cn(
-                              'ml-1 font-medium tabular-nums',
-                              heightDeltaTextClass(heightDelta),
-                            )}
-                          >
-                            {heightDeltaLabel}
-                          </span>
-                        ) : null}
-                        {bmi != null ? ` · BMI ${bmi}` : ''}
-                      </p>
-                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      {height != null ? (
+                        <>
+                          키 {formatBodyMetric(height)}cm
+                          {heightDeltaLabel ? (
+                            <span
+                              className={cn(
+                                'ml-1 font-medium tabular-nums',
+                                heightDeltaTextClass(heightDelta),
+                              )}
+                            >
+                              {heightDeltaLabel}
+                            </span>
+                          ) : null}
+                          {bmi != null ? ` · BMI ${bmi}` : ''}
+                        </>
+                      ) : null}
+                      {record.max_speed_kmh != null ? (
+                        <span>
+                          {height != null ? ' · ' : ''}
+                          시속 {record.max_speed_kmh}
+                        </span>
+                      ) : null}
+                    </p>
                   </div>
                   <WeightWithDeltaText
                     weightKg={weightValue}

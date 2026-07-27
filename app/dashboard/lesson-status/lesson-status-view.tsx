@@ -87,6 +87,7 @@ import {
   getRangeForView,
   getWeekDates,
   LESSON_STATUS_MAX_PER_ROW,
+  LESSON_STATUS_MAX_PER_ROW_SIDEBAR_OPEN,
   sortLessonsForStatusDisplay,
   toDateKey,
   type CalendarView,
@@ -95,6 +96,7 @@ import { formatLessonCompletionRemainingLabel } from '@/lib/lesson-completion-su
 import { formatSessionOverageAlert } from '@/lib/session-package-utils'
 import type { SignaturePadSuccessSummary } from '@/components/ui/signature-pad-dialog'
 import { cn } from '@/lib/utils'
+import { useSidebar } from '@/components/ui/sidebar'
 import {
   AUTO_INSTRUCTOR_BORDER_COLOR,
   getInstructorCalendarColor,
@@ -112,13 +114,17 @@ import {
   Pencil,
   Redo2,
   RefreshCw,
-  Scale,
+  TrendingUp,
   Undo2,
   UserRound,
 } from 'lucide-react'
 import { LessonQuickRegister } from '@/components/lesson-status/lesson-quick-register'
 import { LessonMemberLinkDialog } from '@/components/lesson-status/lesson-member-link-dialog'
 import { LessonStatusWeightInput } from '@/components/lesson-status/lesson-status-weight-input'
+import {
+  LessonCompletionMemberInsight,
+  type LessonCompletionMemberInsightHandle,
+} from '@/components/lesson-status/lesson-completion-member-insight'
 import { LessonStatusMemoBoard } from '@/components/lesson-status/lesson-status-memo-board'
 import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
 import type { LessonStatusBodyWeightSnapshot } from '@/lib/actions/member-body-records'
@@ -249,6 +255,8 @@ interface AthleteTileProps {
     weight: number | null,
     deltaKg?: number | null,
     heightCm?: number | null,
+    heightDeltaCm?: number | null,
+    maxSpeedKmh?: number | null,
   ) => void
   onStatusChange: (lessonId: string, status: AttendanceStatus) => void
   onClearAttendanceCheck: (lessonId: string) => void
@@ -298,6 +306,7 @@ const AthleteTile = memo(function AthleteTile({
   const [completionRemainingLabel, setCompletionRemainingLabel] = useState<string | null>(
     null,
   )
+  const insightRef = useRef<LessonCompletionMemberInsightHandle | null>(null)
 
   const display = getLessonCalendarDisplayParts(lesson)
   const label = display.meta ? `${display.name}(${display.meta})` : display.name
@@ -500,7 +509,7 @@ const AthleteTile = memo(function AthleteTile({
                 'truncate text-left font-semibold leading-tight text-foreground hover:text-primary hover:underline',
                 expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
               )}
-              title={`${label} — 수업 수정 · 회원 페이지 · 체중 페이지`}
+              title={`${label} — 수업 수정 · 회원 페이지 · 성장 페이지`}
             >
               {label}
             </button>
@@ -518,8 +527,8 @@ const AthleteTile = memo(function AthleteTile({
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href={`/dashboard/members/${lesson.member_id}/weight`}>
-                <Scale className="size-4" />
-                체중 페이지
+                <TrendingUp className="size-4" />
+                성장 페이지
               </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -687,15 +696,25 @@ const AthleteTile = memo(function AthleteTile({
                 bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]?.heightCm ??
                 null
               }
+              initialHeightDelta={
+                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]
+                  ?.heightDeltaCm ?? null
+              }
+              initialMaxSpeedKmh={
+                bodyWeightByKey[bodyWeightKey(lesson.member_id, lesson.lesson_date)]
+                  ?.maxSpeedKmh ?? null
+              }
               baselineHeightCm={lesson.member?.height_cm ?? null}
               disabled={isLoading || isCompleting || isCancelling}
-              onWeightChange={(weight, deltaKg, heightCm) =>
+              onWeightChange={(weight, deltaKg, heightCm, heightDeltaCm, maxSpeedKmh) =>
                 onBodyWeightChange(
                   lesson.member_id!,
                   lesson.lesson_date,
                   weight,
                   deltaKg,
                   heightCm,
+                  heightDeltaCm,
+                  maxSpeedKmh,
                 )
               }
             />
@@ -906,6 +925,31 @@ const AthleteTile = memo(function AthleteTile({
         showPastLessonFinder
         pastLessonMemberId={lesson.member_id ?? lesson.member?.id}
         onPastLessonUpdated={onLessonCompleted}
+        companion={
+          lesson.member_id ? (
+            <LessonCompletionMemberInsight
+              ref={insightRef}
+              memberId={lesson.member_id}
+              lessonDate={lesson.lesson_date}
+              remainingSessions={lesson.member?.remaining_sessions ?? null}
+              onBodySaved={({ weightKg, deltaKg, heightCm, maxSpeedKmh }) => {
+                onBodyWeightChange(
+                  lesson.member_id!,
+                  lesson.lesson_date,
+                  weightKg,
+                  deltaKg,
+                  heightCm,
+                  undefined,
+                  maxSpeedKmh,
+                )
+              }}
+            />
+          ) : null
+        }
+        onBeforeConfirm={async () => {
+          if (!insightRef.current) return true
+          return insightRef.current.savePending()
+        }}
         onConfirm={(signatureData, endTime) =>
           handleCompleteLesson(signatureData, endTime)
         }
@@ -970,6 +1014,8 @@ interface TimeSlotsPanelProps {
     weight: number | null,
     deltaKg?: number | null,
     heightCm?: number | null,
+    heightDeltaCm?: number | null,
+    maxSpeedKmh?: number | null,
   ) => void
   emptyMessage?: string
   autoScrollToNow?: boolean
@@ -982,14 +1028,14 @@ function getMobileAthleteFlexClass(
 ) {
   if (expandedAthleteId == null) {
     return useScrollRow
-      ? 'min-w-[7.25rem] shrink-0 flex-[0_0_auto]'
+      ? 'min-w-[7.75rem] shrink-0 flex-[0_0_auto]'
       : 'min-w-0 flex-1 basis-0'
   }
   if (expandedAthleteId === lessonId) {
-    return 'z-[1] min-w-[9.5rem] flex-[2.7] basis-0 shadow-md ring-1 ring-primary/30'
+    return 'z-[1] min-w-[9.75rem] flex-[2.7] basis-0 shadow-md ring-1 ring-primary/30'
   }
   return useScrollRow
-    ? 'min-w-[4.75rem] shrink-0 flex-[0_0_auto] opacity-85'
+    ? 'min-w-[5rem] shrink-0 flex-[0_0_auto] opacity-85'
     : 'min-w-0 flex-[0.65] basis-0 opacity-85'
 }
 
@@ -1012,9 +1058,14 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   autoScrollToNow = false,
 }: TimeSlotsPanelProps) {
   const [expandedAthleteId, setExpandedAthleteId] = useState<string | null>(null)
+  const { state: sidebarState, isMobile: isSidebarMobile } = useSidebar()
+  const maxPerRow =
+    !isSidebarMobile && sidebarState === 'expanded'
+      ? LESSON_STATUS_MAX_PER_ROW_SIDEBAR_OPEN
+      : LESSON_STATUS_MAX_PER_ROW
   const timeSlots = useMemo(
-    () => buildLessonStatusTimeSlots(lessons, instructors),
-    [lessons, instructors],
+    () => buildLessonStatusTimeSlots(lessons, instructors, maxPerRow),
+    [lessons, instructors, maxPerRow],
   )
   const scrollTargetStart = useMemo(
     () => findLessonStatusScrollSlotStart(timeSlots),
@@ -1175,12 +1226,13 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
             <div
               className="grid min-w-0 flex-1 gap-1.5"
               style={{
-                gridTemplateColumns: `repeat(${LESSON_STATUS_MAX_PER_ROW}, minmax(0, 1fr))`,
+                // 사이드바 열림: 6칸 / 닫힘: 8칸 — 카드 폭만 살짝 넓힘
+                gridTemplateColumns: `repeat(${maxPerRow}, minmax(0, 1fr))`,
               }}
             >
               {rowChunks.map((chunk) => {
                 const color = resolveInstructorColor(chunk.instructorId)
-                const span = Math.min(chunk.lessons.length, LESSON_STATUS_MAX_PER_ROW)
+                const span = Math.min(chunk.lessons.length, maxPerRow)
                 return (
                   <div
                     key={`${chunk.instructorId}-${chunk.lessons[0]?.id}`}
@@ -1306,6 +1358,8 @@ export function LessonStatusView({
       weight: number | null,
       deltaKg?: number | null,
       heightCm?: number | null,
+      heightDeltaCm?: number | null,
+      maxSpeedKmh?: number | null,
     ) => {
       setBodyWeightByKey((prev) => {
         const key = bodyWeightKey(memberId, date)
@@ -1319,6 +1373,12 @@ export function LessonStatusView({
             weightKg: weight,
             deltaKg: deltaKg ?? null,
             heightCm: heightCm ?? prev[key]?.heightCm ?? null,
+            heightDeltaCm:
+              heightDeltaCm ?? prev[key]?.heightDeltaCm ?? null,
+            maxSpeedKmh:
+              maxSpeedKmh !== undefined
+                ? maxSpeedKmh
+                : prev[key]?.maxSpeedKmh ?? null,
           },
         }
       })

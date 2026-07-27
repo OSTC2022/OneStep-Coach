@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { CheckCircle2, History, RotateCcw, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -53,6 +53,13 @@ interface SignaturePadDialogProps {
   /** 수업 종료 시 종료 시간 표시 (비관리자는 읽기 전용) */
   showEndTime?: boolean
   defaultEndTime?: string
+  /** 서명 확정 직전 — false면 중단 (별도 회원정보 패널 저장 등) */
+  onBeforeConfirm?: () => Promise<boolean>
+  /**
+   * 상단 동반 패널(회원 신체정보 등).
+   * 있으면 전체 화면을 위(정보)·아래(서명)로 나눠 겹치지 않게 배치합니다.
+   */
+  companion?: ReactNode
   onConfirm: (
     signatureData: string,
     endTime?: string,
@@ -62,6 +69,18 @@ interface SignaturePadDialogProps {
     | Promise<void | SignaturePadSuccessSummary | null | false>
     | null
     | false
+}
+
+const SPLIT_SHELL_STYLE: CSSProperties = {
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  transform: 'none',
+  width: '100vw',
+  maxWidth: '100vw',
+  height: '100dvh',
+  maxHeight: '100dvh',
 }
 
 export function SignaturePadDialog({
@@ -78,6 +97,8 @@ export function SignaturePadDialog({
   canEditEndTime = false,
   showEndTime = false,
   defaultEndTime = '',
+  onBeforeConfirm,
+  companion,
   onConfirm,
 }: SignaturePadDialogProps) {
   const touchFriendly = useTouchFriendlyLayout()
@@ -91,15 +112,18 @@ export function SignaturePadDialog({
     null,
   )
 
+  const splitLayout = Boolean(companion)
+
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
     if (!canvas || !container) return
 
     const width = container.clientWidth
+    // 서명 패드: 너무 작지도·크지도 않게 중간 크기
     const height = touchFriendly
-      ? Math.max(160, Math.min(220, Math.round(width * 0.38)))
-      : Math.max(280, Math.min(360, Math.round(width * 0.45)))
+      ? Math.max(140, Math.min(180, Math.round(width * 0.32)))
+      : Math.max(180, Math.min(240, Math.round(width * 0.32)))
     const dpr = window.devicePixelRatio || 1
 
     canvas.width = Math.floor(width * dpr)
@@ -145,16 +169,13 @@ export function SignaturePadDialog({
   ) => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
-
     const rect = canvas.getBoundingClientRect()
-
     if ('touches' in e) {
       return {
         x: e.touches[0].clientX - rect.left,
         y: e.touches[0].clientY - rect.top,
       }
     }
-
     return {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
@@ -168,29 +189,27 @@ export function SignaturePadDialog({
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
     if (!ctx) return
-
+    setIsDrawing(true)
     const { x, y } = getCoordinates(e)
     ctx.beginPath()
     ctx.moveTo(x, y)
-    setIsDrawing(true)
   }
 
   const draw = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
   ) => {
-    e.preventDefault()
     if (!isDrawing) return
-
+    e.preventDefault()
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
     if (!ctx) return
-
     const { x, y } = getCoordinates(e)
     ctx.lineTo(x, y)
     ctx.stroke()
   }
 
   const stopDrawing = () => {
+    if (!isDrawing) return
     setIsDrawing(false)
     const canvas = canvasRef.current
     if (canvas) {
@@ -206,6 +225,11 @@ export function SignaturePadDialog({
     if (!signatureData) return
     if (showEndTime && !endTime.trim()) return
 
+    if (onBeforeConfirm) {
+      const ok = await onBeforeConfirm()
+      if (!ok) return
+    }
+
     const result = await onConfirm(signatureData, showEndTime ? endTime : undefined)
     if (result === null || result === false) return
     if (result && typeof result === 'object') {
@@ -215,130 +239,89 @@ export function SignaturePadDialog({
     onOpenChange(false)
   }
 
-  return (
+  const signatureBody = successSummary ? (
+    <div className="flex flex-col items-center gap-3 py-10 text-center sm:py-12">
+      <CheckCircle2 className="h-12 w-12 text-primary" aria-hidden />
+      <p className="text-2xl font-semibold tracking-tight text-foreground">감사합니다</p>
+      {successSummary.remainingLabel ? (
+        <p className="text-base font-medium text-primary tabular-nums">
+          {successSummary.remainingLabel}
+        </p>
+      ) : null}
+      <p className="max-w-xs text-sm text-muted-foreground">수업이 종료되었습니다.</p>
+    </div>
+  ) : (
     <>
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && isSubmitting) return
-        onOpenChange(next)
-      }}
-    >
-      <DialogContent
-        mobileSheet
-        opaqueBackdrop
-        className={cn(
-          'max-w-3xl gap-0 overflow-hidden p-0',
-          touchFriendly && 'max-lg:flex max-lg:max-h-[inherit] max-lg:flex-col',
-        )}
-        onPointerDownOutside={(e) => {
-          if (isSubmitting) e.preventDefault()
-        }}
-        onEscapeKeyDown={(e) => {
-          if (isSubmitting) e.preventDefault()
-        }}
-      >
-        <DialogHeader className="shrink-0 space-y-1 px-4 pt-4 pb-2 text-left sm:px-6 sm:pt-6">
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            {memberLabel ? (
-              <>
-                <span className="font-medium text-foreground">{memberLabel}</span>
-                <span className="mx-1">·</span>
-              </>
-            ) : null}
-            {description}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pb-2 sm:px-6">
-        {successSummary ? (
-          <div className="flex flex-col items-center gap-3 py-10 text-center sm:py-12">
-            <CheckCircle2 className="h-12 w-12 text-primary" aria-hidden />
-            <p className="text-2xl font-semibold tracking-tight text-foreground">감사합니다</p>
-            {successSummary.remainingLabel ? (
-              <p className="text-base font-medium text-primary tabular-nums">
-                {successSummary.remainingLabel}
-              </p>
-            ) : null}
-            <p className="max-w-xs text-sm text-muted-foreground">
-              수업이 종료되었습니다.
-            </p>
-          </div>
-        ) : (
-          <>
-        {showEndTime ? (
-          <div className="space-y-1.5">
-            <Label htmlFor="lesson-end-time">종료 시간</Label>
-            {canEditEndTime ? (
-              <TimeInput24
-                id="lesson-end-time"
-                value={endTime}
-                onChange={setEndTime}
-              />
-            ) : (
-              <div
-                id="lesson-end-time"
-                className={cn(
-                  'flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm tabular-nums',
-                )}
-              >
-                <Clock className="h-4 w-4 shrink-0 opacity-60" />
-                {endTime || '—'}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        <div ref={containerRef} className="relative overflow-hidden rounded-lg border border-border">
-          <canvas
-            ref={canvasRef}
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onMouseLeave={stopDrawing}
-            onTouchStart={startDrawing}
-            onTouchMove={draw}
-            onTouchEnd={stopDrawing}
-            className="relative z-0 block w-full touch-none cursor-crosshair"
-          />
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none text-4xl font-semibold tracking-[0.2em] text-white/10 sm:text-5xl"
-          >
-            서명
-          </span>
-        </div>
-
-        <Button type="button" variant="outline" onClick={clearSignature} className="w-full">
-          <RotateCcw className="mr-2 h-4 w-4" />
-          다시 서명
-        </Button>
-          </>
-        )}
-        </div>
-
-        <DialogFooter
-          className={cn(
-            'shrink-0 border-t border-border px-4 py-3 sm:px-6',
-            showPastLessonFinder && !successSummary
-              ? 'gap-2 sm:justify-between'
-              : 'gap-2 sm:justify-end',
-          )}
-        >
-          {successSummary ? (
-            <Button
-              type="button"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setSuccessSummary(null)
-                onOpenChange(false)
-              }}
-            >
-              확인
-            </Button>
+      {showEndTime ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="lesson-end-time">종료 시간</Label>
+          {canEditEndTime ? (
+            <TimeInput24
+              id="lesson-end-time"
+              value={endTime}
+              onChange={setEndTime}
+            />
           ) : (
-            <>
+            <div
+              id="lesson-end-time"
+              className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm tabular-nums"
+            >
+              <Clock className="h-4 w-4 shrink-0 opacity-60" />
+              {endTime || '—'}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      <div ref={containerRef} className="relative overflow-hidden rounded-lg border border-border">
+        <canvas
+          ref={canvasRef}
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+          className="relative z-0 block w-full touch-none cursor-crosshair"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none text-4xl font-semibold tracking-[0.2em] text-white/10 sm:text-5xl"
+        >
+          서명
+        </span>
+      </div>
+
+      <Button type="button" variant="outline" onClick={clearSignature} className="w-full">
+        <RotateCcw className="mr-2 h-4 w-4" />
+        다시 서명
+      </Button>
+    </>
+  )
+
+  const footer = (
+    <DialogFooter
+      className={cn(
+        'shrink-0 border-t border-border px-4 py-3 sm:px-6',
+        showPastLessonFinder && !successSummary
+          ? 'gap-2 sm:justify-between'
+          : 'gap-2 sm:justify-end',
+      )}
+    >
+      {successSummary ? (
+        <Button
+          type="button"
+          className="w-full sm:w-auto"
+          onClick={() => {
+            setSuccessSummary(null)
+            onOpenChange(false)
+          }}
+        >
+          확인
+        </Button>
+      ) : (
+        <>
           {showPastLessonFinder ? (
             <Button
               type="button"
@@ -367,21 +350,133 @@ export function SignaturePadDialog({
               {isSubmitting ? '저장 중...' : confirmLabel}
             </Button>
           </div>
-          </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      )}
+    </DialogFooter>
+  )
 
-    {showPastLessonFinder ? (
-      <PastLessonSignatureDialog
-        open={pastLessonOpen}
-        onOpenChange={setPastLessonOpen}
-        memberId={pastLessonMemberId}
-        memberLabel={memberLabel}
-        onLessonUpdated={onPastLessonUpdated}
-      />
-    ) : null}
+  return (
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && isSubmitting) return
+          onOpenChange(next)
+        }}
+      >
+        <DialogContent
+          mobileSheet={!splitLayout}
+          opaqueBackdrop
+          showCloseButton
+          style={splitLayout ? SPLIT_SHELL_STYLE : undefined}
+          className={cn(
+            splitLayout
+              ? cn(
+                  // 전체 화면 셸 — 중앙 모달/시트 위치 클래스 전부 무력화
+                  '!inset-0 !top-0 !left-0 !right-0 !bottom-0 !z-50',
+                  '!flex !h-[100dvh] !max-h-[100dvh] !w-screen !max-w-none',
+                  '!translate-x-0 !translate-y-0 !gap-3 !rounded-none !border-0',
+                  '!bg-transparent !p-3 !pt-[max(0.75rem,env(safe-area-inset-top))]',
+                  '!pb-[max(0.75rem,env(safe-area-inset-bottom))] !shadow-none',
+                )
+              : cn(
+                  'max-w-3xl gap-0 overflow-hidden border-primary/20 p-0',
+                  touchFriendly && 'max-lg:flex max-lg:max-h-[inherit] max-lg:flex-col',
+                ),
+          )}
+          onPointerDownOutside={(e) => {
+            if (isSubmitting) e.preventDefault()
+          }}
+          onEscapeKeyDown={(e) => {
+            if (isSubmitting) e.preventDefault()
+          }}
+        >
+          {splitLayout ? (
+            <div
+              className={cn(
+                'mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-3',
+                // PC: 좌(정보) · 우(서명)
+                'lg:flex-row lg:items-stretch lg:gap-4',
+              )}
+            >
+              {!successSummary && companion ? (
+                <div
+                  className={cn(
+                    'flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-primary/35 bg-background shadow-2xl',
+                    'max-h-[min(38dvh,360px)] shrink-0',
+                    'lg:max-h-none lg:min-h-0 lg:w-auto lg:min-w-[32rem] lg:max-w-[44rem] lg:flex-1 lg:shrink',
+                  )}
+                >
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
+                    {companion}
+                  </div>
+                </div>
+              ) : null}
+
+              <div
+                className={cn(
+                  'mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden',
+                  'rounded-2xl border border-primary/20 bg-background shadow-2xl',
+                  'lg:mx-0 lg:max-w-md lg:flex-none lg:self-center',
+                )}
+              >
+                <DialogHeader
+                  className={cn(
+                    'shrink-0 space-y-1 border-b border-primary/10 bg-primary/[0.03] text-left',
+                    'px-4 pt-3 pb-2 sm:px-6 sm:pt-4',
+                  )}
+                >
+                  <DialogTitle>{title}</DialogTitle>
+                  <DialogDescription>
+                    {memberLabel ? (
+                      <>
+                        <span className="font-medium text-foreground">{memberLabel}</span>
+                        <span className="mx-1">·</span>
+                      </>
+                    ) : null}
+                    {description}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-2 sm:px-6">
+                  {signatureBody}
+                </div>
+                {footer}
+              </div>
+            </div>
+          ) : (
+            <>
+              <DialogHeader className="shrink-0 space-y-1 border-b border-primary/10 bg-primary/[0.03] px-4 pt-4 pb-3 text-left sm:px-6 sm:pt-5">
+                <DialogTitle>{title}</DialogTitle>
+                <DialogDescription>
+                  {memberLabel ? (
+                    <>
+                      <span className="font-medium text-foreground">{memberLabel}</span>
+                      <span className="mx-1">·</span>
+                    </>
+                  ) : null}
+                  {description}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-2 pb-2 sm:px-6">
+                {signatureBody}
+              </div>
+              {footer}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {showPastLessonFinder ? (
+        <PastLessonSignatureDialog
+          open={pastLessonOpen}
+          onOpenChange={setPastLessonOpen}
+          memberId={pastLessonMemberId}
+          memberLabel={memberLabel}
+          onLessonUpdated={onPastLessonUpdated}
+        />
+      ) : null}
     </>
   )
 }

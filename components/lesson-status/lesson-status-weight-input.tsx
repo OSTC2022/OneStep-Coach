@@ -8,6 +8,7 @@ import {
   recordLessonStatusWeight,
 } from '@/lib/actions/member-body-records'
 import { WeightWithDeltaText } from '@/components/members/weight-with-delta-text'
+import { HeightWithDeltaText } from '@/components/members/height-with-delta-text'
 import {
   calculateHeightDeltaCm,
   formatHeightDeltaInParens,
@@ -31,6 +32,8 @@ interface LessonStatusWeightInputProps {
   initialWeight?: number | null
   initialWeightDelta?: number | null
   initialHeightCm?: number | null
+  initialHeightDelta?: number | null
+  initialMaxSpeedKmh?: number | null
   baselineHeightCm?: number | null
   disabled?: boolean
   className?: string
@@ -38,17 +41,21 @@ interface LessonStatusWeightInputProps {
     weight: number | null,
     deltaKg?: number | null,
     heightCm?: number | null,
+    heightDeltaCm?: number | null,
+    maxSpeedKmh?: number | null,
   ) => void
 }
 
 function showWeightDeltaToast(
   deltaKg: number | null,
   savedWeightKg: number,
+  heightCm: number | null,
   heightDeltaCm: number | null,
+  maxSpeedKmh: number | null,
 ) {
   const weightDeltaLabel = formatWeightDeltaInParens(deltaKg)
   const heightDeltaLabel = formatHeightDeltaInParens(heightDeltaCm)
-  if (weightDeltaLabel || heightDeltaLabel) {
+  if (weightDeltaLabel || heightCm != null || maxSpeedKmh != null) {
     toast.success(
       <span className="font-semibold tabular-nums">
         {formatBodyMetric(savedWeightKg)}
@@ -57,9 +64,19 @@ function showWeightDeltaToast(
             {weightDeltaLabel}
           </span>
         ) : null}
-        {heightDeltaLabel ? (
-          <span className={cn('ml-1.5', heightDeltaTextClass(heightDeltaCm))}>
-            키 {heightDeltaLabel}
+        {heightCm != null ? (
+          <span className="ml-1.5">
+            {formatBodyMetric(heightCm)}
+            {heightDeltaLabel ? (
+              <span className={cn('ml-1', heightDeltaTextClass(heightDeltaCm))}>
+                {heightDeltaLabel}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {maxSpeedKmh != null ? (
+          <span className="ml-1.5 text-muted-foreground">
+            시속 {maxSpeedKmh}
           </span>
         ) : null}
       </span>,
@@ -76,6 +93,8 @@ export function LessonStatusWeightInput({
   initialWeight,
   initialWeightDelta = null,
   initialHeightCm = null,
+  initialHeightDelta = null,
+  initialMaxSpeedKmh = null,
   baselineHeightCm = null,
   disabled,
   className,
@@ -84,6 +103,7 @@ export function LessonStatusWeightInput({
   const [open, setOpen] = useState(false)
   const [weightDraft, setWeightDraft] = useState('')
   const [heightDraft, setHeightDraft] = useState('')
+  const [speedDraft, setSpeedDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [savedWeight, setSavedWeight] = useState<number | null>(
     initialWeight ?? null,
@@ -91,10 +111,15 @@ export function LessonStatusWeightInput({
   const [savedHeight, setSavedHeight] = useState<number | null>(
     initialHeightCm ?? null,
   )
+  const [savedMaxSpeed, setSavedMaxSpeed] = useState<number | null>(
+    initialMaxSpeedKmh ?? null,
+  )
   const [weightDeltaKg, setWeightDeltaKg] = useState<number | null>(
     initialWeightDelta,
   )
-  const [heightDeltaCm, setHeightDeltaCm] = useState<number | null>(null)
+  const [heightDeltaCm, setHeightDeltaCm] = useState<number | null>(
+    initialHeightDelta,
+  )
   const boundRef = useRef({ memberId, lessonDate })
   const weightInputRef = useRef<HTMLInputElement>(null)
   /** 다이얼로그 열 때 기준 키 — 저장 전 성장량 비교용 */
@@ -109,11 +134,13 @@ export function LessonStatusWeightInput({
     if (memberOrDateChanged) {
       setSavedWeight(initialWeight ?? null)
       setSavedHeight(initialHeightCm ?? null)
+      setSavedMaxSpeed(initialMaxSpeedKmh ?? null)
       setWeightDeltaKg(initialWeightDelta)
-      setHeightDeltaCm(null)
+      setHeightDeltaCm(initialHeightDelta)
       setOpen(false)
       setWeightDraft('')
       setHeightDraft('')
+      setSpeedDraft('')
       return
     }
 
@@ -123,11 +150,17 @@ export function LessonStatusWeightInput({
     }
     if (initialHeightCm != null) {
       setSavedHeight(initialHeightCm)
+      setHeightDeltaCm(initialHeightDelta)
+    }
+    if (initialMaxSpeedKmh !== undefined) {
+      setSavedMaxSpeed(initialMaxSpeedKmh ?? null)
     }
   }, [
     initialWeight,
     initialWeightDelta,
     initialHeightCm,
+    initialHeightDelta,
+    initialMaxSpeedKmh,
     memberId,
     lessonDate,
   ])
@@ -156,6 +189,7 @@ export function LessonStatusWeightInput({
     setWeightDraft(savedWeight != null ? formatBodyMetric(savedWeight) : '')
     // 키는 항상 미입력 — 입력할 때만 성장량 표시
     setHeightDraft('')
+    setSpeedDraft(savedMaxSpeed != null ? String(savedMaxSpeed) : '')
     heightCompareRef.current = previousHeightForDelta
     setOpen(true)
   }
@@ -164,6 +198,7 @@ export function LessonStatusWeightInput({
     setOpen(false)
     setWeightDraft('')
     setHeightDraft('')
+    setSpeedDraft('')
   }
 
   async function handleConfirm() {
@@ -181,6 +216,17 @@ export function LessonStatusWeightInput({
       parsedHeight < 250
         ? parsedHeight
         : null
+
+    const trimmedSpeed = speedDraft.trim()
+    const parsedSpeed = trimmedSpeed ? Number(trimmedSpeed) : NaN
+    let maxSpeedKmh: number | null | undefined = undefined
+    if (trimmedSpeed) {
+      if (!Number.isFinite(parsedSpeed) || parsedSpeed <= 0 || parsedSpeed >= 100) {
+        toast.error('최대 시속을 올바르게 입력해주세요. (예: 28.5)')
+        return
+      }
+      maxSpeedKmh = Number(parsedSpeed.toFixed(1))
+    }
 
     if (shouldClear) {
       if (savedWeight == null) {
@@ -203,6 +249,7 @@ export function LessonStatusWeightInput({
 
       setSavedWeight(null)
       setSavedHeight(null)
+      setSavedMaxSpeed(null)
       setWeightDeltaKg(null)
       setHeightDeltaCm(null)
       onWeightChange?.(null)
@@ -221,7 +268,16 @@ export function LessonStatusWeightInput({
       return
     }
 
-    if (savedWeight === weight && heightCm == null) {
+    const speedUnchanged =
+      maxSpeedKmh === undefined
+        ? true
+        : savedMaxSpeed === maxSpeedKmh
+
+    if (
+      savedWeight === weight &&
+      heightCm == null &&
+      speedUnchanged
+    ) {
       closeEditor()
       return
     }
@@ -229,7 +285,8 @@ export function LessonStatusWeightInput({
     if (
       savedWeight === weight &&
       heightCm != null &&
-      savedHeight === heightCm
+      savedHeight === heightCm &&
+      speedUnchanged
     ) {
       closeEditor()
       return
@@ -241,6 +298,7 @@ export function LessonStatusWeightInput({
       lessonDate,
       weight,
       heightCm,
+      maxSpeedKmh,
     )
     setSaving(false)
 
@@ -255,6 +313,9 @@ export function LessonStatusWeightInput({
 
     const saved = result.savedWeightKg ?? weight
     const nextHeight = result.savedHeightCm ?? heightCm ?? savedHeight
+    const nextMaxSpeed =
+      result.savedMaxSpeedKmh ??
+      (maxSpeedKmh !== undefined ? maxSpeedKmh : savedMaxSpeed)
     const nextHeightDelta =
       heightCm != null
         ? calculateHeightDeltaCm(
@@ -265,15 +326,24 @@ export function LessonStatusWeightInput({
 
     setSavedWeight(saved)
     setSavedHeight(nextHeight)
+    setSavedMaxSpeed(nextMaxSpeed)
     setWeightDeltaKg(result.weightDeltaKg ?? null)
     if (heightCm != null) {
       setHeightDeltaCm(nextHeightDelta)
     }
-    onWeightChange?.(saved, result.weightDeltaKg ?? null, nextHeight)
+    onWeightChange?.(
+      saved,
+      result.weightDeltaKg ?? null,
+      nextHeight,
+      heightCm != null ? nextHeightDelta : heightDeltaCm,
+      nextMaxSpeed,
+    )
     showWeightDeltaToast(
       result.weightDeltaKg ?? null,
       saved,
-      heightCm != null ? nextHeightDelta : null,
+      nextHeight,
+      heightCm != null ? nextHeightDelta : heightDeltaCm,
+      nextMaxSpeed,
     )
     closeEditor()
   }
@@ -281,8 +351,6 @@ export function LessonStatusWeightInput({
   const hasSaved = savedWeight != null
   const displayHeight = resolveRecordHeight(baselineHeightCm, savedHeight)
   const displayBmi = calculateMemberBmi(displayHeight, savedWeight)
-  const buttonLabel = hasSaved ? null : '체중 · 키'
-  const heightDeltaLabel = formatHeightDeltaInParens(heightDeltaCm)
 
   return (
     <>
@@ -294,7 +362,7 @@ export function LessonStatusWeightInput({
           openEditor()
         }}
         className={cn(
-          'mt-1 flex w-full min-w-0 items-center rounded border border-border/70 bg-muted/30 px-2 py-1 text-left text-[10px] transition-colors hover:bg-muted/50',
+          'mt-1 flex w-full min-w-0 items-center rounded border border-border/70 bg-muted/30 px-1.5 py-1 text-left text-[10px] transition-colors hover:bg-muted/50',
           hasSaved && weightDeltaKg == null && 'font-medium text-primary',
           (disabled || saving) && 'opacity-50',
           className,
@@ -303,29 +371,41 @@ export function LessonStatusWeightInput({
         {saving ? (
           <Loader2 className="h-3 w-3 animate-spin" />
         ) : hasSaved ? (
-          <span className="min-w-0 truncate">
-            <WeightWithDeltaText
-              weightKg={savedWeight}
-              deltaKg={weightDeltaKg}
-              className="text-[10px] font-semibold"
-              weightClassName="text-primary"
-            />
-            {heightDeltaLabel ? (
-              <span
-                className={cn(
-                  'ml-1 font-semibold tabular-nums',
-                  heightDeltaTextClass(heightDeltaCm),
-                )}
-              >
-                키{heightDeltaLabel}
-              </span>
-            ) : null}
-            {displayBmi != null ? (
-              <span className="ml-1 text-muted-foreground">BMI {displayBmi}</span>
-            ) : null}
+          <span className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-1.5 gap-y-0.5 leading-tight">
+            <span className="min-w-0 overflow-hidden">
+              <WeightWithDeltaText
+                weightKg={savedWeight}
+                deltaKg={weightDeltaKg}
+                className="block truncate text-[10px] font-semibold"
+                weightClassName="text-primary"
+              />
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-right text-[9px] text-muted-foreground tabular-nums">
+              {displayBmi != null ? `BMI ${displayBmi}` : 'BMI -'}
+            </span>
+            <span className="min-w-0 overflow-hidden">
+              {displayHeight != null ? (
+                <HeightWithDeltaText
+                  heightCm={displayHeight}
+                  deltaCm={heightDeltaCm}
+                  className="block truncate text-[10px] font-semibold"
+                  heightClassName="text-foreground"
+                />
+              ) : (
+                <span className="text-[10px] text-muted-foreground">키 -</span>
+              )}
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-right text-[9px] text-muted-foreground tabular-nums">
+              {savedMaxSpeed != null ? `시속 ${savedMaxSpeed}` : '시속 -'}
+            </span>
           </span>
         ) : (
-          <span>{buttonLabel}</span>
+          <span className="grid w-full grid-cols-2 gap-x-1 gap-y-0.5 text-[9px] leading-tight text-muted-foreground">
+            <span>체중</span>
+            <span className="text-right">BMI</span>
+            <span>키</span>
+            <span className="text-right">시속</span>
+          </span>
         )}
       </button>
 
@@ -353,8 +433,10 @@ export function LessonStatusWeightInput({
           }}
         >
           <div className="space-y-3">
-            <DialogTitle className="text-xs font-medium">체중 · 키</DialogTitle>
-            <div className="grid grid-cols-2 gap-2">
+            <DialogTitle className="text-xs font-medium">
+              체중 · 키 · 최대시속
+            </DialogTitle>
+            <div className="grid grid-cols-3 gap-2">
               <div className="space-y-1.5">
                 <p className="text-[11px] text-muted-foreground">체중 (kg)</p>
                 <Input
@@ -406,6 +488,31 @@ export function LessonStatusWeightInput({
                   className="h-9 tabular-nums"
                 />
               </div>
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">시속</p>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  max="100"
+                  placeholder="km/h"
+                  value={speedDraft}
+                  disabled={saving}
+                  onChange={(e) => setSpeedDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void handleConfirm()
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      closeEditor()
+                    }
+                  }}
+                  className="h-9 tabular-nums"
+                />
+              </div>
             </div>
             {(() => {
               const w = Number(weightDraft)
@@ -443,6 +550,10 @@ export function LessonStatusWeightInput({
                       키를 함께 입력하면 BMI가 자동 계산됩니다.
                     </p>
                   )}
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">
+                    최대시속은 강사·관리자 화면에서만 보이며, 회원·보호자 포털에는
+                    표시되지 않습니다.
+                  </p>
                 </div>
               )
             })()}

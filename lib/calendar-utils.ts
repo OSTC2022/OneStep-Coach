@@ -482,6 +482,7 @@ export function findLessonStatusScrollSlotStart(
 export function buildLessonStatusTimeSlots(
   lessons: Lesson[],
   instructors: Instructor[] = [],
+  maxPerRow: number = LESSON_STATUS_MAX_PER_ROW,
 ) {
   const byTime = new Map<string, Lesson[]>()
 
@@ -492,10 +493,12 @@ export function buildLessonStatusTimeSlots(
     byTime.set(key, group)
   }
 
+  const rowSize = Math.max(1, maxPerRow)
+
   return [...byTime.entries()]
     .map(([start, slotLessons]) => {
       const sorted = sortLessonsInTimeSlot(slotLessons, instructors)
-      const rows = chunkArray(sorted, LESSON_STATUS_MAX_PER_ROW).map((rowLessons) =>
+      const rows = chunkArray(sorted, rowSize).map((rowLessons) =>
         groupConsecutiveByInstructor(rowLessons),
       )
       return { start, total: sorted.length, rows }
@@ -507,6 +510,9 @@ export function buildLessonStatusTimeSlots(
       return a.start.localeCompare(b.start)
     })
 }
+
+/** 사이드바 펼침 시 한 줄 최대 인원 (기본 8 → 살짝만 넓히기) */
+export const LESSON_STATUS_MAX_PER_ROW_SIDEBAR_OPEN = 6
 
 export function groupLessonsByInstructorForStatus(
   lessons: Lesson[],

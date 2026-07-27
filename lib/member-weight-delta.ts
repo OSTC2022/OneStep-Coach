@@ -80,6 +80,27 @@ export function formatHeightDeltaInParens(deltaCm: number | null): string | null
   return `(${deltaShort})`
 }
 
+/** 지정 날짜 이전의 가장 최근 키와 비교 */
+export function calculateHeightDeltaFromRecords(
+  records: ReadonlyArray<{ recorded_at: string; height_cm: number | null | undefined }>,
+  recordedAt: string,
+  newHeightCm: number | null | undefined,
+): number | null {
+  if (newHeightCm == null || !Number.isFinite(Number(newHeightCm))) return null
+
+  const previous = [...records]
+    .filter(
+      (row) =>
+        row.recorded_at < recordedAt &&
+        row.height_cm != null &&
+        Number.isFinite(Number(row.height_cm)),
+    )
+    .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))[0]
+
+  if (!previous) return null
+  return calculateHeightDeltaCm(previous.height_cm, Number(newHeightCm))
+}
+
 export function heightDeltaTextClass(deltaCm: number | null): string {
   return weightDeltaTextClass(deltaCm)
 }
