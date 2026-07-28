@@ -82,11 +82,18 @@ export const LessonCompletionMemberInsight = forwardRef<
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [records, setRecords] = useState<InsightRecord[]>([])
+  const [resolvedRemaining, setResolvedRemaining] = useState<number | null>(
+    remainingSessions,
+  )
   const [weightDraft, setWeightDraft] = useState('')
   const [heightDraft, setHeightDraft] = useState('')
   const [speedDraft, setSpeedDraft] = useState('')
   const [baselineHeightCm, setBaselineHeightCm] = useState<number | null>(null)
   const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    setResolvedRemaining(remainingSessions)
+  }, [remainingSessions, memberId])
 
   useEffect(() => {
     let cancelled = false
@@ -95,6 +102,9 @@ export const LessonCompletionMemberInsight = forwardRef<
       if (cancelled) return
       setRecords(data.records)
       setBaselineHeightCm(data.baselineHeightCm)
+      if (data.remainingSessions != null && Number.isFinite(data.remainingSessions)) {
+        setResolvedRemaining(data.remainingSessions)
+      }
       setWeightDraft(
         data.todayWeightKg != null ? formatBodyMetric(data.todayWeightKg) : '',
       )
@@ -263,7 +273,7 @@ export const LessonCompletionMemberInsight = forwardRef<
       <div className="rounded-lg border border-primary/25 bg-primary/10 px-3 py-2.5">
         <p className="text-[11px] font-medium text-primary">남은 횟차</p>
         <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
-          {formatRemainingPreview(remainingSessions)}
+          {formatRemainingPreview(resolvedRemaining)}
         </p>
       </div>
 
@@ -447,7 +457,7 @@ function MiniMetric({
           unit={unit}
           formatValue={formatValue}
           showPreviousDelta
-          className="mt-1 h-[110px] w-full"
+          className="mt-1 h-[min(22dvh,160px)] w-full sm:h-[140px]"
         />
       ) : (
         <p className="mt-2 py-3 text-center text-[10px] text-muted-foreground">

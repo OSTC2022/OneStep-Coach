@@ -120,10 +120,10 @@ export function SignaturePadDialog({
     if (!canvas || !container) return
 
     const width = container.clientWidth
-    // 서명 패드: 너무 작지도·크지도 않게 중간 크기
+    // 하단 고정 서명란 — 그래프 영역을 침범하지 않는 높이
     const height = touchFriendly
-      ? Math.max(140, Math.min(180, Math.round(width * 0.32)))
-      : Math.max(180, Math.min(240, Math.round(width * 0.32)))
+      ? Math.max(120, Math.min(150, Math.round(width * 0.26)))
+      : Math.max(160, Math.min(210, Math.round(width * 0.28)))
     const dpr = window.devicePixelRatio || 1
 
     canvas.width = Math.floor(width * dpr)
@@ -376,8 +376,9 @@ export function SignaturePadDialog({
                   '!inset-0 !top-0 !left-0 !right-0 !bottom-0 !z-50',
                   '!flex !h-[100dvh] !max-h-[100dvh] !w-screen !max-w-none',
                   '!translate-x-0 !translate-y-0 !gap-3 !rounded-none !border-0',
-                  '!bg-transparent !p-3 !pt-[max(0.75rem,env(safe-area-inset-top))]',
-                  '!pb-[max(0.75rem,env(safe-area-inset-bottom))] !shadow-none',
+                  '!bg-transparent !p-2 !pt-[max(0.5rem,env(safe-area-inset-top))]',
+                  '!pb-[max(0.5rem,env(safe-area-inset-bottom))] !shadow-none',
+                  'sm:!p-3 sm:!pt-[max(0.75rem,env(safe-area-inset-top))]',
                 )
               : cn(
                   'max-w-3xl gap-0 overflow-hidden border-primary/20 p-0',
@@ -394,17 +395,19 @@ export function SignaturePadDialog({
           {splitLayout ? (
             <div
               className={cn(
-                'mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-3',
-                // PC: 좌(정보) · 우(서명)
-                'lg:flex-row lg:items-stretch lg:gap-4',
+                'mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col gap-2',
+                // 모바일·태블릿: 위(그래프) / 아래(서명 하단 고정)
+                // PC: 좌·우
+                'lg:max-w-7xl lg:flex-row lg:items-stretch lg:gap-4',
               )}
             >
               {!successSummary && companion ? (
                 <div
                   className={cn(
                     'flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-primary/35 bg-background shadow-2xl',
-                    'max-h-[min(38dvh,360px)] shrink-0',
-                    'lg:max-h-none lg:min-h-0 lg:w-auto lg:min-w-[32rem] lg:max-w-[44rem] lg:flex-1 lg:shrink',
+                    // 서명란을 제외한 나머지(절반 이상)를 그래프로 사용
+                    'min-h-0 flex-1 basis-0',
+                    'lg:min-h-0 lg:min-w-0 lg:flex-[1.35]',
                   )}
                 >
                   <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
@@ -415,19 +418,21 @@ export function SignaturePadDialog({
 
               <div
                 className={cn(
-                  'mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden',
+                  'flex w-full shrink-0 flex-col overflow-hidden',
                   'rounded-2xl border border-primary/20 bg-background shadow-2xl',
-                  'lg:mx-0 lg:max-w-md lg:flex-none lg:self-center',
+                  // 하단 고정 + 좌우 폭을 그래프와 맞춤
+                  'mt-auto max-h-[min(44dvh,460px)]',
+                  'lg:mt-0 lg:max-h-none lg:w-[min(100%,28rem)] lg:max-w-md lg:flex-none lg:self-stretch',
                 )}
               >
                 <DialogHeader
                   className={cn(
-                    'shrink-0 space-y-1 border-b border-primary/10 bg-primary/[0.03] text-left',
-                    'px-4 pt-3 pb-2 sm:px-6 sm:pt-4',
+                    'shrink-0 space-y-0.5 border-b border-primary/10 bg-primary/[0.03] text-left',
+                    'px-4 py-2 sm:px-5',
                   )}
                 >
-                  <DialogTitle>{title}</DialogTitle>
-                  <DialogDescription>
+                  <DialogTitle className="text-base leading-snug">{title}</DialogTitle>
+                  <DialogDescription className="text-xs leading-snug sm:text-sm">
                     {memberLabel ? (
                       <>
                         <span className="font-medium text-foreground">{memberLabel}</span>
@@ -438,7 +443,7 @@ export function SignaturePadDialog({
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-2 sm:px-6">
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-2 sm:px-5">
                   {signatureBody}
                 </div>
                 {footer}

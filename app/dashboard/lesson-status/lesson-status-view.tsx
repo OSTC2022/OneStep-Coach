@@ -97,6 +97,7 @@ import { formatSessionOverageAlert } from '@/lib/session-package-utils'
 import type { SignaturePadSuccessSummary } from '@/components/ui/signature-pad-dialog'
 import { cn } from '@/lib/utils'
 import { useSidebar } from '@/components/ui/sidebar'
+import { useTouchFriendlyLayout } from '@/hooks/use-touch-friendly-layout'
 import {
   AUTO_INSTRUCTOR_BORDER_COLOR,
   getInstructorCalendarColor,
@@ -1028,15 +1029,16 @@ function getMobileAthleteFlexClass(
 ) {
   if (expandedAthleteId == null) {
     return useScrollRow
-      ? 'min-w-[7.75rem] shrink-0 flex-[0_0_auto]'
-      : 'min-w-0 flex-1 basis-0'
+      ? // 태블릿·폰: 체중/키·BMI·시속 두 줄이 잘리지 않을 최소 폭
+        'min-w-[11rem] shrink-0 flex-[0_0_auto]'
+      : 'min-w-[10.5rem] flex-1 basis-0'
   }
   if (expandedAthleteId === lessonId) {
-    return 'z-[1] min-w-[9.75rem] flex-[2.7] basis-0 shadow-md ring-1 ring-primary/30'
+    return 'z-[1] min-w-[12.5rem] flex-[2.7] basis-0 shadow-md ring-1 ring-primary/30'
   }
   return useScrollRow
-    ? 'min-w-[5rem] shrink-0 flex-[0_0_auto] opacity-85'
-    : 'min-w-0 flex-[0.65] basis-0 opacity-85'
+    ? 'min-w-[6.5rem] shrink-0 flex-[0_0_auto] opacity-85'
+    : 'min-w-[5.5rem] flex-[0.65] basis-0 opacity-85'
 }
 
 const TimeSlotsPanel = memo(function TimeSlotsPanel({
@@ -1059,8 +1061,11 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
 }: TimeSlotsPanelProps) {
   const [expandedAthleteId, setExpandedAthleteId] = useState<string | null>(null)
   const { state: sidebarState, isMobile: isSidebarMobile } = useSidebar()
-  const maxPerRow =
-    !isSidebarMobile && sidebarState === 'expanded'
+  const touchFriendly = useTouchFriendlyLayout()
+  // 태블릿(≤1023)·사이드바 펼침: 한 줄 인원을 줄여 체중/키 영역 폭 확보
+  const maxPerRow = touchFriendly
+    ? 3
+    : !isSidebarMobile && sidebarState === 'expanded'
       ? LESSON_STATUS_MAX_PER_ROW_SIDEBAR_OPEN
       : LESSON_STATUS_MAX_PER_ROW
   const timeSlots = useMemo(
@@ -1106,7 +1111,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
       <div className="space-y-2 md:hidden">
         {timeSlots.map((slot) => {
           const slotLessons = allLessonsInSlot(slot)
-          const useScrollRow = slotLessons.length >= 4
+          // 3명 이상이면 가로 스크롤 — 카드가 줄어 체중/키가 잘리는 것 방지
+          const useScrollRow = slotLessons.length >= 3
 
           return (
             <div
@@ -1224,10 +1230,17 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
             </div>
 
             <div
-              className="grid min-w-0 flex-1 gap-1.5"
+              className={cn(
+                'grid min-w-0 flex-1 gap-1.5',
+                touchFriendly && 'overflow-x-auto overscroll-x-contain pb-0.5',
+              )}
               style={{
-                // 사이드바 열림: 6칸 / 닫힘: 8칸 — 카드 폭만 살짝 넓힘
-                gridTemplateColumns: `repeat(${maxPerRow}, minmax(0, 1fr))`,
+                gridTemplateColumns: touchFriendly
+                  ? `repeat(${Math.max(
+                      1,
+                      rowChunks.reduce((sum, chunk) => sum + chunk.lessons.length, 0),
+                    )}, minmax(11rem, 1fr))`
+                  : `repeat(${maxPerRow}, minmax(0, 1fr))`,
               }}
             >
               {rowChunks.map((chunk) => {
@@ -1240,7 +1253,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                     style={{
                       gridColumn: `span ${span}`,
                       borderColor: color,
-                      gridTemplateColumns: `repeat(${span}, minmax(0, 1fr))`,
+                      gridTemplateColumns: `repeat(${span}, minmax(${touchFriendly ? '11rem' : '0'}, 1fr))`,
                     }}
                   >
                     {chunk.lessons.map((lesson) => (

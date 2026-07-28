@@ -873,13 +873,19 @@ export async function getLessonCompletionMemberInsight(
   await requireRole(['admin', 'instructor'])
 
   const supabase = await createStaffDataClient()
-  const [{ records }, memberResult] = await Promise.all([
+  const [{ records }, memberResult, packagesResult] = await Promise.all([
     getMemberBodyRecords(memberId),
     supabase
       .from('members')
       .select('remaining_sessions, height_cm, weight_kg')
       .eq('id', memberId)
       .maybeSingle(),
+    supabase
+      .from('session_packages')
+      .select('remaining_sessions')
+      .eq('member_id', memberId)
+      .eq('is_active', true)
+      .is('deleted_at', null),
   ])
 
   const chartRecords = records
@@ -900,12 +906,39 @@ export async function getLessonCompletionMemberInsight(
   const today = chartRecords.find((row) => row.date === lessonDate) ?? null
   const latest = chartRecords[chartRecords.length - 1] ?? null
 
+  let remainingSessions: number | null = null
+
+  // 활성 수업권 합산을 우선 (members.remaining_sessions 미동기화 대비)
+  const resolvePackageSum = (
+    rows: Array<{ remaining_sessions: number | null }> | null | undefined,
+  ) => {
+    if (!rows || rows.length === 0) return null
+    return rows.reduce(
+      (sum, pkg) => sum + (Number(pkg.remaining_sessions) || 0),
+      0,
+    )
+  }
+
+  if (!packagesResult.error) {
+    remainingSessions = resolvePackageSum(packagesResult.data)
+  } else {
+    const retry = await supabase
+      .from('session_packages')
+      .select('remaining_sessions')
+      .eq('member_id', memberId)
+      .eq('is_active', true)
+    if (!retry.error) {
+      remainingSessions = resolvePackageSum(retry.data)
+    }
+  }
+
+  if (remainingSessions == null && memberResult.data?.remaining_sessions != null) {
+    remainingSessions = Number(memberResult.data.remaining_sessions)
+  }
+
   return {
     records: chartRecords,
-    remainingSessions:
-      memberResult.data?.remaining_sessions != null
-        ? Number(memberResult.data.remaining_sessions)
-        : null,
+    remainingSessions,
     todayWeightKg: today?.weightKg ?? null,
     todayHeightCm: today?.heightCm ?? latest?.heightCm ?? null,
     todayMaxSpeedKmh: today?.maxSpeedKmh ?? null,
