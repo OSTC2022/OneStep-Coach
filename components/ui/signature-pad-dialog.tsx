@@ -120,10 +120,10 @@ export function SignaturePadDialog({
     if (!canvas || !container) return
 
     const width = container.clientWidth
-    // 하단 고정 서명란 — 그래프 영역을 침범하지 않는 높이
+    // 가로는 중간, 세로는 서명하기 편하게
     const height = touchFriendly
-      ? Math.max(120, Math.min(150, Math.round(width * 0.26)))
-      : Math.max(160, Math.min(210, Math.round(width * 0.28)))
+      ? Math.max(170, Math.min(220, Math.round(width * 0.42)))
+      : Math.max(200, Math.min(260, Math.round(width * 0.4)))
     const dpr = window.devicePixelRatio || 1
 
     canvas.width = Math.floor(width * dpr)
@@ -418,11 +418,12 @@ export function SignaturePadDialog({
 
               <div
                 className={cn(
-                  'flex w-full shrink-0 flex-col overflow-hidden',
+                  'mx-auto flex w-full shrink-0 flex-col overflow-hidden',
                   'rounded-2xl border border-primary/20 bg-background shadow-2xl',
-                  // 하단 고정 + 좌우 폭을 그래프와 맞춤
-                  'mt-auto max-h-[min(44dvh,460px)]',
-                  'lg:mt-0 lg:max-h-none lg:w-[min(100%,28rem)] lg:max-w-md lg:flex-none lg:self-stretch',
+                  // 가로는 적당히, 세로는 서명 여유 있게
+                  'mt-auto max-w-md max-h-[min(52dvh,520px)]',
+                  'sm:max-w-lg',
+                  'lg:mx-0 lg:mt-0 lg:max-h-none lg:w-[min(100%,24rem)] lg:max-w-sm lg:flex-none lg:self-stretch',
                 )}
               >
                 <DialogHeader
