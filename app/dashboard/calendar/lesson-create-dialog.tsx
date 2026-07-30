@@ -240,15 +240,7 @@ export function LessonCreateDialog({
   const popupRef = useRef<HTMLDivElement>(null)
   const initKeyRef = useRef<string | null>(null)
   const originalLessonDateRef = useRef('')
-  const pendingEditUpdatesRef = useRef<{
-    instructor_id: string | undefined
-    lesson_date: string
-    start_time: string | undefined
-    end_time: string | undefined
-    lesson_type: string
-    member_id: string | null
-    title: string | null
-  } | null>(null)
+  const pendingEditUpdatesRef = useRef<Partial<LessonFormData> | null>(null)
   const [popupPosition, setPopupPosition] = useState<{ top: number; left: number; width: number }>({
     top: 80,
     left: 304,
@@ -763,6 +755,7 @@ export function LessonCreateDialog({
     identityPayload: {
       member_id: string | null
       title: string | null
+      session_package_id?: string
     },
     successLabel: string,
     options?: { forceNoRecurrence?: boolean },
@@ -974,15 +967,7 @@ export function LessonCreateDialog({
 
   async function executeEditSave(
     scope: LessonSeriesScope,
-    updates: {
-      instructor_id: string | undefined
-      lesson_date: string
-      start_time: string | undefined
-      end_time: string | undefined
-      lesson_type: string
-      member_id: string | null
-      title: string | null
-    },
+    updates: Partial<LessonFormData>,
   ) {
     if (!lesson) return
 
@@ -1006,10 +991,13 @@ export function LessonCreateDialog({
         return
       }
 
+      const saved = result.data ?? []
+      const savedIds = new Set(saved.map((item) => item.id))
+      saved.forEach((item) => onSaved(item))
       const deletedIds = new Set(result.deletedIds ?? [])
       deletedIds.add(lesson.id)
-      onDeleted?.([...deletedIds])
-      result.data?.forEach((item) => onSaved(item))
+      const removeIds = [...deletedIds].filter((id) => !savedIds.has(id))
+      if (removeIds.length) onDeleted?.(removeIds)
 
       setIsLoading(false)
       toast.success('반복이 해제되었습니다.')
@@ -1044,10 +1032,11 @@ export function LessonCreateDialog({
         return
       }
 
-      if (result.deletedIds?.length) {
-        onDeleted?.(result.deletedIds)
-      }
-      result.data?.forEach((item) => onSaved(item))
+      const saved = result.data ?? []
+      const savedIds = new Set(saved.map((item) => item.id))
+      saved.forEach((item) => onSaved(item))
+      const removeIds = (result.deletedIds ?? []).filter((id) => !savedIds.has(id))
+      if (removeIds.length) onDeleted?.(removeIds)
 
       setIsLoading(false)
       toast.success(
@@ -1086,10 +1075,6 @@ export function LessonCreateDialog({
       return
     }
 
-    if (result.deletedIds?.length) {
-      onDeleted?.(result.deletedIds)
-    }
-
     const saved = result.data ?? []
     if (saved.length === 0 && scope === 'single') {
       setIsLoading(false)
@@ -1099,7 +1084,10 @@ export function LessonCreateDialog({
       return
     }
 
+    const savedIds = new Set(saved.map((item) => item.id))
     saved.forEach((item) => onSaved(item))
+    const removeIds = (result.deletedIds ?? []).filter((id) => !savedIds.has(id))
+    if (removeIds.length) onDeleted?.(removeIds)
     showSaveWarning(result.warning)
 
     setIsLoading(false)
@@ -1204,15 +1192,13 @@ export function LessonCreateDialog({
       return
     }
 
-    const schedulePayload: Partial<LessonFormData> = {
+    const schedulePayload = {
       lesson_date: date,
       start_time: startTime || undefined,
       end_time: endTime || undefined,
       lesson_type: lessonType,
-    }
-    Object.assign(schedulePayload, {
       instructor_id: normalizePrimaryInstructorId(instructorId),
-    })
+    }
 
     const identityPayload = {
       member_id: submitMemberId,

@@ -44,6 +44,7 @@ interface MonthViewProps {
     options?: { altKey?: boolean },
   ) => void
   onLessonLineUpdate?: (lesson: Lesson, line: string) => Promise<void>
+  onPrepareLessonEdit?: (lesson: Lesson) => Promise<Lesson | null>
   isLessonSelected?: (lessonId: string) => boolean
   onClearLessonSelection?: () => void
 }
@@ -70,6 +71,7 @@ export function MonthView({
   onLessonEdit,
   onLessonActivate,
   onLessonLineUpdate,
+  onPrepareLessonEdit,
   isLessonSelected,
   onClearLessonSelection,
 }: MonthViewProps) {
@@ -229,9 +231,12 @@ export function MonthView({
       lessons={lessons}
       instructors={instructors}
       members={members}
-      onLessonActivate={onLessonActivate}
-      onLessonEdit={onLessonEdit}
+      onLessonActivate={(lesson, options) =>
+        onLessonActivate?.(lesson, undefined, options)
+      }
+      onLessonEdit={(lesson) => onLessonEdit?.(lesson)}
       onLessonLineUpdate={onLessonLineUpdate}
+      onPrepareLessonEdit={onPrepareLessonEdit}
       onMemoSubmit={onMemoSubmit}
       isLessonSelected={isLessonSelected}
     />

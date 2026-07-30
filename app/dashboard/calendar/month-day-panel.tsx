@@ -13,6 +13,8 @@ import {
 import { resolveLessonDisplayColor, resolveLessonInstructorName } from '@/lib/instructor-colors'
 import type { Instructor, Lesson } from '@/lib/types'
 import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
+import { isOptimisticLessonId } from '@/lib/calendar-optimistic-lesson'
 import {
   MonthMemoInput,
   type MemoQuickAddPayload,
@@ -29,6 +31,8 @@ interface MonthDayPanelProps {
     options?: { altKey?: boolean },
   ) => void
   onLessonLineUpdate?: (lesson: Lesson, line: string) => Promise<void>
+  /** 빠른 등록 직후 수정 시 서버 ID로 치환 */
+  onPrepareLessonEdit?: (lesson: Lesson) => Promise<Lesson | null>
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
   isLessonSelected?: (lessonId: string) => boolean
 }
@@ -41,6 +45,7 @@ export function MonthDayPanel({
   onLessonEdit,
   onLessonActivate,
   onLessonLineUpdate,
+  onPrepareLessonEdit,
   onMemoSubmit,
   isLessonSelected,
 }: MonthDayPanelProps) {
@@ -73,10 +78,19 @@ export function MonthDayPanel({
     }
   }, [inlineEditId])
 
-  function startInlineEdit(lesson: Lesson) {
+  async function startInlineEdit(lesson: Lesson) {
     skipClickRef.current = true
-    setInlineEditId(lesson.id)
-    setInlineEditText(getLessonCalendarDisplayLine(lesson))
+    let target = lesson
+    if (isOptimisticLessonId(lesson.id) && onPrepareLessonEdit) {
+      const persisted = await onPrepareLessonEdit(lesson)
+      if (!persisted) {
+        toast.error('일정 저장 중입니다. 잠시 후 다시 시도해주세요.')
+        return
+      }
+      target = persisted
+    }
+    setInlineEditId(target.id)
+    setInlineEditText(getLessonCalendarDisplayLine(target))
   }
 
   async function saveInlineEdit(lesson: Lesson) {
@@ -179,7 +193,7 @@ export function MonthDayPanel({
                           onDoubleClick={(e) => {
                             e.preventDefault()
                             if (!onLessonLineUpdate) return
-                            startInlineEdit(lesson)
+                            void startInlineEdit(lesson)
                           }}
                         >
                           <span

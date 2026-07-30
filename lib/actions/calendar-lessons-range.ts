@@ -111,7 +111,7 @@ function scheduleCalendarLessonMaintenance(options?: { forStatusPage?: boolean }
 export async function fetchExpandedCalendarLessons(
   dateFrom: string,
   dateTo: string,
-  limit = 300,
+  limit = 800,
   options?: { forStatusPage?: boolean },
 ): Promise<{ lessons: Lesson[]; supportsExpansion: boolean }> {
   scheduleCalendarLessonMaintenance(options)
@@ -120,37 +120,51 @@ export async function fetchExpandedCalendarLessons(
 
   let select = LESSON_CALENDAR_SELECT
 
-  let storedQuery = supabase
-    .from('lessons')
-    .select(select)
-    .gte('lesson_date', dateFrom)
-    .lte('lesson_date', dateTo)
-    .or('event_type.neq.recurring_master,event_type.is.null')
-    .order('lesson_date', { ascending: true })
-    .order('start_time', { ascending: true, nullsFirst: false })
-    .limit(limit)
-
-  let { data: stored, error: storedError } = await storedQuery
-
-  if (storedError && isMissingRecurrenceV2Column(storedError)) {
-    select = LESSON_CALENDAR_SELECT_LEGACY
-    const retry = await supabase
+  const buildStoredQuery = (selectClause: string) =>
+    supabase
       .from('lessons')
-      .select(select)
+      .select(selectClause)
       .gte('lesson_date', dateFrom)
       .lte('lesson_date', dateTo)
+      .or('event_type.neq.recurring_master,event_type.is.null')
       .order('lesson_date', { ascending: true })
       .order('start_time', { ascending: true, nullsFirst: false })
       .limit(limit)
-    stored = retry.data
-    storedError = retry.error
-    if (!storedError) {
+
+  const buildMastersQuery = (selectClause: string) =>
+    supabase
+      .from('lessons')
+      .select(selectClause)
+      .eq('event_type', 'recurring_master')
+      .lte('lesson_date', dateTo)
+      .limit(200)
+
+  const buildExceptionsQuery = (selectClause: string) =>
+    supabase
+      .from('lessons')
+      .select(selectClause)
+      .eq('event_type', 'exception')
+      .gte('lesson_date', dateFrom)
+      .lte('lesson_date', dateTo)
+      .limit(200)
+
+  // 순차 3회 → 병렬 1라운드로 응답 시간 단축
+  let [storedResult, mastersResult, exceptionsResult] = await Promise.all([
+    buildStoredQuery(select),
+    buildMastersQuery(select),
+    buildExceptionsQuery(select),
+  ])
+
+  if (storedResult.error && isMissingRecurrenceV2Column(storedResult.error)) {
+    select = LESSON_CALENDAR_SELECT_LEGACY
+    storedResult = await buildStoredQuery(select)
+    if (!storedResult.error) {
       const isVisible = options?.forStatusPage
         ? isLessonStatusPageVisible
         : isLessonCalendarVisible
       return {
         lessons: normalizeCalendarLessonsForDisplay(
-          ((stored ?? []) as Lesson[])
+          ((storedResult.data ?? []) as Lesson[])
             .filter((row) => isLessonIdentifiable(row) && isVisible(row))
             .map(normalizeCalendarLesson),
           options,
@@ -160,37 +174,34 @@ export async function fetchExpandedCalendarLessons(
     }
   }
 
-  if (storedError) {
-    console.error('fetchExpandedCalendarLessons stored:', storedError.message)
+  if (storedResult.error) {
+    console.error('fetchExpandedCalendarLessons stored:', storedResult.error.message)
     return { lessons: [], supportsExpansion: false }
   }
 
-  const mastersResult = await supabase
-    .from('lessons')
-    .select(select)
-    .eq('event_type', 'recurring_master')
-    .lte('lesson_date', dateTo)
-    .limit(200)
-
   if (mastersResult.error && isMissingRecurrenceV2Column(mastersResult.error)) {
     return {
-      lessons: ((stored ?? []) as Lesson[]).map(normalizeCalendarLesson),
+      lessons: ((storedResult.data ?? []) as Lesson[]).map(normalizeCalendarLesson),
       supportsExpansion: false,
     }
   }
 
-  const exceptionsResult = await supabase
-    .from('lessons')
-    .select(select)
-    .eq('event_type', 'exception')
-    .gte('lesson_date', dateFrom)
-    .lte('lesson_date', dateTo)
-    .limit(200)
+  if (mastersResult.error) {
+    console.error('fetchExpandedCalendarLessons masters:', mastersResult.error.message)
+  }
+  if (exceptionsResult.error) {
+    console.error(
+      'fetchExpandedCalendarLessons exceptions:',
+      exceptionsResult.error.message,
+    )
+  }
 
   const merged = mergeCalendarLessonsForRange(
-    (stored ?? []) as RecurrenceCapableLesson[],
-    (mastersResult.data ?? []) as RecurrenceCapableLesson[],
-    (exceptionsResult.data ?? []) as RecurrenceCapableLesson[],
+    (storedResult.data ?? []) as RecurrenceCapableLesson[],
+    (mastersResult.error ? [] : (mastersResult.data ?? [])) as RecurrenceCapableLesson[],
+    (exceptionsResult.error
+      ? []
+      : (exceptionsResult.data ?? [])) as RecurrenceCapableLesson[],
     dateFrom,
     dateTo,
     options,
@@ -201,7 +212,7 @@ export async function fetchExpandedCalendarLessons(
     dateFrom,
     dateTo,
     count: resultLessons.length,
-    sample: resultLessons.map((lesson) => ({
+    sample: resultLessons.slice(0, 8).map((lesson) => ({
       id: lesson.id,
       instructor_id: lesson.instructor_id,
       google_event_id: lesson.google_event_id,
@@ -210,6 +221,6 @@ export async function fetchExpandedCalendarLessons(
 
   return {
     lessons: resultLessons,
-    supportsExpansion: true,
+    supportsExpansion: !mastersResult.error,
   }
 }

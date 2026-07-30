@@ -118,6 +118,16 @@ function mapLessonError(message: string): string {
   ) {
     return '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.'
   }
+  if (
+    message.includes('schema cache') ||
+    message.includes('Could not find the') ||
+    message.toLowerCase().includes('column')
+  ) {
+    // PGRST204 등 — 원문 전체를 토스트에 그대로 노출하지 않음
+    if (message.includes('schema cache') || /PGRST204/i.test(message)) {
+      return '수업 저장 형식이 올바르지 않습니다. 새로고침 후 다시 시도해주세요.'
+    }
+  }
   if (message.includes('row-level security') || message.includes('permission denied')) {
     return (
       '수업 저장 권한이 없습니다. .env.local에 SUPABASE_SERVICE_ROLE_KEY가 있는지 확인하거나, ' +
@@ -806,8 +816,8 @@ export async function getLessonsForStatusView(options: {
   return attachAttendanceRecordsToLessons(withSessions, attendanceRecords)
 }
 
-const CALENDAR_MONTH_LESSON_LIMIT = 400
-const CALENDAR_RANGE_LESSON_LIMIT = 300
+const CALENDAR_MONTH_LESSON_LIMIT = 800
+const CALENDAR_RANGE_LESSON_LIMIT = 800
 
 export async function getLessonsForMonth(year: number, month: number): Promise<Lesson[]> {
   const dateFrom = `${year}-${String(month).padStart(2, '0')}-01`
@@ -1358,7 +1368,11 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     .eq('id', id)
     .maybeSingle()
 
-  const payload: Record<string, unknown> = { ...updates }
+  if (!existing) {
+    return { error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.' }
+  }
+
+  const payload = sanitizeLessonUpdatePayload(updates)
   let titleForFallback: string | null = null
 
   payload.app_modified_at = touchAppModifiedAt()
@@ -1420,8 +1434,13 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
       instructor_id: normalizedInstructor,
       sync_origin: 'app',
     })
+    payload.instructor_id = normalizedInstructor
     // 수업(캘린더/수업현황) 강사는 해당 일정에만 적용.
     // 회원 프로필의 담당 강사(primary_instructor_id)는 회원 관리에서만 변경.
+  }
+
+  if ('lesson_type' in updates) {
+    payload.lesson_type = toStoredLessonType(updates.lesson_type)
   }
 
   let warning: string | undefined
@@ -1430,7 +1449,11 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     .update(payload)
     .eq('id', id)
     .select(LESSON_MUTATION_SELECT_LEGACY)
-    .single()
+    .maybeSingle()
+
+  if (!error && !data) {
+    return { error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.' }
+  }
 
   if (error && isMissingTitleColumn(error) && titleForFallback) {
     const { title: _removed, ...fallbackPayload } = payload
@@ -1441,7 +1464,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
       .update(fallbackPayload)
       .eq('id', id)
       .select(LESSON_MUTATION_SELECT_LEGACY)
-      .single()
+      .maybeSingle()
 
     data = retry.data
     error = retry.error
@@ -1462,7 +1485,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
       .update(legacyPayload)
       .eq('id', id)
       .select(LESSON_MUTATION_SELECT_LEGACY)
-      .single()
+      .maybeSingle()
 
     data = retry.data
     error = retry.error
@@ -1479,6 +1502,10 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
         ? LESSON_TITLE_MIGRATION_HINT
         : mapLessonError(error.message),
     }
+  }
+
+  if (!data) {
+    return { error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.' }
   }
 
   const lesson = normalizeLessonRecord(data as Lesson)
@@ -1545,8 +1572,43 @@ export async function markAttendance(
   return { data: normalizeLessonRecord(data as Lesson) }
 }
 
+const LESSON_UPDATE_ALLOWED_KEYS = [
+  'member_id',
+  'title',
+  'instructor_id',
+  'session_package_id',
+  'lesson_date',
+  'start_time',
+  'end_time',
+  'lesson_type',
+  'content',
+  'special_note',
+  'attendance_status',
+  'recurrence_group_id',
+  'recurrence_pattern',
+  'event_type',
+  'recurrence',
+  'recurring_master_id',
+  'original_start_time',
+  'google_sync_status',
+] as const
+
+/** 클라이언트 전용·비컬럼 키를 제거하고 DB 컬럼만 남김 */
+function sanitizeLessonUpdatePayload(
+  updates: Partial<LessonFormData> | Record<string, unknown>,
+): Record<string, unknown> {
+  const source = updates as Record<string, unknown>
+  const payload: Record<string, unknown> = {}
+  for (const key of LESSON_UPDATE_ALLOWED_KEYS) {
+    if (key in source && source[key] !== undefined) {
+      payload[key] = source[key]
+    }
+  }
+  return payload
+}
+
 function buildLessonUpdatePayload(updates: Partial<LessonFormData>) {
-  const payload: Record<string, unknown> = { ...updates }
+  const payload = sanitizeLessonUpdatePayload(updates)
   payload.app_modified_at = touchAppModifiedAt()
   payload.sync_origin = 'app'
 
@@ -1848,7 +1910,7 @@ export async function updateLessonSeries(
       .update(payload)
       .eq('id', target.id)
       .select(LESSON_MUTATION_SELECT_LEGACY)
-      .single()
+      .maybeSingle()
 
     if (error) {
       if (isMissingRecurrenceColumn(error)) {
@@ -1860,11 +1922,15 @@ export async function updateLessonSeries(
       }
     }
 
-    if (data) {
-      const normalized = normalizeLessonRecord(data as Lesson)
-      updatedLessons.push(normalized)
-      await syncTrialPayForLesson(supabase, normalized, user.id)
+    if (!data) {
+      return {
+        error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.',
+      }
     }
+
+    const normalized = normalizeLessonRecord(data as Lesson)
+    updatedLessons.push(normalized)
+    await syncTrialPayForLesson(supabase, normalized, user.id)
   }
 
   revalidateLessonDashboardPaths()

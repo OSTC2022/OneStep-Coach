@@ -42,6 +42,7 @@ interface DayWeekViewProps {
     options?: { altKey?: boolean },
   ) => void
   onLessonLineUpdate?: (lesson: Lesson, line: string) => Promise<void>
+  onPrepareLessonEdit?: (lesson: Lesson) => Promise<Lesson | null>
   onMemoSubmit: (payload: MemoQuickAddPayload) => Promise<{ error?: string } | void>
   compactHeader?: boolean
   highlightedLessonIds?: string[]
@@ -90,6 +91,7 @@ export function DayWeekView({
   onLessonEdit,
   onLessonActivate,
   onLessonLineUpdate,
+  onPrepareLessonEdit,
   onMemoSubmit,
   compactHeader = false,
   highlightedLessonIds,
@@ -204,9 +206,12 @@ export function DayWeekView({
               lessons={lessons}
               instructors={instructors}
               members={members}
-              onLessonActivate={onLessonActivate}
-              onLessonEdit={onLessonEdit}
+              onLessonActivate={(lesson, options) =>
+                onLessonActivate?.(lesson, undefined, options)
+              }
+              onLessonEdit={(lesson) => onLessonEdit?.(lesson)}
               onLessonLineUpdate={onLessonLineUpdate}
+              onPrepareLessonEdit={onPrepareLessonEdit}
               onMemoSubmit={onMemoSubmit}
               isLessonSelected={isLessonSelected}
             />
@@ -257,9 +262,12 @@ export function DayWeekView({
               lessons={lessons}
               instructors={instructors}
               members={members}
-              onLessonActivate={onLessonActivate}
-              onLessonEdit={onLessonEdit}
+              onLessonActivate={(lesson, options) =>
+                onLessonActivate?.(lesson, undefined, options)
+              }
+              onLessonEdit={(lesson) => onLessonEdit?.(lesson)}
               onLessonLineUpdate={onLessonLineUpdate}
+              onPrepareLessonEdit={onPrepareLessonEdit}
               onMemoSubmit={onMemoSubmit}
               isLessonSelected={isLessonSelected}
             />

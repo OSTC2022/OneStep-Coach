@@ -6,6 +6,7 @@ import {
 } from '@/lib/calendar-utils'
 import {
   logCalendarFetch,
+  resolveCalendarFetchTimeoutMs,
   withCalendarFetchTimeout,
 } from '@/lib/calendar-client-fetch'
 import type { Lesson } from '@/lib/types'
@@ -113,8 +114,8 @@ export async function fetchCalendarLessons(
   )
   const mode = options.mode ?? 'initial'
 
+  // force여도 캐시는 성공 전까지 유지 (stale-while-revalidate) — 타임아웃 시 빈 화면/에러 배너 완화
   if (options.force) {
-    memoryCache.delete(cacheKey)
     const inflight = inFlightRequests.get(cacheKey)
     if (inflight) {
       abortByKey.get(cacheKey)?.abort()
@@ -140,6 +141,7 @@ export async function fetchCalendarLessons(
   const generation = ++fetchGeneration
   const abortController = new AbortController()
   abortByKey.set(cacheKey, abortController)
+  const timeoutMs = resolveCalendarFetchTimeoutMs(mode)
 
   logCalendarFetch('start', {
     rangeStart: dateFrom,
@@ -147,10 +149,12 @@ export async function fetchCalendarLessons(
     coachId,
     view: options.view,
     mode,
+    timeoutMs,
   })
 
   const promise = withCalendarFetchTimeout(
     fetchLessonsForView(options.date, options.view),
+    timeoutMs,
   )
     .then((data) => {
       if (abortController.signal.aborted) {
