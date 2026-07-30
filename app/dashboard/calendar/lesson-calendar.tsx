@@ -1524,7 +1524,7 @@ export function LessonCalendar({
       ref={calendarRootRef}
       data-calendar-scope
       tabIndex={-1}
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-2 pt-2 outline-none"
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-1 pt-1 outline-none md:gap-2 md:pt-2"
       onPointerDown={(e) => {
         if (isEditableTarget(e.target)) return
         calendarRootRef.current?.focus({ preventScroll: true })
@@ -1551,15 +1551,15 @@ export function LessonCalendar({
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-7 w-7 md:h-8 md:w-8"
                 onClick={() => handleNavigate(-1)}
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-3.5 w-3.5 md:h-4 md:w-4" />
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 px-2.5"
+                className="h-7 px-2 text-xs md:h-8 md:px-2.5"
                 onClick={goToToday}
                 title="오늘 (Ctrl+Space, Ctrl+Shift+Space)"
               >
@@ -1568,28 +1568,28 @@ export function LessonCalendar({
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-7 w-7 md:h-8 md:w-8"
                 onClick={() => handleNavigate(1)}
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-3.5 w-3.5 md:h-4 md:w-4" />
               </Button>
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-7 w-7 md:h-8 md:w-8"
                 onClick={handleRefresh}
                 disabled={loadState.refreshing}
                 title="일정 새로고침"
                 aria-label="일정 새로고침"
               >
                 <RefreshCw
-                  className={`h-4 w-4 ${loadState.refreshing ? 'animate-spin' : ''}`}
+                  className={`h-3.5 w-3.5 md:h-4 md:w-4 ${loadState.refreshing ? 'animate-spin' : ''}`}
                 />
               </Button>
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-7 w-7 md:h-8 md:w-8"
                 disabled={!lessonHistory.canUndo}
                 onClick={() => void lessonHistory.undo()}
                 title={
@@ -1603,12 +1603,12 @@ export function LessonCalendar({
                     : '실행 취소'
                 }
               >
-                <Undo2 className="h-4 w-4" />
+                <Undo2 className="h-3.5 w-3.5 md:h-4 md:w-4" />
               </Button>
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-7 w-7 md:h-8 md:w-8"
                 disabled={!lessonHistory.canRedo}
                 onClick={() => void lessonHistory.redo()}
                 title={
@@ -1622,29 +1622,29 @@ export function LessonCalendar({
                     : '다시 실행'
                 }
               >
-                <Redo2 className="h-4 w-4" />
+                <Redo2 className="h-3.5 w-3.5 md:h-4 md:w-4" />
               </Button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+          <div className="flex flex-wrap items-center gap-1 sm:justify-end md:gap-1.5">
           <LessonStatusMemoBoard
             initialNotes={initialMemoNotes}
             migrationWarning={memoMigrationWarning}
-            triggerClassName="h-8 text-xs"
+            triggerClassName="h-7 text-[11px] md:h-8 md:text-xs"
           />
           <RunningScheduleToolbarButton
             initialBundle={initialRunningSchedule}
-            triggerClassName="h-8 text-xs"
+            triggerClassName="h-7 text-[11px] md:h-8 md:text-xs"
           />
           <Link href="/dashboard/lesson-status">
-            <Button type="button" variant="outline" size="sm" className="h-8 text-xs">
-              <ListChecks className="mr-1 h-3.5 w-3.5" />
+            <Button type="button" variant="outline" size="sm" className="h-7 text-[11px] md:h-8 md:text-xs">
+              <ListChecks className="mr-1 h-3 w-3 md:h-3.5 md:w-3.5" />
               수업현황
             </Button>
           </Link>
           <Select value={instructorFilter} onValueChange={setInstructorFilter}>
-            <SelectTrigger className="w-[130px]">
+            <SelectTrigger className="h-7 w-[108px] text-[11px] md:h-9 md:w-[130px] md:text-sm">
               {instructorFilter !== 'all' ? (
                 (() => {
                   const selected = instructors.find((i) => i.id === instructorFilter)
@@ -1672,14 +1672,17 @@ export function LessonCalendar({
             value={view}
             onValueChange={(v) => handleViewChange(v as CalendarView)}
           >
-            <TabsList title="Ctrl+1 일 · Ctrl+2 주 · Ctrl+3 월 · Ctrl+Space(또는 Ctrl+Shift+Space) 오늘">
-              <TabsTrigger value="day" title="Ctrl+1">
+            <TabsList
+              className="h-7 p-0.5 md:h-9 md:p-1"
+              title="Ctrl+1 일 · Ctrl+2 주 · Ctrl+3 월 · Ctrl+Space(또는 Ctrl+Shift+Space) 오늘"
+            >
+              <TabsTrigger value="day" title="Ctrl+1" className="h-6 px-2 text-[11px] md:h-7 md:px-3 md:text-sm">
                 일
               </TabsTrigger>
-              <TabsTrigger value="week" title="Ctrl+2">
+              <TabsTrigger value="week" title="Ctrl+2" className="h-6 px-2 text-[11px] md:h-7 md:px-3 md:text-sm">
                 주
               </TabsTrigger>
-              <TabsTrigger value="month" title="Ctrl+3">
+              <TabsTrigger value="month" title="Ctrl+3" className="h-6 px-2 text-[11px] md:h-7 md:px-3 md:text-sm">
                 월
               </TabsTrigger>
             </TabsList>

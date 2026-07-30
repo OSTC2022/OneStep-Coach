@@ -112,20 +112,24 @@ export function MonthDayPanel({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-card">
-      <div className="shrink-0 border-b border-border px-4 py-2">
-        <p className="truncate text-sm font-semibold leading-tight">
+      <div className="shrink-0 border-b border-border px-2.5 py-1 md:px-4 md:py-2">
+        <p className="truncate text-xs font-semibold leading-tight md:text-sm">
           <span>{dateLabel}</span>
           <span className="font-normal text-muted-foreground">
             {' · '}
-            {dayLessons.length > 0 ? `${dayLessons.length}개 일정` : '일정 없음'}
-            {onLessonLineUpdate && dayLessons.length > 0 && ' · 더블클릭으로 이름·시간 수정'}
+            {dayLessons.length > 0 ? `${dayLessons.length}개` : '일정 없음'}
+            {onLessonLineUpdate && dayLessons.length > 0 && (
+              <span className="hidden md:inline">
+                {' · '}더블클릭으로 이름·시간 수정
+              </span>
+            )}
           </span>
         </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {dayLessons.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+          <p className="px-2.5 py-4 text-center text-xs text-muted-foreground md:px-4 md:py-8 md:text-sm">
             이 날짜에 등록된 수업이 없습니다.
           </p>
         ) : (
@@ -141,13 +145,13 @@ export function MonthDayPanel({
                 <li key={lesson.id}>
                   <div
                     className={cn(
-                      'flex w-full items-stretch gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40',
+                      'flex w-full items-center gap-1.5 px-2.5 py-1 text-left transition-colors hover:bg-muted/40 md:items-stretch md:gap-3 md:px-4 md:py-3',
                       lesson.attendance_status === 'cancelled' && 'opacity-60',
                       isMultiSelected && 'bg-primary/15 ring-2 ring-inset ring-primary/50',
                     )}
                   >
                     <span
-                      className="mt-0.5 w-1 shrink-0 rounded-full"
+                      className="h-3.5 w-0.5 shrink-0 self-center rounded-full md:mt-0.5 md:h-auto md:w-1 md:self-stretch"
                       style={{ backgroundColor: color }}
                     />
                     <div className="min-w-0 flex-1">
@@ -168,12 +172,12 @@ export function MonthDayPanel({
                           }}
                           onBlur={() => void saveInlineEdit(lesson)}
                           placeholder="16:00 이름(39축구)"
-                          className="h-8 text-sm"
+                          className="h-7 text-xs md:h-8 md:text-sm"
                         />
                       ) : (
                         <button
                           type="button"
-                          className="block w-full truncate text-left text-sm font-medium"
+                          className="block w-full truncate text-left text-xs font-medium leading-snug md:text-sm"
                           onClick={(e) => {
                             if (e.altKey) {
                               e.preventDefault()
@@ -203,10 +207,16 @@ export function MonthDayPanel({
                           >
                             {displayLine}
                           </span>
+                          {instructorName !== '—' && (
+                            <span className="font-normal text-muted-foreground md:hidden">
+                              {' · '}
+                              {instructorName}
+                            </span>
+                          )}
                         </button>
                       )}
                       {instructorName !== '—' && !isEditing && (
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                        <span className="mt-0.5 hidden text-xs text-muted-foreground md:block">
                           {instructorName}
                         </span>
                       )}

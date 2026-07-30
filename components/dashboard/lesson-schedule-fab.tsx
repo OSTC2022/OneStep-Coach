@@ -146,18 +146,18 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
           disabled={isDeleting}
           onClick={() => runDeleteSelected()}
           className={cn(
-            'fixed z-[60] flex h-14 w-14 touch-manipulation select-none items-center justify-center rounded-full',
+            'fixed z-[60] flex h-11 w-11 touch-manipulation select-none items-center justify-center rounded-full md:h-14 md:w-14',
             'bg-destructive text-destructive-foreground shadow-lg',
             'active:scale-95 active:opacity-90 md:transition-transform md:hover:scale-105',
-            'bottom-6 right-24 md:bottom-8 md:right-28',
+            'bottom-4 right-16 md:bottom-8 md:right-28',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
             isDeleting && 'pointer-events-none opacity-70',
           )}
         >
           {isDeleting ? (
-            <Loader2 className="h-6 w-6 animate-spin" />
+            <Loader2 className="h-5 w-5 animate-spin md:h-6 md:w-6" />
           ) : (
-            <Trash2 className="h-6 w-6" strokeWidth={2.25} />
+            <Trash2 className="h-5 w-5 md:h-6 md:w-6" strokeWidth={2.25} />
           )}
         </button>
       )}
@@ -169,17 +169,17 @@ export function LessonScheduleFab({ role }: LessonScheduleFabProps) {
           onClick={() => void handleOpen()}
           disabled={isLoadingData}
           className={cn(
-            'fixed z-[60] flex h-14 w-14 touch-manipulation select-none items-center justify-center rounded-full',
+            'fixed z-[60] flex h-11 w-11 touch-manipulation select-none items-center justify-center rounded-full md:h-14 md:w-14',
             'bg-primary text-primary-foreground shadow-lg',
             'active:scale-95 active:opacity-90 md:transition-transform md:hover:scale-105',
-            'bottom-6 right-6 md:bottom-8 md:right-8',
+            'bottom-4 right-4 md:bottom-8 md:right-8',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           )}
         >
           {isLoadingData ? (
-            <Loader2 className="h-7 w-7 animate-spin" />
+            <Loader2 className="h-5 w-5 animate-spin md:h-7 md:w-7" />
           ) : (
-            <Plus className="h-7 w-7" strokeWidth={2.5} />
+            <Plus className="h-5 w-5 md:h-7 md:w-7" strokeWidth={2.5} />
           )}
         </button>
       )}

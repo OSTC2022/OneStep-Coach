@@ -371,31 +371,31 @@ export function LessonStatusWeightInput({
         {saving ? (
           <Loader2 className="h-3 w-3 animate-spin" />
         ) : hasSaved ? (
-          <span className="grid w-full min-w-0 grid-cols-2 gap-x-1.5 gap-y-0.5 leading-tight">
-            <span className="min-w-0">
+          <span className="grid w-full min-w-0 grid-cols-2 gap-x-1 gap-y-0.5 leading-tight">
+            <span className="min-w-0 overflow-hidden">
               <WeightWithDeltaText
                 weightKg={savedWeight}
                 deltaKg={weightDeltaKg}
-                className="text-[10px] font-semibold leading-tight"
+                className="max-w-full text-[10px] font-semibold leading-tight"
                 weightClassName="text-primary"
               />
             </span>
-            <span className="min-w-0 text-right text-[9px] leading-tight text-muted-foreground tabular-nums">
+            <span className="min-w-0 truncate text-right text-[9px] leading-tight text-muted-foreground tabular-nums">
               {displayBmi != null ? `BMI ${displayBmi}` : 'BMI -'}
             </span>
-            <span className="min-w-0">
+            <span className="min-w-0 overflow-hidden">
               {displayHeight != null ? (
                 <HeightWithDeltaText
                   heightCm={displayHeight}
                   deltaCm={heightDeltaCm}
-                  className="text-[10px] font-semibold leading-tight"
+                  className="max-w-full text-[10px] font-semibold leading-tight"
                   heightClassName="text-foreground"
                 />
               ) : (
                 <span className="text-[10px] text-muted-foreground">키 -</span>
               )}
             </span>
-            <span className="min-w-0 text-right text-[9px] leading-tight text-muted-foreground tabular-nums">
+            <span className="min-w-0 truncate text-right text-[9px] leading-tight text-muted-foreground tabular-nums">
               {savedMaxSpeed != null ? `시속 ${savedMaxSpeed}` : '시속 -'}
             </span>
           </span>

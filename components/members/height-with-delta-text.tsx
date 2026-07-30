@@ -27,13 +27,13 @@ export function HeightWithDeltaText({
     : formatHeightDeltaShort(deltaCm ?? null)
 
   return (
-    <span className={cn('tabular-nums', className)}>
-      <span className={heightClassName}>
+    <span className={cn('inline-flex max-w-full min-w-0 items-baseline tabular-nums', className)}>
+      <span className={cn('min-w-0 truncate', heightClassName)}>
         {heightLabel}
         {showCmSuffix ? 'cm' : ''}
       </span>
       {deltaLabel ? (
-        <span className={cn('ml-1', heightDeltaTextClass(deltaCm ?? null))}>
+        <span className={cn('ml-0.5 shrink-0', heightDeltaTextClass(deltaCm ?? null))}>
           {deltaLabel}
         </span>
       ) : null}

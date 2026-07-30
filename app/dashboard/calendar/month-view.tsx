@@ -26,6 +26,7 @@ import { MonthDayPanel } from './month-day-panel'
 import { CalendarPanelResizeHandle } from './calendar-panel-resize-handle'
 import { Button } from '@/components/ui/button'
 import { useCalendarPanelSplit } from '@/lib/calendar-panel-split'
+import { useIsMobileViewport } from '@/hooks/use-min-md'
 
 import type { MemoQuickAddPayload } from './month-memo-input'
 
@@ -57,7 +58,9 @@ const WEEKDAY_HEADER_PX = 28
 /** 날짜 숫자(24px) + 여백 — 마지막 주(다음달 1·2일)가 잘리지 않도록 */
 const MIN_WEEK_ROW_PX = 34
 const MIN_BOTTOM_PX = 160
+const MIN_BOTTOM_PX_MOBILE = 120
 const DEFAULT_BOTTOM_PX = 420
+const DEFAULT_BOTTOM_PX_MOBILE = 280
 const RESIZE_HANDLE_PX = 20
 
 export function MonthView({
@@ -75,6 +78,7 @@ export function MonthView({
   isLessonSelected,
   onClearLessonSelection,
 }: MonthViewProps) {
+  const isMobile = useIsMobileViewport()
   const [gridExpanded, setGridExpanded] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
   const gridDates = getMonthGridDates(currentDate)
@@ -106,9 +110,9 @@ export function MonthView({
   const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
     containerRef,
     {
-      storageKey: 'month-v2',
-      defaultBottomPx: DEFAULT_BOTTOM_PX,
-      minBottomPx: MIN_BOTTOM_PX,
+      storageKey: isMobile ? 'month-v2-mobile' : 'month-v2',
+      defaultBottomPx: isMobile ? DEFAULT_BOTTOM_PX_MOBILE : DEFAULT_BOTTOM_PX,
+      minBottomPx: isMobile ? MIN_BOTTOM_PX_MOBILE : MIN_BOTTOM_PX,
       minTopPx,
     },
   )

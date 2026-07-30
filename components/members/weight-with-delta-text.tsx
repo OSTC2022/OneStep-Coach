@@ -27,13 +27,13 @@ export function WeightWithDeltaText({
     : formatWeightDeltaShort(deltaKg ?? null)
 
   return (
-    <span className={cn('tabular-nums', className)}>
-      <span className={weightClassName}>
+    <span className={cn('inline-flex max-w-full min-w-0 items-baseline tabular-nums', className)}>
+      <span className={cn('min-w-0 truncate', weightClassName)}>
         {weightLabel}
         {showKgSuffix ? 'kg' : ''}
       </span>
       {deltaLabel ? (
-        <span className={cn('ml-1', weightDeltaTextClass(deltaKg ?? null))}>
+        <span className={cn('ml-0.5 shrink-0', weightDeltaTextClass(deltaKg ?? null))}>
           {deltaLabel}
         </span>
       ) : null}

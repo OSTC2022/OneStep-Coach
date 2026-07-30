@@ -1062,9 +1062,9 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   const [expandedAthleteId, setExpandedAthleteId] = useState<string | null>(null)
   const { state: sidebarState, isMobile: isSidebarMobile } = useSidebar()
   const touchFriendly = useTouchFriendlyLayout()
-  // 태블릿(≤1023)·사이드바 펼침: 한 줄 인원을 줄여 체중/키 영역 폭 확보
+  // 태블릿(≤1023): 한 줄 최대 인원을 줄여 카드·체중칸 폭 확보 (PC와 동일하게 빈 칸은 비워 둠)
   const maxPerRow = touchFriendly
-    ? 3
+    ? 4
     : !isSidebarMobile && sidebarState === 'expanded'
       ? LESSON_STATUS_MAX_PER_ROW_SIDEBAR_OPEN
       : LESSON_STATUS_MAX_PER_ROW
@@ -1230,17 +1230,10 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
             </div>
 
             <div
-              className={cn(
-                'grid min-w-0 flex-1 gap-1.5',
-                touchFriendly && 'overflow-x-auto overscroll-x-contain pb-0.5',
-              )}
+              className="grid min-w-0 flex-1 gap-1.5"
               style={{
-                gridTemplateColumns: touchFriendly
-                  ? `repeat(${Math.max(
-                      1,
-                      rowChunks.reduce((sum, chunk) => sum + chunk.lessons.length, 0),
-                    )}, minmax(11rem, 1fr))`
-                  : `repeat(${maxPerRow}, minmax(0, 1fr))`,
+                // 태블릿도 PC와 같이 고정 칸 — 인원 수만큼 1fr로 늘려 가로 꽉 채우지 않음
+                gridTemplateColumns: `repeat(${maxPerRow}, minmax(0, 1fr))`,
               }}
             >
               {rowChunks.map((chunk) => {
@@ -1253,7 +1246,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                     style={{
                       gridColumn: `span ${span}`,
                       borderColor: color,
-                      gridTemplateColumns: `repeat(${span}, minmax(${touchFriendly ? '11rem' : '0'}, 1fr))`,
+                      gridTemplateColumns: `repeat(${span}, minmax(0, 1fr))`,
                     }}
                   >
                     {chunk.lessons.map((lesson) => (
