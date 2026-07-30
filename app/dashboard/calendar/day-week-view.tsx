@@ -54,9 +54,9 @@ interface DayWeekViewProps {
 }
 
 const MIN_BOTTOM_PX = 160
-const MIN_BOTTOM_PX_MOBILE = 120
+const MIN_BOTTOM_PX_MOBILE = 160
 const DEFAULT_BOTTOM_PX = 420
-const DEFAULT_BOTTOM_PX_MOBILE = 280
+const DEFAULT_BOTTOM_PX_MOBILE = 420
 const RESIZE_HANDLE_PX = 20
 const COLLAPSE_BAR_PX = 36
 const MOBILE_WEEK_STRIP_PX = 44
@@ -117,7 +117,7 @@ export function DayWeekView({
   const { bottomPx, isDragging, handleProps } = useCalendarPanelSplit(
     containerRef,
     {
-      storageKey: isMobile ? `${splitKey}-mobile` : splitKey,
+      storageKey: splitKey,
       defaultBottomPx: isMobile ? DEFAULT_BOTTOM_PX_MOBILE : DEFAULT_BOTTOM_PX,
       minBottomPx: isMobile ? MIN_BOTTOM_PX_MOBILE : MIN_BOTTOM_PX,
       minTopPx,

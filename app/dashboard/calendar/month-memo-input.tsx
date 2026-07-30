@@ -379,7 +379,7 @@ export function MonthMemoInput({
                   <button
                     type="button"
                     className={cn(
-                      'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors md:px-3 md:py-2.5 md:text-sm',
+                      'flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors',
                       'hover:bg-muted/70 active:bg-muted',
                       isActive && 'bg-muted text-foreground',
                     )}
@@ -414,7 +414,7 @@ export function MonthMemoInput({
   return (
     <div
       ref={containerRef}
-      className="relative shrink-0 border-t border-border px-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5 pr-16 md:px-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pt-3 md:pr-24"
+      className="relative shrink-0 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 pr-20 md:pr-24"
     >
       <div className="relative">
         <Input
@@ -429,7 +429,7 @@ export function MonthMemoInput({
           }}
           onKeyDown={handleKeyDown}
           placeholder={`${dateHint} 메모 · 시간 이름`}
-          className="h-9 border-dashed bg-muted/30 pr-10 text-xs md:h-11 md:text-sm"
+          className="h-11 border-dashed bg-muted/30 pr-10 text-sm"
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
@@ -438,7 +438,7 @@ export function MonthMemoInput({
       </div>
 
       {timeHint && (
-        <p className="mt-1 text-[10px] text-muted-foreground md:mt-1.5 md:text-xs">
+        <p className="mt-1.5 text-xs text-muted-foreground">
           시간: {timeHint}
           {selectedMember
             ? ` · ${formatMemberCalendarLabel(selectedMember)}`
@@ -451,7 +451,7 @@ export function MonthMemoInput({
       {suggestionList}
 
       {!showSuggestions && parsed.memberQuery && !isSearching && (
-        <p className="mt-1 hidden text-[11px] text-muted-foreground md:mt-1.5 md:block">
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
           Enter로
           {parsed.startTime
             ? ` ${parsed.memberQuery} ${parsed.startTime} 일정 추가`
