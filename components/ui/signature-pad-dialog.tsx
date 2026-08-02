@@ -9,7 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import { CheckCircle2, History, Lock, RotateCcw, Clock, Unlock } from 'lucide-react'
+import { CheckCircle2, GripVertical, History, Lock, RotateCcw, Clock, Unlock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TimeInput24 } from '@/components/ui/time-input-24'
@@ -24,11 +24,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  applyShellResize,
-  prefsToShellSize,
+  applyPanelResize,
+  clampPanelPosition,
+  getViewportShellBounds,
+  PANEL_MIN_SIZES,
+  prefsToPanelPixels,
   readSignatureCompletionShellPrefs,
-  shellSizeToPrefs,
+  resetSignatureCompletionShellLayout,
   writeSignatureCompletionShellPrefs,
+  type FloatingPanelRect,
+  type PanelPixelRect,
   type ShellResizeEdge,
   type SignatureCompletionShellPrefs,
 } from '@/lib/signature-completion-shell-prefs'
@@ -73,7 +78,7 @@ interface SignaturePadDialogProps {
   onBeforeConfirm?: () => Promise<boolean>
   /**
    * 상단 동반 패널(회원 신체정보 등).
-   * 있으면 전체 화면을 위(정보)·아래(서명)로 나눠 겹치지 않게 배치합니다.
+   * 있으면 남은횟차·서명 창을 각각 드래그해 배치합니다.
    */
   companion?: ReactNode
   onConfirm: (
@@ -114,6 +119,18 @@ const RESIZE_EDGES: Array<{
   { edge: 'sw', className: 'left-0 bottom-0 h-4 w-4', cursor: 'nesw-resize' },
 ]
 
+type PanelKey = 'insight' | 'signature'
+
+function loadPanelPixels(prefs: SignatureCompletionShellPrefs): {
+  insight: PanelPixelRect
+  signature: PanelPixelRect
+} {
+  return {
+    insight: prefsToPanelPixels(prefs.insight, PANEL_MIN_SIZES.insight),
+    signature: prefsToPanelPixels(prefs.signature, PANEL_MIN_SIZES.signature),
+  }
+}
+
 export function SignaturePadDialog({
   open,
   onOpenChange,
@@ -145,20 +162,47 @@ export function SignaturePadDialog({
   const [shellPrefs, setShellPrefs] = useState<SignatureCompletionShellPrefs>(() =>
     readSignatureCompletionShellPrefs(),
   )
-  const [shellSize, setShellSize] = useState(() =>
-    prefsToShellSize(readSignatureCompletionShellPrefs()),
+  const [panelRects, setPanelRects] = useState(() =>
+    loadPanelPixels(readSignatureCompletionShellPrefs()),
   )
-  const [isShellResizing, setIsShellResizing] = useState(false)
-  const resizeSessionRef = useRef<{
-    edge: ShellResizeEdge
-    width: number
-    height: number
-    clientX: number
-    clientY: number
-  } | null>(null)
+  const [activePanel, setActivePanel] = useState<PanelKey>('signature')
+  const [isInteracting, setIsInteracting] = useState(false)
+  const interactionRef = useRef<
+    | {
+        kind: 'drag' | 'resize'
+        panel: PanelKey
+        edge?: ShellResizeEdge
+        startRect: PanelPixelRect
+        clientX: number
+        clientY: number
+        offsetX: number
+        offsetY: number
+      }
+    | null
+  >(null)
 
   const splitLayout = Boolean(companion)
   const shellLocked = shellPrefs.locked
+
+  const persistPanels = useCallback(
+    (nextRects: { insight: PanelPixelRect; signature: PanelPixelRect }, locked: boolean) => {
+      const { vw, vh, maxWidth, maxHeight } = getViewportShellBounds()
+      const toRatio = (p: PanelPixelRect): FloatingPanelRect => ({
+        leftRatio: p.left / Math.max(1, vw),
+        topRatio: p.top / Math.max(1, vh),
+        widthRatio: p.width / Math.max(1, maxWidth),
+        heightRatio: p.height / Math.max(1, maxHeight),
+      })
+      const nextPrefs: SignatureCompletionShellPrefs = {
+        locked,
+        insight: toRatio(nextRects.insight),
+        signature: toRatio(nextRects.signature),
+      }
+      setShellPrefs(nextPrefs)
+      writeSignatureCompletionShellPrefs(nextPrefs)
+    },
+    [],
+  )
 
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -166,7 +210,6 @@ export function SignaturePadDialog({
     if (!canvas || !container) return
 
     const width = Math.max(1, container.clientWidth)
-    // 컨테이너 높이를 최대한 사용 (리사이즈 시 고무줄처럼 맞춤)
     const height = Math.max(
       120,
       container.clientHeight > 0
@@ -206,15 +249,13 @@ export function SignaturePadDialog({
 
     const prefs = readSignatureCompletionShellPrefs()
     setShellPrefs(prefs)
-    setShellSize(prefsToShellSize(prefs))
+    setPanelRects(loadPanelPixels(prefs))
     setEndTime(defaultEndTime)
 
     const timer = window.setTimeout(initCanvas, 50)
     const onResize = () => {
-      setShellSize((prev) => {
-        const nextPrefs = shellSizeToPrefs(prev.width, prev.height, prefs.locked)
-        return prefsToShellSize(nextPrefs)
-      })
+      const next = loadPanelPixels(readSignatureCompletionShellPrefs())
+      setPanelRects(next)
       initCanvas()
     }
     window.addEventListener('resize', onResize)
@@ -233,32 +274,67 @@ export function SignaturePadDialog({
     })
     observer.observe(container)
     return () => observer.disconnect()
-  }, [open, splitLayout, shellSize.width, shellSize.height, initCanvas])
+  }, [
+    open,
+    splitLayout,
+    panelRects.signature.width,
+    panelRects.signature.height,
+    initCanvas,
+  ])
 
   useEffect(() => {
-    if (!isShellResizing) return
+    if (!isInteracting) return
 
     function onMove(e: PointerEvent) {
-      const session = resizeSessionRef.current
+      const session = interactionRef.current
       if (!session) return
       e.preventDefault()
-      setShellSize(applyShellResize(session.edge, session, e.clientX, e.clientY))
+
+      if (session.kind === 'drag') {
+        const pos = clampPanelPosition(
+          e.clientX - session.offsetX,
+          e.clientY - session.offsetY,
+          session.startRect.width,
+          session.startRect.height,
+        )
+        setPanelRects((prev) => ({
+          ...prev,
+          [session.panel]: {
+            ...session.startRect,
+            left: pos.left,
+            top: pos.top,
+          },
+        }))
+        return
+      }
+
+      if (session.kind === 'resize' && session.edge) {
+        const next = applyPanelResize(
+          session.edge,
+          {
+            ...session.startRect,
+            clientX: session.clientX,
+            clientY: session.clientY,
+          },
+          e.clientX,
+          e.clientY,
+          PANEL_MIN_SIZES[session.panel],
+        )
+        setPanelRects((prev) => ({
+          ...prev,
+          [session.panel]: next,
+        }))
+      }
     }
 
     function onUp() {
-      const session = resizeSessionRef.current
+      const session = interactionRef.current
       if (!session) return
-      resizeSessionRef.current = null
-      setIsShellResizing(false)
-      setShellSize((current) => {
-        const nextPrefs = shellSizeToPrefs(
-          current.width,
-          current.height,
-          shellPrefs.locked,
-        )
-        setShellPrefs(nextPrefs)
-        writeSignatureCompletionShellPrefs(nextPrefs)
-        return prefsToShellSize(nextPrefs)
+      interactionRef.current = null
+      setIsInteracting(false)
+      setPanelRects((current) => {
+        persistPanels(current, shellPrefs.locked)
+        return current
       })
     }
 
@@ -270,33 +346,64 @@ export function SignaturePadDialog({
       document.removeEventListener('pointerup', onUp)
       document.removeEventListener('pointercancel', onUp)
     }
-  }, [isShellResizing, shellPrefs.locked])
+  }, [isInteracting, persistPanels, shellPrefs.locked])
 
-  function startShellResize(
+  function startPanelDrag(panel: PanelKey, e: React.PointerEvent) {
+    if (shellLocked || isSubmitting) return
+    const target = e.target as HTMLElement | null
+    if (target?.closest('button, a, input, textarea, select, canvas, [data-no-drag]')) {
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    const rect = panelRects[panel]
+    setActivePanel(panel)
+    interactionRef.current = {
+      kind: 'drag',
+      panel,
+      startRect: rect,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+    }
+    setIsInteracting(true)
+  }
+
+  function startPanelResize(
+    panel: PanelKey,
     edge: ShellResizeEdge,
     e: React.PointerEvent<HTMLDivElement>,
   ) {
     if (shellLocked || isSubmitting) return
     e.preventDefault()
     e.stopPropagation()
-    resizeSessionRef.current = {
+    setActivePanel(panel)
+    interactionRef.current = {
+      kind: 'resize',
+      panel,
       edge,
-      width: shellSize.width,
-      height: shellSize.height,
+      startRect: panelRects[panel],
       clientX: e.clientX,
       clientY: e.clientY,
+      offsetX: 0,
+      offsetY: 0,
     }
-    setIsShellResizing(true)
+    setIsInteracting(true)
   }
 
   function toggleShellLock() {
     setShellPrefs((prev) => {
-      const next = {
-        ...shellSizeToPrefs(shellSize.width, shellSize.height, !prev.locked),
-      }
+      const next = { ...prev, locked: !prev.locked }
       writeSignatureCompletionShellPrefs(next)
       return next
     })
+  }
+
+  function handleResetLayout() {
+    const next = resetSignatureCompletionShellLayout()
+    setShellPrefs(next)
+    setPanelRects(loadPanelPixels(next))
   }
 
   const getCoordinates = (
@@ -498,7 +605,64 @@ export function SignaturePadDialog({
     </DialogFooter>
   )
 
-  const sideBySide = shellSize.width >= 720
+  function renderFloatingWindow(
+    panel: PanelKey,
+    titleText: string,
+    body: ReactNode,
+    hint: string,
+  ) {
+    const rect = panelRects[panel]
+    const z = activePanel === panel ? 40 : 30
+    return (
+      <div
+        className={cn(
+          'absolute flex flex-col overflow-hidden rounded-2xl border border-primary/35 bg-background shadow-2xl',
+          isInteracting && activePanel === panel && 'select-none',
+        )}
+        style={{
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          zIndex: z,
+        }}
+        onPointerDown={() => setActivePanel(panel)}
+      >
+        <div
+          className={cn(
+            'flex shrink-0 items-center gap-1.5 border-b border-border/70 px-2 py-1.5',
+            shellLocked
+              ? 'cursor-default'
+              : 'cursor-grab touch-none active:cursor-grabbing',
+          )}
+          onPointerDown={(e) => startPanelDrag(panel, e)}
+        >
+          {!shellLocked ? (
+            <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-foreground">{titleText}</p>
+            <p className="truncate text-[10px] text-muted-foreground">{hint}</p>
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
+
+        {!shellLocked
+          ? RESIZE_EDGES.map(({ edge, className, cursor }) => (
+              <div
+                key={`${panel}-${edge}`}
+                role="separator"
+                aria-label={`${titleText} 크기 조절 ${edge}`}
+                className={cn('absolute z-20 touch-none', className)}
+                style={{ cursor }}
+                onPointerDown={(e) => startPanelResize(panel, edge, e)}
+              />
+            ))
+          : null}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -519,9 +683,9 @@ export function SignaturePadDialog({
               ? cn(
                   '!inset-0 !top-0 !left-0 !right-0 !bottom-0 !z-50',
                   '!flex !h-[100dvh] !max-h-[100dvh] !w-screen !max-w-none',
-                  '!translate-x-0 !translate-y-0 !items-center !justify-center !gap-0 !rounded-none !border-0',
-                  '!bg-transparent !p-2 !pt-[max(0.5rem,env(safe-area-inset-top))]',
-                  '!pb-[max(0.5rem,env(safe-area-inset-bottom))] !shadow-none',
+                  '!translate-x-0 !translate-y-0 !items-stretch !justify-stretch !gap-0 !rounded-none !border-0',
+                  '!bg-transparent !p-0',
+                  '!shadow-none',
                 )
               : cn(
                   'max-w-3xl gap-0 overflow-hidden border-primary/20 p-0',
@@ -536,20 +700,17 @@ export function SignaturePadDialog({
           }}
         >
           {splitLayout ? (
-            <div
-              className="relative flex max-h-full max-w-full flex-col overflow-hidden rounded-2xl border border-primary/35 bg-background shadow-2xl"
-              style={{
-                width: shellSize.width,
-                height: shellSize.height,
-              }}
-            >
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5">
-                <p className="truncate text-xs text-muted-foreground">
-                  {shellLocked
-                    ? '크기 잠금 · 가장자리 조절 불가'
-                    : '가장자리·모서리를 드래그해 크기 조절'}
-                </p>
-                <div className="flex items-center gap-1.5">
+            <div className="relative h-full w-full">
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-[50] flex justify-center pt-[max(0.5rem,env(safe-area-inset-top))]">
+                <div
+                  data-no-drag
+                  className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/80 bg-background/95 px-2 py-1 shadow-lg backdrop-blur"
+                >
+                  <p className="hidden px-1 text-[10px] text-muted-foreground sm:block">
+                    {shellLocked
+                      ? '위치·크기 잠금'
+                      : '창 상단을 누른 채 원하는 위치로 이동'}
+                  </p>
                   <Button
                     type="button"
                     size="sm"
@@ -557,7 +718,7 @@ export function SignaturePadDialog({
                     className="h-7 gap-1 px-2 text-xs"
                     onClick={toggleShellLock}
                     disabled={isSubmitting}
-                    title={shellLocked ? '잠금 해제' : '크기 잠금'}
+                    title={shellLocked ? '잠금 해제' : '위치·크기 잠금'}
                   >
                     {shellLocked ? (
                       <Lock className="h-3.5 w-3.5" />
@@ -565,6 +726,16 @@ export function SignaturePadDialog({
                       <Unlock className="h-3.5 w-3.5" />
                     )}
                     {shellLocked ? '잠금 중' : '잠금'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    disabled={isSubmitting || shellLocked}
+                    onClick={handleResetLayout}
+                  >
+                    배치 초기화
                   </Button>
                   <Button
                     type="button"
@@ -579,33 +750,21 @@ export function SignaturePadDialog({
                 </div>
               </div>
 
-              <div
-                className={cn(
-                  'flex min-h-0 flex-1 gap-2 p-2',
-                  sideBySide ? 'flex-row' : 'flex-col',
-                )}
-              >
-                {!successSummary && companion ? (
-                  <div
-                    className={cn(
-                      'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-primary/30 bg-background',
-                      sideBySide ? 'flex-[1.35]' : 'min-h-0 flex-[1.15]',
-                    )}
-                  >
+              {!successSummary && companion
+                ? renderFloatingWindow(
+                    'insight',
+                    '남은 횟차 · 신체정보',
                     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 sm:p-3">
                       {companion}
-                    </div>
-                  </div>
-                ) : null}
+                    </div>,
+                    shellLocked ? '잠금됨' : '상단을 드래그해 이동',
+                  )
+                : null}
 
-                <div
-                  className={cn(
-                    'mx-auto flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-primary/20 bg-background',
-                    sideBySide
-                      ? 'w-[min(100%,22rem)] flex-none self-stretch'
-                      : 'w-full max-w-lg flex-[0.85]',
-                  )}
-                >
+              {renderFloatingWindow(
+                'signature',
+                title,
+                <>
                   <DialogHeader
                     className={cn(
                       'shrink-0 space-y-0.5 border-b border-primary/10 bg-primary/[0.03] text-left',
@@ -628,21 +787,9 @@ export function SignaturePadDialog({
                     {signatureBody}
                   </div>
                   {footer}
-                </div>
-              </div>
-
-              {!shellLocked
-                ? RESIZE_EDGES.map(({ edge, className, cursor }) => (
-                    <div
-                      key={edge}
-                      role="separator"
-                      aria-label={`크기 조절 ${edge}`}
-                      className={cn('absolute z-20 touch-none', className)}
-                      style={{ cursor }}
-                      onPointerDown={(e) => startShellResize(edge, e)}
-                    />
-                  ))
-                : null}
+                </>,
+                shellLocked ? '잠금됨' : '상단을 드래그해 이동',
+              )}
             </div>
           ) : (
             <>

@@ -1,13 +1,34 @@
 import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { UserRole } from '@/lib/types'
 
-/** 계정당 동시 로그인 허용 기기 수 */
-export const MAX_CONCURRENT_AUTH_SESSIONS = 2
+/** 일반 회원 — 기기 1대 (새 로그인 시 기존 세션 종료) */
+export const MAX_CONCURRENT_AUTH_SESSIONS_MEMBER = 1
+
+/** 관리자·강사 — 동시 로그인 최대 */
+export const MAX_CONCURRENT_AUTH_SESSIONS_STAFF = 4
+
+/** @deprecated 역할별 한도 사용 — 하위 호환용 기본값 */
+export const MAX_CONCURRENT_AUTH_SESSIONS = MAX_CONCURRENT_AUTH_SESSIONS_STAFF
 
 type AuthSessionRow = {
   id: string
   created_at: string | null
+}
+
+export function resolveMaxConcurrentAuthSessions(
+  role: UserRole | string | null | undefined,
+): number {
+  const normalized = String(role ?? '')
+  if (
+    normalized === 'admin' ||
+    normalized === 'instructor' ||
+    normalized === 'coach'
+  ) {
+    return MAX_CONCURRENT_AUTH_SESSIONS_STAFF
+  }
+  return MAX_CONCURRENT_AUTH_SESSIONS_MEMBER
 }
 
 /**
@@ -17,7 +38,10 @@ type AuthSessionRow = {
 export async function enforceConcurrentSessionLimit(
   admin: SupabaseClient,
   userId: string,
+  maxSessions: number = MAX_CONCURRENT_AUTH_SESSIONS_MEMBER,
 ): Promise<void> {
+  const limit = Math.max(1, Math.floor(maxSessions))
+
   const { data, error } = await admin
     .schema('auth')
     .from('sessions')
@@ -31,11 +55,9 @@ export async function enforceConcurrentSessionLimit(
   }
 
   const sessions = (data ?? []) as AuthSessionRow[]
-  if (sessions.length <= MAX_CONCURRENT_AUTH_SESSIONS) return
+  if (sessions.length <= limit) return
 
-  const staleIds = sessions
-    .slice(MAX_CONCURRENT_AUTH_SESSIONS)
-    .map((session) => session.id)
+  const staleIds = sessions.slice(limit).map((session) => session.id)
 
   const { error: deleteError } = await admin
     .schema('auth')

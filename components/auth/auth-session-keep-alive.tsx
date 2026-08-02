@@ -20,7 +20,15 @@ export function AuthSessionKeepAlive() {
 
       refreshing = true
       try {
-        await supabase.auth.getSession()
+        const { data, error } = await supabase.auth.getSession()
+        if (error) return
+        const expiresAt = data.session?.expires_at
+        if (!expiresAt) return
+        // 만료 10분 전이면 선제 refresh (장시간 백그라운드 후 복귀 대비)
+        const msLeft = expiresAt * 1000 - Date.now()
+        if (msLeft < 10 * 60 * 1000) {
+          await supabase.auth.refreshSession()
+        }
       } catch {
         // ignore — middleware / next navigation will handle logout if refresh fails
       } finally {
@@ -51,7 +59,7 @@ export function AuthSessionKeepAlive() {
       if (document.visibilityState === 'visible') {
         void refreshIfNeeded()
       }
-    }, 10 * 60 * 1000)
+    }, 5 * 60 * 1000)
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibility)

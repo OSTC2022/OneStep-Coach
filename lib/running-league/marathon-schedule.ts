@@ -7,6 +7,28 @@ export type MarathonEventSignup = {
   signed_at: string
 }
 
+export type MarathonLabelTone =
+  | 'amber'
+  | 'sky'
+  | 'lime'
+  | 'rose'
+  | 'violet'
+  | 'zinc'
+
+export type MarathonCustomLabel = {
+  text: string
+  tone: MarathonLabelTone
+}
+
+export const MARATHON_LABEL_TONES: MarathonLabelTone[] = [
+  'amber',
+  'sky',
+  'lime',
+  'rose',
+  'violet',
+  'zinc',
+]
+
 export type MarathonEventInput = {
   id?: string | null
   title: string
@@ -15,6 +37,13 @@ export type MarathonEventInput = {
   registration_url: string
   notes: string
   is_hidden: boolean
+  region: string
+  is_featured: boolean
+  registration_open: boolean
+  /** 신청 마감일 (없으면 대회일 기준으로 자동 종료) */
+  registration_end_date: string
+  custom_labels: MarathonCustomLabel[]
+  catalog_key?: string | null
 }
 
 export type MarathonEventView = {
@@ -30,6 +59,14 @@ export type MarathonEventView = {
   registration_href: string | null
   notes: string
   is_hidden: boolean
+  region: string
+  is_featured: boolean
+  registration_open: boolean
+  registration_end_date: string | null
+  /** 신청기간 반영된 표시용 */
+  registration_open_active: boolean
+  custom_labels: MarathonCustomLabel[]
+  catalog_key: string | null
   signup_count: number
   signups: MarathonEventSignup[]
   is_signed_up: boolean
@@ -124,6 +161,44 @@ export function isVisibleMarathonEvent(event: Pick<MarathonEventView, 'is_hidden
   return !event.is_hidden && Boolean(event.title.trim())
 }
 
+/** 신청가능 라벨 — 마감일(또는 대회일)이 지나면 false */
+export function isMarathonRegistrationOpenActive(options: {
+  registration_open?: boolean | null
+  event_date?: string | null
+  registration_end_date?: string | null
+  today?: Date | string
+}): boolean {
+  if (!options.registration_open) return false
+  const todayRaw =
+    typeof options.today === 'string'
+      ? options.today
+      : format(options.today ?? new Date(), 'yyyy-MM-dd')
+  const today = normalizeMarathonDate(todayRaw) ?? todayRaw.slice(0, 10)
+  const end =
+    normalizeMarathonDate(options.registration_end_date) ??
+    normalizeMarathonDate(options.event_date)
+  if (!end) return Boolean(options.registration_open)
+  return today <= end
+}
+
+export function normalizeMarathonCustomLabels(
+  value: unknown,
+): MarathonCustomLabel[] {
+  if (!Array.isArray(value)) return []
+  const tones = new Set<string>(MARATHON_LABEL_TONES)
+  const out: MarathonCustomLabel[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const text = String((item as { text?: unknown }).text ?? '').trim()
+    if (!text) continue
+    const toneRaw = String((item as { tone?: unknown }).tone ?? 'zinc')
+    const tone = (tones.has(toneRaw) ? toneRaw : 'zinc') as MarathonLabelTone
+    out.push({ text: text.slice(0, 20), tone })
+    if (out.length >= 8) break
+  }
+  return out
+}
+
 export function createEmptyMarathonEventInput(
   eventDate = format(new Date(), 'yyyy-MM-dd'),
 ): MarathonEventInput {
@@ -135,6 +210,12 @@ export function createEmptyMarathonEventInput(
     registration_url: '',
     notes: '',
     is_hidden: false,
+    region: '',
+    is_featured: false,
+    registration_open: false,
+    registration_end_date: '',
+    custom_labels: [],
+    catalog_key: null,
   }
 }
 

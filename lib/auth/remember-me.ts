@@ -24,23 +24,42 @@ export function getRememberMeFromCookieList(
   return shouldPersistAuthSession(cookies)
 }
 
-export function applyRememberMeToSupabaseCookieOptions<
-  T extends { maxAge?: number; expires?: Date },
->(name: string, options: T, rememberMe: boolean): T {
+type CookieOptionBag = {
+  maxAge?: number
+  expires?: Date
+  path?: string
+  sameSite?: 'lax' | 'strict' | 'none' | boolean
+  secure?: boolean
+  httpOnly?: boolean
+  domain?: string
+}
+
+/**
+ * Supabase sb-* 쿠키에 자동로그인 기간을 강제합니다.
+ * refresh 시 Supabase가 짧은 expires를 넣어도 90일로 다시 맞춥니다.
+ */
+export function applyRememberMeToSupabaseCookieOptions<T extends CookieOptionBag>(
+  name: string,
+  options: T,
+  rememberMe: boolean,
+): T {
   if (!name.startsWith('sb-')) return options
+
   if (!rememberMe) {
     // 세션 쿠키: 브라우저/앱을 완전히 닫으면 만료
-    const { maxAge: _maxAge, expires: _expires, ...rest } = options as T & {
-      maxAge?: number
-      expires?: Date
-    }
-    return rest as T
+    const next = { ...options } as T & CookieOptionBag
+    delete next.maxAge
+    delete next.expires
+    return next as T
   }
-  return {
-    ...options,
-    maxAge: REMEMBER_ME_MAX_AGE_SECONDS,
-    expires: undefined,
-  }
+
+  const next = { ...options } as T & CookieOptionBag
+  next.maxAge = REMEMBER_ME_MAX_AGE_SECONDS
+  // 짧은 expires가 남아 있으면 브라우저가 maxAge보다 expires를 우선할 수 있음
+  delete next.expires
+  if (!next.path) next.path = '/'
+  if (!next.sameSite) next.sameSite = 'lax'
+  return next as T
 }
 
 export const SUPABASE_AUTH_COOKIE_OPTIONS = {

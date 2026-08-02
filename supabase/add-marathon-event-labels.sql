@@ -1,5 +1,8 @@
--- 마라톤 일정 (테이블 + 라벨 + RLS)
--- Supabase SQL Editor에서 이 파일 하나만 실행하세요.
+-- 하위 호환: 라벨만 추가하려 했을 때 → 전체 마이그레이션으로 위임
+-- 실제 내용은 add-center-marathon-schedule.sql 과 동일합니다.
+-- Supabase에서는 \i 가 안 되므로, add-center-marathon-schedule.sql 을 실행하세요.
+
+-- (아래는 동일 스크립트 복제 — 어느 쪽을 실행해도 됩니다)
 
 CREATE TABLE IF NOT EXISTS public.center_marathon_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -53,7 +56,6 @@ CREATE INDEX IF NOT EXISTS center_marathon_events_region_idx
 CREATE INDEX IF NOT EXISTS center_marathon_event_signups_event_idx
   ON public.center_marathon_event_signups (event_id, created_at);
 
--- 헬퍼가 없을 때만 최소 정의 (기존 함수는 덮어쓰지 않음)
 DO $$
 BEGIN
   IF to_regprocedure('public.is_admin()') IS NULL THEN
@@ -97,16 +99,6 @@ BEGIN
     $fn$;
   END IF;
 END $$;
-
-COMMENT ON TABLE public.center_marathon_events IS '국내 마라톤/대회 일정 (센터 러닝 포털)';
-COMMENT ON COLUMN public.center_marathon_events.registration_url IS '참가신청 홈페이지 URL';
-COMMENT ON COLUMN public.center_marathon_events.region IS '지역 (서울/경기/부산 등)';
-COMMENT ON COLUMN public.center_marathon_events.is_featured IS '인지도 있는 대회 라벨';
-COMMENT ON COLUMN public.center_marathon_events.registration_open IS '참가신청 가능 라벨';
-COMMENT ON COLUMN public.center_marathon_events.custom_labels IS '관리자 커스텀 라벨 [{text,tone}]';
-COMMENT ON COLUMN public.center_marathon_events.catalog_key IS '추천 카탈로그에서 추가된 경우 중복 방지 키';
-COMMENT ON COLUMN public.center_marathon_events.registration_end_date IS '참가신청 마감일 — 지나면 신청가능 라벨 숨김';
-COMMENT ON TABLE public.center_marathon_event_signups IS '마라톤 일정 참여 신청';
 
 ALTER TABLE public.center_marathon_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.center_marathon_event_signups ENABLE ROW LEVEL SECURITY;
@@ -156,5 +148,7 @@ DROP POLICY IF EXISTS center_marathon_event_signups_member_delete ON public.cent
 CREATE POLICY center_marathon_event_signups_member_delete ON public.center_marathon_event_signups
   FOR DELETE TO authenticated
   USING (public.running_league_member_owns_row(member_id));
+
+COMMENT ON COLUMN public.center_marathon_events.registration_end_date IS '참가신청 마감일 — 지나면 신청가능 라벨 숨김';
 
 NOTIFY pgrst, 'reload schema';

@@ -10,17 +10,28 @@ import {
   isVisibleMarathonEvent,
   marathonMonthDateRange,
   marathonWeekdayLabel,
+  normalizeMarathonCustomLabels,
   normalizeMarathonDate,
   normalizeMarathonMonthKey,
   resolveMarathonRegistrationHref,
+  isMarathonRegistrationOpenActive,
+  type MarathonCustomLabel,
   type MarathonEventInput,
   type MarathonEventSignup,
   type MarathonEventView,
 } from '@/lib/running-league/marathon-schedule'
+import {
+  filterMarathonCatalog,
+  listMarathonCatalogYear,
+  type MarathonCatalogItem,
+} from '@/lib/running-league/marathon-catalog-2026'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
 const EVENT_SELECT =
+  'id, title, event_date, location_label, registration_url, notes, is_hidden, region, is_featured, registration_open, registration_end_date, custom_labels, catalog_key, created_at, updated_at'
+
+const EVENT_SELECT_LEGACY =
   'id, title, event_date, location_label, registration_url, notes, is_hidden, created_at, updated_at'
 
 export type CenterMarathonScheduleBundle = {
@@ -37,6 +48,12 @@ type MarathonEventRow = {
   registration_url: string | null
   notes: string | null
   is_hidden: boolean
+  region?: string | null
+  is_featured?: boolean | null
+  registration_open?: boolean | null
+  registration_end_date?: string | null
+  custom_labels?: unknown
+  catalog_key?: string | null
 }
 
 type MarathonSignupRow = {
@@ -49,9 +66,20 @@ type MarathonSignupRow = {
 
 function isMissingTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
-  if (error.code === '42P01') return true
+  if (error.code === '42P01' || error.code === 'PGRST205') return true
   const message = error.message?.toLowerCase() ?? ''
-  return message.includes('does not exist') || message.includes('Could not find the table')
+  return (
+    message.includes('does not exist') ||
+    message.includes('could not find the table') ||
+    message.includes('schema cache')
+  )
+}
+
+function marathonMigrationErrorMessage(kind: 'table' | 'column'): string {
+  if (kind === 'column') {
+    return '마라톤 일정 컬럼이 없습니다. Supabase SQL Editor에서 supabase/add-center-marathon-schedule.sql 을 다시 실행해주세요.'
+  }
+  return '마라톤 일정 테이블이 없습니다. Supabase SQL Editor에서 supabase/add-center-marathon-schedule.sql 을 실행해주세요.'
 }
 
 async function scheduleClient() {
@@ -92,6 +120,17 @@ function mapEventView(
     registration_href: resolveMarathonRegistrationHref(registrationUrl),
     notes: row.notes?.trim() || '',
     is_hidden: Boolean(row.is_hidden),
+    region: row.region?.trim() || '',
+    is_featured: Boolean(row.is_featured),
+    registration_open: Boolean(row.registration_open),
+    registration_end_date: normalizeMarathonDate(row.registration_end_date),
+    registration_open_active: isMarathonRegistrationOpenActive({
+      registration_open: row.registration_open,
+      event_date: eventDate,
+      registration_end_date: row.registration_end_date,
+    }),
+    custom_labels: normalizeMarathonCustomLabels(row.custom_labels),
+    catalog_key: row.catalog_key?.trim() || null,
     signup_count: signups.length,
     signups,
     is_signed_up: viewerMemberId
@@ -105,6 +144,16 @@ function revalidateMarathonPaths() {
   revalidatePath('/dashboard/running-portal')
   revalidatePath('/dashboard/settings/marathon-schedule')
   revalidatePath('/dashboard/settings/adult-running-portal')
+}
+
+function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  const message = error.message?.toLowerCase() ?? ''
+  return (
+    message.includes('does not exist') ||
+    message.includes('could not find the') ||
+    message.includes('column')
+  )
 }
 
 async function fetchCenterMarathonSchedule(
@@ -124,22 +173,31 @@ async function fetchCenterMarathonSchedule(
 
   try {
     const supabase = await scheduleClient()
-    let eventQuery = supabase
-      .from('center_marathon_events')
-      .select(EVENT_SELECT)
-      .order('event_date', { ascending: true })
-      .order('created_at', { ascending: true })
 
-    if (!includeAll) {
-      const { start, end } = marathonMonthDateRange(monthKey)
-      eventQuery = eventQuery.gte('event_date', start).lte('event_date', end)
+    async function queryEvents(select: string) {
+      let eventQuery = supabase
+        .from('center_marathon_events')
+        .select(select)
+        .order('event_date', { ascending: true })
+        .order('created_at', { ascending: true })
+
+      if (!includeAll) {
+        const { start, end } = marathonMonthDateRange(monthKey)
+        eventQuery = eventQuery.gte('event_date', start).lte('event_date', end)
+      }
+
+      if (!includeHidden) {
+        eventQuery = eventQuery.eq('is_hidden', false)
+      }
+
+      return eventQuery
     }
 
-    if (!includeHidden) {
-      eventQuery = eventQuery.eq('is_hidden', false)
-    }
+    let { data: eventRows, error: eventError } = await queryEvents(EVENT_SELECT)
 
-    const { data: eventRows, error: eventError } = await eventQuery
+    if (eventError && !isMissingTableError(eventError) && isMissingColumnError(eventError)) {
+      ;({ data: eventRows, error: eventError } = await queryEvents(EVENT_SELECT_LEGACY))
+    }
 
     if (isMissingTableError(eventError)) {
       return { ...empty, tableReady: false }
@@ -149,7 +207,7 @@ async function fetchCenterMarathonSchedule(
       return empty
     }
 
-    const rows = (eventRows ?? []) as MarathonEventRow[]
+    const rows = (eventRows ?? []) as unknown as MarathonEventRow[]
     if (rows.length === 0) return empty
 
     const eventIds = rows.map((row) => row.id)
@@ -221,6 +279,10 @@ export async function saveMarathonEvent(
     return { ok: false, error: '참가신청 URL 형식을 확인해주세요.' }
   }
 
+  const customLabels = normalizeMarathonCustomLabels(input.custom_labels)
+  const catalogKey = input.catalog_key?.trim() || null
+  const registrationEndDate = normalizeMarathonDate(input.registration_end_date)
+
   const payload = {
     title,
     event_date: eventDate,
@@ -228,6 +290,12 @@ export async function saveMarathonEvent(
     registration_url: registrationUrl,
     notes: input.notes.trim(),
     is_hidden: Boolean(input.is_hidden),
+    region: input.region.trim(),
+    is_featured: Boolean(input.is_featured),
+    registration_open: Boolean(input.registration_open),
+    registration_end_date: registrationEndDate,
+    custom_labels: customLabels,
+    catalog_key: catalogKey,
     updated_at: new Date().toISOString(),
   }
 
@@ -244,8 +312,13 @@ export async function saveMarathonEvent(
       if (isMissingTableError(error)) {
         return {
           ok: false,
-          error:
-            'DB 마이그레이션이 필요합니다. supabase/add-center-marathon-schedule.sql 을 실행해주세요.',
+          error: marathonMigrationErrorMessage('table'),
+        }
+      }
+      if (error && isMissingColumnError(error)) {
+        return {
+          ok: false,
+          error: marathonMigrationErrorMessage('column'),
         }
       }
       if (error) {
@@ -265,12 +338,20 @@ export async function saveMarathonEvent(
     if (isMissingTableError(error)) {
       return {
         ok: false,
-        error:
-          'DB 마이그레이션이 필요합니다. supabase/add-center-marathon-schedule.sql 을 실행해주세요.',
+        error: marathonMigrationErrorMessage('table'),
+      }
+    }
+    if (error && isMissingColumnError(error)) {
+      return {
+        ok: false,
+        error: marathonMigrationErrorMessage('column'),
       }
     }
     if (error || !data) {
       console.error('saveMarathonEvent.insert', error)
+      if (error?.code === '23505') {
+        return { ok: false, error: '이미 일정에 추가된 추천 대회입니다.' }
+      }
       return { ok: false, error: error?.message || '저장에 실패했습니다.' }
     }
 
@@ -280,6 +361,73 @@ export async function saveMarathonEvent(
     console.error('saveMarathonEvent', error)
     return { ok: false, error: '저장에 실패했습니다.' }
   }
+}
+
+export async function listMarathonRecommendations(options?: {
+  region?: string
+  monthKey?: string | null
+  featuredOnly?: boolean
+  registrationOpenOnly?: boolean
+  year?: number
+}): Promise<{
+  items: MarathonCatalogItem[]
+  addedKeys: string[]
+}> {
+  await requireRole(['admin'])
+  const year = options?.year ?? new Date().getFullYear()
+  const items = filterMarathonCatalog(listMarathonCatalogYear(year), {
+    region: options?.region,
+    monthKey: options?.monthKey,
+    featuredOnly: options?.featuredOnly,
+    registrationOpenOnly: options?.registrationOpenOnly,
+  })
+
+  const addedKeys: string[] = []
+  try {
+    const supabase = await scheduleClient()
+    const keys = items.map((item) => item.key)
+    if (keys.length > 0) {
+      const { data, error } = await supabase
+        .from('center_marathon_events')
+        .select('catalog_key')
+        .in('catalog_key', keys)
+      if (!error && data) {
+        for (const row of data as Array<{ catalog_key: string | null }>) {
+          const key = row.catalog_key?.trim()
+          if (key) addedKeys.push(key)
+        }
+      }
+    }
+  } catch {
+    // ignore — 추천 목록은 카탈로그만으로도 표시
+  }
+
+  return { items, addedKeys }
+}
+
+export async function addMarathonEventFromCatalog(
+  catalogKey: string,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  await requireRole(['admin'])
+  const key = catalogKey.trim()
+  const item = listMarathonCatalogYear().find((entry) => entry.key === key)
+  if (!item) return { ok: false, error: '추천 대회를 찾을 수 없습니다.' }
+
+  return saveMarathonEvent({
+    id: null,
+    title: item.title,
+    event_date: item.event_date,
+    location_label: item.location_label,
+    registration_url: item.registration_url,
+    notes: item.notes,
+    is_hidden: false,
+    region: item.region,
+    is_featured: item.is_featured,
+    registration_open: item.registration_open,
+    registration_end_date: item.registration_end_date ?? '',
+    custom_labels: [] as MarathonCustomLabel[],
+    catalog_key: item.key,
+  })
 }
 
 export async function deleteMarathonEvent(
@@ -296,8 +444,7 @@ export async function deleteMarathonEvent(
     if (isMissingTableError(error)) {
       return {
         ok: false,
-        error:
-          'DB 마이그레이션이 필요합니다. supabase/add-center-marathon-schedule.sql 을 실행해주세요.',
+        error: marathonMigrationErrorMessage('table'),
       }
     }
     if (error) {

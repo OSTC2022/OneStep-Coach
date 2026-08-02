@@ -1,5 +1,4 @@
 -- 동시 로그인 한도: 관리자·강사 4대, 그 외 회원 1대
--- (동일 내용: update-auth-concurrent-session-limit-by-role.sql)
 -- Supabase Dashboard > Authentication 에서 "Single session per user" 는 꺼 두세요.
 
 CREATE OR REPLACE FUNCTION public.enforce_auth_concurrent_session_limit()

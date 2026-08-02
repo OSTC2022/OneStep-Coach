@@ -26,6 +26,7 @@ import {
 } from '@/lib/auth-recovery-link'
 import {
   enforceConcurrentSessionLimit,
+  resolveMaxConcurrentAuthSessions,
 } from '@/lib/auth/concurrent-sessions'
 import {
   REMEMBER_ME_COOKIE,
@@ -52,7 +53,12 @@ async function applyRememberMeCookies(rememberMe: boolean) {
         cookie.value,
         applyRememberMeToSupabaseCookieOptions(
           cookie.name,
-          { path: '/', sameSite: 'lax', secure },
+          {
+            path: '/',
+            sameSite: 'lax' as const,
+            secure,
+            maxAge: REMEMBER_ME_MAX_AGE_SECONDS,
+          },
           true,
         ),
       )
@@ -188,10 +194,24 @@ export async function signIn(
 
   await applyRememberMeCookies(rememberMe)
 
+  // refresh로 쿠키를 한 번 더 써서 90일 maxAge가 확실히 반영되게 함
+  if (rememberMe) {
+    try {
+      await supabase.auth.getSession()
+      await applyRememberMeCookies(true)
+    } catch {
+      // ignore
+    }
+  }
+
   try {
     const { createServiceRoleClient } = await import('@/lib/supabase/admin')
     const admin = createServiceRoleClient()
-    await enforceConcurrentSessionLimit(admin, authUser.id)
+    await enforceConcurrentSessionLimit(
+      admin,
+      authUser.id,
+      resolveMaxConcurrentAuthSessions(appRole),
+    )
   } catch {
     // service role 미설정 시 SQL 트리거에만 의존
   }

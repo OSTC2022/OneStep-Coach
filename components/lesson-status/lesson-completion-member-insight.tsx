@@ -266,7 +266,7 @@ export const LessonCompletionMemberInsight = forwardRef<
   return (
     <div
       className={cn(
-        'flex h-full min-h-0 flex-col gap-2 rounded-xl border border-primary/20 bg-primary/[0.04] p-2 sm:gap-3 sm:p-3',
+        'flex h-full min-h-0 flex-col gap-2 rounded-xl bg-primary/[0.04] p-2 sm:gap-3 sm:p-3',
         className,
       )}
     >

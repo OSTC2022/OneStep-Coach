@@ -44,6 +44,7 @@ import {
   MEMBER_PORTAL_CARD_CLASS,
   MEMBER_PORTAL_SHELL_CLASS,
 } from '@/lib/running-league/member-portal-layout'
+import { MarathonEventLabels } from '@/components/dashboard/marathon-event-labels'
 
 type MemberMarathonScheduleProps = {
   bundle: CenterMarathonScheduleBundle
@@ -402,11 +403,18 @@ function MarathonEventRow({
             >
               {event.day_label}
             </span>
+            <MarathonEventLabels
+              isFeatured={event.is_featured}
+              registrationOpen={event.registration_open}
+              eventDate={event.event_date}
+              registrationEndDate={event.registration_end_date}
+              customLabels={event.custom_labels}
+            />
           </span>
-          {event.location_label ? (
+          {event.location_label || event.region ? (
             <span className="mt-0.5 flex items-center gap-1 text-[11px] text-zinc-500">
               <MapPin className="h-3 w-3 shrink-0" />
-              {event.location_label}
+              {[event.region, event.location_label].filter(Boolean).join(' · ')}
             </span>
           ) : null}
           {event.notes ? (
@@ -471,8 +479,21 @@ function ParticipantsDialog({
                   {event.weekday_label} · {event.event_date_label} · {event.day_label}
                 </span>
               </DialogTitle>
-              <DialogDescription className="text-left text-zinc-400">
-                {event.location_label || '참가 신청 명단'}
+              <DialogDescription asChild>
+                <div className="space-y-2 text-left text-zinc-400">
+                  <p>
+                    {[event.region, event.location_label].filter(Boolean).join(' · ') ||
+                      '참가 신청 명단'}
+                  </p>
+                  <MarathonEventLabels
+                    isFeatured={event.is_featured}
+                    registrationOpen={event.registration_open}
+                    eventDate={event.event_date}
+                    registrationEndDate={event.registration_end_date}
+                    customLabels={event.custom_labels}
+                    size="md"
+                  />
+                </div>
               </DialogDescription>
             </DialogHeader>
 
