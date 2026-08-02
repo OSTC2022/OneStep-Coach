@@ -3,7 +3,10 @@
  */
 
 import catalogData from '@/lib/running-league/marathon-catalog-2026-data.json'
-import { isMarathonRegistrationOpenActive } from '@/lib/running-league/marathon-schedule'
+import {
+  isMarathonEventUpcomingOrToday,
+  isMarathonRegistrationOpenActive,
+} from '@/lib/running-league/marathon-schedule'
 
 export type MarathonCatalogItem = {
   key: string
@@ -57,7 +60,11 @@ export const MARATHON_CATALOG_2026 = catalogData as MarathonCatalogItem[]
 export const MARATHON_CATALOG_PAGE_SIZE = 10
 
 export function listMarathonCatalogYear(year = new Date().getFullYear()): MarathonCatalogItem[] {
-  return MARATHON_CATALOG_2026.filter((item) => item.event_date.startsWith(`${year}-`)).sort(
+  return MARATHON_CATALOG_2026.filter(
+    (item) =>
+      item.event_date.startsWith(`${year}-`) &&
+      isMarathonEventUpcomingOrToday(item.event_date),
+  ).sort(
     (a, b) =>
       a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title, 'ko'),
   )
@@ -78,11 +85,13 @@ export function filterMarathonCatalog(
     monthKey?: string | null
     featuredOnly?: boolean
     registrationOpenOnly?: boolean
+    includePast?: boolean
   },
 ): MarathonCatalogItem[] {
   const region = options.region?.trim()
   const monthKey = options.monthKey?.trim()
   return items.filter((item) => {
+    if (!options.includePast && !isMarathonEventUpcomingOrToday(item.event_date)) return false
     if (region && region !== '전체' && item.region !== region) return false
     if (monthKey && monthKey !== 'all' && !item.event_date.startsWith(monthKey)) return false
     if (options.featuredOnly && !item.is_featured) return false

@@ -161,6 +161,19 @@ export function isVisibleMarathonEvent(event: Pick<MarathonEventView, 'is_hidden
   return !event.is_hidden && Boolean(event.title.trim())
 }
 
+/** 대회일이 오늘 이후(오늘 포함)인지 — 지난 대회 숨김용 */
+export function isMarathonEventUpcomingOrToday(
+  eventDate: string | null | undefined,
+  today: Date | string = new Date(),
+): boolean {
+  const date = normalizeMarathonDate(eventDate)
+  if (!date) return false
+  const todayRaw =
+    typeof today === 'string' ? today : format(today, 'yyyy-MM-dd')
+  const todayKey = normalizeMarathonDate(todayRaw) ?? todayRaw.slice(0, 10)
+  return date >= todayKey
+}
+
 /** 신청가능 라벨 — 마감일(또는 대회일)이 지나면 false */
 export function isMarathonRegistrationOpenActive(options: {
   registration_open?: boolean | null

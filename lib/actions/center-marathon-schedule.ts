@@ -1,5 +1,6 @@
 'use server'
 
+import { format } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
@@ -8,6 +9,7 @@ import {
   formatMarathonEventDateLabel,
   isMarathonScheduleAllKey,
   isVisibleMarathonEvent,
+  isMarathonEventUpcomingOrToday,
   marathonMonthDateRange,
   marathonWeekdayLabel,
   normalizeMarathonCustomLabels,
@@ -159,11 +161,13 @@ function isMissingColumnError(error: { code?: string; message?: string } | null)
 async function fetchCenterMarathonSchedule(
   monthKeyInput: string | null | undefined,
   viewerMemberId: string | null,
-  options?: { includeHidden?: boolean },
+  options?: { includeHidden?: boolean; includePast?: boolean },
 ): Promise<CenterMarathonScheduleBundle> {
   const monthKey = normalizeMarathonMonthKey(monthKeyInput)
   const includeAll = isMarathonScheduleAllKey(monthKey)
   const includeHidden = options?.includeHidden === true
+  const includePast = options?.includePast === true
+  const todayKey = format(new Date(), 'yyyy-MM-dd')
 
   const empty: CenterMarathonScheduleBundle = {
     monthKey,
@@ -184,6 +188,10 @@ async function fetchCenterMarathonSchedule(
       if (!includeAll) {
         const { start, end } = marathonMonthDateRange(monthKey)
         eventQuery = eventQuery.gte('event_date', start).lte('event_date', end)
+      }
+
+      if (!includePast) {
+        eventQuery = eventQuery.gte('event_date', todayKey)
       }
 
       if (!includeHidden) {
@@ -235,6 +243,7 @@ async function fetchCenterMarathonSchedule(
     const events = rows
       .map((row) => mapEventView(row, signupsByEvent.get(row.id) ?? [], viewerMemberId))
       .filter((event) => includeHidden || isVisibleMarathonEvent(event))
+      .filter((event) => includePast || isMarathonEventUpcomingOrToday(event.event_date, todayKey))
 
     return { monthKey, events, tableReady: true }
   } catch (error) {
@@ -254,7 +263,11 @@ export async function getCenterMarathonScheduleForAdmin(
   monthKey?: string | null,
 ): Promise<CenterMarathonScheduleBundle> {
   await requireRole(['admin'])
-  return fetchCenterMarathonSchedule(monthKey, null, { includeHidden: true })
+  // 관리 화면에서는 지난 대회도 수정·삭제할 수 있게 유지
+  return fetchCenterMarathonSchedule(monthKey, null, {
+    includeHidden: true,
+    includePast: true,
+  })
 }
 
 export async function getCenterMarathonScheduleAdminPreview(
