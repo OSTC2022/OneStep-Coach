@@ -1,8 +1,15 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { CheckCircle2, History, RotateCcw, Clock } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
+import { CheckCircle2, History, Lock, RotateCcw, Clock, Unlock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TimeInput24 } from '@/components/ui/time-input-24'
@@ -16,6 +23,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  applyShellResize,
+  prefsToShellSize,
+  readSignatureCompletionShellPrefs,
+  shellSizeToPrefs,
+  writeSignatureCompletionShellPrefs,
+  type ShellResizeEdge,
+  type SignatureCompletionShellPrefs,
+} from '@/lib/signature-completion-shell-prefs'
 
 const PastLessonSignatureDialog = dynamic(
   () =>
@@ -83,6 +99,21 @@ const SPLIT_SHELL_STYLE: CSSProperties = {
   maxHeight: '100dvh',
 }
 
+const RESIZE_EDGES: Array<{
+  edge: ShellResizeEdge
+  className: string
+  cursor: string
+}> = [
+  { edge: 'n', className: 'left-3 right-3 top-0 h-2', cursor: 'ns-resize' },
+  { edge: 's', className: 'left-3 right-3 bottom-0 h-2', cursor: 'ns-resize' },
+  { edge: 'e', className: 'top-3 bottom-3 right-0 w-2', cursor: 'ew-resize' },
+  { edge: 'w', className: 'top-3 bottom-3 left-0 w-2', cursor: 'ew-resize' },
+  { edge: 'ne', className: 'right-0 top-0 h-4 w-4', cursor: 'nesw-resize' },
+  { edge: 'nw', className: 'left-0 top-0 h-4 w-4', cursor: 'nwse-resize' },
+  { edge: 'se', className: 'right-0 bottom-0 h-4 w-4', cursor: 'nwse-resize' },
+  { edge: 'sw', className: 'left-0 bottom-0 h-4 w-4', cursor: 'nesw-resize' },
+]
+
 export function SignaturePadDialog({
   open,
   onOpenChange,
@@ -111,19 +142,39 @@ export function SignaturePadDialog({
   const [successSummary, setSuccessSummary] = useState<SignaturePadSuccessSummary | null>(
     null,
   )
+  const [shellPrefs, setShellPrefs] = useState<SignatureCompletionShellPrefs>(() =>
+    readSignatureCompletionShellPrefs(),
+  )
+  const [shellSize, setShellSize] = useState(() =>
+    prefsToShellSize(readSignatureCompletionShellPrefs()),
+  )
+  const [isShellResizing, setIsShellResizing] = useState(false)
+  const resizeSessionRef = useRef<{
+    edge: ShellResizeEdge
+    width: number
+    height: number
+    clientX: number
+    clientY: number
+  } | null>(null)
 
   const splitLayout = Boolean(companion)
+  const shellLocked = shellPrefs.locked
 
   const initCanvas = useCallback(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
     if (!canvas || !container) return
 
-    const width = container.clientWidth
-    // 가로는 중간, 세로는 서명하기 편하게
-    const height = touchFriendly
-      ? Math.max(170, Math.min(220, Math.round(width * 0.42)))
-      : Math.max(200, Math.min(260, Math.round(width * 0.4)))
+    const width = Math.max(1, container.clientWidth)
+    // 컨테이너 높이를 최대한 사용 (리사이즈 시 고무줄처럼 맞춤)
+    const height = Math.max(
+      120,
+      container.clientHeight > 0
+        ? container.clientHeight
+        : touchFriendly
+          ? Math.round(width * 0.42)
+          : Math.round(width * 0.4),
+    )
     const dpr = window.devicePixelRatio || 1
 
     canvas.width = Math.floor(width * dpr)
@@ -153,16 +204,100 @@ export function SignaturePadDialog({
       return
     }
 
+    const prefs = readSignatureCompletionShellPrefs()
+    setShellPrefs(prefs)
+    setShellSize(prefsToShellSize(prefs))
     setEndTime(defaultEndTime)
 
     const timer = window.setTimeout(initCanvas, 50)
-    const onResize = () => initCanvas()
+    const onResize = () => {
+      setShellSize((prev) => {
+        const nextPrefs = shellSizeToPrefs(prev.width, prev.height, prefs.locked)
+        return prefsToShellSize(nextPrefs)
+      })
+      initCanvas()
+    }
     window.addEventListener('resize', onResize)
     return () => {
       window.clearTimeout(timer)
       window.removeEventListener('resize', onResize)
     }
   }, [open, initCanvas, defaultEndTime])
+
+  useEffect(() => {
+    if (!open || !splitLayout) return
+    const container = containerRef.current
+    if (!container || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      initCanvas()
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [open, splitLayout, shellSize.width, shellSize.height, initCanvas])
+
+  useEffect(() => {
+    if (!isShellResizing) return
+
+    function onMove(e: PointerEvent) {
+      const session = resizeSessionRef.current
+      if (!session) return
+      e.preventDefault()
+      setShellSize(applyShellResize(session.edge, session, e.clientX, e.clientY))
+    }
+
+    function onUp() {
+      const session = resizeSessionRef.current
+      if (!session) return
+      resizeSessionRef.current = null
+      setIsShellResizing(false)
+      setShellSize((current) => {
+        const nextPrefs = shellSizeToPrefs(
+          current.width,
+          current.height,
+          shellPrefs.locked,
+        )
+        setShellPrefs(nextPrefs)
+        writeSignatureCompletionShellPrefs(nextPrefs)
+        return prefsToShellSize(nextPrefs)
+      })
+    }
+
+    document.addEventListener('pointermove', onMove, { passive: false })
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
+    return () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+    }
+  }, [isShellResizing, shellPrefs.locked])
+
+  function startShellResize(
+    edge: ShellResizeEdge,
+    e: React.PointerEvent<HTMLDivElement>,
+  ) {
+    if (shellLocked || isSubmitting) return
+    e.preventDefault()
+    e.stopPropagation()
+    resizeSessionRef.current = {
+      edge,
+      width: shellSize.width,
+      height: shellSize.height,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    }
+    setIsShellResizing(true)
+  }
+
+  function toggleShellLock() {
+    setShellPrefs((prev) => {
+      const next = {
+        ...shellSizeToPrefs(shellSize.width, shellSize.height, !prev.locked),
+      }
+      writeSignatureCompletionShellPrefs(next)
+      return next
+    })
+  }
 
   const getCoordinates = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
@@ -253,7 +388,7 @@ export function SignaturePadDialog({
   ) : (
     <>
       {showEndTime ? (
-        <div className="space-y-1.5">
+        <div className="shrink-0 space-y-1.5">
           <Label htmlFor="lesson-end-time">종료 시간</Label>
           {canEditEndTime ? (
             <TimeInput24
@@ -273,7 +408,10 @@ export function SignaturePadDialog({
         </div>
       ) : null}
 
-      <div ref={containerRef} className="relative overflow-hidden rounded-lg border border-border">
+      <div
+        ref={containerRef}
+        className="relative min-h-[7.5rem] flex-1 overflow-hidden rounded-lg border border-border"
+      >
         <canvas
           ref={canvasRef}
           onMouseDown={startDrawing}
@@ -283,7 +421,7 @@ export function SignaturePadDialog({
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
-          className="relative z-0 block w-full touch-none cursor-crosshair"
+          className="relative z-0 block h-full w-full touch-none cursor-crosshair"
         />
         <span
           aria-hidden
@@ -293,7 +431,12 @@ export function SignaturePadDialog({
         </span>
       </div>
 
-      <Button type="button" variant="outline" onClick={clearSignature} className="w-full">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={clearSignature}
+        className="w-full shrink-0"
+      >
         <RotateCcw className="mr-2 h-4 w-4" />
         다시 서명
       </Button>
@@ -355,6 +498,8 @@ export function SignaturePadDialog({
     </DialogFooter>
   )
 
+  const sideBySide = shellSize.width >= 720
+
   return (
     <>
       <Dialog
@@ -367,18 +512,16 @@ export function SignaturePadDialog({
         <DialogContent
           mobileSheet={!splitLayout}
           opaqueBackdrop
-          showCloseButton
+          showCloseButton={!splitLayout}
           style={splitLayout ? SPLIT_SHELL_STYLE : undefined}
           className={cn(
             splitLayout
               ? cn(
-                  // 전체 화면 셸 — 중앙 모달/시트 위치 클래스 전부 무력화
                   '!inset-0 !top-0 !left-0 !right-0 !bottom-0 !z-50',
                   '!flex !h-[100dvh] !max-h-[100dvh] !w-screen !max-w-none',
-                  '!translate-x-0 !translate-y-0 !gap-3 !rounded-none !border-0',
+                  '!translate-x-0 !translate-y-0 !items-center !justify-center !gap-0 !rounded-none !border-0',
                   '!bg-transparent !p-2 !pt-[max(0.5rem,env(safe-area-inset-top))]',
                   '!pb-[max(0.5rem,env(safe-area-inset-bottom))] !shadow-none',
-                  'sm:!p-3 sm:!pt-[max(0.75rem,env(safe-area-inset-top))]',
                 )
               : cn(
                   'max-w-3xl gap-0 overflow-hidden border-primary/20 p-0',
@@ -394,61 +537,112 @@ export function SignaturePadDialog({
         >
           {splitLayout ? (
             <div
-              className={cn(
-                'mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col gap-2',
-                // 모바일·태블릿: 위(그래프) / 아래(서명 하단 고정)
-                // PC: 좌·우
-                'lg:max-w-7xl lg:flex-row lg:items-stretch lg:gap-4',
-              )}
+              className="relative flex max-h-full max-w-full flex-col overflow-hidden rounded-2xl border border-primary/35 bg-background shadow-2xl"
+              style={{
+                width: shellSize.width,
+                height: shellSize.height,
+              }}
             >
-              {!successSummary && companion ? (
-                <div
-                  className={cn(
-                    'flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-primary/35 bg-background shadow-2xl',
-                    // 서명란을 제외한 나머지(절반 이상)를 그래프로 사용
-                    'min-h-0 flex-1 basis-0',
-                    'lg:min-h-0 lg:min-w-0 lg:flex-[1.35]',
-                  )}
-                >
-                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
-                    {companion}
-                  </div>
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5">
+                <p className="truncate text-xs text-muted-foreground">
+                  {shellLocked
+                    ? '크기 잠금 · 가장자리 조절 불가'
+                    : '가장자리·모서리를 드래그해 크기 조절'}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={shellLocked ? 'default' : 'outline'}
+                    className="h-7 gap-1 px-2 text-xs"
+                    onClick={toggleShellLock}
+                    disabled={isSubmitting}
+                    title={shellLocked ? '잠금 해제' : '크기 잠금'}
+                  >
+                    {shellLocked ? (
+                      <Lock className="h-3.5 w-3.5" />
+                    ) : (
+                      <Unlock className="h-3.5 w-3.5" />
+                    )}
+                    {shellLocked ? '잠금 중' : '잠금'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    disabled={isSubmitting}
+                    onClick={() => onOpenChange(false)}
+                  >
+                    닫기
+                  </Button>
                 </div>
-              ) : null}
+              </div>
 
               <div
                 className={cn(
-                  'mx-auto flex w-full shrink-0 flex-col overflow-hidden',
-                  'rounded-2xl border border-primary/20 bg-background shadow-2xl',
-                  // 가로는 적당히, 세로는 서명 여유 있게
-                  'mt-auto max-w-md max-h-[min(52dvh,520px)]',
-                  'sm:max-w-lg',
-                  'lg:mx-0 lg:mt-0 lg:max-h-none lg:w-[min(100%,24rem)] lg:max-w-sm lg:flex-none lg:self-stretch',
+                  'flex min-h-0 flex-1 gap-2 p-2',
+                  sideBySide ? 'flex-row' : 'flex-col',
                 )}
               >
-                <DialogHeader
+                {!successSummary && companion ? (
+                  <div
+                    className={cn(
+                      'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-primary/30 bg-background',
+                      sideBySide ? 'flex-[1.35]' : 'min-h-0 flex-[1.15]',
+                    )}
+                  >
+                    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 sm:p-3">
+                      {companion}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div
                   className={cn(
-                    'shrink-0 space-y-0.5 border-b border-primary/10 bg-primary/[0.03] text-left',
-                    'px-4 py-2 sm:px-5',
+                    'mx-auto flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-primary/20 bg-background',
+                    sideBySide
+                      ? 'w-[min(100%,22rem)] flex-none self-stretch'
+                      : 'w-full max-w-lg flex-[0.85]',
                   )}
                 >
-                  <DialogTitle className="text-base leading-snug">{title}</DialogTitle>
-                  <DialogDescription className="text-xs leading-snug sm:text-sm">
-                    {memberLabel ? (
-                      <>
-                        <span className="font-medium text-foreground">{memberLabel}</span>
-                        <span className="mx-1">·</span>
-                      </>
-                    ) : null}
-                    {description}
-                  </DialogDescription>
-                </DialogHeader>
+                  <DialogHeader
+                    className={cn(
+                      'shrink-0 space-y-0.5 border-b border-primary/10 bg-primary/[0.03] text-left',
+                      'px-4 py-2 sm:px-5',
+                    )}
+                  >
+                    <DialogTitle className="text-base leading-snug">{title}</DialogTitle>
+                    <DialogDescription className="text-xs leading-snug sm:text-sm">
+                      {memberLabel ? (
+                        <>
+                          <span className="font-medium text-foreground">{memberLabel}</span>
+                          <span className="mx-1">·</span>
+                        </>
+                      ) : null}
+                      {description}
+                    </DialogDescription>
+                  </DialogHeader>
 
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-2 sm:px-5">
-                  {signatureBody}
+                  <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-4 py-2 sm:px-5">
+                    {signatureBody}
+                  </div>
+                  {footer}
                 </div>
-                {footer}
               </div>
+
+              {!shellLocked
+                ? RESIZE_EDGES.map(({ edge, className, cursor }) => (
+                    <div
+                      key={edge}
+                      role="separator"
+                      aria-label={`크기 조절 ${edge}`}
+                      className={cn('absolute z-20 touch-none', className)}
+                      style={{ cursor }}
+                      onPointerDown={(e) => startShellResize(edge, e)}
+                    />
+                  ))
+                : null}
             </div>
           ) : (
             <>

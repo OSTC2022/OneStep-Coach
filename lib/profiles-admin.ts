@@ -19,6 +19,7 @@ export type ProfileRow = {
   role: ProfileRole | string
   approval_status: ProfileApprovalStatus
   created_at: string
+  adult_running_portal_manage?: boolean | null
 }
 
 export function isMissingApprovalColumn(message: string | undefined): boolean {
@@ -93,8 +94,24 @@ export async function fetchAllProfiles(
     data = (legacy.data ?? []).map((row) => ({
       ...row,
       approval_status: null as unknown as ProfileApprovalStatus,
-    }))
+      adult_running_portal_manage: false,
+    })) as typeof data
     error = legacy.error
+  }
+
+  if (
+    error &&
+    (error.message?.toLowerCase().includes('adult_running_portal_manage') ||
+      error.code === '42703')
+  ) {
+    const withoutManage = await admin
+      .from('profiles')
+      .select(
+        'id, email, full_name, role, approval_status, created_at, avatar_url, phone, kakao_id, instagram_id',
+      )
+      .order('created_at', ordered)
+    data = withoutManage.data as typeof data
+    error = withoutManage.error
   }
 
   const byId = new Map<string, ProfileRow & { dbApprovalStatus?: ProfileApprovalStatus | null }>()
@@ -110,6 +127,10 @@ export async function fetchAllProfiles(
       approval_status: 'pending',
       dbApprovalStatus: dbStatus ?? null,
       created_at: row.created_at,
+      adult_running_portal_manage: Boolean(
+        (row as { adult_running_portal_manage?: boolean | null })
+          .adult_running_portal_manage,
+      ),
     })
   }
 

@@ -68,7 +68,8 @@ function resolveMonthlyMileageKm(input: {
   )
   if (monthLogs.length > 0) return sumMileageLogsKm(monthLogs)
 
-  return Number(input.participant?.mileage_km ?? 0)
+  // 기간 내 로그가 없으면 0 — participant.mileage_km(이전 기간 합계) 폴백 금지
+  return 0
 }
 
 function resolvePersonalPbLabel(input: {

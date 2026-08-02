@@ -53,6 +53,7 @@ import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { resolveBeatRivalMileageGap, formatBeatRivalGapWithName } from '@/lib/running-league/beat-rival-gap'
 import { buildFilteredPortalRankings } from '@/lib/running-league/ranking-hub'
 import {
+  filterMileageLogsForPeriod,
   resolveEffectiveRankingPeriod,
   rankingPeriodFromMonthKey,
 } from '@/lib/running-league/ranking-period'
@@ -998,13 +999,17 @@ function RankingPreview({
     const rivalName = participant?.member?.name?.trim() ?? null
     if (!rivalName) return null
 
+    const periodLogs = filterMileageLogsForPeriod(
+      rankingBundle.mileageLogs,
+      rankingPeriod,
+    )
     const gap =
       highlightMemberId != null
         ? resolveBeatRivalMileageGap({
             myMemberId: highlightMemberId,
             beatRivalMemberId,
             mileageLeaderboard: activeMileageLeaderboard,
-            monthlyLogs: rankingBundle?.mileageLogs,
+            monthlyLogs: periodLogs,
           })
         : null
 
@@ -1014,6 +1019,7 @@ function RankingPreview({
     beatRivalMemberId,
     highlightMemberId,
     rankingBundle,
+    rankingPeriod,
   ])
 
   const filteredParticipants = rankingBundle
@@ -1660,17 +1666,16 @@ function MileageRankingList({
 
   const beatRivalGap = useMemo(() => {
     if (!showBeatRivalLabel || !highlightMemberId || !beatRivalMemberId) return null
+    // leaderboard는 이미 기간 필터됨 — lookback 로그 폴백 금지
     return resolveBeatRivalMileageGap({
       myMemberId: highlightMemberId,
       beatRivalMemberId,
       mileageLeaderboard: leaderboard,
-      monthlyLogs: rankingBundle?.mileageLogs,
     })
   }, [
     beatRivalMemberId,
     highlightMemberId,
     leaderboard,
-    rankingBundle?.mileageLogs,
     showBeatRivalLabel,
   ])
 

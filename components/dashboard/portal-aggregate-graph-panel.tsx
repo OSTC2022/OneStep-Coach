@@ -11,7 +11,10 @@ import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
 import { filterParticipantsByGender, type RankingGenderFilter } from '@/lib/running-league/ranking-gender'
 import type { MemberRunningLeagueRankingBundle } from '@/lib/actions/running-league'
 import type { RankingView } from '@/lib/running-league/ranking-view'
-import type { RankingPeriod } from '@/lib/running-league/ranking-period'
+import {
+  filterMileageLogsForPeriod,
+  type RankingPeriod,
+} from '@/lib/running-league/ranking-period'
 import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-layout'
 import { cn } from '@/lib/utils'
 
@@ -59,22 +62,27 @@ export function PortalAggregateGraphPanel({
     })
   }, [filteredParticipants, pbDistance, portalPbRecords, rankingBundle])
 
+  const periodMileageLogs = useMemo(() => {
+    if (!rankingBundle) return []
+    return filterMileageLogsForPeriod(rankingBundle.mileageLogs, rankingPeriod)
+  }, [rankingBundle, rankingPeriod])
+
   const mileageComparisonChart = useMemo(() => {
     if (!rankingBundle) return null
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
-      logs: rankingBundle.mileageLogs,
+      logs: periodMileageLogs,
     })
-  }, [filteredParticipants, rankingBundle])
+  }, [filteredParticipants, periodMileageLogs, rankingBundle])
 
   const beatRivalMileageComparisonChart = useMemo(() => {
     if (!rankingBundle || !beatRivalMemberId) return null
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
-      logs: rankingBundle.mileageLogs,
+      logs: periodMileageLogs,
       beatRivalMemberId,
     })
-  }, [beatRivalMemberId, filteredParticipants, rankingBundle])
+  }, [beatRivalMemberId, filteredParticipants, periodMileageLogs, rankingBundle])
 
   const attendanceComparisonChart = useMemo(() => {
     if (!rankingBundle) return null

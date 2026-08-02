@@ -12,6 +12,7 @@ import {
   listRegisteredAccounts,
   revokeAccountApproval,
   revokeAccountRole,
+  setAdultRunningPortalManageAccess,
   updateAccountRole,
 } from '@/lib/actions/settings-accounts'
 import type {
@@ -45,6 +46,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -725,6 +728,51 @@ export function AccountRoleManagement({
                   '권한 저장'
                 )}
               </Button>
+
+              {!isOnHoldAction &&
+                selected.appRole === 'instructor' && (
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
+                    <div className="min-w-0 space-y-0.5">
+                      <Label
+                        htmlFor="portal-manage-access"
+                        className="text-sm font-medium"
+                      >
+                        러닝 포털 관리 허용
+                      </Label>
+                      <p className="text-[11px] leading-snug text-muted-foreground">
+                        월별 출석왕·룰렛 관리 페이지 접근
+                      </p>
+                    </div>
+                    <Switch
+                      id="portal-manage-access"
+                      checked={selected.adultRunningPortalManage}
+                      disabled={actionBusy}
+                      onCheckedChange={(checked) => {
+                        void (async () => {
+                          setActionBusy(true)
+                          const result = await setAdultRunningPortalManageAccess(
+                            selected.id,
+                            checked,
+                          )
+                          setActionBusy(false)
+                          if (result.error) {
+                            toast.error('권한 변경 실패', {
+                              description: result.error,
+                            })
+                            return
+                          }
+                          toast.success(
+                            checked
+                              ? '러닝 포털 관리를 허용했습니다.'
+                              : '러닝 포털 관리를 해제했습니다.',
+                          )
+                          const refreshed = await listRegisteredAccounts()
+                          setAccounts(refreshed)
+                        })()
+                      }}
+                    />
+                  </div>
+                )}
 
               {!isOnHoldAction &&
                 selected.appRole !== 'member' &&

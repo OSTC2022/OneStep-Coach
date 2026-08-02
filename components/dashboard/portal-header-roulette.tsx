@@ -14,7 +14,10 @@ import { buildAttendanceKingLeaderboard } from '@/lib/running-league/attendance-
 import type { MemberRunningLeagueHome } from '@/lib/running-league/member-ranking-types'
 import { buildPortalRouletteMemberColorMap } from '@/lib/running-league/portal-member-color-sync'
 import { buildPortalRouletteSlots } from '@/lib/running-league/portal-roulette'
-import { resolveEffectiveRankingPeriod } from '@/lib/running-league/ranking-period'
+import {
+  rankingPeriodFromMonthKey,
+  resolveEffectiveRankingPeriod,
+} from '@/lib/running-league/ranking-period'
 import type { RunningLeagueMileageLog, RunningLeagueParticipant } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -23,6 +26,8 @@ type PortalHeaderRouletteProps = {
   participants: ReadonlyArray<RunningLeagueParticipant>
   rankingReferenceDate?: string | null
   rankingCycleStartDate?: string | null
+  /** 관리 페이지 등 — 지정 시 해당 월 전체로 출석·룰렛 집계 */
+  rankingMonthKey?: string | null
   beatRivalMemberId?: string | null
   className?: string
 }
@@ -34,6 +39,7 @@ export function resolvePortalHeaderRouletteProps(input: {
   > | null
   rankingReferenceDate?: string | null
   rankingCycleStartDate?: string | null
+  rankingMonthKey?: string | null
   beatRivalMemberId?: string | null
 }): PortalHeaderRouletteProps | null {
   const bundle = input.runningLeagueHome?.rankingBundle
@@ -49,6 +55,7 @@ export function resolvePortalHeaderRouletteProps(input: {
     participants: bundle.participants,
     rankingReferenceDate: input.rankingReferenceDate ?? null,
     rankingCycleStartDate: input.rankingCycleStartDate ?? null,
+    rankingMonthKey: input.rankingMonthKey ?? null,
     beatRivalMemberId:
       input.beatRivalMemberId ??
       input.runningLeagueHome?.league?.beat_rival_member_id ??
@@ -60,6 +67,7 @@ export function MemberPortalHeaderRoulette({
   runningLeagueHome,
   rankingReferenceDate,
   rankingCycleStartDate,
+  rankingMonthKey,
   beatRivalMemberId,
   className,
 }: {
@@ -69,6 +77,7 @@ export function MemberPortalHeaderRoulette({
   > | null
   rankingReferenceDate?: string | null
   rankingCycleStartDate?: string | null
+  rankingMonthKey?: string | null
   beatRivalMemberId?: string | null
   className?: string
 }) {
@@ -78,9 +87,16 @@ export function MemberPortalHeaderRoulette({
         runningLeagueHome,
         rankingReferenceDate,
         rankingCycleStartDate,
+        rankingMonthKey,
         beatRivalMemberId,
       }),
-    [beatRivalMemberId, rankingCycleStartDate, rankingReferenceDate, runningLeagueHome],
+    [
+      beatRivalMemberId,
+      rankingCycleStartDate,
+      rankingMonthKey,
+      rankingReferenceDate,
+      runningLeagueHome,
+    ],
   )
 
   if (!props) return null
@@ -92,17 +108,20 @@ export function PortalHeaderRoulette({
   participants,
   rankingReferenceDate,
   rankingCycleStartDate,
+  rankingMonthKey,
   beatRivalMemberId,
   className,
 }: PortalHeaderRouletteProps) {
   const [open, setOpen] = useState(false)
 
-  const { period } = resolveEffectiveRankingPeriod(
-    null,
-    null,
-    rankingReferenceDate ?? null,
-    rankingCycleStartDate ?? null,
-  )
+  const period = rankingMonthKey?.trim()
+    ? rankingPeriodFromMonthKey(rankingMonthKey.trim())
+    : resolveEffectiveRankingPeriod(
+        null,
+        null,
+        rankingReferenceDate ?? null,
+        rankingCycleStartDate ?? null,
+      ).period
   const attendanceRows = useMemo(
     () => buildAttendanceKingLeaderboard(participants, mileageLogs, period),
     [mileageLogs, participants, period],

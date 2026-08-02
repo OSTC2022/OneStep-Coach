@@ -941,7 +941,10 @@ export function MemberRankingCharts({
         title="이겨라 · 마일리지"
       />
     ) : (
-      mileagePanel
+      <GraphEmptyState
+        compact={compact}
+        description="이번 기간 러닝 기록이 쌓이면 이겨라 그래프가 표시됩니다."
+      />
     )
 
   const attendancePanel =

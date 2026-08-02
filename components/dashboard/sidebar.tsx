@@ -39,6 +39,7 @@ import {
   Eye,
   EyeOff,
   Trophy,
+  Dices,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { User } from '@/lib/types'
@@ -56,10 +57,12 @@ import {
   orderSidebarMenuItems,
   readSidebarMenuHidden,
   readSidebarMenuOrder,
-  type SidebarMenuItemDef,
   writeSidebarMenuHidden,
   writeSidebarMenuOrder,
+  RUNNING_PORTAL_MANAGE_MENU_ID,
+  type SidebarMenuItemDef,
 } from '@/lib/dashboard-menu-order'
+import { canManageAdultRunningPortal } from '@/lib/running-league/portal-manage-access'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
@@ -68,6 +71,7 @@ import { cn } from '@/lib/utils'
 const MENU_ICONS: Record<string, LucideIcon> = {
   '/dashboard/my': LayoutDashboard,
   '/dashboard/running-portal': Trophy,
+  '/dashboard/running-portal/manage': Dices,
   '/dashboard': LayoutDashboard,
   '/dashboard/lesson-status': ListChecks,
   '/dashboard/members': Users,
@@ -82,6 +86,7 @@ const MENU_ICONS: Record<string, LucideIcon> = {
   '/dashboard/settings/center-contact': MessageCircle,
   '/dashboard/settings/adult-running-portal': Eye,
   '/dashboard/settings/running-schedule': CalendarDays,
+  '/dashboard/settings/marathon-schedule': Trophy,
   '/dashboard/settings': Settings,
 }
 
@@ -92,11 +97,21 @@ function isMenuItemActive(pathname: string, url: string) {
   if (url === '/dashboard/settings/running-schedule') {
     return pathname.startsWith('/dashboard/settings/running-schedule')
   }
+  if (url === '/dashboard/settings/marathon-schedule') {
+    return pathname.startsWith('/dashboard/settings/marathon-schedule')
+  }
   if (url === '/dashboard/settings/adult-running-portal') {
     return pathname.startsWith('/dashboard/settings/adult-running-portal')
   }
+  if (url === '/dashboard/running-portal/manage') {
+    return pathname.startsWith('/dashboard/running-portal/manage')
+  }
   if (url === '/dashboard/running-portal') {
-    return pathname === '/dashboard/running-portal' || pathname.startsWith('/dashboard/running-portal/')
+    return (
+      pathname === '/dashboard/running-portal' ||
+      (pathname.startsWith('/dashboard/running-portal/') &&
+        !pathname.startsWith('/dashboard/running-portal/manage'))
+    )
   }
   return (
     pathname === url ||
@@ -130,8 +145,14 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
     setHiddenIds(readSidebarMenuHidden(userRole))
   }, [userRole])
 
-  const menuItems = orderSidebarMenuItems(userRole, order, hiddenIds)
-  const editMenuItems = orderSidebarMenuItems(userRole, order)
+  const menuItems = orderSidebarMenuItems(userRole, order, hiddenIds).filter(
+    (item) =>
+      item.id !== RUNNING_PORTAL_MANAGE_MENU_ID || canManageAdultRunningPortal(user),
+  )
+  const editMenuItems = orderSidebarMenuItems(userRole, order).filter(
+    (item) =>
+      item.id !== RUNNING_PORTAL_MANAGE_MENU_ID || canManageAdultRunningPortal(user),
+  )
   const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds])
   const visibleCount = editMenuItems.filter((item) => !hiddenSet.has(item.id)).length
   const canEditMenu = editMenuItems.length > 1

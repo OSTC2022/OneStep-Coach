@@ -188,7 +188,7 @@ export function MonthDayPanel({
                                 return
                               }
                               activateLesson(lesson)
-                            }, 220)
+                            }, 80)
                           }}
                           onDoubleClick={(e) => {
                             e.preventDefault()

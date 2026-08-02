@@ -100,6 +100,43 @@ function mergeLessonsById(...lists: Lesson[][]): Lesson[] {
   return Array.from(map.values())
 }
 
+/** 새로고침 결과를 우선하되, 같은 마스터의 옛 가상 일정은 제거 */
+function mergeCalendarRefresh(
+  previous: Lesson[],
+  fresh: Lesson[],
+  dateFrom: string,
+  dateTo: string,
+): Lesson[] {
+  const touchedMasterIds = new Set<string>()
+
+  for (const lesson of fresh) {
+    const virtual = parseVirtualLessonId(lesson.id)
+    if (virtual) touchedMasterIds.add(virtual.masterId)
+    if (lesson.recurring_master_id) touchedMasterIds.add(lesson.recurring_master_id)
+  }
+
+  const previousKept = previous.filter((lesson) => {
+    const inRange =
+      lesson.lesson_date >= dateFrom && lesson.lesson_date <= dateTo
+    if (!inRange) return true
+
+    if (touchedMasterIds.has(lesson.id)) return false
+
+    const virtual = parseVirtualLessonId(lesson.id)
+    if (virtual && touchedMasterIds.has(virtual.masterId)) return false
+    if (
+      lesson.recurring_master_id &&
+      touchedMasterIds.has(lesson.recurring_master_id)
+    ) {
+      return false
+    }
+
+    return true
+  })
+
+  return mergeLessonsById(previousKept, fresh)
+}
+
 import { DayWeekView } from './day-week-view'
 import { MonthView } from './month-view'
 
@@ -159,6 +196,7 @@ export function LessonCalendar({
   const [editOpen, setEditOpen] = useState(false)
   const [draft, setDraft] = useState<LessonDraft | null>(null)
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null)
+  const [editSessionKey, setEditSessionKey] = useState<string | null>(null)
   const [editDraftInstructorId, setEditDraftInstructorId] = useState<string | null>(null)
   const [editAnchor, setEditAnchor] = useState<LessonEditAnchor | null>(null)
   const [searchPoolLessons, setSearchPoolLessons] = useState<Lesson[]>([])
@@ -345,12 +383,11 @@ export function LessonCalendar({
 
         const { dateFrom, dateTo } = resolveRangeKey(date, nextView, 'all')
         const nextLessons = shouldMergeWithPrevious
-          ? mergeLessonsById(
-              lessonsBeforeFetch.filter(
-                (lesson) =>
-                  lesson.lesson_date >= dateFrom && lesson.lesson_date <= dateTo,
-              ),
+          ? mergeCalendarRefresh(
+              lessonsBeforeFetch,
               data,
+              dateFrom,
+              dateTo,
             )
           : data
 
@@ -362,13 +399,11 @@ export function LessonCalendar({
         if (shouldReplacePool) {
           setSearchPoolLessons((prev) =>
             shouldMergeWithPrevious
-              ? mergeLessonsById(
-                  prev.filter(
-                    (lesson) =>
-                      lesson.lesson_date >= dateFrom &&
-                      lesson.lesson_date <= dateTo,
-                  ),
+              ? mergeCalendarRefresh(
+                  prev,
                   nextLessons,
+                  dateFrom,
+                  dateTo,
                 )
               : nextLessons,
           )
@@ -470,7 +505,7 @@ export function LessonCalendar({
     mutationSyncTimerRef.current = window.setTimeout(() => {
       mutationSyncTimerRef.current = null
       void syncRange(currentDateRef.current, viewRef.current, {
-        force: false,
+        force: true,
         refreshing: true,
       })
     }, 180)
@@ -765,6 +800,7 @@ export function LessonCalendar({
     setDraft(null)
     setEditingLesson(lesson)
     setEditAnchor(anchor ?? null)
+    setEditSessionKey(crypto.randomUUID())
     setEditOpen(true)
   }
 
@@ -786,6 +822,11 @@ export function LessonCalendar({
     return null
   }, [])
 
+  // 수정 팝업 청크 미리 로드 — 첫 클릭 지연 완화
+  useEffect(() => {
+    void import('./lesson-create-dialog')
+  }, [])
+
   async function handleLessonActivate(
     lesson: Lesson,
     anchor?: LessonEditAnchor,
@@ -802,16 +843,7 @@ export function LessonCalendar({
       return
     }
 
-    if (isOptimisticLessonId(lesson.id)) {
-      const persisted = await waitForPersistedLesson(lesson)
-      if (!persisted) {
-        toast.error('일정 저장 중입니다. 잠시 후 다시 시도해주세요.')
-        return
-      }
-      openEditDialog(persisted, anchor)
-      return
-    }
-
+    // 낙관적 일정도 즉시 팝업 오픈 — 저장/삭제는 실ID 확보 후 처리
     openEditDialog(lesson, anchor)
   }
 
@@ -1072,6 +1104,20 @@ export function LessonCalendar({
         lesson.event_type === 'materialized' ||
         (!isMaster && !isVirtual)
 
+      // 마스터 저장: 같은 id로 남아 있는 옛 단일 행만 제거 (가상 발생은 sync가 교체)
+      if (isMaster) {
+        setLessons((prev) => {
+          const next = prev.filter((item) => item.id !== lesson.id)
+          lessonsRef.current = next
+          const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+          setCachedLessons(cacheKey, next)
+          return next
+        })
+        setSearchPoolLessons((prev) => prev.filter((item) => item.id !== lesson.id))
+        scheduleMutationSync()
+        return
+      }
+
       // 예외/단일 저장 결과는 즉시 반영 (모바일에서 sync 대기 중 미반영 방지)
       if (isExceptionOrStored) {
         const enriched = enrichLessonWithInstructorCatalog(lesson, instructors)
@@ -1091,17 +1137,21 @@ export function LessonCalendar({
             lessonHistory.pushLessonCreate(enriched)
           }
 
-          // 같은 마스터·같은 원래 날짜의 가상 발생은 예외로 대체
+          // 같은 마스터·원래 발생일(또는 이동 후 날짜)의 가상 발생은 예외로 대체
           const withoutReplacedVirtual = prev.filter((item) => {
             if (item.id === enriched.id) return true
             const virtual = parseVirtualLessonId(item.id)
             if (!virtual || !enriched.recurring_master_id) return true
             if (virtual.masterId !== enriched.recurring_master_id) return true
             const originalDate =
-              typeof enriched.original_start_time === 'string'
+              typeof enriched.original_start_time === 'string' &&
+              /^\d{4}-\d{2}-\d{2}/.test(enriched.original_start_time)
                 ? enriched.original_start_time.slice(0, 10)
                 : enriched.lesson_date
-            return virtual.occurrenceDate !== originalDate && virtual.occurrenceDate !== enriched.lesson_date
+            return (
+              virtual.occurrenceDate !== originalDate &&
+              virtual.occurrenceDate !== enriched.lesson_date
+            )
           })
 
           const next = exists
@@ -1119,10 +1169,14 @@ export function LessonCalendar({
             if (!virtual || !enriched.recurring_master_id) return true
             if (virtual.masterId !== enriched.recurring_master_id) return true
             const originalDate =
-              typeof enriched.original_start_time === 'string'
+              typeof enriched.original_start_time === 'string' &&
+              /^\d{4}-\d{2}-\d{2}/.test(enriched.original_start_time)
                 ? enriched.original_start_time.slice(0, 10)
                 : enriched.lesson_date
-            return virtual.occurrenceDate !== originalDate && virtual.occurrenceDate !== enriched.lesson_date
+            return (
+              virtual.occurrenceDate !== originalDate &&
+              virtual.occurrenceDate !== enriched.lesson_date
+            )
           })
           const exists = withoutReplacedVirtual.some((item) => item.id === enriched.id)
           if (exists) {
@@ -1374,8 +1428,29 @@ export function LessonCalendar({
         return
       }
 
+      const saved = result.data ?? []
+      const savedIds = new Set(saved.map((item) => item.id))
+      for (const item of saved) {
+        handleLessonSaved(item)
+      }
+      const removeIds = (result.deletedIds ?? []).filter((id) => !savedIds.has(id))
+      // 드래그 이동: 옛 가상 occurrence는 반드시 제거
+      if (
+        parseVirtualLessonId(persisted.id) &&
+        !savedIds.has(persisted.id) &&
+        !removeIds.includes(persisted.id)
+      ) {
+        removeIds.push(persisted.id)
+      }
+      if (removeIds.length) {
+        handleLessonDeleted(removeIds, {
+          scope: 'single',
+          anchorDate: virtual?.occurrenceDate ?? persisted.lesson_date,
+        })
+      }
+
       lessonHistory.pushLessonUpdate(persisted, { ...persisted, ...updates })
-      void syncRange(currentDate, view, { force: false, refreshing: true })
+      void syncRange(currentDate, view, { force: true, refreshing: true })
       toast.message('수업 일정 이동', {
         description: '상단 실행 취소(↩)로 되돌릴 수 있습니다.',
       })
@@ -1395,8 +1470,13 @@ export function LessonCalendar({
       setLessons((prev) => {
         const next = prev.map((l) => (l.id === persisted.id ? after : l))
         lessonsRef.current = next
+        const { cacheKey } = resolveRangeKey(currentDate, view, 'all')
+        setCachedLessons(cacheKey, next)
         return next
       })
+      setSearchPoolLessons((prev) =>
+        prev.map((l) => (l.id === persisted.id ? after : l)),
+      )
     }
 
     toast.message('수업 일정 이동', {
@@ -1833,10 +1913,12 @@ export function LessonCalendar({
                 if (!open) {
                   setEditingLesson(null)
                   setEditAnchor(null)
+                  setEditSessionKey(null)
                 }
               }}
               variant="popup"
               anchor={editAnchor}
+              editSessionKey={editSessionKey}
               sameSlotLessons={editingSameSlotLessons}
               lesson={editingLesson}
               members={members}
@@ -1844,6 +1926,7 @@ export function LessonCalendar({
               defaultInstructorId={defaultInstructorId}
               onSaved={handleLessonSaved}
               onDeleted={handleLessonDeleted}
+              onResolvePersistedLesson={waitForPersistedLesson}
               onEditDraftChange={({ instructorId }) =>
                 setEditDraftInstructorId(instructorId)
               }

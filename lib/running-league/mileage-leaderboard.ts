@@ -97,10 +97,8 @@ export function buildMileageDistanceLeaderboard(
     const memberId = participant.member_id
     const memberName = participant.member?.name?.trim() || '회원'
     const fromLogs = monthlyDistanceByMember.get(memberId)
-    const mileageKm =
-      fromLogs != null
-        ? fromLogs
-        : Math.round(Number(participant.mileage_km ?? 0) * 10) / 10
+    // 기간 필터된 로그만 사용 — participant.mileage_km 폴백은 출석·룰렛과 어긋남
+    const mileageKm = fromLogs != null ? fromLogs : 0
 
     if (mileageKm <= 0) {
       unranked.push({

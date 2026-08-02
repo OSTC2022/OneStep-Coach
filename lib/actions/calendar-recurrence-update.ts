@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { addDays, format, parseISO } from 'date-fns'
+import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
@@ -10,9 +10,8 @@ import {
 import { buildVirtualLessonId, patternToRRuleLines } from '@/lib/calendar-recurrence/types'
 import type { RecurrenceCapableLesson } from '@/lib/calendar-recurrence/types'
 import { parseLessonRecurrencePattern } from '@/lib/lesson-recurrence'
-import type { LessonFormData, LessonSeriesScope } from '@/lib/actions/lessons'
-import type { Lesson } from '@/lib/types'
-import { toStoredLessonType } from '@/lib/lesson-types'
+import type { LessonSeriesScope } from '@/lib/actions/lessons'
+import type { Lesson, LessonFormData } from '@/lib/types'
 import {
   syncAndPurgeStoredLessonsForRecurringSlot,
 } from '@/lib/calendar-recurrence/purge-slot-stored-lessons'
@@ -43,11 +42,32 @@ function revalidateCalendarPaths() {
 
 function occurrenceOriginalIso(master: RecurrenceCapableLesson, date: string) {
   const hhmm = (master.start_time ?? '09:00').slice(0, 5)
-  return new Date(`${date}T${hhmm}:00+09:00`).toISOString()
+  // UTC 변환하지 않음 — 클라이언트에서 날짜(YYYY-MM-DD)를 그대로 읽을 수 있게 유지
+  return `${date}T${hhmm}:00+09:00`
 }
 
 function dayBefore(dateKey: string) {
   return format(addDays(parseISO(dateKey), -1), 'yyyy-MM-dd')
+}
+
+function shiftDateKey(dateKey: string, deltaDays: number) {
+  if (!deltaDays) return dateKey
+  return format(addDays(parseISO(dateKey), deltaDays), 'yyyy-MM-dd')
+}
+
+/** 전체 이동 시 EXDATE 날짜도 같은 일수만큼 이동 */
+function shiftRecurrenceExdates(
+  recurrence: string[] | null | undefined,
+  deltaDays: number,
+): string[] {
+  if (!deltaDays) return [...(recurrence ?? [])]
+  return (recurrence ?? []).map((line) => {
+    if (!line.startsWith('EXDATE')) return line
+    return line.replace(/(\d{4})(\d{2})(\d{2})/g, (_match, y, m, d) => {
+      const shifted = shiftDateKey(`${y}-${m}-${d}`, deltaDays)
+      return shifted.replace(/-/g, '')
+    })
+  })
 }
 
 function buildExceptionPayload(
@@ -75,12 +95,50 @@ function buildExceptionPayload(
   }
 }
 
+function resolvePatternFromUpdates(
+  master: RecurrenceCapableLesson,
+  updates: Partial<LessonFormData>,
+) {
+  if (updates.recurrence_pattern !== undefined && updates.recurrence_pattern !== null) {
+    return parseLessonRecurrencePattern(updates.recurrence_pattern)
+  }
+  return parseLessonRecurrencePattern(master.recurrence_pattern)
+}
+
+function resolveMasterRecurrenceLines(
+  master: RecurrenceCapableLesson,
+  updates: Partial<LessonFormData>,
+  lessonDate: string,
+  recurrence?: string[] | null,
+): string[] {
+  const nextPattern = resolvePatternFromUpdates(master, updates)
+  const prevPattern = parseLessonRecurrencePattern(master.recurrence_pattern)
+  const explicitRecurrence = recurrence?.some((line) => line.startsWith('RRULE:'))
+    ? [...recurrence!]
+    : null
+
+  if (nextPattern !== 'none' && nextPattern !== prevPattern) {
+    return explicitRecurrence ?? patternToRRuleLines(nextPattern, lessonDate)
+  }
+
+  if (explicitRecurrence) return explicitRecurrence
+  return ensureMasterRecurrenceLines(master)
+}
+
 function buildMasterPayloadFromRow(
   master: RecurrenceCapableLesson,
   updates: Partial<LessonFormData>,
   lessonDate: string,
   recurrence: string[] | null | undefined,
 ): Record<string, unknown> {
+  const pattern = resolvePatternFromUpdates(master, updates)
+  const recurrenceLines = resolveMasterRecurrenceLines(
+    master,
+    updates,
+    lessonDate,
+    recurrence,
+  )
+
   return {
     event_type: 'recurring_master',
     event_status: 'confirmed',
@@ -92,8 +150,8 @@ function buildMasterPayloadFromRow(
     end_time: updates.end_time ?? master.end_time,
     lesson_type: resolveLessonTypeUpdate(updates, master.lesson_type),
     recurrence_group_id: master.recurrence_group_id ?? master.id,
-    recurrence_pattern: master.recurrence_pattern,
-    recurrence,
+    recurrence_pattern: pattern === 'none' ? master.recurrence_pattern : pattern,
+    recurrence: recurrenceLines,
     session_deducted: false,
   }
 }
@@ -387,6 +445,13 @@ export async function updateRecurringMasterSeries(
   }
 
   if (scope === 'all') {
+    const newOccurrenceDate = updates.lesson_date ?? occurrenceDate
+    const deltaDays = differenceInCalendarDays(
+      parseISO(newOccurrenceDate),
+      parseISO(occurrenceDate),
+    )
+    const masterStartDate = shiftDateKey(row.lesson_date, deltaDays)
+
     const oldSlotMatchTarget = buildSlotMatchTargetFromMaster(row, occurrenceDate)
     await syncAndPurgeRecurringSlot(
       supabase,
@@ -400,7 +465,31 @@ export async function updateRecurringMasterSeries(
       deletedIds.push(...purged)
     })
 
-    const payload = buildMasterPayloadFromRow(row, updates, row.lesson_date, row.recurrence)
+    const baseRecurrence = resolveMasterRecurrenceLines(
+      row,
+      updates,
+      masterStartDate,
+      deltaDays !== 0 ? shiftRecurrenceExdates(row.recurrence, deltaDays) : row.recurrence,
+    )
+    const nextRecurrence =
+      deltaDays !== 0 &&
+      resolvePatternFromUpdates(row, updates) ===
+        parseLessonRecurrencePattern(row.recurrence_pattern)
+        ? [
+            ...patternToRRuleLines(
+              resolvePatternFromUpdates(row, updates),
+              masterStartDate,
+            ),
+            ...baseRecurrence.filter((line) => line.startsWith('EXDATE')),
+          ]
+        : baseRecurrence
+
+    const payload = buildMasterPayloadFromRow(
+      row,
+      updates,
+      masterStartDate,
+      nextRecurrence,
+    )
     const { data, error: updateError } = await supabase
       .from('lessons')
       .update(payload)
@@ -410,12 +499,20 @@ export async function updateRecurringMasterSeries(
     if (updateError) return { error: updateError.message }
     if (data) updatedLessons.push(data as Lesson)
 
-    const newSlotMatchTarget = buildSlotMatchTargetFromMaster(row, occurrenceDate, updates)
+    if (deltaDays !== 0) {
+      deletedIds.push(buildVirtualLessonId(masterId, occurrenceDate))
+    }
+
+    const newSlotMatchTarget = buildSlotMatchTargetFromMaster(
+      row,
+      newOccurrenceDate,
+      updates,
+    )
     await syncAndPurgeRecurringSlot(
       supabase,
       newSlotMatchTarget,
       'all',
-      occurrenceDate,
+      newOccurrenceDate,
       row,
       updates,
       [masterId],
@@ -427,7 +524,7 @@ export async function updateRecurringMasterSeries(
     const groupPurged = await purgeGroupStoredRowsFromDate(
       supabase,
       groupId,
-      row.lesson_date,
+      masterStartDate < row.lesson_date ? masterStartDate : row.lesson_date,
       [masterId],
     )
     deletedIds.push(...groupPurged)
@@ -440,8 +537,9 @@ export async function updateRecurringMasterSeries(
     return { data: updatedLessons, deletedIds: [...new Set(deletedIds)] }
   }
 
-  // future — split series: old master ends before anchor, new master from anchor
-  const pattern = parseLessonRecurrencePattern(row.recurrence_pattern)
+  // future — split series: old master ends before anchor, new master from (moved) date
+  const pattern = resolvePatternFromUpdates(row, updates)
+  const seriesStartDate = updates.lesson_date ?? occurrenceDate
   const recurrenceLines = ensureMasterRecurrenceLines(row)
   const truncatedRecurrence = truncateRecurrenceUntil(
     recurrenceLines,
@@ -455,6 +553,9 @@ export async function updateRecurringMasterSeries(
   if (truncateError) return { error: truncateError.message }
 
   deletedIds.push(buildVirtualLessonId(masterId, occurrenceDate))
+  if (seriesStartDate !== occurrenceDate) {
+    deletedIds.push(buildVirtualLessonId(masterId, seriesStartDate))
+  }
 
   await supabase
     .from('lessons')
@@ -496,11 +597,11 @@ export async function updateRecurringMasterSeries(
     )),
   )
 
-  const freshRecurrence = patternToRRuleLines(pattern, occurrenceDate)
+  const freshRecurrence = patternToRRuleLines(pattern, seriesStartDate)
   const newMasterPayload = buildMasterPayloadFromRow(
     row,
     updates,
-    occurrenceDate,
+    seriesStartDate,
     freshRecurrence,
   )
 
@@ -528,13 +629,17 @@ export async function updateRecurringMasterSeries(
     )),
   )
 
-  const newSlotMatchTarget = buildSlotMatchTargetFromMaster(row, occurrenceDate, updates)
+  const newSlotMatchTarget = buildSlotMatchTargetFromMaster(
+    row,
+    seriesStartDate,
+    updates,
+  )
   deletedIds.push(
     ...(await syncAndPurgeRecurringSlot(
       supabase,
       newSlotMatchTarget,
       'future',
-      occurrenceDate,
+      seriesStartDate,
       row,
       updates,
       keepMasterIds,
@@ -549,7 +654,7 @@ export async function updateRecurringMasterSeries(
         member_id: updates.member_id ?? row.member_id,
         start_time: updates.start_time ?? row.start_time,
       },
-      occurrenceDate,
+      seriesStartDate,
       keepMasterIds,
     )),
   )

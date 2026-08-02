@@ -152,6 +152,10 @@ async function mapRegisteredAccounts(
       linkedMemberName: linked?.name ?? null,
       linkedMemberSport: linked?.sport ?? null,
       isProtected: protectedAccount,
+      adultRunningPortalManage: Boolean(
+        (row as { adult_running_portal_manage?: boolean | null })
+          .adult_running_portal_manage,
+      ),
     }
   })
 }
@@ -654,5 +658,47 @@ export async function deleteAccount(userId: string): Promise<{ error?: string }>
 
   revalidatePath('/dashboard/settings')
   revalidatePath('/auth/login')
+  return {}
+}
+
+export async function setAdultRunningPortalManageAccess(
+  userId: string,
+  enabled: boolean,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+
+  const admin = createServiceRoleClient()
+  const allProfiles = await fetchAllProfiles(admin)
+  const profile = allProfiles.find((p) => p.id === userId)
+  if (!profile) return { error: '계정을 찾을 수 없습니다.' }
+
+  const appRole = profileRoleToAppRole(profile.role as ProfileRole)
+  if (appRole !== 'instructor') {
+    return { error: '강사 계정에만 러닝 포털 관리 권한을 부여할 수 있습니다.' }
+  }
+
+  const { error } = await admin
+    .from('profiles')
+    .update({
+      adult_running_portal_manage: enabled,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+
+  if (error) {
+    if (
+      error.message.toLowerCase().includes('adult_running_portal_manage') ||
+      error.code === '42703'
+    ) {
+      return {
+        error:
+          'DB 마이그레이션이 필요합니다. supabase/add-adult-running-portal-manage.sql 을 실행해주세요.',
+      }
+    }
+    return { error: error.message }
+  }
+
+  revalidatePath('/dashboard/settings')
+  revalidatePath('/dashboard/running-portal/manage')
   return {}
 }

@@ -266,11 +266,11 @@ export const LessonCompletionMemberInsight = forwardRef<
   return (
     <div
       className={cn(
-        'flex h-full min-h-0 flex-col gap-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-3',
+        'flex h-full min-h-0 flex-col gap-2 rounded-xl border border-primary/20 bg-primary/[0.04] p-2 sm:gap-3 sm:p-3',
         className,
       )}
     >
-      <div className="rounded-lg border border-primary/25 bg-primary/10 px-3 py-2.5">
+      <div className="shrink-0 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2">
         <p className="text-[11px] font-medium text-primary">남은 횟차</p>
         <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
           {formatRemainingPreview(resolvedRemaining)}
@@ -283,7 +283,7 @@ export const LessonCompletionMemberInsight = forwardRef<
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-2">
             <MiniMetric
               title="체중"
               latest={
@@ -336,7 +336,7 @@ export const LessonCompletionMemberInsight = forwardRef<
             />
           </div>
 
-          <div className="space-y-2 border-t border-border/60 pt-2">
+          <div className="shrink-0 space-y-2 border-t border-border/60 pt-2">
             <p className="text-[11px] font-medium text-muted-foreground">
               오늘 기록 (종료 전 입력)
             </p>
@@ -434,8 +434,8 @@ function MiniMetric({
   staffOnly?: boolean
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border/70 bg-background/60 p-2">
-      <div className="flex items-baseline justify-between gap-1">
+    <div className="flex min-h-0 min-w-0 flex-col rounded-lg border border-border/70 bg-background/60 p-2">
+      <div className="flex shrink-0 items-baseline justify-between gap-1">
         <p className="text-[10px] font-medium text-muted-foreground">
           {title}
           {staffOnly ? (
@@ -457,10 +457,10 @@ function MiniMetric({
           unit={unit}
           formatValue={formatValue}
           showPreviousDelta
-          className="mt-1 h-[min(22dvh,160px)] w-full sm:h-[140px]"
+          className="mt-1 min-h-[4.5rem] w-full flex-1 !aspect-auto"
         />
       ) : (
-        <p className="mt-2 py-3 text-center text-[10px] text-muted-foreground">
+        <p className="mt-2 flex flex-1 items-center justify-center py-3 text-center text-[10px] text-muted-foreground">
           기록 부족
         </p>
       )}

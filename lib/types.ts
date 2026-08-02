@@ -15,6 +15,8 @@ export interface User {
   phone?: string | null
   kakao_id?: string | null
   instagram_id?: string | null
+  /** 러닝 포털 관리(월별 출석·룰렛) — 강사에만 의미 */
+  adult_running_portal_manage?: boolean
 }
 
 export interface Profile {
@@ -29,6 +31,7 @@ export interface Profile {
   phone?: string | null
   kakao_id?: string | null
   instagram_id?: string | null
+  adult_running_portal_manage?: boolean
 }
 
 export interface Instructor {

@@ -17,6 +17,7 @@ import {
   type LessonSeriesScope,
 } from '@/lib/actions/lessons'
 import { getRecurrenceDisplayLabel, isPersistedRecurringLesson, parseVirtualLessonId } from '@/lib/calendar-recurrence/types'
+import { isOptimisticLessonId } from '@/lib/calendar-optimistic-lesson'
 import { resolveLessonRecurrence } from '@/lib/lesson-recurrence-legacy'
 import {
   defaultRecurrenceEndDate,
@@ -106,6 +107,8 @@ interface LessonCreateDialogProps {
   onOpenChange: (open: boolean) => void
   draft?: LessonDraft | null
   lesson?: Lesson | null
+  /** 같은 편집 세션 동안 폼 재초기화 방지 (optimistic → 실ID 치환 시) */
+  editSessionKey?: string | null
   members: MemberOption[]
   instructors: Instructor[]
   defaultInstructorId?: string | null
@@ -115,6 +118,8 @@ interface LessonCreateDialogProps {
     meta?: { scope?: LessonSeriesScope; anchorDate?: string },
   ) => void
   onEditDraftChange?: (draft: { instructorId: string }) => void
+  /** 낙관적 일정 저장 완료 후 실제 lesson 반환 — 저장/삭제 직전에만 호출 */
+  onResolvePersistedLesson?: (lesson: Lesson) => Promise<Lesson | null>
   variant?: 'dialog' | 'popup'
   anchor?: LessonEditAnchor | null
   sameSlotLessons?: Lesson[]
@@ -222,12 +227,14 @@ export function LessonCreateDialog({
   onOpenChange,
   draft = null,
   lesson = null,
+  editSessionKey = null,
   members = [],
   instructors,
   defaultInstructorId = null,
   onSaved,
   onDeleted,
   onEditDraftChange,
+  onResolvePersistedLesson,
   variant = 'dialog',
   anchor = null,
   sameSlotLessons = EMPTY_SLOT_LESSONS,
@@ -281,6 +288,38 @@ export function LessonCreateDialog({
   const [deleteScopeOpen, setDeleteScopeOpen] = useState(false)
   const recurrenceUserEditedRef = useRef(false)
   const editDurationMinutesRef = useRef<number | null>(null)
+  const resolvedLessonRef = useRef<Lesson | null>(null)
+
+  useEffect(() => {
+    if (lesson && !isOptimisticLessonId(lesson.id)) {
+      resolvedLessonRef.current = lesson
+    }
+    if (!open) {
+      resolvedLessonRef.current = null
+    }
+  }, [lesson, open])
+
+  async function ensurePersistedLesson(): Promise<Lesson | null> {
+    if (!lesson) return null
+    if (!isOptimisticLessonId(lesson.id)) return lesson
+    if (
+      resolvedLessonRef.current &&
+      !isOptimisticLessonId(resolvedLessonRef.current.id)
+    ) {
+      return resolvedLessonRef.current
+    }
+    if (!onResolvePersistedLesson) {
+      toast.error('일정 저장 중입니다. 잠시 후 다시 시도해주세요.')
+      return null
+    }
+    const persisted = await onResolvePersistedLesson(lesson)
+    if (!persisted || isOptimisticLessonId(persisted.id)) {
+      toast.error('일정 저장 중입니다. 잠시 후 다시 시도해주세요.')
+      return null
+    }
+    resolvedLessonRef.current = persisted
+    return persisted
+  }
 
   const shouldPreserveEditDuration = useCallback(() => {
     if (!lesson) return false
@@ -485,11 +524,13 @@ export function LessonCreateDialog({
       return
     }
 
-    const initKey = lesson
-      ? `${lesson.id}:${sameSlotLessons.map((l) => l.id).join(',')}`
-      : draft
-        ? `${draft.date}:${draft.startTime}:${draft.endTime}`
-        : 'create'
+    const initKey = editSessionKey
+      ? `session:${editSessionKey}`
+      : lesson
+        ? `${lesson.id}:${sameSlotLessons.map((l) => l.id).join(',')}`
+        : draft
+          ? `${draft.date}:${draft.startTime}:${draft.endTime}`
+          : 'create'
 
     if (initKeyRef.current === initKey) return
     initKeyRef.current = initKey
@@ -529,28 +570,31 @@ export function LessonCreateDialog({
       setRecurrenceEndDate(
         defaultRecurrenceEndDate(lesson.lesson_date, recurrence.pattern),
       )
-      void getLessonRecurrenceInfo(lesson.id).then((info) => {
-        if (!info || initKeyRef.current !== initKey) return
-        const safeGroupId =
-          info.groupId && !info.groupId.startsWith('slot:')
-            ? info.groupId
-            : null
-        setSeriesGroupId(safeGroupId)
-        if (!recurrenceUserEditedRef.current) {
-          setRecurrencePattern(info.pattern === 'none' ? 'none' : info.pattern)
-        }
-        if (
-          info.endDate &&
-          info.pattern !== 'none' &&
-          !isOpenEndedRecurrencePattern(info.pattern) &&
-          !recurrenceUserEditedRef.current
-        ) {
-          setRecurrenceEndDate(info.endDate)
-        }
-        if (info.pattern === 'none' && !recurrenceUserEditedRef.current) {
-          setRecurrenceEndDate('')
-        }
-      })
+      // 낙관적 ID는 서버 조회 스킵 — 실ID로 바뀐 뒤 별도 effect에서 조회
+      if (!isOptimisticLessonId(lesson.id)) {
+        void getLessonRecurrenceInfo(lesson.id).then((info) => {
+          if (!info || initKeyRef.current !== initKey) return
+          const safeGroupId =
+            info.groupId && !info.groupId.startsWith('slot:')
+              ? info.groupId
+              : null
+          setSeriesGroupId(safeGroupId)
+          if (!recurrenceUserEditedRef.current) {
+            setRecurrencePattern(info.pattern === 'none' ? 'none' : info.pattern)
+          }
+          if (
+            info.endDate &&
+            info.pattern !== 'none' &&
+            !isOpenEndedRecurrencePattern(info.pattern) &&
+            !recurrenceUserEditedRef.current
+          ) {
+            setRecurrenceEndDate(info.endDate)
+          }
+          if (info.pattern === 'none' && !recurrenceUserEditedRef.current) {
+            setRecurrenceEndDate('')
+          }
+        })
+      }
       return
     }
 
@@ -587,7 +631,37 @@ export function LessonCreateDialog({
     setSeriesGroupId(null)
     setRecurrencePattern('none')
     setRecurrenceEndDate('')
-  }, [open, lesson, draft, sameSlotLessons, initialInstructorId])
+  }, [open, lesson, draft, sameSlotLessons, initialInstructorId, editSessionKey])
+
+  // 낙관적 → 실ID 치환 후 반복 정보만 백그라운드 조회 (폼 필드는 유지)
+  useEffect(() => {
+    if (!open || !lesson || isOptimisticLessonId(lesson.id)) return
+    if (recurrenceUserEditedRef.current) return
+
+    let cancelled = false
+    void getLessonRecurrenceInfo(lesson.id).then((info) => {
+      if (cancelled || !info || recurrenceUserEditedRef.current) return
+      const safeGroupId =
+        info.groupId && !info.groupId.startsWith('slot:')
+          ? info.groupId
+          : null
+      setSeriesGroupId(safeGroupId)
+      if (!recurrenceUserEditedRef.current) {
+        setRecurrencePattern(info.pattern === 'none' ? 'none' : info.pattern)
+      }
+      if (
+        info.endDate &&
+        info.pattern !== 'none' &&
+        !isOpenEndedRecurrencePattern(info.pattern) &&
+        !recurrenceUserEditedRef.current
+      ) {
+        setRecurrenceEndDate(info.endDate)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, lesson?.id])
 
   useEffect(() => {
     if (!open || recurrencePattern === 'none') return
@@ -873,25 +947,28 @@ export function LessonCreateDialog({
 
     setDeleteScopeOpen(false)
 
+    const target = await ensurePersistedLesson()
+    if (!target) return
+
     // 시리즈 앵커는 폼에서 바꾼 날짜가 아니라 원래 발생일 기준
     const seriesAnchorDate =
-      originalLessonDateRef.current || lesson.lesson_date
+      originalLessonDateRef.current || target.lesson_date
 
     // 단일 일정은 서버 기다리지 않고 즉시 닫고 목록에서 제거
     const canOptimisticSingle =
       scope === 'single' &&
-      !isPersistedRecurringLesson(lesson) &&
-      !parseVirtualLessonId(lesson.id)
+      !isPersistedRecurringLesson(target) &&
+      !parseVirtualLessonId(target.id)
 
     if (canOptimisticSingle) {
-      onDeleted?.([lesson.id], {
+      onDeleted?.([target.id], {
         scope,
         anchorDate: seriesAnchorDate,
       })
       toast.success('수업이 삭제되었습니다.')
       handleOpenChange(false)
 
-      void deleteLessonsInSeries(lesson.id, scope, seriesAnchorDate).then((result) => {
+      void deleteLessonsInSeries(target.id, scope, seriesAnchorDate).then((result) => {
         if (result.error && !result.error.includes('찾을 수 없습니다')) {
           toast.error('수업 삭제 실패', {
             description: `${result.error} 새로고침 후 다시 확인해 주세요.`,
@@ -905,14 +982,14 @@ export function LessonCreateDialog({
 
     try {
       const result = await deleteLessonsInSeries(
-        lesson.id,
+        target.id,
         scope,
         seriesAnchorDate,
       )
 
       if (result.error) {
         if (result.error.includes('찾을 수 없습니다')) {
-          onDeleted?.([lesson.id])
+          onDeleted?.([target.id])
           toast.info('이미 삭제되었거나 목록에 없는 수업입니다.', {
             description: '캘린더에서 제거했습니다.',
           })
@@ -926,7 +1003,7 @@ export function LessonCreateDialog({
       const deletedIds = result.deletedIds ?? []
       if (deletedIds.length === 0) {
         if (scope === 'future') {
-          onDeleted?.([lesson.id], {
+          onDeleted?.([target.id], {
             scope,
             anchorDate: seriesAnchorDate,
           })
@@ -971,19 +1048,25 @@ export function LessonCreateDialog({
   ) {
     if (!lesson) return
 
-    const persistedRecurrence = isPersistedRecurringLesson(lesson)
-    const hasRecurringContext =
-      persistedRecurrence || Boolean(getActiveSeriesGroupId())
-
     setIsLoading(true)
     setSaveScopeOpen(false)
 
+    const target = await ensurePersistedLesson()
+    if (!target) {
+      setIsLoading(false)
+      return
+    }
+
+    const persistedRecurrence = isPersistedRecurringLesson(target)
+    const hasRecurringContext =
+      persistedRecurrence || Boolean(getActiveSeriesGroupId())
+
     // 시리즈 앵커는 원래 발생일. 새 날짜는 updates.lesson_date 로만 전달
     const anchorDate =
-      originalLessonDateRef.current || lesson.lesson_date
+      originalLessonDateRef.current || target.lesson_date
 
     if (recurrencePattern === 'none' && hasRecurringContext) {
-      const result = await removeLessonRecurrence(lesson.id, scope, anchorDate, updates)
+      const result = await removeLessonRecurrence(target.id, scope, anchorDate, updates)
 
       if (result.error) {
         setIsLoading(false)
@@ -995,7 +1078,7 @@ export function LessonCreateDialog({
       const savedIds = new Set(saved.map((item) => item.id))
       saved.forEach((item) => onSaved(item))
       const deletedIds = new Set(result.deletedIds ?? [])
-      deletedIds.add(lesson.id)
+      deletedIds.add(target.id)
       const removeIds = [...deletedIds].filter((id) => !savedIds.has(id))
       if (removeIds.length) onDeleted?.(removeIds)
 
@@ -1016,7 +1099,7 @@ export function LessonCreateDialog({
       }
 
       const result = await convertLessonToRecurringSeries(
-        lesson.id,
+        target.id,
         scope,
         anchorDate,
         updates,
@@ -1047,7 +1130,7 @@ export function LessonCreateDialog({
     }
 
     if (recurrencePattern === 'none') {
-      const result = await updateLesson(lesson.id, {
+      const result = await updateLesson(target.id, {
         ...updates,
         recurrence_pattern: 'none',
         recurrence_group_id: null,
@@ -1067,7 +1150,7 @@ export function LessonCreateDialog({
       return
     }
 
-    const result = await updateLessonSeries(lesson.id, updates, scope, anchorDate)
+    const result = await updateLessonSeries(target.id, updates, scope, anchorDate)
 
     if (result.error) {
       setIsLoading(false)
@@ -1076,7 +1159,7 @@ export function LessonCreateDialog({
     }
 
     const saved = result.data ?? []
-    if (saved.length === 0 && scope === 'single') {
+    if (saved.length === 0) {
       setIsLoading(false)
       toast.error('수업 수정 실패', {
         description: '변경이 저장되지 않았습니다. 새로고침 후 다시 시도해주세요.',
@@ -1223,9 +1306,11 @@ export function LessonCreateDialog({
     }
 
     if (isEditing && lesson) {
-      const updates = {
+      const updates: Partial<LessonFormData> = {
         ...schedulePayload,
         ...identityPayload,
+        instructor_id: normalizePrimaryInstructorId(instructorId) || undefined,
+        recurrence_pattern: recurrencePattern,
       }
 
       if (recurrencePattern !== 'none' && !validateRecurrenceSelection()) {
@@ -1254,7 +1339,13 @@ export function LessonCreateDialog({
         return
       }
 
-      const primaryResult = await updateLesson(lesson.id, updates)
+      const target = await ensurePersistedLesson()
+      if (!target) {
+        setIsLoading(false)
+        return
+      }
+
+      const primaryResult = await updateLesson(target.id, updates)
 
       if (primaryResult.error) {
         setIsLoading(false)

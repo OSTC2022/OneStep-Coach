@@ -5,7 +5,7 @@ import { ko } from 'date-fns/locale'
 import { ArrowLeft, Loader2, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   addMemberBodyRecord,
@@ -108,6 +108,8 @@ export function MemberWeightPageView({
   const [heightDraft, setHeightDraft] = useState('')
   const [speedDraft, setSpeedDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const formSectionRef = useRef<HTMLElement | null>(null)
+  const weightInputRef = useRef<HTMLInputElement | null>(null)
 
   const memberLabel = memberSport?.trim()
     ? `${memberName}(${memberSport})`
@@ -129,8 +131,11 @@ export function MemberWeightPageView({
     const existing = recordsByDate.get(recordedAt)
     if (existing) {
       setWeightDraft(formatBodyMetric(existing.weight_kg) ?? String(existing.weight_kg))
-      // 키는 미입력 — 새로 입력할 때만 성장량 비교
-      setHeightDraft('')
+      setHeightDraft(
+        existing.height_cm != null
+          ? (formatBodyMetric(existing.height_cm) ?? String(existing.height_cm))
+          : '',
+      )
       setSpeedDraft(
         existing.max_speed_kmh != null ? String(existing.max_speed_kmh) : '',
       )
@@ -140,6 +145,25 @@ export function MemberWeightPageView({
     setHeightDraft('')
     setSpeedDraft('')
   }, [recordedAt, recordsByDate])
+
+  function loadRecordForEdit(record: MemberBodyRecord) {
+    setRecordedAt(record.recorded_at)
+    setWeightDraft(formatBodyMetric(record.weight_kg) ?? String(record.weight_kg))
+    setHeightDraft(
+      record.height_cm != null
+        ? (formatBodyMetric(record.height_cm) ?? String(record.height_cm))
+        : '',
+    )
+    setSpeedDraft(record.max_speed_kmh != null ? String(record.max_speed_kmh) : '')
+
+    requestAnimationFrame(() => {
+      formSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      window.setTimeout(() => {
+        weightInputRef.current?.focus()
+        weightInputRef.current?.select()
+      }, 280)
+    })
+  }
 
   const previewBmi = useMemo(() => {
     const weight = Number(weightDraft)
@@ -330,7 +354,10 @@ export function MemberWeightPageView({
         </div>
       </div>
 
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <section
+        ref={formSectionRef}
+        className="space-y-3 rounded-xl border border-border bg-card p-4"
+      >
         <h2 className="text-sm font-semibold text-foreground">성장 기록 입력</h2>
         <div className="space-y-1.5">
           <Label htmlFor="weight-date">날짜</Label>
@@ -346,6 +373,7 @@ export function MemberWeightPageView({
           <div className="space-y-1.5">
             <Label htmlFor="weight-kg">체중 (kg)</Label>
             <Input
+              ref={weightInputRef}
               id="weight-kg"
               type="number"
               inputMode="decimal"
@@ -572,7 +600,7 @@ export function MemberWeightPageView({
                   key={record.id}
                   className="flex items-center justify-between gap-3 px-4 py-3"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground">
                       {formatRecordDate(record.recorded_at)}
                     </p>
@@ -601,12 +629,24 @@ export function MemberWeightPageView({
                       ) : null}
                     </p>
                   </div>
-                  <WeightWithDeltaText
-                    weightKg={weightValue}
-                    deltaKg={delta}
-                    className="text-sm font-semibold"
-                    showKgSuffix
-                  />
+                  <div className="flex shrink-0 items-center gap-2">
+                    <WeightWithDeltaText
+                      weightKg={weightValue}
+                      deltaKg={delta}
+                      className="text-sm font-semibold"
+                      showKgSuffix
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                      disabled={saving}
+                      onClick={() => loadRecordForEdit(record)}
+                    >
+                      수정
+                    </Button>
+                  </div>
                 </li>
               )
             })}

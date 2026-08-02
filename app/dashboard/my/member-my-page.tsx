@@ -25,12 +25,15 @@ import { Button } from '@/components/ui/button'
 import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import { MemberRunningLeagueRankings, MemberPortalBrandHeader } from '@/components/dashboard/member-running-league-rankings'
 import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
+import { RunningPortalManageLink } from '@/components/dashboard/running-portal-manage-link'
 import {
   MemberRunningLeagueTrainingSchedule,
 } from '@/components/dashboard/member-running-league-training-schedule'
+import { MemberMarathonSchedule } from '@/components/dashboard/member-marathon-schedule'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { AdultRunningPortalDisplaySettings } from '@/lib/actions/adult-running-portal-settings'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
+import type { CenterMarathonScheduleBundle } from '@/lib/actions/center-marathon-schedule'
 import type { MemberPortalData, MemberPortalSessionStatus } from '@/lib/member-portal-types'
 import { MEMBER_REPORT_MIN_RECORDS } from '@/lib/member-portal-summary'
 import { portalStatusToneClass } from '@/lib/member-portal-status'
@@ -44,10 +47,15 @@ interface MemberMyPageProps {
   role?: string | null
   runningLeagueHome?: MemberRunningLeagueHome | null
   centerTrainingSchedule?: CenterRunningTrainingScheduleBundle | null
+  marathonSchedule?: CenterMarathonScheduleBundle | null
   portalDisplay?: AdultRunningPortalDisplaySettings | null
   adminPreview?: boolean
   runningLeagueHref?: string
   showRunningPortal?: boolean
+  /** 관리자·승인된 포털 관리 강사만 true — DOM에 관리 링크 노출 */
+  canManageRunningPortal?: boolean
+  /** 마라톤 일정 관리 링크 (관리자) */
+  showMarathonManageLink?: boolean
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -127,10 +135,13 @@ export function MemberMyPage({
   role,
   runningLeagueHome,
   centerTrainingSchedule,
+  marathonSchedule = null,
   portalDisplay,
   adminPreview = false,
   runningLeagueHref = '/dashboard/my/running-league',
   showRunningPortal = false,
+  canManageRunningPortal = false,
+  showMarathonManageLink = false,
 }: MemberMyPageProps) {
   const { member, summary, centerContact, coachContact, sessionStatus } = data
   const isAdultMember = role === 'adult_member'
@@ -173,6 +184,9 @@ export function MemberMyPage({
               runningLeagueHome?.league?.beat_rival_member_id ??
               null
             }
+            action={
+              canManageRunningPortal ? <RunningPortalManageLink compact /> : undefined
+            }
           />
           <MemberPortalNoticePanel notice={portalDisplay?.notice} />
           <MemberRunningLeagueTrainingSchedule
@@ -182,6 +196,15 @@ export function MemberMyPage({
             readOnly={adminPreview}
             embedded
           />
+          {marathonSchedule ? (
+            <MemberMarathonSchedule
+              bundle={marathonSchedule}
+              canParticipate={!adminPreview}
+              readOnly={adminPreview}
+              embedded
+              showManageLink={showMarathonManageLink}
+            />
+          ) : null}
           {runningLeagueHome ? (
             <MemberRunningLeagueRankings
               pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}

@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { getMemberPortalDataForStaff } from '@/lib/actions/member-portal'
 import { getCenterRunningTrainingScheduleForMember } from '@/lib/actions/center-running-training-schedule'
+import { getCenterMarathonScheduleForMember } from '@/lib/actions/center-marathon-schedule'
 import { getMemberRunningLeagueHomeForStaff } from '@/lib/actions/running-league'
 import { getMemberLinkedProfileRole } from '@/lib/actions/member-account'
 import { requireMemberViewer } from '@/lib/auth/member-access'
@@ -21,10 +22,11 @@ export default async function MemberRunningPortalPreviewPage({
   const linkedRole = await getMemberLinkedProfileRole(id)
   if (linkedRole !== 'adult_member') notFound()
 
-  const [data, runningLeagueHome, centerTrainingSchedule] = await Promise.all([
+  const [data, runningLeagueHome, centerTrainingSchedule, marathonSchedule] = await Promise.all([
     getMemberPortalDataForStaff(id),
     getMemberRunningLeagueHomeForStaff(id),
     getCenterRunningTrainingScheduleForMember(),
+    getCenterMarathonScheduleForMember(),
   ])
 
   if (!data) notFound()
@@ -45,6 +47,7 @@ export default async function MemberRunningPortalPreviewPage({
         role="adult_member"
         runningLeagueHome={runningLeagueHome}
         centerTrainingSchedule={centerTrainingSchedule}
+        marathonSchedule={marathonSchedule}
         adminPreview
         runningLeagueHref={`/dashboard/members/${id}/running-portal/league`}
       />

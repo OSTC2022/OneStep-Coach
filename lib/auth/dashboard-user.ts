@@ -34,36 +34,59 @@ export const getDashboardProfile = cache(async (): Promise<User | null> => {
 
   if (!user) return null
 
-  const { data: dbProfile } = await supabase
+  const { data: dbProfile, error: profileError } = await supabase
     .from('profiles')
     .select(PROFILE_SELECT)
     .eq('id', user.id)
     .maybeSingle()
 
-  const email = user.email ?? dbProfile?.email ?? null
+  const profileMissingManageColumn =
+    profileError?.message?.toLowerCase().includes('adult_running_portal_manage') ??
+    false
 
-  if (dbProfile) {
+  const resolvedProfile =
+    dbProfile ??
+    (profileMissingManageColumn
+      ? (
+          await supabase
+            .from('profiles')
+            .select(
+              'id, email, full_name, role, approval_status, created_at, avatar_url, phone, kakao_id, instagram_id',
+            )
+            .eq('id', user.id)
+            .maybeSingle()
+        ).data
+      : null)
+
+  const email = user.email ?? resolvedProfile?.email ?? null
+
+  if (resolvedProfile) {
     if (
-      isProtectedAdminAccount(email ?? dbProfile.email) &&
-      dbProfile.role !== 'admin'
+      isProtectedAdminAccount(email ?? resolvedProfile.email) &&
+      resolvedProfile.role !== 'admin'
     ) {
-      await ensureProtectedAdminRole(user.id, email ?? dbProfile.email)
+      await ensureProtectedAdminRole(user.id, email ?? resolvedProfile.email)
     }
     return {
-      id: dbProfile.id,
-      email: formatLoginEmailForDisplay(dbProfile.email) ?? dbProfile.email,
-      full_name: dbProfile.full_name,
-      role: resolveAppRole(dbProfile.email, dbProfile.role),
+      id: resolvedProfile.id,
+      email:
+        formatLoginEmailForDisplay(resolvedProfile.email) ?? resolvedProfile.email,
+      full_name: resolvedProfile.full_name,
+      role: resolveAppRole(resolvedProfile.email, resolvedProfile.role),
       approval_status: getEffectiveApprovalStatus(
-        dbProfile.email,
-        dbProfile.approval_status as ProfileApprovalStatus | null | undefined,
+        resolvedProfile.email,
+        resolvedProfile.approval_status as ProfileApprovalStatus | null | undefined,
         user.user_metadata?.approval_status as ProfileApprovalStatus | undefined,
       ),
-      created_at: dbProfile.created_at,
-      avatar_url: dbProfile.avatar_url ?? null,
-      phone: dbProfile.phone ?? null,
-      kakao_id: dbProfile.kakao_id ?? null,
-      instagram_id: dbProfile.instagram_id ?? null,
+      created_at: resolvedProfile.created_at,
+      avatar_url: resolvedProfile.avatar_url ?? null,
+      phone: resolvedProfile.phone ?? null,
+      kakao_id: resolvedProfile.kakao_id ?? null,
+      instagram_id: resolvedProfile.instagram_id ?? null,
+      adult_running_portal_manage: Boolean(
+        (resolvedProfile as { adult_running_portal_manage?: boolean | null })
+          .adult_running_portal_manage,
+      ),
     }
   }
 

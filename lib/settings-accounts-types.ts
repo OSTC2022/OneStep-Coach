@@ -33,6 +33,8 @@ export type RegisteredAccount = {
   linkedMemberSport: string | null
   /** 관리자·보호 계정 — 설정에서 권한 변경 불가 */
   isProtected: boolean
+  /** 러닝 포털 관리(월별 출석·룰렛) — 강사용 */
+  adultRunningPortalManage: boolean
 }
 
 /** 설정 > 강사 탭 — 강사 프로필 + 로그인 연결 상태 */

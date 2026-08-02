@@ -1,5 +1,6 @@
 'use server'
 
+import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns'
 import { createClient } from '@/lib/supabase/server'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -1901,9 +1902,25 @@ export async function updateLessonSeries(
   const updatedLessons: Lesson[] = []
   let warning: string | undefined
 
+  const dateDeltaDays =
+    updates.lesson_date && updates.lesson_date !== anchorDate
+      ? differenceInCalendarDays(
+          parseISO(updates.lesson_date),
+          parseISO(anchorDate),
+        )
+      : 0
+
   for (const target of targets) {
     const payload =
-      target.id === lessonId ? fullPayload : { ...sharedPayload }
+      target.id === lessonId ? { ...fullPayload } : { ...sharedPayload }
+
+    // 전체/이후 수정에서 날짜를 바꾸면 형제 일정도 같은 일수만큼 이동
+    if (dateDeltaDays !== 0 && target.id !== lessonId && target.lesson_date) {
+      payload.lesson_date = format(
+        addDays(parseISO(target.lesson_date), dateDeltaDays),
+        'yyyy-MM-dd',
+      )
+    }
 
     const { data, error } = await supabase
       .from('lessons')

@@ -89,6 +89,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin', 'instructor'],
   },
   {
+    id: '/dashboard/running-portal/manage',
+    title: '러닝 포털 관리',
+    url: '/dashboard/running-portal/manage',
+    roles: ['admin', 'instructor'],
+  },
+  {
     id: '/dashboard/settings/adult-running-portal',
     title: '성인 러닝 포털',
     url: '/dashboard/settings/adult-running-portal',
@@ -98,6 +104,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     id: '/dashboard/settings/running-schedule',
     title: '러닝 스케줄',
     url: '/dashboard/settings/running-schedule',
+    roles: ['admin'],
+  },
+  {
+    id: '/dashboard/settings/marathon-schedule',
+    title: '마라톤 일정',
+    url: '/dashboard/settings/marathon-schedule',
     roles: ['admin'],
   },
   {
@@ -134,9 +146,13 @@ export function getDefaultSidebarMenuHidden(role: SidebarMenuRole): string[] {
 }
 
 const RUNNING_SCHEDULE_MENU_ID = '/dashboard/settings/running-schedule'
+const MARATHON_SCHEDULE_MENU_ID = '/dashboard/settings/marathon-schedule'
 const SETTINGS_MENU_ID = '/dashboard/settings'
 const MY_RUNNING_PORTAL_MENU_ID = '/dashboard/running-portal'
+const RUNNING_PORTAL_MANAGE_MENU_ID = '/dashboard/running-portal/manage'
 const ADULT_RUNNING_PORTAL_MENU_ID = '/dashboard/settings/adult-running-portal'
+
+export { RUNNING_PORTAL_MANAGE_MENU_ID }
 
 function pinMyRunningPortalAboveAdultRunningPortal(order: string[]): string[] {
   const myPortalIndex = order.indexOf(MY_RUNNING_PORTAL_MENU_ID)
@@ -151,6 +167,20 @@ function pinMyRunningPortalAboveAdultRunningPortal(order: string[]): string[] {
   return next
 }
 
+/** 「내 러닝 포털」 바로 아래에 「러닝 포털 관리」 고정 */
+function pinRunningPortalManageBelowMyPortal(order: string[]): string[] {
+  const manageIndex = order.indexOf(RUNNING_PORTAL_MANAGE_MENU_ID)
+  const myPortalIndex = order.indexOf(MY_RUNNING_PORTAL_MENU_ID)
+  if (manageIndex < 0 || myPortalIndex < 0) return order
+  if (manageIndex === myPortalIndex + 1) return order
+
+  const next = order.filter((id) => id !== RUNNING_PORTAL_MANAGE_MENU_ID)
+  const nextMyPortalIndex = next.indexOf(MY_RUNNING_PORTAL_MENU_ID)
+  if (nextMyPortalIndex < 0) return order
+  next.splice(nextMyPortalIndex + 1, 0, RUNNING_PORTAL_MANAGE_MENU_ID)
+  return next
+}
+
 function pinRunningScheduleAboveSettings(order: string[]): string[] {
   const scheduleIndex = order.indexOf(RUNNING_SCHEDULE_MENU_ID)
   const settingsIndex = order.indexOf(SETTINGS_MENU_ID)
@@ -161,6 +191,19 @@ function pinRunningScheduleAboveSettings(order: string[]): string[] {
   const nextSettingsIndex = next.indexOf(SETTINGS_MENU_ID)
   if (nextSettingsIndex < 0) return order
   next.splice(nextSettingsIndex, 0, RUNNING_SCHEDULE_MENU_ID)
+  return next
+}
+
+function pinMarathonScheduleBelowRunningSchedule(order: string[]): string[] {
+  const marathonIndex = order.indexOf(MARATHON_SCHEDULE_MENU_ID)
+  const scheduleIndex = order.indexOf(RUNNING_SCHEDULE_MENU_ID)
+  if (marathonIndex < 0 || scheduleIndex < 0) return order
+  if (marathonIndex === scheduleIndex + 1) return order
+
+  const next = order.filter((id) => id !== MARATHON_SCHEDULE_MENU_ID)
+  const nextScheduleIndex = next.indexOf(RUNNING_SCHEDULE_MENU_ID)
+  if (nextScheduleIndex < 0) return order
+  next.splice(nextScheduleIndex + 1, 0, MARATHON_SCHEDULE_MENU_ID)
   return next
 }
 
@@ -214,7 +257,11 @@ export function normalizeSidebarMenuOrder(
       : insertMissingMenuItemsAtDefaultPositions(saved, defaultOrder)
 
   return pinRunningScheduleAboveSettings(
-    pinMyRunningPortalAboveAdultRunningPortal(next),
+    pinMarathonScheduleBelowRunningSchedule(
+      pinRunningPortalManageBelowMyPortal(
+        pinMyRunningPortalAboveAdultRunningPortal(next),
+      ),
+    ),
   )
 }
 

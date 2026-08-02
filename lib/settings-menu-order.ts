@@ -10,6 +10,7 @@ export const SETTINGS_MENU_TAB_IDS = [
   '/dashboard/settings',
   '/dashboard/settings/adult-running-portal',
   '/dashboard/settings/running-schedule',
+  '/dashboard/settings/marathon-schedule',
   '/dashboard/settings/center-board',
   '/dashboard/settings/adult-center-board',
   '/dashboard/settings/running-league',

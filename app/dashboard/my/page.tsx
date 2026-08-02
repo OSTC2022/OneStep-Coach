@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getMemberPortalData } from '@/lib/actions/member-portal'
 import { getAdultGeneralPortalData } from '@/lib/actions/adult-general-portal'
 import { getCenterRunningTrainingScheduleForMember } from '@/lib/actions/center-running-training-schedule'
+import { getCenterMarathonScheduleForMember } from '@/lib/actions/center-marathon-schedule'
 import { getMemberRunningLeagueHome } from '@/lib/actions/running-league'
 import { getAdultRunningPortalDisplaySettings } from '@/lib/actions/adult-running-portal-settings'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
@@ -21,12 +22,15 @@ export default async function MyDashboardPage() {
     }
   }
 
-  const [data, runningLeagueHome, centerTrainingSchedule, portalDisplay] =
+  const [data, runningLeagueHome, centerTrainingSchedule, marathonSchedule, portalDisplay] =
     await Promise.all([
       getMemberPortalData(),
       profile?.role === 'adult_member' ? getMemberRunningLeagueHome() : Promise.resolve(null),
       profile?.role === 'adult_member'
         ? getCenterRunningTrainingScheduleForMember()
+        : Promise.resolve(null),
+      profile?.role === 'adult_member'
+        ? getCenterMarathonScheduleForMember()
         : Promise.resolve(null),
       profile?.role === 'adult_member'
         ? getAdultRunningPortalDisplaySettings()
@@ -54,6 +58,7 @@ export default async function MyDashboardPage() {
       role={profile?.role}
       runningLeagueHome={runningLeagueHome}
       centerTrainingSchedule={centerTrainingSchedule}
+      marathonSchedule={marathonSchedule}
       portalDisplay={portalDisplay}
     />
   )

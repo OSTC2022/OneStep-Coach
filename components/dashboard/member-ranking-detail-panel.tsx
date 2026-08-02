@@ -29,7 +29,10 @@ import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-lay
 import type { RankAspirationInsight } from '@/lib/running-league/rank-aspiration'
 
 import type { RankingView } from '@/lib/running-league/ranking-view'
-import type { RankingPeriod } from '@/lib/running-league/ranking-period'
+import {
+  filterMileageLogsForPeriod,
+  type RankingPeriod,
+} from '@/lib/running-league/ranking-period'
 
 interface MemberRankingDetailPanelProps {
   memberId: string
@@ -167,19 +170,24 @@ export function MemberRankingDetailPanel({
     [distance, historyPoints],
   )
 
+  const periodMileageLogs = useMemo(() => {
+    if (!rankingBundle) return []
+    return filterMileageLogsForPeriod(rankingBundle.mileageLogs, rankingPeriod)
+  }, [rankingBundle, rankingPeriod])
+
   const mileagePoints = useMemo(() => {
     if (!rankingBundle) return []
-    return buildMemberMileageHistorySeries(memberId, rankingBundle.mileageLogs)
-  }, [memberId, rankingBundle])
+    return buildMemberMileageHistorySeries(memberId, periodMileageLogs)
+  }, [memberId, periodMileageLogs, rankingBundle])
 
   const mileageRankPoints = useMemo(() => {
     if (!rankingBundle) return []
     return buildMemberMileageRankHistorySeries({
       memberId,
       participants: filteredParticipants,
-      logs: rankingBundle.mileageLogs,
+      logs: periodMileageLogs,
     })
-  }, [filteredParticipants, memberId, rankingBundle])
+  }, [filteredParticipants, memberId, periodMileageLogs, rankingBundle])
 
   const attendancePoints = useMemo(() => {
     if (!rankingBundle) return []
@@ -194,18 +202,18 @@ export function MemberRankingDetailPanel({
     if (!rankingBundle) return null
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
-      logs: rankingBundle.mileageLogs,
+      logs: periodMileageLogs,
     })
-  }, [filteredParticipants, rankingBundle])
+  }, [filteredParticipants, periodMileageLogs, rankingBundle])
 
   const beatRivalMileageComparisonChart = useMemo(() => {
     if (!rankingBundle || !beatRivalMemberId) return null
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
-      logs: rankingBundle.mileageLogs,
+      logs: periodMileageLogs,
       beatRivalMemberId,
     })
-  }, [beatRivalMemberId, filteredParticipants, rankingBundle])
+  }, [beatRivalMemberId, filteredParticipants, periodMileageLogs, rankingBundle])
 
   const attendanceComparisonChart = useMemo(() => {
     if (!rankingBundle) return null

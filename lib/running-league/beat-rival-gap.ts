@@ -21,13 +21,14 @@ function resolveMemberMileageKm(
   const ranked = leaderboard.ranked.find((row) => row.memberId === memberId)
   if (ranked) return ranked.mileageKm
 
+  // 기간 필터된 리더보드에 있으면(0km 포함) 로그 lookback 폴백을 쓰지 않음
+  if (leaderboard.unranked.some((row) => row.memberId === memberId)) {
+    return 0
+  }
+
   if (monthlyLogs?.length) {
     const fromLogs = aggregateMonthlyMileageByMember(monthlyLogs).get(memberId)
     if (fromLogs != null) return fromLogs
-  }
-
-  if (leaderboard.unranked.some((row) => row.memberId === memberId)) {
-    return 0
   }
 
   return 0
