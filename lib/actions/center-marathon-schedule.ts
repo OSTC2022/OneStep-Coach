@@ -443,6 +443,49 @@ export async function addMarathonEventFromCatalog(
   })
 }
 
+/** 추천 카탈로그에서 추가된 대회를 catalog_key 기준으로 제거 */
+export async function removeMarathonEventFromCatalog(
+  catalogKey: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireRole(['admin'])
+  const key = catalogKey.trim()
+  if (!key) return { ok: false, error: '추천 대회를 찾을 수 없습니다.' }
+
+  try {
+    const supabase = await scheduleClient()
+    const { data, error: findError } = await supabase
+      .from('center_marathon_events')
+      .select('id')
+      .eq('catalog_key', key)
+
+    if (isMissingTableError(findError)) {
+      return { ok: false, error: marathonMigrationErrorMessage('table') }
+    }
+    if (findError) {
+      console.error('removeMarathonEventFromCatalog.find', findError)
+      return { ok: false, error: findError.message || '대회를 찾지 못했습니다.' }
+    }
+
+    const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id)
+    if (ids.length === 0) {
+      return { ok: false, error: '일정에 추가된 대회가 없습니다.' }
+    }
+
+    const { error } = await supabase.from('center_marathon_events').delete().in('id', ids)
+
+    if (error) {
+      console.error('removeMarathonEventFromCatalog.delete', error)
+      return { ok: false, error: error.message || '취소에 실패했습니다.' }
+    }
+
+    revalidateMarathonPaths()
+    return { ok: true }
+  } catch (error) {
+    console.error('removeMarathonEventFromCatalog', error)
+    return { ok: false, error: '취소에 실패했습니다.' }
+  }
+}
+
 export async function deleteMarathonEvent(
   eventId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {

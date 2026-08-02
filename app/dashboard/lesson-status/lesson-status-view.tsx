@@ -915,8 +915,8 @@ const AthleteTile = memo(function AthleteTile({
         onOpenChange={(open) => {
           if (!open && !isCompleting) setSignatureOpen(false)
         }}
-        title={`${label} 수업 종료`}
-        description="해당 회원의 보호자(부모님)께 직접 서명을 받아주세요."
+        title="수업 종료"
+        description="보호자(부모님)께 직접 서명을 받아주세요."
         memberLabel={label}
         confirmLabel="종료 확인"
         isSubmitting={isCompleting}

@@ -1,5 +1,6 @@
 import type { Member } from '@/lib/types'
 import { INSTRUCTOR_CALENDAR_COLORS } from '@/lib/instructor-colors'
+import { phonesMatch } from '@/lib/member-account-status'
 
 export const MEMBER_SPORT_OPTIONS = [
   '야구',
@@ -257,6 +258,8 @@ export function formatMemberContactDisplay(
   const parentPhone = member.parent_phone?.trim()
 
   if (phone && parentPhone) {
+    // 본인·보호자 번호가 같으면 한 번만 표기
+    if (phonesMatch(phone, parentPhone)) return phone
     return `${phone} · 보호자 ${parentPhone}`
   }
   if (phone) return phone
@@ -271,7 +274,10 @@ export function formatMemberContactDisplayCompact(
   const phone = member.phone?.trim()
   const parentPhone = member.parent_phone?.trim()
 
-  if (phone && parentPhone) return `${phone} (+보호자)`
+  if (phone && parentPhone) {
+    if (phonesMatch(phone, parentPhone)) return phone
+    return `${phone} (+보호자)`
+  }
   if (phone) return phone
   if (parentPhone) return `보호자 ${parentPhone}`
   return '-'

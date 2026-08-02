@@ -21,7 +21,10 @@ import {
 import {
   formatMarathonMonthLabel,
   listNearbyMarathonMonthKeys,
+  marathonEventMatchesDistanceFilters,
+  MARATHON_DISTANCE_FILTERS,
   MARATHON_SCHEDULE_ALL_KEY,
+  type MarathonDistanceFilter,
   type MarathonEventView,
 } from '@/lib/running-league/marathon-schedule'
 import { Button } from '@/components/ui/button'
@@ -72,6 +75,7 @@ export function MemberMarathonSchedule({
   const [monthKey, setMonthKey] = useState(bundle.monthKey)
   const [activeEvent, setActiveEvent] = useState<MarathonEventView | null>(null)
   const [sectionOpen, setSectionOpen] = useState(false)
+  const [distanceFilters, setDistanceFilters] = useState<MarathonDistanceFilter[]>([])
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(bundle.events.map((event) => [event.id, event.is_signed_up])),
   )
@@ -99,9 +103,23 @@ export function MemberMarathonSchedule({
     })
   }, [bundle])
 
-  const signedUpCount = events.filter(
+  const filteredEvents = useMemo(
+    () =>
+      events.filter((event) =>
+        marathonEventMatchesDistanceFilters(event, distanceFilters),
+      ),
+    [events, distanceFilters],
+  )
+
+  const signedUpCount = filteredEvents.filter(
     (event) => signupDraft[event.id] ?? event.is_signed_up,
   ).length
+
+  function toggleDistanceFilter(id: MarathonDistanceFilter) {
+    setDistanceFilters((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    )
+  }
 
   function handleMonthChange(next: string) {
     setMonthKey(next)
@@ -173,10 +191,12 @@ export function MemberMarathonSchedule({
   }
 
   const collapsedSummary =
-    events.length > 0
-      ? `${events.length}개 대회${signedUpCount > 0 ? ` · ${signedUpCount}개 참여` : ''}`
+    filteredEvents.length > 0
+      ? `${filteredEvents.length}개 대회${signedUpCount > 0 ? ` · ${signedUpCount}개 참여` : ''}`
       : bundle.tableReady
-        ? '등록된 일정 없음'
+        ? distanceFilters.length > 0
+          ? '선택한 종목 일정 없음'
+          : '등록된 일정 없음'
         : '준비 중'
 
   const scheduleBody = (
@@ -209,18 +229,42 @@ export function MemberMarathonSchedule({
         ) : null}
       </div>
 
+      <div className="flex flex-wrap gap-1.5 px-0.5 pb-1">
+        {MARATHON_DISTANCE_FILTERS.map((filter) => {
+          const active = distanceFilters.includes(filter.id)
+          return (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => toggleDistanceFilter(filter.id)}
+              className={cn(
+                'rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-wide transition-colors',
+                active
+                  ? 'border-lime-400/50 bg-lime-500/20 text-lime-100'
+                  : 'border-zinc-700 bg-black/40 text-zinc-400 hover:border-lime-500/30 hover:text-zinc-200',
+              )}
+              aria-pressed={active}
+            >
+              {filter.label}
+            </button>
+          )
+        })}
+      </div>
+
       {!bundle.tableReady ? (
         <p className="px-2 py-6 text-center text-sm text-zinc-500">
           마라톤 일정 기능을 준비 중입니다.
         </p>
-      ) : events.length === 0 ? (
+      ) : filteredEvents.length === 0 ? (
         <p className="px-2 py-6 text-center text-sm text-zinc-500">
-          {monthKey === MARATHON_SCHEDULE_ALL_KEY
-            ? '등록된 대회 일정이 없습니다.'
-            : '이 달 등록된 대회 일정이 없습니다.'}
+          {distanceFilters.length > 0
+            ? '선택한 종목이 포함된 대회가 없습니다.'
+            : monthKey === MARATHON_SCHEDULE_ALL_KEY
+              ? '등록된 대회 일정이 없습니다.'
+              : '이 달 등록된 대회 일정이 없습니다.'}
         </p>
       ) : (
-        events.map((event) => (
+        filteredEvents.map((event) => (
           <MarathonEventRow
             key={event.id}
             event={event}

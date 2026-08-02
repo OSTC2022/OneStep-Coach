@@ -270,9 +270,8 @@ export const LessonCompletionMemberInsight = forwardRef<
         className,
       )}
     >
-      <div className="shrink-0 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2">
-        <p className="text-[11px] font-medium text-primary">남은 횟차</p>
-        <p className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+      <div className="shrink-0 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2.5">
+        <p className="text-lg font-semibold tabular-nums leading-snug text-foreground sm:text-xl">
           {formatRemainingPreview(resolvedRemaining)}
         </p>
       </div>
@@ -436,13 +435,13 @@ function MiniMetric({
   return (
     <div className="flex min-h-0 min-w-0 flex-col rounded-lg border border-border/70 bg-background/60 p-2">
       <div className="flex shrink-0 items-baseline justify-between gap-1">
-        <p className="text-[10px] font-medium text-muted-foreground">
+        <p className="text-[11px] font-medium text-muted-foreground">
           {title}
           {staffOnly ? (
             <span className="ml-1 text-[9px] text-muted-foreground/70">내부</span>
           ) : null}
         </p>
-        <p className="truncate text-xs font-semibold tabular-nums">
+        <p className="truncate text-sm font-semibold tabular-nums sm:text-base">
           {latest}
           {delta ? (
             <span className={cn('ml-1', deltaClassName)}>{delta}</span>

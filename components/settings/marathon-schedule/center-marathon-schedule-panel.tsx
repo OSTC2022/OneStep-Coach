@@ -9,6 +9,7 @@ import {
   deleteMarathonEvent,
   getCenterMarathonScheduleForAdmin,
   listMarathonRecommendations,
+  removeMarathonEventFromCatalog,
   saveMarathonEvent,
   type CenterMarathonScheduleBundle,
 } from '@/lib/actions/center-marathon-schedule'
@@ -229,14 +230,24 @@ export function CenterMarathonSchedulePanel() {
     })
   }
 
-  function handleAddFromCatalog(item: MarathonCatalogItem) {
+  function handleToggleCatalog(item: MarathonCatalogItem) {
+    const already = addedKeySet.has(item.key)
     startTransition(async () => {
-      const result = await addMarathonEventFromCatalog(item.key)
-      if (!result.ok) {
-        toast.error(result.error)
-        return
+      if (already) {
+        const result = await removeMarathonEventFromCatalog(item.key)
+        if (!result.ok) {
+          toast.error(result.error)
+          return
+        }
+        toast.success(`「${item.title}」 추가를 취소했습니다.`)
+      } else {
+        const result = await addMarathonEventFromCatalog(item.key)
+        if (!result.ok) {
+          toast.error(result.error)
+          return
+        }
+        toast.success(`「${item.title}」을(를) 일정에 추가했습니다.`)
       }
-      toast.success(`「${item.title}」을(를) 일정에 추가했습니다.`)
       await refreshAll()
       router.refresh()
     })
@@ -380,11 +391,12 @@ export function CenterMarathonSchedulePanel() {
                         <Button
                           type="button"
                           size="sm"
-                          disabled={pending || already}
-                          onClick={() => handleAddFromCatalog(item)}
+                          variant={already ? 'outline' : 'default'}
+                          disabled={pending}
+                          onClick={() => handleToggleCatalog(item)}
                         >
-                          <Plus className="mr-1 h-3.5 w-3.5" />
-                          {already ? '추가됨' : '대회 추가'}
+                          {already ? null : <Plus className="mr-1 h-3.5 w-3.5" />}
+                          {already ? '추가됨 · 취소' : '대회 추가'}
                         </Button>
                       </div>
                     </li>

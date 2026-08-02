@@ -29,8 +29,8 @@ type LegacyShellPrefsV1 = {
 }
 
 const VIEWPORT_MARGIN_PX = 8
-const MIN_INSIGHT = { width: 280, height: 280 }
-const MIN_SIGNATURE = { width: 280, height: 360 }
+const MIN_INSIGHT = { width: 280, height: 260 }
+const MIN_SIGNATURE = { width: 280, height: 420 }
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
@@ -78,7 +78,8 @@ function defaultRectsForViewport(): Pick<
   }
 
   const usableH = vh - VIEWPORT_MARGIN_PX * 2 - gap
-  const insightH = Math.round(usableH * 0.52)
+  // 서명창을 더 크게 — 신체정보 패널은 간결하게
+  const insightH = Math.round(usableH * 0.38)
   const sigH = usableH - insightH
   const w = Math.min(Math.round(vw * 0.94), vw - VIEWPORT_MARGIN_PX * 2)
   const left = Math.max(VIEWPORT_MARGIN_PX, Math.round((vw - w) / 2))

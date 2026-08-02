@@ -495,18 +495,22 @@ export function SignaturePadDialog({
   ) : (
     <>
       {showEndTime ? (
-        <div className="shrink-0 space-y-1.5">
-          <Label htmlFor="lesson-end-time">종료 시간</Label>
+        <div className="flex shrink-0 items-center gap-2">
+          <Label htmlFor="lesson-end-time" className="shrink-0 text-sm font-medium">
+            종료 시간
+          </Label>
           {canEditEndTime ? (
-            <TimeInput24
-              id="lesson-end-time"
-              value={endTime}
-              onChange={setEndTime}
-            />
+            <div className="min-w-0 flex-1">
+              <TimeInput24
+                id="lesson-end-time"
+                value={endTime}
+                onChange={setEndTime}
+              />
+            </div>
           ) : (
             <div
               id="lesson-end-time"
-              className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm tabular-nums"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-base font-medium tabular-nums"
             >
               <Clock className="h-4 w-4 shrink-0 opacity-60" />
               {endTime || '—'}
@@ -517,7 +521,7 @@ export function SignaturePadDialog({
 
       <div
         ref={containerRef}
-        className="relative min-h-[7.5rem] flex-1 overflow-hidden rounded-lg border border-border"
+        className="relative min-h-[14rem] flex-[1.6] overflow-hidden rounded-lg border border-border sm:min-h-[18rem]"
       >
         <canvas
           ref={canvasRef}
@@ -532,7 +536,7 @@ export function SignaturePadDialog({
         />
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none text-4xl font-semibold tracking-[0.2em] text-white/10 sm:text-5xl"
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center select-none text-5xl font-semibold tracking-[0.2em] text-white/10 sm:text-6xl"
         >
           서명
         </span>
@@ -542,7 +546,7 @@ export function SignaturePadDialog({
         type="button"
         variant="outline"
         onClick={clearSignature}
-        className="w-full shrink-0"
+        className="h-10 w-full shrink-0 text-sm"
       >
         <RotateCcw className="mr-2 h-4 w-4" />
         다시 서명
@@ -609,7 +613,7 @@ export function SignaturePadDialog({
     panel: PanelKey,
     titleText: string,
     body: ReactNode,
-    hint: string,
+    dragHint: string,
   ) {
     const rect = panelRects[panel]
     const z = activePanel === panel ? 40 : 30
@@ -630,20 +634,21 @@ export function SignaturePadDialog({
       >
         <div
           className={cn(
-            'flex shrink-0 items-center gap-1.5 border-b border-border/70 px-2 py-1.5',
+            'flex h-9 shrink-0 items-center gap-1.5 border-b border-border/70 px-2',
             shellLocked
               ? 'cursor-default'
               : 'cursor-grab touch-none active:cursor-grabbing',
           )}
           onPointerDown={(e) => startPanelDrag(panel, e)}
+          title={dragHint}
+          aria-label={dragHint}
         >
           {!shellLocked ? (
             <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           ) : null}
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-foreground">{titleText}</p>
-            <p className="truncate text-[10px] text-muted-foreground">{hint}</p>
-          </div>
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+            {titleText}
+          </p>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
@@ -763,27 +768,13 @@ export function SignaturePadDialog({
 
               {renderFloatingWindow(
                 'signature',
-                title,
+                memberLabel ? `${memberLabel} · ${title}` : title,
                 <>
-                  <DialogHeader
-                    className={cn(
-                      'shrink-0 space-y-0.5 border-b border-primary/10 bg-primary/[0.03] text-left',
-                      'px-4 py-2 sm:px-5',
-                    )}
-                  >
-                    <DialogTitle className="text-base leading-snug">{title}</DialogTitle>
-                    <DialogDescription className="text-xs leading-snug sm:text-sm">
-                      {memberLabel ? (
-                        <>
-                          <span className="font-medium text-foreground">{memberLabel}</span>
-                          <span className="mx-1">·</span>
-                        </>
-                      ) : null}
-                      {description}
-                    </DialogDescription>
-                  </DialogHeader>
+                  <p className="shrink-0 border-b border-primary/10 bg-primary/[0.03] px-4 py-1.5 text-xs text-muted-foreground sm:px-5">
+                    {description}
+                  </p>
 
-                  <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-4 py-2 sm:px-5">
+                  <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden px-4 py-2.5 sm:px-5">
                     {signatureBody}
                   </div>
                   {footer}
@@ -794,16 +785,10 @@ export function SignaturePadDialog({
           ) : (
             <>
               <DialogHeader className="shrink-0 space-y-1 border-b border-primary/10 bg-primary/[0.03] px-4 pt-4 pb-3 text-left sm:px-6 sm:pt-5">
-                <DialogTitle>{title}</DialogTitle>
-                <DialogDescription>
-                  {memberLabel ? (
-                    <>
-                      <span className="font-medium text-foreground">{memberLabel}</span>
-                      <span className="mx-1">·</span>
-                    </>
-                  ) : null}
-                  {description}
-                </DialogDescription>
+                <DialogTitle>
+                  {memberLabel ? `${memberLabel} · ${title}` : title}
+                </DialogTitle>
+                <DialogDescription>{description}</DialogDescription>
               </DialogHeader>
 
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-2 pb-2 sm:px-6">

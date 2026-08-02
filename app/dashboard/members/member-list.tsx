@@ -14,6 +14,7 @@ import {
 import {
   formatMemberAge,
   formatMemberContactDisplay,
+  formatMemberContactDisplayCompact,
   suggestAgeFromBirthDate,
   AUTO_INSTRUCTOR_ID,
   formatPrimaryInstructorName,
@@ -743,7 +744,9 @@ export function MemberList({
                 className="hidden w-[7rem] lg:table-cell"
                 onSort={handleSortClick}
               />
-              <TableHead className="hidden w-[8rem] lg:table-cell">연락처</TableHead>
+              <TableHead className="hidden w-[9rem] max-w-[9rem] lg:table-cell">
+                연락처
+              </TableHead>
               <TableHead className="w-[3.5rem] whitespace-nowrap text-center">
                 상태
               </TableHead>
@@ -801,10 +804,15 @@ export function MemberList({
                   <TableCell className="hidden w-[7rem] lg:table-cell text-xs whitespace-nowrap">
                     {formatPrimaryInstructorName(member.primary_instructor)}
                   </TableCell>
-                  <TableCell className="hidden w-[8rem] lg:table-cell text-xs text-muted-foreground whitespace-nowrap">
-                    {formatMemberContactDisplay(member)}
+                  <TableCell className="hidden max-w-[9rem] overflow-hidden lg:table-cell text-xs text-muted-foreground">
+                    <span
+                      className="block truncate"
+                      title={formatMemberContactDisplay(member)}
+                    >
+                      {formatMemberContactDisplayCompact(member)}
+                    </span>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">
+                  <TableCell className="relative z-[1] whitespace-nowrap bg-background">
                     <div className="flex justify-center">
                       {canManage ? (
                         <Switch
@@ -819,7 +827,7 @@ export function MemberList({
                     </div>
                   </TableCell>
                   {canManage ? (
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell className="relative z-[1] whitespace-nowrap bg-background">
                       <div className="flex justify-center gap-0.5">
                         <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
                           <Link

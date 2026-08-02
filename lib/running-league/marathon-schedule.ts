@@ -174,6 +174,90 @@ export function isMarathonEventUpcomingOrToday(
   return date >= todayKey
 }
 
+/** 회원 포털 거리 필터 */
+export type MarathonDistanceFilter = '5km' | '10km' | 'half' | 'full'
+
+export const MARATHON_DISTANCE_FILTERS: Array<{
+  id: MarathonDistanceFilter
+  label: string
+}> = [
+  { id: '5km', label: '5KM' },
+  { id: '10km', label: '10KM' },
+  { id: 'half', label: 'HALF' },
+  { id: 'full', label: 'FULL' },
+]
+
+/**
+ * 대회 메모·제목에서 종목(5km/10km/하프/풀) 추출.
+ * 예: "풀,하프,10km,5km" / "하프 · 10km" / "Full"
+ */
+export function detectMarathonDistanceFilters(
+  ...parts: Array<string | null | undefined>
+): MarathonDistanceFilter[] {
+  const source = parts.filter(Boolean).join(' ')
+  if (!source.trim()) return []
+
+  const found = new Set<MarathonDistanceFilter>()
+  const lower = source.toLowerCase()
+
+  // 토큰 단위 (쉼표·슬래시·가운뎃점 등)
+  const tokens = lower
+    .split(/[,/·|+\n]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+
+  for (const token of tokens) {
+    const compact = token.replace(/\s+/g, '')
+    if (
+      compact === '풀' ||
+      compact === '풀코스' ||
+      compact === 'full' ||
+      compact === '풀마라톤' ||
+      /^42(\.195)?k?m?$/.test(compact)
+    ) {
+      found.add('full')
+    }
+    if (
+      compact === '하프' ||
+      compact === '하프코스' ||
+      compact === 'half' ||
+      compact === '하프마라톤' ||
+      /^21(\.0975?)?k?m?$/.test(compact)
+    ) {
+      found.add('half')
+    }
+    if (/^10k(m)?$/.test(compact) || compact === '10킬로') {
+      found.add('10km')
+    }
+    if (/^5k(m)?$/.test(compact) || compact === '5킬로') {
+      found.add('5km')
+    }
+  }
+
+  // 토큰이 비어도 문자열 전체에서 재탐지
+  if (/(?:^|[^0-9])10\s*k(?:m)?(?:[^a-z0-9]|$)/i.test(lower)) found.add('10km')
+  if (/(?:^|[^0-9])5\s*k(?:m)?(?:[^a-z0-9]|$)/i.test(lower)) found.add('5km')
+  if (/하프|\bhalf\b|21\.?\s*097/i.test(lower)) found.add('half')
+  if (
+    /풀코스|풀마라톤|\bfull\b|42\.?\s*195/i.test(lower) ||
+    /(?:^|[,/·|\s])풀(?:[,/·|\s]|$)/.test(source)
+  ) {
+    found.add('full')
+  }
+
+  return MARATHON_DISTANCE_FILTERS.map((item) => item.id).filter((id) => found.has(id))
+}
+
+export function marathonEventMatchesDistanceFilters(
+  event: Pick<MarathonEventView, 'notes' | 'title'>,
+  selected: MarathonDistanceFilter[],
+): boolean {
+  if (selected.length === 0) return true
+  const tags = detectMarathonDistanceFilters(event.notes, event.title)
+  if (tags.length === 0) return false
+  return selected.some((id) => tags.includes(id))
+}
+
 /** 신청가능 라벨 — 마감일(또는 대회일)이 지나면 false */
 export function isMarathonRegistrationOpenActive(options: {
   registration_open?: boolean | null
