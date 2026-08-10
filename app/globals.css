@@ -195,6 +195,17 @@ a[href] {
   }
 }
 
+/* 헤더 원스텝 심볼 — 은은한 깜빡임 */
+@keyframes onestep-symbol-soft-blink {
+  0%,
+  100% {
+    opacity: 0.78;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .onestep-pulse-line {
   stroke-dasharray: 140;
   animation: onestep-pulse-travel 2.4s linear infinite;
@@ -202,6 +213,10 @@ a[href] {
 
 .onestep-heartbeat {
   animation: onestep-heartbeat-pulse 1.2s ease-in-out infinite;
+}
+
+.onestep-symbol-soft-blink {
+  animation: onestep-symbol-soft-blink 2.6s ease-in-out infinite;
 }
 
 .onestep-spinner {

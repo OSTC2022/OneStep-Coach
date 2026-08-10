@@ -61,6 +61,7 @@ function eventToInput(event: CenterMarathonScheduleBundle['events'][number]): Ma
     is_featured: event.is_featured,
     registration_open: event.registration_open,
     registration_end_date: event.registration_end_date ?? '',
+    is_pinned: event.is_pinned,
     custom_labels: event.custom_labels,
     catalog_key: event.catalog_key,
   }
@@ -79,6 +80,7 @@ function catalogToDraft(item: MarathonCatalogItem): MarathonEventInput {
     is_featured: item.is_featured,
     registration_open: item.registration_open,
     registration_end_date: item.registration_end_date ?? '',
+    is_pinned: false,
     custom_labels: [],
     catalog_key: item.key,
   }
@@ -510,11 +512,18 @@ export function CenterMarathonSchedulePanel() {
                   className={cn(
                     'flex flex-wrap items-start justify-between gap-3 rounded-lg border px-3 py-2.5',
                     event.is_hidden && 'opacity-60',
-                    event.is_featured && 'border-amber-400/30',
+                    event.is_pinned
+                      ? 'border-amber-400/45 bg-amber-500/[0.06]'
+                      : event.is_featured && 'border-amber-400/30',
                   )}
                 >
                   <div className="min-w-0 space-y-0.5">
                     <div className="flex flex-wrap items-center gap-1.5">
+                      {event.is_pinned ? (
+                        <span className="rounded-full border border-amber-400/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100">
+                          상단 고정
+                        </span>
+                      ) : null}
                       <p className="font-medium">{event.title}</p>
                       <MarathonEventLabels
                         isFeatured={event.is_featured}
@@ -672,6 +681,17 @@ export function CenterMarathonSchedulePanel() {
           <div className="space-y-2 rounded-lg border border-border/70 p-3">
             <p className="text-xs font-medium text-muted-foreground">라벨 (회원에게 표시)</p>
             <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={draft.is_pinned ? 'default' : 'outline'}
+                disabled={pending}
+                onClick={() =>
+                  setDraft((current) => ({ ...current, is_pinned: !current.is_pinned }))
+                }
+              >
+                상단 고정
+              </Button>
               <Button
                 type="button"
                 size="sm"

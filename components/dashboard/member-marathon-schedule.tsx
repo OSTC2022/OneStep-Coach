@@ -1,24 +1,26 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
   ChevronDown,
   ExternalLink,
   Loader2,
   MapPin,
+  Pin,
   Settings2,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   toggleMarathonEventSignup,
+  toggleMarathonEventPinned,
   getCenterMarathonScheduleForMember,
   type CenterMarathonScheduleBundle,
 } from '@/lib/actions/center-marathon-schedule'
 import {
+  compareMarathonEventsForDisplay,
   formatMarathonMonthLabel,
   listNearbyMarathonMonthKeys,
   marathonEventMatchesDistanceFilters,
@@ -54,7 +56,11 @@ type MemberMarathonScheduleProps = {
   canParticipate: boolean
   readOnly?: boolean
   embedded?: boolean
+  /** 카드 헤더 없이 본문만 (상단 메뉴 스트립용) */
+  contentOnly?: boolean
   showManageLink?: boolean
+  /** 관리자·강사 — 상단 고정 토글 */
+  canPinEvents?: boolean
   className?: string
   onMonthChange?: (monthKey: string) => void
 }
@@ -64,23 +70,31 @@ export function MemberMarathonSchedule({
   canParticipate,
   readOnly = false,
   embedded = false,
+  contentOnly = false,
   showManageLink = false,
+  canPinEvents = false,
   className,
   onMonthChange,
 }: MemberMarathonScheduleProps) {
-  const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [pendingEventId, setPendingEventId] = useState<string | null>(null)
+  const [pendingPinId, setPendingPinId] = useState<string | null>(null)
   const [events, setEvents] = useState(bundle.events)
+  const [tableReady, setTableReady] = useState(bundle.tableReady)
   const [monthKey, setMonthKey] = useState(bundle.monthKey)
+  const selectedMonthRef = useRef(bundle.monthKey)
   const [activeEvent, setActiveEvent] = useState<MarathonEventView | null>(null)
-  const [sectionOpen, setSectionOpen] = useState(false)
+  const [sectionOpen, setSectionOpen] = useState(contentOnly)
   const [distanceFilters, setDistanceFilters] = useState<MarathonDistanceFilter[]>([])
+  const [mySignupsOnly, setMySignupsOnly] = useState(false)
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(bundle.events.map((event) => [event.id, event.is_signed_up])),
   )
   const [countDraft, setCountDraft] = useState<Record<string, number>>(() =>
     Object.fromEntries(bundle.events.map((event) => [event.id, event.signup_count])),
+  )
+  const [pinDraft, setPinDraft] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(bundle.events.map((event) => [event.id, event.is_pinned])),
   )
 
   const monthOptions = useMemo(
@@ -89,13 +103,54 @@ export function MemberMarathonSchedule({
   )
 
   useEffect(() => {
+    selectedMonthRef.current = monthKey
+  }, [monthKey])
+
+  useEffect(() => {
+    const selected = selectedMonthRef.current
+    // 서버 bundle이 기본 월로 갱신돼도, 사용자가 보고 있던 월은 유지
+    if (selected !== bundle.monthKey) {
+      let cancelled = false
+      void getCenterMarathonScheduleForMember(selected).then((nextBundle) => {
+        if (cancelled) return
+        if (selectedMonthRef.current !== selected) return
+        setEvents(nextBundle.events)
+        setTableReady(nextBundle.tableReady)
+        setMonthKey(nextBundle.monthKey)
+        selectedMonthRef.current = nextBundle.monthKey
+        setSignupDraft(
+          Object.fromEntries(
+            nextBundle.events.map((event) => [event.id, event.is_signed_up]),
+          ),
+        )
+        setCountDraft(
+          Object.fromEntries(
+            nextBundle.events.map((event) => [event.id, event.signup_count]),
+          ),
+        )
+        setPinDraft(
+          Object.fromEntries(
+            nextBundle.events.map((event) => [event.id, event.is_pinned]),
+          ),
+        )
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
     setEvents(bundle.events)
+    setTableReady(bundle.tableReady)
     setMonthKey(bundle.monthKey)
+    selectedMonthRef.current = bundle.monthKey
     setSignupDraft(
       Object.fromEntries(bundle.events.map((event) => [event.id, event.is_signed_up])),
     )
     setCountDraft(
       Object.fromEntries(bundle.events.map((event) => [event.id, event.signup_count])),
+    )
+    setPinDraft(
+      Object.fromEntries(bundle.events.map((event) => [event.id, event.is_pinned])),
     )
     setActiveEvent((current) => {
       if (!current) return current
@@ -103,15 +158,26 @@ export function MemberMarathonSchedule({
     })
   }, [bundle])
 
-  const filteredEvents = useMemo(
-    () =>
-      events.filter((event) =>
-        marathonEventMatchesDistanceFilters(event, distanceFilters),
-      ),
-    [events, distanceFilters],
-  )
+  const filteredEvents = useMemo(() => {
+    const list = events.filter((event) => {
+      if (!marathonEventMatchesDistanceFilters(event, distanceFilters)) return false
+      if (mySignupsOnly) {
+        return signupDraft[event.id] ?? event.is_signed_up
+      }
+      return true
+    })
+    return [...list]
+      .map((event) => ({
+        ...event,
+        is_pinned: pinDraft[event.id] ?? event.is_pinned,
+      }))
+      .sort(compareMarathonEventsForDisplay)
+  }, [events, distanceFilters, mySignupsOnly, signupDraft, pinDraft])
 
   const signedUpCount = filteredEvents.filter(
+    (event) => signupDraft[event.id] ?? event.is_signed_up,
+  ).length
+  const mySignupTotal = events.filter(
     (event) => signupDraft[event.id] ?? event.is_signed_up,
   ).length
 
@@ -122,6 +188,10 @@ export function MemberMarathonSchedule({
   }
 
   function handleMonthChange(next: string) {
+    if (next === selectedMonthRef.current && next === monthKey) {
+      return
+    }
+    selectedMonthRef.current = next
     setMonthKey(next)
     if (onMonthChange) {
       onMonthChange(next)
@@ -129,14 +199,52 @@ export function MemberMarathonSchedule({
     }
     startTransition(async () => {
       const nextBundle = await getCenterMarathonScheduleForMember(next)
+      // 사용자가 다른 월로 이미 바꾼 경우 무시
+      if (selectedMonthRef.current !== next && selectedMonthRef.current !== nextBundle.monthKey) {
+        return
+      }
       setEvents(nextBundle.events)
+      setTableReady(nextBundle.tableReady)
       setMonthKey(nextBundle.monthKey)
+      selectedMonthRef.current = nextBundle.monthKey
       setSignupDraft(
         Object.fromEntries(nextBundle.events.map((event) => [event.id, event.is_signed_up])),
       )
       setCountDraft(
         Object.fromEntries(nextBundle.events.map((event) => [event.id, event.signup_count])),
       )
+      setPinDraft(
+        Object.fromEntries(nextBundle.events.map((event) => [event.id, event.is_pinned])),
+      )
+    })
+  }
+
+  function toggleMySignupsOnly() {
+    setMySignupsOnly((current) => !current)
+  }
+
+  function togglePin(event: MarathonEventView) {
+    if (!canPinEvents) return
+    const previous = pinDraft[event.id] ?? event.is_pinned
+    const optimistic = !previous
+    setPinDraft((current) => ({ ...current, [event.id]: optimistic }))
+    setPendingPinId(event.id)
+
+    startTransition(async () => {
+      const result = await toggleMarathonEventPinned(event.id)
+      setPendingPinId(null)
+      if (!result.ok) {
+        setPinDraft((current) => ({ ...current, [event.id]: previous }))
+        toast.error(result.error)
+        return
+      }
+      setPinDraft((current) => ({ ...current, [event.id]: result.pinned }))
+      setEvents((current) =>
+        current.map((row) =>
+          row.id === event.id ? { ...row, is_pinned: result.pinned } : row,
+        ),
+      )
+      toast.success(result.pinned ? '상단에 고정했습니다.' : '고정을 해제했습니다.')
     })
   }
 
@@ -182,25 +290,26 @@ export function MemberMarathonSchedule({
         ),
       )
       toast.success(result.signedUp ? '참여 신청했습니다.' : '참여를 취소했습니다.')
-      router.refresh()
     })
   }
 
-  if (!embedded && !bundle.tableReady) {
+  if (!embedded && !tableReady) {
     return null
   }
 
   const collapsedSummary =
     filteredEvents.length > 0
       ? `${filteredEvents.length}개 대회${signedUpCount > 0 ? ` · ${signedUpCount}개 참여` : ''}`
-      : bundle.tableReady
-        ? distanceFilters.length > 0
-          ? '선택한 종목 일정 없음'
-          : '등록된 일정 없음'
+      : tableReady
+        ? mySignupsOnly
+          ? '참여 중인 대회 없음'
+          : distanceFilters.length > 0
+            ? '선택한 종목 일정 없음'
+            : '등록된 일정 없음'
         : '준비 중'
 
   const scheduleBody = (
-    <div className="space-y-1.5 p-2.5 sm:p-3">
+    <div className={cn(contentOnly ? 'space-y-1.5' : 'space-y-1.5 p-2.5 sm:p-3')}>
       <div className="flex flex-wrap items-center gap-2 px-0.5 pb-1">
         <Select value={monthKey} onValueChange={handleMonthChange} disabled={pending}>
           <SelectTrigger className="h-8 w-[9.5rem] border-lime-500/20 bg-black/40 text-xs">
@@ -230,6 +339,19 @@ export function MemberMarathonSchedule({
       </div>
 
       <div className="flex flex-wrap gap-1.5 px-0.5 pb-1">
+        <button
+          type="button"
+          onClick={toggleMySignupsOnly}
+          className={cn(
+            'rounded-md border px-2.5 py-1 text-[11px] font-semibold tracking-wide transition-colors',
+            mySignupsOnly
+              ? 'border-primary/55 bg-primary/20 text-primary'
+              : 'border-zinc-700 bg-black/40 text-zinc-400 hover:border-primary/35 hover:text-zinc-200',
+          )}
+          aria-pressed={mySignupsOnly}
+        >
+          내 참여{mySignupTotal > 0 ? ` ${mySignupTotal}` : ''}
+        </button>
         {MARATHON_DISTANCE_FILTERS.map((filter) => {
           const active = distanceFilters.includes(filter.id)
           return (
@@ -251,17 +373,19 @@ export function MemberMarathonSchedule({
         })}
       </div>
 
-      {!bundle.tableReady ? (
+      {!tableReady ? (
         <p className="px-2 py-6 text-center text-sm text-zinc-500">
           마라톤 일정 기능을 준비 중입니다.
         </p>
       ) : filteredEvents.length === 0 ? (
         <p className="px-2 py-6 text-center text-sm text-zinc-500">
-          {distanceFilters.length > 0
-            ? '선택한 종목이 포함된 대회가 없습니다.'
-            : monthKey === MARATHON_SCHEDULE_ALL_KEY
-              ? '등록된 대회 일정이 없습니다.'
-              : '이 달 등록된 대회 일정이 없습니다.'}
+          {mySignupsOnly
+            ? '참여 신청한 대회가 없습니다.'
+            : distanceFilters.length > 0
+              ? '선택한 종목이 포함된 대회가 없습니다.'
+              : monthKey === MARATHON_SCHEDULE_ALL_KEY
+                ? '등록된 대회 일정이 없습니다.'
+                : '이 달 등록된 대회 일정이 없습니다.'}
         </p>
       ) : (
         filteredEvents.map((event) => (
@@ -269,17 +393,53 @@ export function MemberMarathonSchedule({
             key={event.id}
             event={event}
             pending={pending && pendingEventId === event.id}
+            pinPending={pending && pendingPinId === event.id}
             readOnly={readOnly}
             canParticipate={canParticipate}
+            canPin={canPinEvents}
             isSignedUp={signupDraft[event.id] ?? event.is_signed_up}
+            isPinned={pinDraft[event.id] ?? event.is_pinned}
             signupCount={countDraft[event.id] ?? event.signup_count}
             onOpenParticipants={() => setActiveEvent(event)}
             onToggleSignup={() => toggleSignup(event)}
+            onTogglePin={() => togglePin(event)}
           />
         ))
       )}
     </div>
   )
+
+  const participantsDialog = (
+    <ParticipantsDialog
+      event={
+        activeEvent
+          ? {
+              ...activeEvent,
+              is_signed_up: signupDraft[activeEvent.id] ?? activeEvent.is_signed_up,
+              signup_count: countDraft[activeEvent.id] ?? activeEvent.signup_count,
+            }
+          : null
+      }
+      onOpenChange={(open) => {
+        if (!open) setActiveEvent(null)
+      }}
+      onToggleSignup={() => {
+        if (activeEvent) toggleSignup(activeEvent)
+      }}
+      pending={pending && pendingEventId === activeEvent?.id}
+      readOnly={readOnly}
+      canParticipate={canParticipate}
+    />
+  )
+
+  if (contentOnly) {
+    return (
+      <div className={cn(className)}>
+        {scheduleBody}
+        {participantsDialog}
+      </div>
+    )
+  }
 
   return (
     <section className={cn(!embedded && MEMBER_PORTAL_SHELL_CLASS, className)}>
@@ -292,7 +452,7 @@ export function MemberMarathonSchedule({
         >
           <div className="flex min-w-0 items-center gap-2">
             <CalendarDays className="h-4 w-4 shrink-0 text-lime-400" />
-            <h2 className="text-base font-bold text-lime-50 sm:text-lg">마라톤 일정</h2>
+            <h2 className="text-base font-bold text-lime-50 sm:text-lg">대회 일정</h2>
             {!sectionOpen ? (
               <span className="truncate text-xs text-zinc-500">{collapsedSummary}</span>
             ) : null}
@@ -307,27 +467,7 @@ export function MemberMarathonSchedule({
         </button>
 
         {sectionOpen ? scheduleBody : null}
-
-        <ParticipantsDialog
-          event={
-            activeEvent
-              ? {
-                  ...activeEvent,
-                  is_signed_up: signupDraft[activeEvent.id] ?? activeEvent.is_signed_up,
-                  signup_count: countDraft[activeEvent.id] ?? activeEvent.signup_count,
-                }
-              : null
-          }
-          onOpenChange={(open) => {
-            if (!open) setActiveEvent(null)
-          }}
-          onToggleSignup={() => {
-            if (activeEvent) toggleSignup(activeEvent)
-          }}
-          pending={pending && pendingEventId === activeEvent?.id}
-          readOnly={readOnly}
-          canParticipate={canParticipate}
-        />
+        {participantsDialog}
       </div>
     </section>
   )
@@ -401,24 +541,39 @@ function ParticipationToggle({
 function MarathonEventRow({
   event,
   pending,
+  pinPending,
   readOnly,
   canParticipate,
+  canPin,
   isSignedUp,
+  isPinned,
   signupCount,
   onOpenParticipants,
   onToggleSignup,
+  onTogglePin,
 }: {
   event: MarathonEventView
   pending: boolean
+  pinPending: boolean
   readOnly: boolean
   canParticipate: boolean
+  canPin: boolean
   isSignedUp: boolean
+  isPinned: boolean
   signupCount: number
   onOpenParticipants: () => void
   onToggleSignup: () => void
+  onTogglePin: () => void
 }) {
   return (
-    <div className="flex w-full items-start gap-2 rounded-lg border border-lime-500/15 bg-black/35 px-2.5 py-2">
+    <div
+      className={cn(
+        'flex w-full items-start gap-2 rounded-lg border bg-black/35 px-2.5 py-2',
+        isPinned
+          ? 'border-amber-400/45 bg-amber-500/[0.07] shadow-[0_0_16px_-6px_rgba(251,191,36,0.45)]'
+          : 'border-lime-500/15',
+      )}
+    >
       <button
         type="button"
         onClick={onOpenParticipants}
@@ -434,6 +589,12 @@ function MarathonEventRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-1.5">
+            {isPinned ? (
+              <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-400/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100">
+                <Pin className="h-3 w-3" />
+                고정
+              </span>
+            ) : null}
             <span className="text-sm font-medium leading-snug text-zinc-100">{event.title}</span>
             <span
               className={cn(
@@ -484,14 +645,39 @@ function MarathonEventRow({
           </span>
         </span>
       </button>
-      {!readOnly ? (
-        <ParticipationToggle
-          active={isSignedUp}
-          pending={pending}
-          disabled={!canParticipate}
-          onToggle={onToggleSignup}
-        />
-      ) : null}
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        {canPin ? (
+          <button
+            type="button"
+            onClick={onTogglePin}
+            disabled={pinPending}
+            title={isPinned ? '상단 고정 해제' : '상단에 고정'}
+            aria-label={isPinned ? '상단 고정 해제' : '상단에 고정'}
+            aria-pressed={isPinned}
+            className={cn(
+              'inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors',
+              isPinned
+                ? 'border-amber-400/50 bg-amber-500/20 text-amber-100'
+                : 'border-zinc-700 bg-black/40 text-zinc-500 hover:border-amber-400/35 hover:text-amber-200',
+              pinPending && 'opacity-60',
+            )}
+          >
+            {pinPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Pin className={cn('h-3.5 w-3.5', isPinned && 'fill-current')} />
+            )}
+          </button>
+        ) : null}
+        {!readOnly ? (
+          <ParticipationToggle
+            active={isSignedUp}
+            pending={pending}
+            disabled={!canParticipate}
+            onToggle={onToggleSignup}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }

@@ -8,13 +8,24 @@ import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-lay
 export function MemberPortalNoticePanel({
   notice,
   className,
+  contentOnly = false,
 }: {
   notice: string | null | undefined
   className?: string
+  /** 상단 메뉴 스트립에서 본문만 표시 */
+  contentOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const content = notice?.trim()
   if (!content) return null
+
+  const body = (
+    <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">{content}</p>
+  )
+
+  if (contentOnly) {
+    return <div className={cn('px-3 py-3 sm:px-4', className)}>{body}</div>
+  }
 
   return (
     <div className={cn(MEMBER_PORTAL_CARD_CLASS, className)}>
@@ -37,9 +48,7 @@ export function MemberPortalNoticePanel({
         />
       </button>
       {open ? (
-        <div className="border-t border-lime-500/10 px-3 py-3 sm:px-4">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">{content}</p>
-        </div>
+        <div className="border-t border-lime-500/10 px-3 py-3 sm:px-4">{body}</div>
       ) : null}
     </div>
   )

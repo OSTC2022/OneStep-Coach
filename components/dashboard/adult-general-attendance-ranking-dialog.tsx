@@ -13,18 +13,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { cn } from '@/lib/utils'
 
-const RANK_MEDALS: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' }
-
 function RankBadge({ rank }: { rank: number }) {
-  const medal = RANK_MEDALS[rank]
-  if (medal) {
-    return (
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center text-base" aria-hidden>
-        {medal}
-      </span>
-    )
+  if (rank >= 1 && rank <= 3) {
+    return <RankMedalDisplay rank={rank} size="sm" />
   }
   return (
     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold tabular-nums text-muted-foreground">

@@ -42,6 +42,8 @@ export type MarathonEventInput = {
   registration_open: boolean
   /** 신청 마감일 (없으면 대회일 기준으로 자동 종료) */
   registration_end_date: string
+  /** 회원 포털 목록 상단 고정 */
+  is_pinned: boolean
   custom_labels: MarathonCustomLabel[]
   catalog_key?: string | null
 }
@@ -65,6 +67,7 @@ export type MarathonEventView = {
   registration_end_date: string | null
   /** 신청기간 반영된 표시용 */
   registration_open_active: boolean
+  is_pinned: boolean
   custom_labels: MarathonCustomLabel[]
   catalog_key: string | null
   signup_count: number
@@ -311,9 +314,23 @@ export function createEmptyMarathonEventInput(
     is_featured: false,
     registration_open: false,
     registration_end_date: '',
+    is_pinned: false,
     custom_labels: [],
     catalog_key: null,
   }
+}
+
+/** 고정 대회를 위로, 이후 날짜순 */
+export function compareMarathonEventsForDisplay(
+  a: Pick<MarathonEventView, 'is_pinned' | 'event_date' | 'title'>,
+  b: Pick<MarathonEventView, 'is_pinned' | 'event_date' | 'title'>,
+): number {
+  if (Boolean(a.is_pinned) !== Boolean(b.is_pinned)) {
+    return a.is_pinned ? -1 : 1
+  }
+  const byDate = a.event_date.localeCompare(b.event_date)
+  if (byDate !== 0) return byDate
+  return a.title.localeCompare(b.title, 'ko')
 }
 
 export function listNearbyMarathonMonthKeys(reference = new Date(), past = 2, future = 6): string[] {

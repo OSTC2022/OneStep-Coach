@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Download } from 'lucide-react'
+import { Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
@@ -71,17 +71,19 @@ export function InstallAppButton({
     <Button
       type="button"
       variant={variant}
-      size={size}
-      className={className}
+      size={showLabel ? size : 'icon'}
+      className={cn(!showLabel && 'h-9 w-9', className)}
       disabled={installing}
       onClick={() => void handleInstall()}
       aria-label="홈 화면에 추가"
       title="홈 화면에 추가"
     >
-      <Download className={cn('h-4 w-4 shrink-0', showLabel && 'mr-1.5')} />
-      <span className={showLabel ? 'inline' : 'hidden sm:inline'}>
-        {canPrompt ? '홈 화면 추가' : '앱 설치'}
-      </span>
+      <Smartphone className={cn('h-4 w-4 shrink-0', showLabel && 'mr-1.5')} />
+      {showLabel ? (
+        <span>{canPrompt ? '홈 화면 추가' : '앱 설치'}</span>
+      ) : (
+        <span className="sr-only">앱 설치</span>
+      )}
     </Button>
   )
 }

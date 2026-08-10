@@ -32,6 +32,9 @@ import { cn } from '@/lib/utils'
 interface MemberCenterContactCardProps {
   coach: MemberCoachContactView
   center: MemberCenterContactView
+  /** true면 Card 없이 본문만 (다이얼로그용) */
+  bare?: boolean
+  className?: string
 }
 
 function RoleCard({
@@ -144,6 +147,8 @@ function buildUnavailableNotice(flags: {
 export function MemberCenterContactCard({
   coach,
   center,
+  bare = false,
+  className,
 }: MemberCenterContactCardProps) {
   const [kakaoDialogOpen, setKakaoDialogOpen] = useState(false)
   const [phoneDialogOpen, setPhoneDialogOpen] = useState(false)
@@ -190,132 +195,118 @@ export function MemberCenterContactCard({
     setPhoneDialogOpen(true)
   }
 
-  return (
-    <Card className="border-border/70">
-      <CardHeader className="pb-2 sm:px-6">
-        <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-          <Users className="h-4 w-4 text-primary" />
-          코치 &amp; 센터 연락
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 p-4 sm:p-6 sm:pt-0">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          궁금한 점이 있으면 아래 채널로 편하게 문의해주세요. 훈련 관련 내용은
-          담당 코치가, 예약과 수업 변경은 센터가 안내합니다.
-        </p>
+  const body = (
+    <div className={cn('space-y-4', className)}>
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        궁금한 점이 있으면 아래 채널로 편하게 문의해주세요. 훈련 관련 내용은
+        담당 코치가, 예약과 수업 변경은 센터가 안내합니다.
+      </p>
 
-        <div className="grid gap-2.5 sm:grid-cols-2">
-          <RoleCard
-            title="훈련 문의"
-            subtitle={coachCardSubtitle}
-            hint={coachCardHint}
-          />
-          <RoleCard
-            title="센터 문의"
-            subtitle={center.centerName}
-            hint={CENTER_CONTACT_TOPICS.join(' · ')}
-          />
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        <RoleCard
+          title="훈련 문의"
+          subtitle={coachCardSubtitle}
+          hint={coachCardHint}
+        />
+        <RoleCard
+          title="센터 문의"
+          subtitle={center.centerName}
+          hint={CENTER_CONTACT_TOPICS.join(' · ')}
+        />
+      </div>
+
+      {!unassigned && coach.phone ? (
+        <button
+          type="button"
+          onClick={() => openPhoneDialog([coach.phone!], '담당 코치 연락')}
+          className="inline-flex min-h-11 w-full items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3.5 py-2 text-left text-sm text-primary transition-colors hover:bg-primary/10"
+        >
+          <Phone className="h-4 w-4 shrink-0" />
+          <span>
+            담당 코치 연락 · <span className="font-medium">{coach.phone}</span>
+          </span>
+        </button>
+      ) : null}
+
+      {hasCenterInfo ? (
+        <div className="space-y-1 rounded-lg border border-border/50 bg-muted/5 px-3.5 py-2.5 text-sm">
+          {centerPhones.length > 0 ? (
+            <div className="text-foreground/90">
+              <span className="text-muted-foreground">대표 전화 </span>
+              <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                {centerPhones.map((phone, index) => (
+                  <button
+                    key={`${phone}-${index}`}
+                    type="button"
+                    onClick={() => openPhoneDialog([phone], '센터 대표 전화')}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {phone}
+                  </button>
+                ))}
+              </span>
+            </div>
+          ) : null}
+          {center.centerAddress ? (
+            <p className="text-foreground/90">{center.centerAddress}</p>
+          ) : null}
+          {center.businessHours ? (
+            <p className="text-xs text-muted-foreground">{center.businessHours}</p>
+          ) : null}
         </div>
+      ) : null}
 
-        {!unassigned && coach.phone ? (
-          <button
-            type="button"
+      <div className="space-y-3 border-t border-border/50 pt-4">
+        <ButtonGroup label="빠른 문의">
+          <ContactActionButton
+            label="카카오톡 문의"
+            icon={<MessageCircle className="h-4 w-4" />}
+            ready={kakaoReady}
+            primary
+            onClick={() => setKakaoDialogOpen(true)}
+          />
+          <ContactActionButton
+            label="전화하기"
+            icon={<Phone className="h-4 w-4" />}
+            ready={phoneReady}
+            primary
+            onClick={() => openPhoneDialog(centerPhones, '센터 대표 전화')}
+          />
+        </ButtonGroup>
+
+        <ButtonGroup label="센터 소식">
+          <ContactActionButton
+            label="센터 인스타"
+            icon={<Instagram className="h-4 w-4" />}
+            ready={instagramReady}
+            onClick={() => openInstagram(center.instagram!)}
+          />
+          <ContactActionButton
+            label="블로그"
+            icon={<Globe className="h-4 w-4" />}
+            ready={blogReady}
+            onClick={() => openBlog(center.blogUrl!)}
+          />
+        </ButtonGroup>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">오시는 길</p>
+          <ContactActionButton
+            label="센터 위치 보기"
+            icon={<MapPin className="h-4 w-4" />}
+            ready={placeReady}
             onClick={() =>
-              openPhoneDialog([coach.phone!], '담당 코치 연락')
+              window.open(center.naverPlaceUrl!, '_blank', 'noopener,noreferrer')
             }
-            className="inline-flex min-h-11 w-full items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3.5 py-2 text-left text-sm text-primary transition-colors hover:bg-primary/10"
-          >
-            <Phone className="h-4 w-4 shrink-0" />
-            <span>
-              담당 코치 연락 · <span className="font-medium">{coach.phone}</span>
-            </span>
-          </button>
-        ) : null}
-
-        {hasCenterInfo ? (
-          <div className="space-y-1 rounded-lg border border-border/50 bg-muted/5 px-3.5 py-2.5 text-sm">
-            {centerPhones.length > 0 ? (
-              <div className="text-foreground/90">
-                <span className="text-muted-foreground">대표 전화 </span>
-                <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-                  {centerPhones.map((phone, index) => (
-                    <button
-                      key={`${phone}-${index}`}
-                      type="button"
-                      onClick={() =>
-                        openPhoneDialog([phone], '센터 대표 전화')
-                      }
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {phone}
-                    </button>
-                  ))}
-                </span>
-              </div>
-            ) : null}
-            {center.centerAddress ? (
-              <p className="text-foreground/90">{center.centerAddress}</p>
-            ) : null}
-            {center.businessHours ? (
-              <p className="text-xs text-muted-foreground">{center.businessHours}</p>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="space-y-3 border-t border-border/50 pt-4">
-          <ButtonGroup label="빠른 문의">
-            <ContactActionButton
-              label="카카오톡 문의"
-              icon={<MessageCircle className="h-4 w-4" />}
-              ready={kakaoReady}
-              primary
-              onClick={() => setKakaoDialogOpen(true)}
-            />
-            <ContactActionButton
-              label="전화하기"
-              icon={<Phone className="h-4 w-4" />}
-              ready={phoneReady}
-              primary
-              onClick={() =>
-                openPhoneDialog(centerPhones, '센터 대표 전화')
-              }
-            />
-          </ButtonGroup>
-
-          <ButtonGroup label="센터 소식">
-            <ContactActionButton
-              label="센터 인스타"
-              icon={<Instagram className="h-4 w-4" />}
-              ready={instagramReady}
-              onClick={() => openInstagram(center.instagram!)}
-            />
-            <ContactActionButton
-              label="블로그"
-              icon={<Globe className="h-4 w-4" />}
-              ready={blogReady}
-              onClick={() => openBlog(center.blogUrl!)}
-            />
-          </ButtonGroup>
-
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">오시는 길</p>
-            <ContactActionButton
-              label="센터 위치 보기"
-              icon={<MapPin className="h-4 w-4" />}
-              ready={placeReady}
-              onClick={() =>
-                window.open(center.naverPlaceUrl!, '_blank', 'noopener,noreferrer')
-              }
-            />
-          </div>
+          />
         </div>
+      </div>
 
-        {unavailableNotice ? (
-          <p className="text-center text-xs leading-relaxed text-muted-foreground">
-            {unavailableNotice}
-          </p>
-        ) : null}
-      </CardContent>
+      {unavailableNotice ? (
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
+          {unavailableNotice}
+        </p>
+      ) : null}
 
       <KakaoChannelInquiryDialog
         channelId={kakaoChannel}
@@ -329,6 +320,20 @@ export function MemberCenterContactCard({
         open={phoneDialogOpen}
         onOpenChange={setPhoneDialogOpen}
       />
+    </div>
+  )
+
+  if (bare) return body
+
+  return (
+    <Card className="border-border/70">
+      <CardHeader className="pb-2 sm:px-6">
+        <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
+          <Users className="h-4 w-4 text-primary" />
+          코치 &amp; 센터 연락
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 sm:p-6 sm:pt-0">{body}</CardContent>
     </Card>
   )
 }

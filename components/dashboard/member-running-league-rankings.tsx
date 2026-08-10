@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Search } from 'lucide-react'
 import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
+import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberRunningLeagueRankingsSkeleton } from '@/components/dashboard/member-running-league-rankings-skeleton'
 import { MemberRunningPbDialog } from '@/components/dashboard/member-running-pb-panel'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,7 +47,7 @@ import {
   RankingStatusMessageSlot,
   resolveRankingRowGridClass,
 } from '@/components/dashboard/ranking-member-name-block'
-import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
+import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
 import type { PbLeaderboardDistance } from '@/lib/running-league/pb-leaderboard'
@@ -623,8 +624,6 @@ const rankingCardClass =
 const rankingCardHeaderClass = 'border-b border-lime-500/20 bg-black/40 px-4 py-3.5 sm:px-5'
 const rankingCardContentClass = 'min-w-0 px-4 py-4 sm:px-5 sm:py-4'
 
-const RANK_MEDALS: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' }
-
 function RankingFilterChip({
   active,
   onClick,
@@ -663,30 +662,6 @@ function RankingFilterChip({
     >
       {children}
     </button>
-  )
-}
-
-function RankMedalDisplay({ rank }: { rank: number }) {
-  const medal = RANK_MEDALS[rank]
-  if (medal) {
-    return (
-      <span
-        className="flex w-11 shrink-0 items-center justify-center text-[1.35rem] leading-none"
-        aria-label={`${rank}위`}
-        title={`${rank}위`}
-      >
-        {medal}
-      </span>
-    )
-  }
-  return (
-    <span
-      className="flex w-11 shrink-0 items-center justify-center leading-none"
-      aria-label={`${rank}위`}
-      title={`${rank}위`}
-    >
-      <span className="text-sm font-bold tabular-nums text-zinc-200">{rank}위</span>
-    </span>
   )
 }
 
@@ -789,23 +764,19 @@ function buildDisplayRows<T extends RankedRow>(
   return [...topRows, myRow]
 }
 
-function buildNeighborRankRows<T extends { memberId: string }>(
-  ranked: T[],
-  highlightMemberId?: string | null,
-): T[] {
-  if (ranked.length === 0) return []
-  if (!highlightMemberId) return ranked.slice(0, Math.min(3, ranked.length))
+const RANKING_PREVIEW_VISIBLE = 5
 
-  const myIndex = ranked.findIndex((row) => row.memberId === highlightMemberId)
-  if (myIndex < 0) return ranked.slice(0, Math.min(3, ranked.length))
-
-  if (myIndex === 0) {
-    return ranked.slice(0, Math.min(3, ranked.length))
-  }
-
-  const start = myIndex - 1
-  const end = Math.min(ranked.length, myIndex + 2)
-  return ranked.slice(start, end)
+function resolveRankingWindowStart(
+  rankedLength: number,
+  focusIndex: number,
+  visibleCount = RANKING_PREVIEW_VISIBLE,
+): number {
+  if (rankedLength <= 0) return 0
+  const maxStart = Math.max(0, rankedLength - visibleCount)
+  if (focusIndex < 0) return 0
+  // 내 순위가 창 중앙에 오도록
+  const idealStart = focusIndex - Math.floor((Math.min(visibleCount, rankedLength) - 1) / 2)
+  return Math.min(maxStart, Math.max(0, idealStart))
 }
 
 function MyRankSeparator() {
@@ -981,14 +952,80 @@ function RankingPreview({
   rankingCaption?: string | null
   rankingCaptionStyle?: PortalTextStyleConfig
 }) {
-  const previewRows = usesAttendanceLeaderboard(rankingView)
-    ? buildNeighborRankRows(attendanceLeaderboard, highlightMemberId)
-    : buildNeighborRankRows(
-        usesPbLeaderboard(rankingView)
-          ? activePbLeaderboard.ranked
-          : activeMileageLeaderboard.ranked,
-        highlightMemberId,
+  const allRows = usesAttendanceLeaderboard(rankingView)
+    ? attendanceLeaderboard
+    : usesPbLeaderboard(rankingView)
+      ? activePbLeaderboard.ranked
+      : activeMileageLeaderboard.ranked
+
+  const myIndex = useMemo(() => {
+    if (!highlightMemberId) return -1
+    return allRows.findIndex((row) => row.memberId === highlightMemberId)
+  }, [allRows, highlightMemberId])
+
+  const [windowStart, setWindowStart] = useState(() =>
+    resolveRankingWindowStart(allRows.length, myIndex),
+  )
+  const wheelLockRef = useRef(false)
+  const windowStartRef = useRef(windowStart)
+  const maxWindowStartRef = useRef(0)
+  const canScrollRanksRef = useRef(false)
+
+  useEffect(() => {
+    setWindowStart(resolveRankingWindowStart(allRows.length, myIndex))
+  }, [allRows.length, myIndex, rankingView, pbDistance, genderFilter])
+
+  const maxWindowStart = Math.max(0, allRows.length - RANKING_PREVIEW_VISIBLE)
+  const previewRows = allRows.slice(
+    windowStart,
+    windowStart + RANKING_PREVIEW_VISIBLE,
+  )
+  const canScrollRanks = allRows.length > RANKING_PREVIEW_VISIBLE
+  const listRef = useRef<HTMLDivElement>(null)
+
+  windowStartRef.current = windowStart
+  maxWindowStartRef.current = maxWindowStart
+  canScrollRanksRef.current = canScrollRanks
+
+  function shiftRankingWindow(delta: number) {
+    if (!canScrollRanksRef.current || delta === 0) return
+    setWindowStart((current) =>
+      Math.min(maxWindowStartRef.current, Math.max(0, current + delta)),
+    )
+  }
+
+  useEffect(() => {
+    const node = listRef.current
+    if (!node) return
+
+    function onWheel(event: WheelEvent) {
+      if (!canScrollRanksRef.current) return
+      if (Math.abs(event.deltaY) < 2 && Math.abs(event.deltaX) < 2) return
+
+      const start = windowStartRef.current
+      const maxStart = maxWindowStartRef.current
+      const goingDown = event.deltaY > 0 || event.deltaX > 0
+      const goingUp = event.deltaY < 0 || event.deltaX < 0
+      if (goingDown && start >= maxStart) return
+      if (goingUp && start <= 0) return
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      if (wheelLockRef.current) return
+      wheelLockRef.current = true
+      setWindowStart((current) =>
+        Math.min(maxStart, Math.max(0, current + (goingDown ? 1 : -1))),
       )
+      window.setTimeout(() => {
+        wheelLockRef.current = false
+      }, 80)
+    }
+
+    node.addEventListener('wheel', onWheel, { passive: false })
+    return () => node.removeEventListener('wheel', onWheel)
+  }, [])
+
   const showBeatRivalLabel = rankingView === 'beat_rival'
 
   const beatRivalHeader = useMemo(() => {
@@ -1089,9 +1126,28 @@ function RankingPreview({
       <div className="space-y-1.5 p-2.5">
         {rankingsError ? (
           <RankingsLoadErrorState onRetry={onRetry} />
-        ) : previewRows.length > 0 ? (
+        ) : allRows.length > 0 ? (
           <>
-            <div className="space-y-1.5">
+            <div
+              ref={listRef}
+              className={cn(
+                'relative space-y-1.5 overscroll-contain',
+                canScrollRanks && 'cursor-ns-resize touch-pan-y',
+              )}
+              role="list"
+              aria-label="랭킹 미리보기"
+            >
+              {canScrollRanks && windowStart > 0 ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center py-0.5 text-zinc-500 transition-colors hover:text-lime-300"
+                  aria-label="위 순위 보기"
+                  onClick={() => shiftRankingWindow(-1)}
+                >
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+
               {previewRows.map((row) => {
                 const isMe = highlightMemberId != null && row.memberId === highlightMemberId
                 if (usesAttendanceLeaderboard(rankingView)) {
@@ -1108,7 +1164,7 @@ function RankingPreview({
                 }
                 return usesPbLeaderboard(rankingView) ? (
                   <PbRankingRow
-                    key={row.participantId}
+                    key={(row as PbDistanceRankRow).participantId}
                     row={row as PbDistanceRankRow}
                     isMe={isMe}
                     distanceLabel={formatPbDistanceLabel(pbDistance)}
@@ -1122,7 +1178,7 @@ function RankingPreview({
                   />
                 ) : (
                   <MileageRankingRow
-                    key={row.participantId}
+                    key={(row as MileageDistanceRankRow).participantId}
                     row={row as MileageDistanceRankRow}
                     isMe={isMe}
                     rankChangeDelta={resolveRankChangeDelta(row.memberId)}
@@ -1138,7 +1194,23 @@ function RankingPreview({
                   />
                 )
               })}
+
+              {canScrollRanks && windowStart < maxWindowStart ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center py-0.5 text-zinc-500 transition-colors hover:text-lime-300"
+                  aria-label="아래 순위 보기"
+                  onClick={() => shiftRankingWindow(1)}
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
             </div>
+            {canScrollRanks ? (
+              <p className="text-center text-[10px] text-zinc-500">
+                휠로 순위 이동 · {windowStart + 1}–{Math.min(allRows.length, windowStart + RANKING_PREVIEW_VISIBLE)}위 / {allRows.length}명
+              </p>
+            ) : null}
             {leagueStatus?.isSoloRanked ? (
               <p className="text-center text-[11px] font-medium text-lime-200/90">현재 리그 1위입니다</p>
             ) : showBeatRivalLabel && beatRivalHeader?.gapLabel ? (

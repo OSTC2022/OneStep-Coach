@@ -50,6 +50,7 @@ export default async function MemberRunningPortalPreviewPage({
         marathonSchedule={marathonSchedule}
         adminPreview
         runningLeagueHref={`/dashboard/members/${id}/running-portal/league`}
+        canPinMarathonEvents
       />
     </div>
   )

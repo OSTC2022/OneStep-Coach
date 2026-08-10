@@ -36,7 +36,6 @@ import {
   validateBasicBodyRecord,
   type MemberBodyRecordFormValues,
 } from '@/components/members/member-body-record-fields'
-import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import { AdultGeneralAttendanceRankingDialog } from '@/components/dashboard/adult-general-attendance-ranking-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -154,7 +153,7 @@ export function MemberAdultGeneralPortal({
 }) {
   const { portal, bodyRecords, proteinSettings, attendanceRanking, attendancePeriodLabel } =
     data
-  const { member, sessionStatus, centerContact, coachContact } = portal
+  const { member, sessionStatus } = portal
   const today = format(new Date(), 'yyyy-MM-dd')
 
   const [records, setRecords] = useState(bodyRecords)
@@ -722,13 +721,6 @@ export function MemberAdultGeneralPortal({
             )}
           </div>
         </div>
-      </SectionCard>
-
-      <SectionCard icon={Activity} title="센터 연락">
-        <MemberCenterContactCard
-          coach={coachContact}
-          center={centerContact}
-        />
       </SectionCard>
     </div>
   )

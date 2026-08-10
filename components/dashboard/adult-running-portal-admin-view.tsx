@@ -4,6 +4,7 @@ import { MemberPortalBrandHeader, MemberRunningLeagueRankings } from '@/componen
 import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/member-running-league-training-schedule'
 import { MemberMarathonSchedule } from '@/components/dashboard/member-marathon-schedule'
 import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
+import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal-accordion-menus'
 import { AdultRunningPortalSettingsPanel } from '@/components/dashboard/adult-running-portal-settings-panel'
 import { RunningPortalManageLink } from '@/components/dashboard/running-portal-manage-link'
 import type { AdultRunningPortalAdminSettings } from '@/lib/actions/adult-running-portal-settings'
@@ -44,20 +45,31 @@ export function AdultRunningPortalAdminView({
           beatRivalMemberId={portalSettings.beatRivalMemberId}
           action={<RunningPortalManageLink compact />}
         />
-        <MemberPortalNoticePanel notice={portalSettings.notice} />
-        <MemberRunningLeagueTrainingSchedule
-          days={trainingScheduleDays}
-          tableReady={trainingScheduleReady}
-          canParticipate={false}
-          readOnly
-          embedded
-        />
-        <MemberMarathonSchedule
-          bundle={marathonSchedule}
-          canParticipate={false}
-          readOnly
-          embedded
-          showManageLink
+        <MemberPortalAccordionMenus
+          hasNotice={Boolean(portalSettings.notice?.trim())}
+          hasMarathon
+          notice={<MemberPortalNoticePanel notice={portalSettings.notice} contentOnly />}
+          training={
+            <MemberRunningLeagueTrainingSchedule
+              days={trainingScheduleDays}
+              tableReady={trainingScheduleReady}
+              canParticipate={false}
+              readOnly
+              embedded
+              contentOnly
+            />
+          }
+          marathon={
+            <MemberMarathonSchedule
+              bundle={marathonSchedule}
+              canParticipate={false}
+              readOnly
+              embedded
+              contentOnly
+              showManageLink
+              canPinEvents
+            />
+          }
         />
         <MemberRunningLeagueRankings
           pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}

@@ -562,7 +562,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     console.error('toggleCenterRunningTrainingScheduleSignup.count', countError)
   }
 
-  revalidateCenterTrainingSchedulePaths()
+  // 참여 토글은 클라이언트 낙관적 UI로 반영. revalidate하면 메뉴·스크롤이 초기화됨.
   return {
     ok: true,
     signedUp: !existing,

@@ -161,7 +161,7 @@ export function PortalHeaderRoulette({
         )}
       >
         <PortalRouletteIcon slots={slots} />
-        <span className="text-[10px] font-semibold leading-none text-lime-200">룰렛</span>
+        <span className="text-[10px] font-semibold leading-none text-lime-200">돌림판</span>
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>

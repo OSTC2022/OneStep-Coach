@@ -31,6 +31,8 @@ ALTER TABLE public.center_marathon_events
   ADD COLUMN IF NOT EXISTS catalog_key TEXT;
 ALTER TABLE public.center_marathon_events
   ADD COLUMN IF NOT EXISTS registration_end_date DATE;
+ALTER TABLE public.center_marathon_events
+  ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.center_marathon_event_signups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,6 +108,7 @@ COMMENT ON COLUMN public.center_marathon_events.registration_open IS '참가신�
 COMMENT ON COLUMN public.center_marathon_events.custom_labels IS '관리자 커스텀 라벨 [{text,tone}]';
 COMMENT ON COLUMN public.center_marathon_events.catalog_key IS '추천 카탈로그에서 추가된 경우 중복 방지 키';
 COMMENT ON COLUMN public.center_marathon_events.registration_end_date IS '참가신청 마감일 — 지나면 신청가능 라벨 숨김';
+COMMENT ON COLUMN public.center_marathon_events.is_pinned IS '회원 포털 대회 일정 상단 고정';
 COMMENT ON TABLE public.center_marathon_event_signups IS '마라톤 일정 참여 신청';
 
 ALTER TABLE public.center_marathon_events ENABLE ROW LEVEL SECURITY;

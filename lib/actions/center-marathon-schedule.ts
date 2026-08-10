@@ -17,6 +17,8 @@ import {
   normalizeMarathonMonthKey,
   resolveMarathonRegistrationHref,
   isMarathonRegistrationOpenActive,
+  compareMarathonEventsForDisplay,
+  MARATHON_SCHEDULE_ALL_KEY,
   type MarathonCustomLabel,
   type MarathonEventInput,
   type MarathonEventSignup,
@@ -31,6 +33,9 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
 const EVENT_SELECT =
+  'id, title, event_date, location_label, registration_url, notes, is_hidden, region, is_featured, registration_open, registration_end_date, is_pinned, custom_labels, catalog_key, created_at, updated_at'
+
+const EVENT_SELECT_NO_PIN =
   'id, title, event_date, location_label, registration_url, notes, is_hidden, region, is_featured, registration_open, registration_end_date, custom_labels, catalog_key, created_at, updated_at'
 
 const EVENT_SELECT_LEGACY =
@@ -54,6 +59,7 @@ type MarathonEventRow = {
   is_featured?: boolean | null
   registration_open?: boolean | null
   registration_end_date?: string | null
+  is_pinned?: boolean | null
   custom_labels?: unknown
   catalog_key?: string | null
 }
@@ -69,11 +75,14 @@ type MarathonSignupRow = {
 function isMissingTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
   if (error.code === '42P01' || error.code === 'PGRST205') return true
+  // 컬럼 없음(42703/PGRST204)은 테이블 없음과 메시지가 비슷하므로 제외
+  if (error.code === '42703' || error.code === 'PGRST204') return false
   const message = error.message?.toLowerCase() ?? ''
+  if (message.includes('column')) return false
   return (
-    message.includes('does not exist') ||
     message.includes('could not find the table') ||
-    message.includes('schema cache')
+    message.includes('schema cache') ||
+    (message.includes('does not exist') && message.includes('relation'))
   )
 }
 
@@ -131,6 +140,7 @@ function mapEventView(
       event_date: eventDate,
       registration_end_date: row.registration_end_date,
     }),
+    is_pinned: Boolean(row.is_pinned),
     custom_labels: normalizeMarathonCustomLabels(row.custom_labels),
     catalog_key: row.catalog_key?.trim() || null,
     signup_count: signups.length,
@@ -150,11 +160,12 @@ function revalidateMarathonPaths() {
 
 function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
+  if (error.code === '42703' || error.code === 'PGRST204') return true
   const message = error.message?.toLowerCase() ?? ''
   return (
-    message.includes('does not exist') ||
-    message.includes('could not find the') ||
-    message.includes('column')
+    message.includes('column') ||
+    (message.includes('could not find the') && !message.includes('table')) ||
+    (message.includes('does not exist') && message.includes('column'))
   )
 }
 
@@ -203,7 +214,11 @@ async function fetchCenterMarathonSchedule(
 
     let { data: eventRows, error: eventError } = await queryEvents(EVENT_SELECT)
 
-    if (eventError && !isMissingTableError(eventError) && isMissingColumnError(eventError)) {
+    // 컬럼 누락은 테이블 누락보다 먼저 폴백 (is_pinned / custom_labels 등)
+    if (eventError && isMissingColumnError(eventError)) {
+      ;({ data: eventRows, error: eventError } = await queryEvents(EVENT_SELECT_NO_PIN))
+    }
+    if (eventError && isMissingColumnError(eventError)) {
       ;({ data: eventRows, error: eventError } = await queryEvents(EVENT_SELECT_LEGACY))
     }
 
@@ -244,6 +259,7 @@ async function fetchCenterMarathonSchedule(
       .map((row) => mapEventView(row, signupsByEvent.get(row.id) ?? [], viewerMemberId))
       .filter((event) => includeHidden || isVisibleMarathonEvent(event))
       .filter((event) => includePast || isMarathonEventUpcomingOrToday(event.event_date, todayKey))
+      .sort(compareMarathonEventsForDisplay)
 
     return { monthKey, events, tableReady: true }
   } catch (error) {
@@ -256,7 +272,12 @@ export async function getCenterMarathonScheduleForMember(
   monthKey?: string | null,
 ): Promise<CenterMarathonScheduleBundle> {
   const member = await getRunningPortalMemberForCurrentUser()
-  return fetchCenterMarathonSchedule(monthKey, member?.id ?? null)
+  // 회원 포털 기본: 다가오는 대회 전체 (당월만 보면 비어 보이는 경우 방지)
+  const resolved =
+    monthKey === undefined || monthKey === null || monthKey === ''
+      ? MARATHON_SCHEDULE_ALL_KEY
+      : monthKey
+  return fetchCenterMarathonSchedule(resolved, member?.id ?? null)
 }
 
 export async function getCenterMarathonScheduleForAdmin(
@@ -274,7 +295,11 @@ export async function getCenterMarathonScheduleAdminPreview(
   monthKey?: string | null,
 ): Promise<CenterMarathonScheduleBundle> {
   await requireRole(['admin'])
-  return fetchCenterMarathonSchedule(monthKey, null)
+  const resolved =
+    monthKey === undefined || monthKey === null || monthKey === ''
+      ? MARATHON_SCHEDULE_ALL_KEY
+      : monthKey
+  return fetchCenterMarathonSchedule(resolved, null)
 }
 
 export async function saveMarathonEvent(
@@ -307,6 +332,7 @@ export async function saveMarathonEvent(
     is_featured: Boolean(input.is_featured),
     registration_open: Boolean(input.registration_open),
     registration_end_date: registrationEndDate,
+    is_pinned: Boolean(input.is_pinned),
     custom_labels: customLabels,
     catalog_key: catalogKey,
     updated_at: new Date().toISOString(),
@@ -438,6 +464,7 @@ export async function addMarathonEventFromCatalog(
     is_featured: item.is_featured,
     registration_open: item.registration_open,
     registration_end_date: item.registration_end_date ?? '',
+    is_pinned: false,
     custom_labels: [] as MarathonCustomLabel[],
     catalog_key: item.key,
   })
@@ -591,7 +618,7 @@ export async function toggleMarathonEventSignup(
       console.error('toggleMarathonEventSignup.count', countError)
     }
 
-    revalidateMarathonPaths()
+    // 참여 토글은 클라이언트 낙관적 UI로 반영. revalidate하면 월 선택·메뉴가 초기화됨.
     return {
       ok: true,
       signedUp: !existing,
@@ -600,5 +627,67 @@ export async function toggleMarathonEventSignup(
   } catch (error) {
     console.error('toggleMarathonEventSignup', error)
     return { ok: false, error: '참여 처리에 실패했습니다.' }
+  }
+}
+
+/** 관리자·강사 — 대회 일정 상단 고정 토글 */
+export async function toggleMarathonEventPinned(
+  eventId: string,
+): Promise<
+  | { ok: true; pinned: boolean }
+  | { ok: false; error: string }
+> {
+  await requireRole(['admin', 'instructor'])
+
+  const id = eventId.trim()
+  if (!id) return { ok: false, error: '대회를 찾을 수 없습니다.' }
+
+  try {
+    const supabase = await scheduleClient()
+    const { data: eventRow, error: eventError } = await supabase
+      .from('center_marathon_events')
+      .select('id, is_pinned')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (isMissingTableError(eventError)) {
+      return { ok: false, error: '마라톤 일정 기능이 준비되지 않았습니다.' }
+    }
+    if (eventError && isMissingColumnError(eventError)) {
+      return {
+        ok: false,
+        error:
+          '상단 고정 컬럼이 없습니다. Supabase에서 supabase/add-marathon-event-pinned.sql 을 실행해주세요.',
+      }
+    }
+    if (eventError || !eventRow) {
+      return { ok: false, error: '대회를 찾을 수 없습니다.' }
+    }
+
+    const nextPinned = !Boolean(eventRow.is_pinned)
+    const { error: updateError } = await supabase
+      .from('center_marathon_events')
+      .update({
+        is_pinned: nextPinned,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+
+    if (updateError && isMissingColumnError(updateError)) {
+      return {
+        ok: false,
+        error:
+          '상단 고정 컬럼이 없습니다. Supabase에서 supabase/add-marathon-event-pinned.sql 을 실행해주세요.',
+      }
+    }
+    if (updateError) {
+      console.error('toggleMarathonEventPinned.update', updateError)
+      return { ok: false, error: '고정 상태 변경에 실패했습니다.' }
+    }
+
+    return { ok: true, pinned: nextPinned }
+  } catch (error) {
+    console.error('toggleMarathonEventPinned', error)
+    return { ok: false, error: '고정 처리에 실패했습니다.' }
   }
 }

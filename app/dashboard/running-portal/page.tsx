@@ -43,6 +43,7 @@ export default async function StaffRunningPortalPage() {
       showRunningPortal
       canManageRunningPortal={canManageAdultRunningPortal(profile)}
       showMarathonManageLink={profile.role === 'admin'}
+      canPinMarathonEvents={profile.role === 'admin' || profile.role === 'instructor'}
     />
   )
 }

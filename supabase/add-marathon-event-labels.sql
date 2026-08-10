@@ -34,6 +34,8 @@ ALTER TABLE public.center_marathon_events
   ADD COLUMN IF NOT EXISTS catalog_key TEXT;
 ALTER TABLE public.center_marathon_events
   ADD COLUMN IF NOT EXISTS registration_end_date DATE;
+ALTER TABLE public.center_marathon_events
+  ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.center_marathon_event_signups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -22,9 +22,9 @@ import {
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { MemberCenterContactCard } from '@/components/members/member-center-contact-card'
 import { MemberRunningLeagueRankings, MemberPortalBrandHeader } from '@/components/dashboard/member-running-league-rankings'
 import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
+import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal-accordion-menus'
 import { RunningPortalManageLink } from '@/components/dashboard/running-portal-manage-link'
 import {
   MemberRunningLeagueTrainingSchedule,
@@ -56,6 +56,8 @@ interface MemberMyPageProps {
   canManageRunningPortal?: boolean
   /** 마라톤 일정 관리 링크 (관리자) */
   showMarathonManageLink?: boolean
+  /** 관리자·강사 — 대회 상단 고정 */
+  canPinMarathonEvents?: boolean
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -142,8 +144,9 @@ export function MemberMyPage({
   showRunningPortal = false,
   canManageRunningPortal = false,
   showMarathonManageLink = false,
+  canPinMarathonEvents = false,
 }: MemberMyPageProps) {
-  const { member, summary, centerContact, coachContact, sessionStatus } = data
+  const { member, summary, sessionStatus } = data
   const isAdultMember = role === 'adult_member'
   const showRunningPortalSection = showRunningPortal || isAdultMember
   const instructorName = member.primary_instructor?.name ?? '자율배정'
@@ -188,23 +191,36 @@ export function MemberMyPage({
               canManageRunningPortal ? <RunningPortalManageLink compact /> : undefined
             }
           />
-          <MemberPortalNoticePanel notice={portalDisplay?.notice} />
-          <MemberRunningLeagueTrainingSchedule
-            days={trainingScheduleDays}
-            tableReady={trainingScheduleReady}
-            canParticipate={!adminPreview}
-            readOnly={adminPreview}
-            embedded
+          <MemberPortalAccordionMenus
+            hasNotice={Boolean(portalDisplay?.notice?.trim())}
+            hasMarathon={Boolean(marathonSchedule)}
+            notice={
+              <MemberPortalNoticePanel notice={portalDisplay?.notice} contentOnly />
+            }
+            training={
+              <MemberRunningLeagueTrainingSchedule
+                days={trainingScheduleDays}
+                tableReady={trainingScheduleReady}
+                canParticipate={!adminPreview}
+                readOnly={adminPreview}
+                embedded
+                contentOnly
+              />
+            }
+            marathon={
+              marathonSchedule ? (
+                <MemberMarathonSchedule
+                  bundle={marathonSchedule}
+                  canParticipate={!adminPreview}
+                  readOnly={adminPreview}
+                  embedded
+                  contentOnly
+                  showManageLink={showMarathonManageLink}
+                  canPinEvents={canPinMarathonEvents}
+                />
+              ) : null
+            }
           />
-          {marathonSchedule ? (
-            <MemberMarathonSchedule
-              bundle={marathonSchedule}
-              canParticipate={!adminPreview}
-              readOnly={adminPreview}
-              embedded
-              showManageLink={showMarathonManageLink}
-            />
-          ) : null}
           {runningLeagueHome ? (
             <MemberRunningLeagueRankings
               pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}
@@ -529,8 +545,6 @@ export function MemberMyPage({
         </CardContent>
       </Card>
       ) : null}
-
-      <MemberCenterContactCard coach={coachContact} center={centerContact} />
     </div>
   )
 }

@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
   ChevronDown,
@@ -68,10 +67,9 @@ export function MemberRunningLeagueTrainingSchedule({
   readOnly = false,
   embedded = false,
   contentOnly = false,
-  title = '러닝 스케줄',
+  title = '훈련 일정',
   className,
 }: MemberRunningLeagueTrainingScheduleProps) {
-  const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [pendingDayId, setPendingDayId] = useState<string | null>(null)
   const [scheduleDays, setScheduleDays] = useState(days)
@@ -138,7 +136,6 @@ export function MemberRunningLeagueTrainingSchedule({
         [day.id]: result.signedUp,
       }))
       toast.success(result.signedUp ? '참여 신청했습니다.' : '참여를 취소했습니다.')
-      router.refresh()
     })
   }
 

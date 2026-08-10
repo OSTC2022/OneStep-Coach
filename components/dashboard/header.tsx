@@ -21,6 +21,7 @@ import { MemberBackupHeaderMenu } from '@/components/dashboard/member-backup-hea
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
+import { MemberCenterContactHeaderButton } from '@/components/dashboard/member-center-contact-header-button'
 
 interface DashboardHeaderProps {
   user: User | null
@@ -50,6 +51,7 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
 
         {user?.role === 'admin' ? <MemberBackupHeaderMenu /> : null}
         <InstallAppButton showLabel className="shrink-0" />
+        <MemberCenterContactHeaderButton />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
