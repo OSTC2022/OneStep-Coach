@@ -16,7 +16,7 @@ export default async function MemberRunningPortalPreviewPage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  await requireMemberViewer()
+  const viewer = await requireMemberViewer()
   const { id } = await params
 
   const linkedRole = await getMemberLinkedProfileRole(id)
@@ -35,6 +35,9 @@ export default async function MemberRunningPortalPreviewPage({
     redirect(`/dashboard/members/${id}/weight-portal`)
   }
 
+  const canPin =
+    viewer.role === 'admin' || viewer.role === 'instructor'
+
   return (
     <div className="space-y-4">
       <MemberRunningPortalAdminBanner
@@ -50,7 +53,7 @@ export default async function MemberRunningPortalPreviewPage({
         marathonSchedule={marathonSchedule}
         adminPreview
         runningLeagueHref={`/dashboard/members/${id}/running-portal/league`}
-        canPinMarathonEvents
+        canPinMarathonEvents={canPin}
       />
     </div>
   )

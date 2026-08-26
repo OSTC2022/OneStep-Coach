@@ -54,9 +54,7 @@ export function MemberPortalAccordionMenus({
   hasMarathon = Boolean(marathon),
   className,
 }: MemberPortalAccordionMenusProps) {
-  const [openKey, setOpenKey] = useState<MemberPortalMenuKey | null>(() =>
-    hasMarathon ? 'marathon' : hasNotice ? 'notice' : 'training',
-  )
+  const [openKey, setOpenKey] = useState<MemberPortalMenuKey | null>(null)
   const restoredRef = useRef(false)
 
   useEffect(() => {
@@ -65,6 +63,7 @@ export function MemberPortalAccordionMenus({
     const stored = readStoredOpenKey()
     if (stored === 'notice' && !hasNotice) return
     if (stored === 'marathon' && !hasMarathon) return
+    // 대회 일정은 기본 닫힘 — 이전에 열어둔 세션만 복원
     if (stored) setOpenKey(stored)
   }, [hasMarathon, hasNotice])
 

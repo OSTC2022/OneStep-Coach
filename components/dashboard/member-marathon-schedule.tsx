@@ -649,16 +649,19 @@ function MarathonEventRow({
         {canPin ? (
           <button
             type="button"
-            onClick={onTogglePin}
+            onClick={(event) => {
+              event.stopPropagation()
+              onTogglePin()
+            }}
             disabled={pinPending}
-            title={isPinned ? '상단 고정 해제' : '상단에 고정'}
-            aria-label={isPinned ? '상단 고정 해제' : '상단에 고정'}
+            title={isPinned ? '상단 고정 해제' : '목록 상단에 고정'}
+            aria-label={isPinned ? '상단 고정 해제' : '목록 상단에 고정'}
             aria-pressed={isPinned}
             className={cn(
-              'inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors',
+              'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[11px] font-semibold transition-colors',
               isPinned
-                ? 'border-amber-400/50 bg-amber-500/20 text-amber-100'
-                : 'border-zinc-700 bg-black/40 text-zinc-500 hover:border-amber-400/35 hover:text-amber-200',
+                ? 'border-amber-400/55 bg-amber-500/20 text-amber-100'
+                : 'border-zinc-700 bg-black/40 text-zinc-400 hover:border-amber-400/40 hover:text-amber-200',
               pinPending && 'opacity-60',
             )}
           >
@@ -667,6 +670,7 @@ function MarathonEventRow({
             ) : (
               <Pin className={cn('h-3.5 w-3.5', isPinned && 'fill-current')} />
             )}
+            {isPinned ? '고정됨' : '고정'}
           </button>
         ) : null}
         {!readOnly ? (
