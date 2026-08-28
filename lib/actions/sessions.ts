@@ -52,6 +52,10 @@ async function sessionWriteClient() {
 const SESSION_PACKAGE_TRASH_SETUP_MESSAGE =
   '휴지통 기능을 사용하려면 Supabase SQL Editor에서 supabase/add-session-packages-deleted-at.sql 을 실행해주세요.'
 
+/** deleted_at 컬럼 존재 여부 — 매 요청 프로브 대신 짧게 캐시 */
+let sessionPackageTrashEnabledCache: { value: boolean; at: number } | null = null
+const SESSION_PACKAGE_TRASH_CACHE_MS = 5 * 60 * 1000
+
 function isDeletedAtMissingError(message?: string, code?: string) {
   return code === '42703' || Boolean(message?.includes('deleted_at'))
 }
@@ -74,12 +78,22 @@ function applyTrashFilter<T extends { is: (col: string, val: null) => T; not: (c
 }
 
 export async function isSessionPackageTrashEnabled(): Promise<boolean> {
+  const now = Date.now()
+  if (
+    sessionPackageTrashEnabledCache &&
+    now - sessionPackageTrashEnabledCache.at < SESSION_PACKAGE_TRASH_CACHE_MS
+  ) {
+    return sessionPackageTrashEnabledCache.value
+  }
+
   try {
     const supabase = await createStaffDataClient()
     const { error } = await supabase.from('session_packages').select('deleted_at').limit(1)
-    if (!error) return true
-    return !isDeletedAtMissingError(error.message, error.code)
+    const enabled = !error || !isDeletedAtMissingError(error.message, error.code)
+    sessionPackageTrashEnabledCache = { value: enabled, at: now }
+    return enabled
   } catch {
+    sessionPackageTrashEnabledCache = { value: false, at: now }
     return false
   }
 }
@@ -163,16 +177,14 @@ async function fetchSessionPackages(
     withCount?: boolean
   },
 ) {
-  const trashEnabled = await isSessionPackageTrashEnabled()
-  const useTrashFilter = trashEnabled
-
+  // 별도 프로브 없이 바로 조회 — deleted_at 없으면 legacy로 폴백 (왕복 1회 절약)
   const primary = await fetchSessionPackageRows(supabase, {
     ...options,
     orderBy: options?.orderBy ?? 'created_at',
     orderAsc: options?.orderAsc ?? false,
     withCount: options?.withCount,
     select: SESSION_PACKAGE_LIST_SELECT,
-    useTrashFilter,
+    useTrashFilter: true,
   })
 
   if (!primary.error) {
@@ -180,7 +192,7 @@ async function fetchSessionPackages(
       data: (primary.data ?? []).map((row) => withDeletedAtDefault(row as Record<string, unknown>)),
       error: null,
       count: primary.count,
-      trashEnabled,
+      trashEnabled: true,
     }
   }
 
@@ -203,6 +215,54 @@ async function fetchSessionPackages(
     count: legacy.count,
     trashEnabled: false,
   }
+}
+
+/** 캘린더 수업 수정용 — 최소 컬럼·무카운트·무조인 빠른 조회 */
+export type LessonSessionPackageOption = {
+  id: string
+  total_sessions: number
+  remaining_sessions: number
+  note: string | null
+  is_active: boolean
+  expires_at: string | null
+  created_at: string
+  paid_at: string | null
+}
+
+const LESSON_PACKAGE_PICKER_SELECT =
+  'id, total_sessions, remaining_sessions, note, is_active, expires_at, created_at, paid_at'
+
+export async function getMemberSessionPackagesForLessonPicker(
+  memberId: string,
+): Promise<LessonSessionPackageOption[]> {
+  const id = memberId.trim()
+  if (!id) return []
+
+  const supabase = await createStaffDataClient()
+
+  let { data, error } = await supabase
+    .from('session_packages')
+    .select(LESSON_PACKAGE_PICKER_SELECT)
+    .eq('member_id', id)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(40)
+
+  if (error && isDeletedAtMissingError(error.message, error.code)) {
+    ;({ data, error } = await supabase
+      .from('session_packages')
+      .select(LESSON_PACKAGE_PICKER_SELECT)
+      .eq('member_id', id)
+      .order('created_at', { ascending: false })
+      .limit(40))
+  }
+
+  if (error) {
+    console.error('getMemberSessionPackagesForLessonPicker', error)
+    return []
+  }
+
+  return (data ?? []) as LessonSessionPackageOption[]
 }
 
 export async function getSessionPackages(options?: {

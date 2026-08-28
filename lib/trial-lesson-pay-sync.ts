@@ -118,3 +118,31 @@ export async function syncTrialLessonPayOverride(
     console.warn('syncTrialLessonPayOverride delete:', error.message)
   }
 }
+
+/** 강사 변경 시 이전 강사 슬롯의 고정 강사료 override 제거 */
+export async function clearTrialLessonPayOverrideForInstructor(
+  supabase: SupabaseClient,
+  lesson: Pick<
+    TrialLessonPaySyncRow,
+    'id' | 'instructor_id' | 'lesson_date' | 'start_time'
+  >,
+) {
+  if (!lesson.instructor_id) return
+
+  const slotKey = getInstructorSlotPayKey(
+    lesson.lesson_date,
+    lesson.start_time,
+    lesson.instructor_id,
+  )
+  const memberKey = getInstructorMemberPayOverrideKey(slotKey, lesson.id)
+
+  const { error } = await supabase
+    .from('instructor_pay_slot_overrides')
+    .delete()
+    .eq('instructor_id', lesson.instructor_id)
+    .eq('slot_key', memberKey)
+
+  if (error && !isMissingPayOverrideTable(error.message)) {
+    console.warn('clearTrialLessonPayOverrideForInstructor:', error.message)
+  }
+}

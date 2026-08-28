@@ -70,7 +70,7 @@ import {
   getTodayDateKey,
 } from '@/lib/lesson-record-utils'
 import { toStoredLessonType } from '@/lib/lesson-types'
-import { syncTrialLessonPayOverride } from '@/lib/trial-lesson-pay-sync'
+import { syncTrialLessonPayOverride, clearTrialLessonPayOverrideForInstructor } from '@/lib/trial-lesson-pay-sync'
 import {
   LESSON_CALENDAR_SELECT,
   LESSON_CALENDAR_SELECT_LEGACY,
@@ -1527,6 +1527,19 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
               .eq('id', id)
             lesson.session_package_id = packageId
           }
+        }
+        // 강사 변경 시 이전 강사 월 강사료 override 정리 → 새 강사로 재계산
+        if (
+          'instructor_id' in updates &&
+          existing?.instructor_id &&
+          existing.instructor_id !== lesson.instructor_id
+        ) {
+          await clearTrialLessonPayOverrideForInstructor(supabase, {
+            id: lesson.id,
+            instructor_id: existing.instructor_id,
+            lesson_date: existing.lesson_date ?? lesson.lesson_date,
+            start_time: existing.start_time ?? lesson.start_time,
+          })
         }
         await syncTrialPayForLesson(supabase, lesson, user.id)
         if ('instructor_id' in updates || 'session_package_id' in payload) {

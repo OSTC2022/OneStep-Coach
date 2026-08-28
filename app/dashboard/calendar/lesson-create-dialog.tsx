@@ -47,6 +47,7 @@ import { touchMemberRecent } from '@/lib/member-recent-search'
 import {
   LESSON_TYPE_OPTIONS,
   normalizeLessonType,
+  isAthleticsClubLessonType,
   isRunningLessonType,
 } from '@/lib/lesson-types'
 import {
@@ -72,7 +73,7 @@ import { SimpleTimeRangeInput } from '@/components/ui/simple-time-range-input'
 import { InstructorSelectField } from '@/components/members/instructor-select-field'
 import { MemberSearchSelect } from '@/components/members/member-search-select'
 import { searchMembersForPicker } from '@/lib/actions/members'
-import { getSessionPackages } from '@/lib/actions/sessions'
+import { getMemberSessionPackagesForLessonPicker } from '@/lib/actions/sessions'
 import { pickSessionPackageIdForDeduction } from '@/lib/session-package-deduction'
 import { formatPackagePlanLabel } from '@/lib/session-package-utils'
 import {
@@ -434,7 +435,9 @@ export function LessonCreateDialog({
       ? formatTrialLessonPayHint(date)
       : isRunningLessonType(lessonType)
         ? formatRunningLessonPayHint()
-        : null
+        : isAthleticsClubLessonType(lessonType)
+          ? '육상부 일정은 담당 강사 월 정산에 반영됩니다. (강사료 0원)'
+          : null
 
   const linkedMemberId = memberId || getLessonMemberId(lesson)
   const sessionPackagePayload = useMemo(() => {
@@ -680,17 +683,30 @@ export function LessonCreateDialog({
     onEditDraftChange({ instructorId })
   }, [open, isEditing, instructorId, onEditDraftChange])
 
+  const packagesMemberIdRef = useRef('')
+
   useEffect(() => {
     if (!open || !linkedMemberId) {
-      setMemberPackages([])
+      if (!linkedMemberId) {
+        setMemberPackages([])
+        setPackagesLoading(false)
+        packagesMemberIdRef.current = ''
+      }
       return
     }
 
     let cancelled = false
-    setPackagesLoading(true)
-    void getSessionPackages({ memberId: linkedMemberId })
-      .then(({ data }) => {
+    const hasCachedForMember = packagesMemberIdRef.current === linkedMemberId
+
+    // 같은 회원 캐시가 있으면 목록을 비우지 않고 백그라운드 갱신
+    if (!hasCachedForMember) {
+      setPackagesLoading(true)
+    }
+
+    void getMemberSessionPackagesForLessonPicker(linkedMemberId)
+      .then((data) => {
         if (cancelled) return
+        packagesMemberIdRef.current = linkedMemberId
         setMemberPackages(data)
       })
       .finally(() => {
@@ -720,8 +736,13 @@ export function LessonCreateDialog({
 
     if (!memberChanged && !instructorChanged) return
 
-    const picked = pickSessionPackageIdForDeduction(memberPackages)
-    if (picked) setSessionPackageId(picked)
+    // 이미 선택된 수업권이 목록에 있으면 유지 (수정 시 덮어쓰기 방지)
+    setSessionPackageId((current) => {
+      if (current && memberPackages.some((pkg) => pkg.id === current)) {
+        return current
+      }
+      return pickSessionPackageIdForDeduction(memberPackages) ?? ''
+    })
   }, [open, linkedMemberId, instructorId, memberPackages])
 
   useEffect(() => {
@@ -1542,7 +1563,7 @@ export function LessonCreateDialog({
             onValueChange={(value) =>
               setSessionPackageId(value === 'auto' ? '' : value)
             }
-            disabled={packagesLoading || memberPackages.length === 0}
+            disabled={!packagesLoading && memberPackages.length === 0}
           >
             <SelectTrigger
               id="lesson-session-package"
@@ -1563,6 +1584,17 @@ export function LessonCreateDialog({
               />
             </SelectTrigger>
             <SelectContent>
+              {sessionPackageId &&
+              !memberPackages.some((pkg) => pkg.id === sessionPackageId) ? (
+                <SelectItem value={sessionPackageId}>
+                  {packagesLoading ? '연결된 수업권 불러오는 중…' : '연결된 수업권'}
+                </SelectItem>
+              ) : null}
+              {packagesLoading && memberPackages.length === 0 && !sessionPackageId ? (
+                <SelectItem value="__loading" disabled>
+                  불러오는 중…
+                </SelectItem>
+              ) : null}
               {memberPackages.map((pkg) => (
                 <SelectItem key={pkg.id} value={pkg.id}>
                   {formatPackagePlanLabel(pkg.total_sessions, pkg.note)} · 잔여{' '}

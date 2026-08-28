@@ -534,28 +534,21 @@ const AthleteTile = memo(function AthleteTile({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      ) : isAthleticsGroup ? (
-        <p
-          className={cn(
-            'truncate font-semibold leading-tight',
-            expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
-          )}
-          title={label}
-        >
-          {label}
-        </p>
       ) : (
         <>
-          <p
+          <button
+            type="button"
+            onClick={() => setEditLessonOpen(true)}
             className={cn(
-              'truncate font-semibold leading-tight text-primary',
+              'truncate text-left font-semibold leading-tight hover:text-primary hover:underline',
+              isAthleticsGroup ? 'text-foreground' : 'text-primary',
               expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
             )}
-            title={label}
+            title={`${label} — 시간·강사 수정`}
           >
             {label}
-          </p>
-          {showActions ? (
+          </button>
+          {showActions && !isAthleticsGroup ? (
             <div
               className="mt-1 grid grid-cols-2 gap-0.5"
               role="group"
@@ -577,6 +570,15 @@ const AthleteTile = memo(function AthleteTile({
               </button>
             </div>
           ) : null}
+          {showActions && isAthleticsGroup ? (
+            <button
+              type="button"
+              onClick={() => setEditLessonOpen(true)}
+              className="mt-1 w-full rounded bg-muted/40 px-0.5 py-1 text-[9px] font-medium leading-tight text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              시간·강사 수정
+            </button>
+          ) : null}
         </>
       )}
 
@@ -589,23 +591,21 @@ const AthleteTile = memo(function AthleteTile({
         />
       ) : null}
 
-      {!isAthleticsGroup ? (
-        <LessonCreateDialog
-          open={editLessonOpen}
-          onOpenChange={setEditLessonOpen}
-          lesson={lesson}
-          members={memberPickerOptions}
-          instructors={instructors}
-          onSaved={(saved) => {
-            onLessonEdited(saved)
-            setEditLessonOpen(false)
-          }}
-          onDeleted={(lessonIds) => {
-            onLessonDeleted(lessonIds)
-            setEditLessonOpen(false)
-          }}
-        />
-      ) : null}
+      <LessonCreateDialog
+        open={editLessonOpen}
+        onOpenChange={setEditLessonOpen}
+        lesson={lesson}
+        members={memberPickerOptions}
+        instructors={instructors}
+        onSaved={(saved) => {
+          onLessonEdited(saved)
+          setEditLessonOpen(false)
+        }}
+        onDeleted={(lessonIds) => {
+          onLessonDeleted(lessonIds)
+          setEditLessonOpen(false)
+        }}
+      />
 
       <p
         className={cn(
