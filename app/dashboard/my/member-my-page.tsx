@@ -157,6 +157,8 @@ export function MemberMyPage({
     ? null
     : resolveProfileAside(data)
   const trainingScheduleDays = centerTrainingSchedule?.days ?? []
+  const trainingSchedulePreviousWeekDays =
+    centerTrainingSchedule?.previousWeekDays ?? []
   const trainingScheduleReady = centerTrainingSchedule?.tableReady ?? true
 
   return (
@@ -200,6 +202,7 @@ export function MemberMyPage({
             training={
               <MemberRunningLeagueTrainingSchedule
                 days={trainingScheduleDays}
+                previousWeekDays={trainingSchedulePreviousWeekDays}
                 tableReady={trainingScheduleReady}
                 canParticipate={!adminPreview}
                 readOnly={adminPreview}

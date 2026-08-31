@@ -9,6 +9,7 @@ import {
   Loader2,
   MapPin,
   Pin,
+  Search,
   Settings2,
   Users,
 } from 'lucide-react'
@@ -30,6 +31,7 @@ import {
   type MarathonEventView,
 } from '@/lib/running-league/marathon-schedule'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -87,6 +89,7 @@ export function MemberMarathonSchedule({
   const [sectionOpen, setSectionOpen] = useState(contentOnly)
   const [distanceFilters, setDistanceFilters] = useState<MarathonDistanceFilter[]>([])
   const [mySignupsOnly, setMySignupsOnly] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(bundle.events.map((event) => [event.id, event.is_signed_up])),
   )
@@ -159,10 +162,26 @@ export function MemberMarathonSchedule({
   }, [bundle])
 
   const filteredEvents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
     const list = events.filter((event) => {
       if (!marathonEventMatchesDistanceFilters(event, distanceFilters)) return false
       if (mySignupsOnly) {
-        return signupDraft[event.id] ?? event.is_signed_up
+        if (!(signupDraft[event.id] ?? event.is_signed_up)) return false
+      }
+      if (query) {
+        const haystack = [
+          event.title,
+          event.location_label,
+          event.region,
+          event.notes,
+          event.event_date_label,
+          event.weekday_label,
+          ...(event.custom_labels?.map((label) => label.text) ?? []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        if (!haystack.includes(query)) return false
       }
       return true
     })
@@ -172,7 +191,7 @@ export function MemberMarathonSchedule({
         is_pinned: pinDraft[event.id] ?? event.is_pinned,
       }))
       .sort(compareMarathonEventsForDisplay)
-  }, [events, distanceFilters, mySignupsOnly, signupDraft, pinDraft])
+  }, [events, distanceFilters, mySignupsOnly, signupDraft, pinDraft, searchQuery])
 
   const signedUpCount = filteredEvents.filter(
     (event) => signupDraft[event.id] ?? event.is_signed_up,
@@ -301,11 +320,13 @@ export function MemberMarathonSchedule({
     filteredEvents.length > 0
       ? `${filteredEvents.length}개 대회${signedUpCount > 0 ? ` · ${signedUpCount}개 참여` : ''}`
       : tableReady
-        ? mySignupsOnly
-          ? '참여 중인 대회 없음'
-          : distanceFilters.length > 0
-            ? '선택한 종목 일정 없음'
-            : '등록된 일정 없음'
+        ? searchQuery.trim()
+          ? '검색 결과 없음'
+          : mySignupsOnly
+            ? '참여 중인 대회 없음'
+            : distanceFilters.length > 0
+              ? '선택한 종목 일정 없음'
+              : '등록된 일정 없음'
         : '준비 중'
 
   const scheduleBody = (
@@ -336,6 +357,19 @@ export function MemberMarathonSchedule({
             </Link>
           </Button>
         ) : null}
+        <div className="relative min-w-[10rem] flex-1">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"
+            aria-hidden
+          />
+          <Input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="대회명·지역 검색"
+            className="h-8 border-lime-500/20 bg-black/40 pl-8 text-xs placeholder:text-zinc-500"
+            aria-label="대회 검색"
+          />
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-1.5 px-0.5 pb-1">
@@ -379,13 +413,15 @@ export function MemberMarathonSchedule({
         </p>
       ) : filteredEvents.length === 0 ? (
         <p className="px-2 py-6 text-center text-sm text-zinc-500">
-          {mySignupsOnly
-            ? '참여 신청한 대회가 없습니다.'
-            : distanceFilters.length > 0
-              ? '선택한 종목이 포함된 대회가 없습니다.'
-              : monthKey === MARATHON_SCHEDULE_ALL_KEY
-                ? '등록된 대회 일정이 없습니다.'
-                : '이 달 등록된 대회 일정이 없습니다.'}
+          {searchQuery.trim()
+            ? '검색 결과가 없습니다.'
+            : mySignupsOnly
+              ? '참여 신청한 대회가 없습니다.'
+              : distanceFilters.length > 0
+                ? '선택한 종목이 포함된 대회가 없습니다.'
+                : monthKey === MARATHON_SCHEDULE_ALL_KEY
+                  ? '등록된 대회 일정이 없습니다.'
+                  : '이 달 등록된 대회 일정이 없습니다.'}
         </p>
       ) : (
         filteredEvents.map((event) => (

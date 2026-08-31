@@ -14,6 +14,7 @@ type GroupedPackageUsageDisplayProps = {
   isActive?: boolean
   expiresAt?: string | null
   paidAt?: string | null
+  pausedAt?: string | null
   className?: string
 }
 
@@ -25,6 +26,7 @@ export function GroupedPackageUsageDisplay({
   isActive = true,
   expiresAt,
   paidAt,
+  pausedAt,
   className,
 }: GroupedPackageUsageDisplayProps) {
   const expired =
@@ -33,6 +35,7 @@ export function GroupedPackageUsageDisplay({
       remaining_sessions: remainingSessions,
       note,
       expires_at: expiresAt,
+      paused_at: pausedAt,
     }) || isSessionPackageOverage(remainingSessions, note)
 
   if (isMonthlyPlanPackage(note)) {
@@ -40,11 +43,21 @@ export function GroupedPackageUsageDisplay({
       <span
         className={cn(
           'font-bold tabular-nums',
-          expired ? 'text-destructive' : 'text-primary',
+          pausedAt?.trim()
+            ? 'text-amber-400'
+            : expired
+              ? 'text-destructive'
+              : 'text-primary',
           className,
         )}
       >
-        {formatPackageRemainingDisplay(remainingSessions, note, expiresAt, paidAt)}
+        {formatPackageRemainingDisplay(
+          remainingSessions,
+          note,
+          expiresAt,
+          paidAt,
+          pausedAt,
+        )}
       </span>
     )
   }

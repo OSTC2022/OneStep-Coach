@@ -8,13 +8,22 @@ import { revalidatePath } from 'next/cache'
 import type { SessionPackage, SessionPackageFormData } from '@/lib/types'
 import {
   SESSION_PACKAGE_DETAIL_SELECT,
+  SESSION_PACKAGE_DETAIL_SELECT_NO_PAUSE,
   SESSION_PACKAGE_LIST_SELECT,
   SESSION_PACKAGE_LIST_SELECT_LEGACY,
+  SESSION_PACKAGE_LIST_SELECT_NO_PAUSE,
 } from '@/lib/supabase-selects'
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import {
+  addDaysToDate,
+  diffCalendarDays,
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
+  isSessionPackagePaused,
+  parseMonthlyPlanMonthsFromNote,
+  calculateMonthlyPlanExpiryDate,
+  calculateMonthlyRecurringExpiryDate,
+  isMonthlyRecurringPlan,
 } from '@/lib/session-package-utils'
 import {
   pickSessionPackageIdForDeduction,
@@ -52,11 +61,21 @@ async function sessionWriteClient() {
 const SESSION_PACKAGE_TRASH_SETUP_MESSAGE =
   '휴지통 기능을 사용하려면 Supabase SQL Editor에서 supabase/add-session-packages-deleted-at.sql 을 실행해주세요.'
 
+const SESSION_PACKAGE_PAUSE_SETUP_MESSAGE =
+  '월정액 일시정지 기능을 사용하려면 Supabase SQL Editor에서 supabase/add-session-package-pause.sql 을 실행해주세요.'
+
 /** deleted_at 컬럼 존재 여부 — 매 요청 프로브 대신 짧게 캐시 */
 let sessionPackageTrashEnabledCache: { value: boolean; at: number } | null = null
 const SESSION_PACKAGE_TRASH_CACHE_MS = 5 * 60 * 1000
 
+function isPauseColumnMissingError(message?: string, code?: string) {
+  return Boolean(
+    message?.includes('paused_at') || message?.includes('total_paused_days'),
+  )
+}
+
 function isDeletedAtMissingError(message?: string, code?: string) {
+  if (isPauseColumnMissingError(message, code)) return false
   return code === '42703' || Boolean(message?.includes('deleted_at'))
 }
 
@@ -64,6 +83,8 @@ function withDeletedAtDefault<T extends Record<string, unknown>>(row: T) {
   return {
     ...row,
     deleted_at: (row.deleted_at as string | null | undefined) ?? null,
+    paused_at: (row.paused_at as string | null | undefined) ?? null,
+    total_paused_days: (row.total_paused_days as number | null | undefined) ?? 0,
   }
 }
 
@@ -177,7 +198,7 @@ async function fetchSessionPackages(
     withCount?: boolean
   },
 ) {
-  // 별도 프로브 없이 바로 조회 — deleted_at 없으면 legacy로 폴백 (왕복 1회 절약)
+  // FULL → NO_PAUSE → LEGACY 순으로 폴백 (컬럼 미적용 DB 호환)
   const primary = await fetchSessionPackageRows(supabase, {
     ...options,
     orderBy: options?.orderBy ?? 'created_at',
@@ -196,7 +217,31 @@ async function fetchSessionPackages(
     }
   }
 
-  if (!isDeletedAtMissingError(primary.error.message, primary.error.code)) {
+  if (isPauseColumnMissingError(primary.error.message, primary.error.code)) {
+    const noPause = await fetchSessionPackageRows(supabase, {
+      ...options,
+      orderBy: options?.orderBy ?? 'created_at',
+      orderAsc: options?.orderAsc ?? false,
+      withCount: options?.withCount,
+      select: SESSION_PACKAGE_LIST_SELECT_NO_PAUSE,
+      useTrashFilter: true,
+    })
+
+    if (!noPause.error) {
+      return {
+        data: (noPause.data ?? []).map((row) =>
+          withDeletedAtDefault(row as Record<string, unknown>),
+        ),
+        error: null,
+        count: noPause.count,
+        trashEnabled: true,
+      }
+    }
+
+    if (!isDeletedAtMissingError(noPause.error.message, noPause.error.code)) {
+      return { data: null, error: noPause.error, count: 0, trashEnabled: false }
+    }
+  } else if (!isDeletedAtMissingError(primary.error.message, primary.error.code)) {
     return { data: null, error: primary.error, count: 0, trashEnabled: false }
   }
 
@@ -227,9 +272,12 @@ export type LessonSessionPackageOption = {
   expires_at: string | null
   created_at: string
   paid_at: string | null
+  paused_at?: string | null
 }
 
 const LESSON_PACKAGE_PICKER_SELECT =
+  'id, total_sessions, remaining_sessions, note, is_active, expires_at, created_at, paid_at, paused_at'
+const LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE =
   'id, total_sessions, remaining_sessions, note, is_active, expires_at, created_at, paid_at'
 
 export async function getMemberSessionPackagesForLessonPicker(
@@ -240,21 +288,46 @@ export async function getMemberSessionPackagesForLessonPicker(
 
   const supabase = await createStaffDataClient()
 
-  let { data, error } = await supabase
-    .from('session_packages')
-    .select(LESSON_PACKAGE_PICKER_SELECT)
-    .eq('member_id', id)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(40)
+  let data: LessonSessionPackageOption[] | null = null
+  let error: { message: string; code?: string } | null = null
 
-  if (error && isDeletedAtMissingError(error.message, error.code)) {
-    ;({ data, error } = await supabase
+  {
+    const primary = await supabase
       .from('session_packages')
       .select(LESSON_PACKAGE_PICKER_SELECT)
       .eq('member_id', id)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
-      .limit(40))
+      .limit(40)
+    data = (primary.data as LessonSessionPackageOption[] | null) ?? null
+    error = primary.error
+  }
+
+  if (error && isPauseColumnMissingError(error.message, error.code)) {
+    const fallback = await supabase
+      .from('session_packages')
+      .select(LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE)
+      .eq('member_id', id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(40)
+    data = ((fallback.data ?? []) as Omit<LessonSessionPackageOption, 'paused_at'>[]).map(
+      (row) => ({ ...row, paused_at: null }),
+    )
+    error = fallback.error
+  }
+
+  if (error && isDeletedAtMissingError(error.message, error.code)) {
+    const legacy = await supabase
+      .from('session_packages')
+      .select(LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE)
+      .eq('member_id', id)
+      .order('created_at', { ascending: false })
+      .limit(40)
+    data = ((legacy.data ?? []) as Omit<LessonSessionPackageOption, 'paused_at'>[]).map(
+      (row) => ({ ...row, paused_at: null }),
+    )
+    error = legacy.error
   }
 
   if (error) {
@@ -262,7 +335,10 @@ export async function getMemberSessionPackagesForLessonPicker(
     return []
   }
 
-  return (data ?? []) as LessonSessionPackageOption[]
+  return (data ?? []).map((row) => ({
+    ...row,
+    paused_at: row.paused_at ?? null,
+  }))
 }
 
 export async function getSessionPackages(options?: {
@@ -349,13 +425,23 @@ export async function adjustSessionPackageRemaining(
 ): Promise<{ remaining?: number; error?: string }> {
   const supabase = client ?? (await createStaffDataClient())
 
-  const { data: pkg, error: pkgError } = await supabase
+  let { data: pkg, error: pkgError } = await supabase
     .from('session_packages')
     .select(
-      'id, member_id, total_sessions, remaining_sessions, note, expires_at, is_active',
+      'id, member_id, total_sessions, remaining_sessions, note, expires_at, is_active, paused_at',
     )
     .eq('id', packageId)
     .single()
+
+  if (pkgError && isPauseColumnMissingError(pkgError.message, pkgError.code)) {
+    ;({ data: pkg, error: pkgError } = await supabase
+      .from('session_packages')
+      .select(
+        'id, member_id, total_sessions, remaining_sessions, note, expires_at, is_active',
+      )
+      .eq('id', packageId)
+      .single())
+  }
 
   if (pkgError || !pkg) {
     return { error: '수업권을 찾을 수 없습니다.' }
@@ -363,11 +449,17 @@ export async function adjustSessionPackageRemaining(
 
   try {
     if (isMonthlyPlanPackage(pkg.note)) {
+      // 일시정지 중에는 is_active를 건드리지 않음 (paused_at이 이용 불가 판단)
+      if (isSessionPackagePaused(pkg as { paused_at?: string | null })) {
+        return { remaining: 0 }
+      }
+
       const stillActive = isPackageUsableForLesson({
         is_active: pkg.is_active,
         remaining_sessions: 0,
         note: pkg.note,
         expires_at: pkg.expires_at,
+        paused_at: (pkg as { paused_at?: string | null }).paused_at,
       })
 
       if (stillActive !== pkg.is_active) {
@@ -422,11 +514,19 @@ export async function reconcileSessionPackageRemaining(
 ): Promise<{ remaining?: number; error?: string }> {
   const supabase = client ?? (await createStaffDataClient())
 
-  const { data: pkg, error: pkgError } = await supabase
+  let { data: pkg, error: pkgError } = await supabase
     .from('session_packages')
-    .select('id, member_id, total_sessions, note, expires_at, is_active')
+    .select('id, member_id, total_sessions, note, expires_at, is_active, paused_at')
     .eq('id', packageId)
     .single()
+
+  if (pkgError && isPauseColumnMissingError(pkgError.message, pkgError.code)) {
+    ;({ data: pkg, error: pkgError } = await supabase
+      .from('session_packages')
+      .select('id, member_id, total_sessions, note, expires_at, is_active')
+      .eq('id', packageId)
+      .single())
+  }
 
   if (pkgError || !pkg) {
     return { error: '수업권을 찾을 수 없습니다.' }
@@ -434,11 +534,16 @@ export async function reconcileSessionPackageRemaining(
 
   try {
     if (isMonthlyPlanPackage(pkg.note)) {
+      if (isSessionPackagePaused(pkg as { paused_at?: string | null })) {
+        return { remaining: 0 }
+      }
+
       const stillActive = isPackageUsableForLesson({
         is_active: pkg.is_active,
         remaining_sessions: 0,
         note: pkg.note,
         expires_at: pkg.expires_at,
+        paused_at: (pkg as { paused_at?: string | null }).paused_at,
       })
 
       const { error: updateError } = await supabase
@@ -650,7 +755,7 @@ export async function queryActiveSessionPackageId(
   let query = supabase
     .from('session_packages')
     .select(
-      'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at',
+      'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at, paused_at',
     )
     .eq('member_id', memberId)
     .order('created_at', { ascending: true })
@@ -659,7 +764,22 @@ export async function queryActiveSessionPackageId(
     query = query.is('deleted_at', null)
   }
 
-  const { data, error } = await query
+  let { data, error } = await query
+  if (error && isPauseColumnMissingError(error.message, error.code)) {
+    let fallback = supabase
+      .from('session_packages')
+      .select(
+        'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at',
+      )
+      .eq('member_id', memberId)
+      .order('created_at', { ascending: true })
+    if (trashEnabled) {
+      fallback = fallback.is('deleted_at', null)
+    }
+    const fb = await fallback
+    data = (fb.data ?? []).map((row) => ({ ...row, paused_at: null })) as typeof data
+    error = fb.error
+  }
   if (error || !data?.length) return null
 
   return pickSessionPackageIdForDeduction(data as SessionPackageDeductionCandidate[])
@@ -687,19 +807,39 @@ export async function getActivePackageForMember(memberId: string): Promise<Sessi
     query = query.is('deleted_at', null)
   }
 
-  const { data, error } = await query
+  let { data, error } = await query
+
+  if (error && isPauseColumnMissingError(error.message, error.code)) {
+    let fallback = supabase
+      .from('session_packages')
+      .select(SESSION_PACKAGE_DETAIL_SELECT_NO_PAUSE)
+      .eq('member_id', memberId)
+      .order('created_at', { ascending: true })
+    if (trashEnabled) {
+      fallback = fallback.is('deleted_at', null)
+    }
+    const fb = await fallback
+    data = (fb.data ?? []).map((row) => ({
+      ...row,
+      paused_at: null,
+      total_paused_days: 0,
+    })) as typeof data
+    error = fb.error
+  }
 
   if (error) {
     console.error('Error fetching active package:', error)
     return null
   }
 
-  const packageId = pickSessionPackageIdForDeduction(
-    (data ?? []) as SessionPackageDeductionCandidate[],
-  )
+  const rows = (data ?? []).map((row) =>
+    withDeletedAtDefault(row as Record<string, unknown>),
+  ) as SessionPackage[]
+
+  const packageId = pickSessionPackageIdForDeduction(rows)
   if (!packageId) return null
 
-  return ((data ?? []).find((pkg) => pkg.id === packageId) as SessionPackage | undefined) ?? null
+  return rows.find((pkg) => pkg.id === packageId) ?? null
 }
 
 function normalizeOptionalDate(value?: string | null): string | null {
@@ -770,9 +910,7 @@ export async function createSessionPackage(formData: SessionPackageFormData): Pr
             remaining_sessions: remainingSessions,
             expires_at: formData.expires_at ?? null,
             is_active: true,
-            deleted_at: null,
             note: formData.note ?? null,
-            total_sessions: totalSessions,
           })
             ? 'active'
             : 'none',
@@ -801,14 +939,26 @@ export async function getSessionPackage(id: string): Promise<SessionPackage | nu
     query = query.is('deleted_at', null)
   }
 
-  const { data, error } = await query.single()
+  let { data, error } = await query.maybeSingle()
+
+  if (error && isPauseColumnMissingError(error.message, error.code)) {
+    let fallback = supabase
+      .from('session_packages')
+      .select(SESSION_PACKAGE_DETAIL_SELECT_NO_PAUSE)
+      .eq('id', id)
+    if (trashEnabled) {
+      fallback = fallback.is('deleted_at', null)
+    }
+    ;({ data, error } = await fallback.maybeSingle())
+  }
 
   if (error) {
     console.error('Error fetching session package:', error)
     return null
   }
 
-  return data as SessionPackage
+  if (!data) return null
+  return withDeletedAtDefault(data as Record<string, unknown>) as SessionPackage
 }
 
 export async function updateSessionPackage(
@@ -908,6 +1058,153 @@ export async function deleteSessionPackage(id: string): Promise<{ error?: string
   revalidatePath(`/dashboard/members/${pkg.member_id}`)
   revalidatePath('/dashboard/sessions')
   return {}
+}
+
+function resolveMonthlyExpiryForPause(
+  note: string | null,
+  expiresAt: string | null,
+  paidAt: string | null,
+): string | null {
+  if (expiresAt) return expiresAt.split('T')[0]
+  if (!paidAt) return null
+  const months = parseMonthlyPlanMonthsFromNote(note)
+  if (months != null) return calculateMonthlyPlanExpiryDate(paidAt, months)
+  if (isMonthlyRecurringPlan(note)) return calculateMonthlyRecurringExpiryDate(paidAt)
+  return null
+}
+
+/** 월정액 수업권 일시정지 — 재개 시 정지 일수만큼 만료일 연장 */
+export async function pauseSessionPackage(
+  id: string,
+): Promise<{ data?: SessionPackage; error?: string }> {
+  await requireRole(['admin', 'instructor'])
+  const supabase = await sessionWriteClient()
+
+  const { data: pkg, error: fetchError } = await supabase
+    .from('session_packages')
+    .select(
+      'id, member_id, note, is_active, paused_at, expires_at, paid_at, total_paused_days, deleted_at',
+    )
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError) {
+    if (isPauseColumnMissingError(fetchError.message, fetchError.code)) {
+      return { error: SESSION_PACKAGE_PAUSE_SETUP_MESSAGE }
+    }
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (!pkg || pkg.deleted_at) {
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (!isMonthlyPlanPackage(pkg.note)) {
+    return { error: '일시정지는 월정액 수업권만 가능합니다.' }
+  }
+
+  if (!pkg.is_active) {
+    return { error: '종료된 수업권은 일시정지할 수 없습니다.' }
+  }
+
+  if (isSessionPackagePaused(pkg)) {
+    return { error: '이미 일시정지된 수업권입니다.' }
+  }
+
+  const today = new Date().toISOString().split('T')[0]
+  const { data, error } = await supabase
+    .from('session_packages')
+    .update({ paused_at: today })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    if (isPauseColumnMissingError(error.message, error.code)) {
+      return { error: SESSION_PACKAGE_PAUSE_SETUP_MESSAGE }
+    }
+    console.error('Error pausing session package:', error)
+    return { error: mapSessionPackageError(error.message) }
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${pkg.member_id}`)
+  revalidatePath('/dashboard/sessions')
+  return { data: data as SessionPackage }
+}
+
+/** 월정액 일시정지 재개 — 정지 기간만큼 expires_at 연장 */
+export async function resumeSessionPackage(
+  id: string,
+): Promise<{ data?: SessionPackage; error?: string; extendedDays?: number }> {
+  await requireRole(['admin', 'instructor'])
+  const supabase = await sessionWriteClient()
+
+  const { data: pkg, error: fetchError } = await supabase
+    .from('session_packages')
+    .select(
+      'id, member_id, note, is_active, paused_at, expires_at, paid_at, total_paused_days, deleted_at',
+    )
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError) {
+    if (isPauseColumnMissingError(fetchError.message, fetchError.code)) {
+      return { error: SESSION_PACKAGE_PAUSE_SETUP_MESSAGE }
+    }
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (!pkg || pkg.deleted_at) {
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (!isMonthlyPlanPackage(pkg.note)) {
+    return { error: '일시정지는 월정액 수업권만 가능합니다.' }
+  }
+
+  if (!isSessionPackagePaused(pkg)) {
+    return { error: '일시정지 상태가 아닙니다.' }
+  }
+
+  const today = new Date().toISOString().split('T')[0]
+  const pausedDays = diffCalendarDays(pkg.paused_at!, today)
+  if (pausedDays == null || pausedDays < 0) {
+    return { error: '일시정지 기간을 계산할 수 없습니다.' }
+  }
+
+  const baseExpiry = resolveMonthlyExpiryForPause(pkg.note, pkg.expires_at, pkg.paid_at)
+  if (!baseExpiry) {
+    return { error: '만료일이 없어 연장할 수 없습니다. 만료일을 먼저 설정해주세요.' }
+  }
+
+  const nextExpiry = addDaysToDate(baseExpiry, pausedDays)
+  const nextTotalPaused = (pkg.total_paused_days ?? 0) + pausedDays
+
+  const { data, error } = await supabase
+    .from('session_packages')
+    .update({
+      paused_at: null,
+      expires_at: nextExpiry,
+      total_paused_days: nextTotalPaused,
+      is_active: true,
+    })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    if (isPauseColumnMissingError(error.message, error.code)) {
+      return { error: SESSION_PACKAGE_PAUSE_SETUP_MESSAGE }
+    }
+    console.error('Error resuming session package:', error)
+    return { error: mapSessionPackageError(error.message) }
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${pkg.member_id}`)
+  revalidatePath('/dashboard/sessions')
+  return { data: data as SessionPackage, extendedDays: pausedDays }
 }
 
 /** 휴지통에서 복구 */

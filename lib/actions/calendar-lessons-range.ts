@@ -6,6 +6,7 @@ import type { RecurrenceCapableLesson } from '@/lib/calendar-recurrence/types'
 import {
   LESSON_CALENDAR_SELECT,
   LESSON_CALENDAR_SELECT_LEGACY,
+  LESSON_CALENDAR_SELECT_NO_DRINK,
 } from '@/lib/supabase-selects'
 import type { Lesson } from '@/lib/types'
 import { enrichLessonRecurrenceFields } from '@/lib/lesson-recurrence-legacy'
@@ -17,6 +18,7 @@ import { logLessonViewFetch } from '@/lib/lesson-data-sync'
 function isMissingRecurrenceV2Column(error: { message?: string; code?: string } | null) {
   if (!error) return false
   const message = error.message?.toLowerCase() ?? ''
+  if (message.includes('drink_preference')) return false
   return (
     error.code === 'PGRST204' ||
     error.code === '42703' ||
@@ -24,6 +26,11 @@ function isMissingRecurrenceV2Column(error: { message?: string; code?: string } 
     message.includes('recurrence') ||
     message.includes('recurring_master_id')
   )
+}
+
+function isMissingDrinkPreferenceColumn(error: { message?: string; code?: string } | null) {
+  if (!error) return false
+  return (error.message?.toLowerCase() ?? '').includes('drink_preference')
 }
 
 function normalizeCalendarLesson(lesson: Lesson): Lesson {
@@ -154,6 +161,15 @@ export async function fetchExpandedCalendarLessons(
     buildMastersQuery(select),
     buildExceptionsQuery(select),
   ])
+
+  if (storedResult.error && isMissingDrinkPreferenceColumn(storedResult.error)) {
+    select = LESSON_CALENDAR_SELECT_NO_DRINK
+    ;[storedResult, mastersResult, exceptionsResult] = await Promise.all([
+      buildStoredQuery(select),
+      buildMastersQuery(select),
+      buildExceptionsQuery(select),
+    ])
+  }
 
   if (storedResult.error && isMissingRecurrenceV2Column(storedResult.error)) {
     select = LESSON_CALENDAR_SELECT_LEGACY

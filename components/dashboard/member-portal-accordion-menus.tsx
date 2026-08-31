@@ -63,6 +63,8 @@ export function MemberPortalAccordionMenus({
     const stored = readStoredOpenKey()
     if (stored === 'notice' && !hasNotice) return
     if (stored === 'marathon' && !hasMarathon) return
+    // 훈련 일정은 항상 기본 닫힘 (세션 복원하지 않음)
+    if (stored === 'training') return
     // 대회 일정은 기본 닫힘 — 이전에 열어둔 세션만 복원
     if (stored) setOpenKey(stored)
   }, [hasMarathon, hasNotice])

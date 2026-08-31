@@ -225,13 +225,15 @@ export function formatPackagePlanLabel(
   return base
 }
 
-/** 회원권 만료 여부 (기간·비활성·잔여 소진) */
+/** 회원권 만료 여부 (기간·비활성·잔여 소진) — 일시정지는 만료가 아님 */
 export function isSessionPackageExpired(pkg: {
   is_active: boolean
   remaining_sessions: number
   note?: string | null
   expires_at?: string | null
+  paused_at?: string | null
 }): boolean {
+  if (isSessionPackagePaused(pkg)) return false
   if (!pkg.is_active) return true
   if (pkg.expires_at) {
     const today = new Date().toISOString().split('T')[0]
@@ -239,6 +241,13 @@ export function isSessionPackageExpired(pkg: {
   }
   if (!isMonthlyPlanPackage(pkg.note) && pkg.remaining_sessions <= 0) return true
   return false
+}
+
+/** 월정액 일시정지 중인지 */
+export function isSessionPackagePaused(pkg: {
+  paused_at?: string | null
+}): boolean {
+  return Boolean(pkg.paused_at?.trim())
 }
 
 /** 회차권 잔여 — 잔여 / 최근 구매 회차 / 누적 등록 회차 (plain text) */
@@ -274,8 +283,15 @@ export function formatPackageRemainingDisplay(
   note?: string | null,
   expiresAt?: string | null,
   paidAt?: string | null,
+  pausedAt?: string | null,
 ): string {
   if (isMonthlyPlanPackage(note)) {
+    if (pausedAt?.trim()) {
+      const pauseDays = diffCalendarDays(pausedAt, new Date().toISOString().split('T')[0])
+      const pauseLabel =
+        pauseDays != null && pauseDays >= 0 ? `${pauseDays}일째` : '중'
+      return `일시정지 ${pauseLabel}`
+    }
     return formatMonthlyPlanRemainingPeriod(
       resolveMonthlyPackageExpiryDate(note, expiresAt, paidAt),
     )
@@ -322,7 +338,9 @@ export function getPackageRemainingColorClass(
   remainingSessions: number,
   note?: string | null,
   isActive = true,
+  pausedAt?: string | null,
 ): string {
+  if (pausedAt?.trim()) return 'text-amber-400'
   if (isMonthlyPlanPackage(note)) {
     return isActive ? 'text-primary' : 'text-destructive'
   }
@@ -337,8 +355,10 @@ export function isPackageUsableForLesson(pkg: {
   remaining_sessions: number
   note?: string | null
   expires_at?: string | null
+  paused_at?: string | null
 }): boolean {
   if (!pkg.is_active) return false
+  if (isSessionPackagePaused(pkg)) return false
   if (pkg.expires_at) {
     const today = new Date().toISOString().split('T')[0]
     if (pkg.expires_at.split('T')[0] < today) return false

@@ -159,6 +159,42 @@ export async function fetchCenterTrainingScheduleLibrary(): Promise<CenterTraini
   return { tableReady: true, weekSnapshots, locationPresets }
 }
 
+export async function fetchCenterTrainingScheduleWeekSnapshotsByStarts(
+  weekStartDates: string[],
+): Promise<Map<string, RunningLeagueTrainingScheduleDayInput[]>> {
+  const unique = [
+    ...new Set(
+      weekStartDates
+        .map((value) => value.trim().slice(0, 10))
+        .filter(Boolean),
+    ),
+  ]
+  const result = new Map<string, RunningLeagueTrainingScheduleDayInput[]>()
+  if (unique.length === 0) return result
+
+  const supabase = await libraryClient()
+  const { data, error } = await supabase
+    .from('center_running_training_schedule_week_snapshots')
+    .select('week_start_date, days, saved_at')
+    .in('week_start_date', unique)
+    .order('saved_at', { ascending: false })
+
+  if (error) {
+    if (!isMissingLibraryTableError(error)) {
+      console.error('fetchCenterTrainingScheduleWeekSnapshotsByStarts', error)
+    }
+    return result
+  }
+
+  for (const row of data ?? []) {
+    const weekStart = row.week_start_date?.slice(0, 10)
+    if (!weekStart || result.has(weekStart)) continue
+    result.set(weekStart, normalizeSnapshotDays(row.days))
+  }
+
+  return result
+}
+
 export async function saveCenterTrainingScheduleWeekSnapshot(
   days: RunningLeagueTrainingScheduleDayInput[],
 ): Promise<void> {

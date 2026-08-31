@@ -32,6 +32,7 @@ import {
 
 type MemberRunningLeagueTrainingScheduleProps = {
   days: RunningLeagueTrainingScheduleDayView[]
+  previousWeekDays?: RunningLeagueTrainingScheduleDayView[]
   tableReady: boolean
   canParticipate: boolean
   readOnly?: boolean
@@ -62,6 +63,7 @@ function buildSignupDraft(
 
 export function MemberRunningLeagueTrainingSchedule({
   days,
+  previousWeekDays = [],
   tableReady,
   canParticipate,
   readOnly = false,
@@ -73,28 +75,41 @@ export function MemberRunningLeagueTrainingSchedule({
   const [pending, startTransition] = useTransition()
   const [pendingDayId, setPendingDayId] = useState<string | null>(null)
   const [scheduleDays, setScheduleDays] = useState(days)
+  const [pastScheduleDays, setPastScheduleDays] = useState(previousWeekDays)
+  const [showPastWeek, setShowPastWeek] = useState(false)
   const [activeDay, setActiveDay] = useState<RunningLeagueTrainingScheduleDayView | null>(null)
   const [sectionOpen, setSectionOpen] = useState(contentOnly)
-  const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() => buildSignupDraft(days))
+  const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
+    buildSignupDraft([...days, ...previousWeekDays]),
+  )
 
   useEffect(() => {
     setScheduleDays(days)
-    setSignupDraft((current) => buildSignupDraft(days, current))
+    setPastScheduleDays(previousWeekDays)
+    setSignupDraft((current) => buildSignupDraft([...days, ...previousWeekDays], current))
     setActiveDay((current) => {
       if (!current) return current
-      return days.find((day) => day.id === current.id) ?? null
+      return (
+        days.find((day) => day.id === current.id) ??
+        previousWeekDays.find((day) => day.id === current.id) ??
+        null
+      )
     })
-  }, [days])
+  }, [days, previousWeekDays])
 
   const fullWeekDays = useMemo(
     () => buildFullWeekScheduleDays(scheduleDays),
     [scheduleDays],
   )
+  const fullPastWeekDays = useMemo(
+    () => buildFullWeekScheduleDays(pastScheduleDays),
+    [pastScheduleDays],
+  )
   const visibleDays = useMemo(
     () => fullWeekDays.filter(isVotableDay),
     [fullWeekDays],
   )
-  const hasWeekSchedule = fullWeekDays.some(
+  const hasPastWeekSchedule = fullPastWeekDays.some(
     (day) =>
       isVotableDay(day) ||
       day.is_hidden ||
@@ -102,6 +117,40 @@ export function MemberRunningLeagueTrainingSchedule({
       Boolean(day.training_summary.trim()),
   )
   const signedUpCount = visibleDays.filter((day) => signupDraft[day.id] ?? day.is_signed_up).length
+
+  function renderWeekRows(
+    weekDays: RunningLeagueTrainingScheduleDayView[],
+    options: { emptyMessage: string; participate: boolean },
+  ) {
+    const hasSchedule = weekDays.some(
+      (day) =>
+        isVotableDay(day) ||
+        day.is_hidden ||
+        Boolean(day.schedule_date) ||
+        Boolean(day.training_summary.trim()),
+    )
+    if (!hasSchedule) {
+      return (
+        <p className="px-2 py-6 text-center text-sm text-zinc-500">{options.emptyMessage}</p>
+      )
+    }
+    return weekDays.map((day) =>
+      isVotableDay(day) ? (
+        <ScheduleDayRow
+          key={day.id}
+          day={day}
+          pending={pending && pendingDayId === day.id}
+          readOnly={readOnly || !options.participate}
+          canParticipate={canParticipate && options.participate}
+          isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
+          onOpenParticipants={() => openParticipants(day)}
+          onToggleSignup={() => toggleSignup(day)}
+        />
+      ) : (
+        <ScheduleRestDayRow key={day.id} day={day} />
+      ),
+    )
+  }
 
   function toggleSignup(day: RunningLeagueTrainingScheduleDayView) {
     if (readOnly || !canParticipate) {
@@ -140,7 +189,10 @@ export function MemberRunningLeagueTrainingSchedule({
   }
 
   function openParticipants(day: RunningLeagueTrainingScheduleDayView) {
-    const latest = scheduleDays.find((item) => item.id === day.id) ?? day
+    const latest =
+      scheduleDays.find((item) => item.id === day.id) ??
+      pastScheduleDays.find((item) => item.id === day.id) ??
+      day
     setActiveDay(latest)
   }
 
@@ -157,30 +209,41 @@ export function MemberRunningLeagueTrainingSchedule({
 
   const scheduleBody = (
     <div className={cn(contentOnly ? 'space-y-1.5' : 'space-y-1.5 p-2.5 sm:p-3')}>
-      {!hasWeekSchedule ? (
-        <p className="px-2 py-6 text-center text-sm text-zinc-500">
-          {tableReady
+      {hasPastWeekSchedule ? (
+        <div className="px-0.5 pb-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full border-zinc-700/80 bg-zinc-900/40 text-xs text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
+            onClick={() => setShowPastWeek((value) => !value)}
+          >
+            {showPastWeek ? '지난 훈련 일정 숨기기' : '지난 훈련 일정 보기'}
+          </Button>
+        </div>
+      ) : null}
+
+      {showPastWeek && hasPastWeekSchedule ? (
+        <div className="space-y-1.5 rounded-md border border-dashed border-zinc-700/70 bg-zinc-950/40 p-1.5">
+          <p className="px-1 pb-0.5 text-[11px] font-medium text-zinc-500">지난 주</p>
+          {renderWeekRows(fullPastWeekDays, {
+            emptyMessage: '지난 주 등록된 훈련 일정이 없습니다.',
+            participate: false,
+          })}
+        </div>
+      ) : null}
+
+      <div className="space-y-1.5">
+        {showPastWeek && hasPastWeekSchedule ? (
+          <p className="px-1 pb-0.5 text-[11px] font-medium text-zinc-500">이번 주</p>
+        ) : null}
+        {renderWeekRows(fullWeekDays, {
+          emptyMessage: tableReady
             ? '이번 주 등록된 훈련 일정이 없습니다.'
-            : '훈련 스케줄 기능을 준비 중입니다.'}
-        </p>
-      ) : (
-        fullWeekDays.map((day) =>
-          isVotableDay(day) ? (
-            <ScheduleDayRow
-              key={day.id}
-              day={day}
-              pending={pending && pendingDayId === day.id}
-              readOnly={readOnly}
-              canParticipate={canParticipate}
-              isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
-              onOpenParticipants={() => openParticipants(day)}
-              onToggleSignup={() => toggleSignup(day)}
-            />
-          ) : (
-            <ScheduleRestDayRow key={day.id} day={day} />
-          ),
-        )
-      )}
+            : '훈련 스케줄 기능을 준비 중입니다.',
+          participate: true,
+        })}
+      </div>
     </div>
   )
 

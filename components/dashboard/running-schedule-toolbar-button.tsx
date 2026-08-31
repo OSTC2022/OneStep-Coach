@@ -89,6 +89,7 @@ export function RunningScheduleToolbarButton({
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <MemberRunningLeagueTrainingSchedule
             days={bundle?.days ?? []}
+            previousWeekDays={bundle?.previousWeekDays ?? []}
             tableReady={bundle?.tableReady ?? true}
             canParticipate={false}
             readOnly

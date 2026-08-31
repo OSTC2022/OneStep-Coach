@@ -74,6 +74,7 @@ import { syncTrialLessonPayOverride, clearTrialLessonPayOverrideForInstructor } 
 import {
   LESSON_CALENDAR_SELECT,
   LESSON_CALENDAR_SELECT_LEGACY,
+  LESSON_CALENDAR_SELECT_NO_DRINK,
   LESSON_LIST_SELECT,
   LESSON_LIST_SELECT_LEGACY,
   LESSON_MUTATION_SELECT,
@@ -179,11 +180,24 @@ function isMissingRecurrenceColumn(error: { message?: string; code?: string }) {
   )
 }
 
+function isMissingDrinkPreferenceColumn(error: { message?: string; code?: string }) {
+  const message = error.message?.toLowerCase() ?? ''
+  return (
+    message.includes('drink_preference') &&
+    (error.code === 'PGRST204' ||
+      error.code === '42703' ||
+      message.includes('schema cache') ||
+      message.includes('does not exist') ||
+      message.includes('column'))
+  )
+}
+
 function lessonSelectFallback(
   select: string,
   includeSessionPackage?: boolean,
 ) {
-  if (select === LESSON_CALENDAR_SELECT) return LESSON_CALENDAR_SELECT_LEGACY
+  if (select === LESSON_CALENDAR_SELECT) return LESSON_CALENDAR_SELECT_NO_DRINK
+  if (select === LESSON_CALENDAR_SELECT_NO_DRINK) return LESSON_CALENDAR_SELECT_LEGACY
   if (select === LESSON_LIST_SELECT) return LESSON_LIST_SELECT_LEGACY
   if (select === LESSON_MUTATION_SELECT) return LESSON_MUTATION_SELECT_LEGACY
   return includeSessionPackage ? LESSON_LIST_SELECT_LEGACY : LESSON_CALENDAR_SELECT_LEGACY
@@ -710,7 +724,7 @@ export async function getLessons(options?: {
 
   let { data, error } = await query
 
-  if (error && isMissingRecurrenceColumn(error)) {
+  if (error && (isMissingRecurrenceColumn(error) || isMissingDrinkPreferenceColumn(error))) {
     const fallbackSelect = lessonSelectFallback(select, options?.includeSessionPackage)
     let retryQuery = supabase.from('lessons').select(fallbackSelect)
     if (options?.date) {
@@ -741,6 +755,39 @@ export async function getLessons(options?: {
     const retry = await retryQuery
     data = retry.data
     error = retry.error
+
+    // drink만 빠진 경우 NO_DRINK → 다시 recurrence 없을 수 있음
+    if (error && isMissingRecurrenceColumn(error) && fallbackSelect === LESSON_CALENDAR_SELECT_NO_DRINK) {
+      const legacySelect = LESSON_CALENDAR_SELECT_LEGACY
+      let legacyQuery = supabase.from('lessons').select(legacySelect)
+      if (options?.date) {
+        legacyQuery = legacyQuery
+          .order('start_time', { ascending: true, nullsFirst: false })
+          .order('created_at', { ascending: true })
+      } else {
+        legacyQuery = legacyQuery
+          .order('lesson_date', { ascending: false })
+          .order('start_time', { ascending: false })
+      }
+      if (options?.memberId) legacyQuery = legacyQuery.eq('member_id', options.memberId)
+      if (options?.instructorId) legacyQuery = legacyQuery.eq('instructor_id', options.instructorId)
+      if (options?.date) legacyQuery = legacyQuery.eq('lesson_date', options.date)
+      if (options?.dateFrom) legacyQuery = legacyQuery.gte('lesson_date', options.dateFrom)
+      if (options?.dateTo) legacyQuery = legacyQuery.lte('lesson_date', options.dateTo)
+      else if (options?.upToNow && !options.date && !options.dateFrom) {
+        legacyQuery = legacyQuery.lte('lesson_date', getTodayDateKey())
+      }
+      if (options?.status) legacyQuery = legacyQuery.eq('attendance_status', options.status)
+      if (options?.limit) {
+        const fetchLimit = options.upToNow
+          ? Math.max(options.limit * 4, 40)
+          : options.limit
+        legacyQuery = legacyQuery.limit(fetchLimit)
+      }
+      const legacy = await legacyQuery
+      data = legacy.data
+      error = legacy.error
+    }
   }
 
   if (error) {

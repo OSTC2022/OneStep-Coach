@@ -45,6 +45,8 @@ export interface Member {
   goal: string | null
   injury_history: string | null
   memo: string | null
+  /** 음료 선호: water | bcaa_* | null */
+  drink_preference?: string | null
   primary_instructor_id: string | null
   registered_at: string
   body_baseline_recorded_at: string | null
@@ -84,6 +86,8 @@ export interface SessionPackage {
   is_active: boolean
   created_at: string
   deleted_at: string | null
+  paused_at?: string | null
+  total_paused_days?: number | null
   // Joined relations
   member?: Member
 }

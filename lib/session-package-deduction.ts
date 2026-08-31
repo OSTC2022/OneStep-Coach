@@ -9,6 +9,7 @@ export type SessionPackageDeductionCandidate = {
   created_at: string
   paid_at?: string | null
   deleted_at?: string | null
+  paused_at?: string | null
 }
 
 /** 등록(생성) 순 → 결제일 순 */

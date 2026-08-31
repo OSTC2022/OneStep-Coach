@@ -1292,3 +1292,61 @@ export async function permanentlyDeleteMember(id: string): Promise<{ error?: str
   revalidatePath('/dashboard/members')
   return {}
 }
+
+const DRINK_PREFERENCE_SETUP_MESSAGE =
+  '음료 선호 저장을 위해 Supabase SQL Editor에서 supabase/add-member-drink-preference.sql 을 실행해주세요. 이미 실행했다면 add-member-drink-preference-custom.sql 도 실행해주세요.'
+
+function isDrinkPreferenceMissingError(message?: string, code?: string) {
+  return Boolean(
+    message?.includes('drink_preference') ||
+      ((code === '42703' || code === 'PGRST204') && message?.includes('drink')),
+  )
+}
+
+/** 수업현황 스케줄표 — 회원 음료 선호 (생수 / BCAA 맛) */
+export async function updateMemberDrinkPreference(
+  memberId: string,
+  drinkPreference: string | null,
+): Promise<{ data?: { id: string; drink_preference: string | null }; error?: string }> {
+  const access = await assertCanEditMemberBasicInfo(memberId)
+  if (access.error) return { error: access.error }
+
+  const id = memberId.trim()
+  if (!id) return { error: '회원을 찾을 수 없습니다.' }
+
+  let value: string | null = null
+  if (drinkPreference != null && drinkPreference.trim()) {
+    const trimmed = drinkPreference.trim().slice(0, 20)
+    if (!trimmed) {
+      return { error: '올바르지 않은 음료 선호입니다.' }
+    }
+    value = trimmed
+  }
+
+  const supabase = await memberWriteClient()
+  const { data, error } = await supabase
+    .from('members')
+    .update({ drink_preference: value })
+    .eq('id', id)
+    .select('id, drink_preference')
+    .single()
+
+  if (error) {
+    if (isDrinkPreferenceMissingError(error.message, error.code)) {
+      return { error: DRINK_PREFERENCE_SETUP_MESSAGE }
+    }
+    console.error('Error updating member drink preference:', error)
+    return { error: mapMemberError(error.message) }
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${id}`)
+  revalidatePath('/dashboard/lesson-status')
+  revalidatePath('/dashboard/calendar')
+  return {
+    data: {
+      id: data.id as string,
+      drink_preference: (data.drink_preference as string | null) ?? null,
+    },
+  }
+}

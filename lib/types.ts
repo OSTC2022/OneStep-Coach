@@ -76,6 +76,8 @@ export interface Member {
   goal: string | null
   injury_history: string | null
   memo: string | null
+  /** 음료 선호: water | bcaa_* | null */
+  drink_preference?: string | null
   ranking_status_message?: string | null
   ranking_status_message_color?: string | null
   primary_instructor_id: string | null
@@ -117,6 +119,10 @@ export interface SessionPackage {
   is_active: boolean
   created_at: string
   deleted_at: string | null
+  /** 일시정지 시작일 (월정액) — null이면 정상 */
+  paused_at?: string | null
+  /** 누적 일시정지 일수 */
+  total_paused_days?: number | null
   // Joined fields
   member?: Member
 }

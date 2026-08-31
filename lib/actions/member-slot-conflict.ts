@@ -10,6 +10,7 @@ import { enrichLessonRecurrenceFields } from '@/lib/lesson-recurrence-legacy'
 import {
   LESSON_CALENDAR_SELECT,
   LESSON_CALENDAR_SELECT_LEGACY,
+  LESSON_CALENDAR_SELECT_NO_DRINK,
 } from '@/lib/supabase-selects'
 
 function slotStartKey(startTime?: string | null) {
@@ -64,6 +65,16 @@ export async function findFastMemberSlotConflict(
     .eq('event_type', 'recurring_master')
     .lte('lesson_date', params.lessonDate)
     .limit(40)
+
+  if (mastersQuery.error?.message?.includes('drink_preference')) {
+    mastersQuery = await supabase
+      .from('lessons')
+      .select(LESSON_CALENDAR_SELECT_NO_DRINK)
+      .eq('member_id', params.memberId)
+      .eq('event_type', 'recurring_master')
+      .lte('lesson_date', params.lessonDate)
+      .limit(40)
+  }
 
   if (mastersQuery.error) {
     mastersQuery = await supabase

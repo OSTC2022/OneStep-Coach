@@ -28,6 +28,8 @@ export function AdultRunningPortalAdminView({
   portalSettings,
 }: AdultRunningPortalAdminViewProps) {
   const trainingScheduleDays = centerTrainingSchedule.days ?? []
+  const trainingSchedulePreviousWeekDays =
+    centerTrainingSchedule.previousWeekDays ?? []
   const trainingScheduleReady = centerTrainingSchedule.tableReady ?? true
 
   return (
@@ -52,6 +54,7 @@ export function AdultRunningPortalAdminView({
           training={
             <MemberRunningLeagueTrainingSchedule
               days={trainingScheduleDays}
+              previousWeekDays={trainingSchedulePreviousWeekDays}
               tableReady={trainingScheduleReady}
               canParticipate={false}
               readOnly

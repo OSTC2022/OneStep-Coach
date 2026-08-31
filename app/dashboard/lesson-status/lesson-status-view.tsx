@@ -128,7 +128,7 @@ import {
 } from '@/components/lesson-status/lesson-completion-member-insight'
 import { LessonStatusMemoBoard } from '@/components/lesson-status/lesson-status-memo-board'
 import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
-import type { LessonStatusBodyWeightSnapshot } from '@/lib/actions/member-body-records'
+import { MemberDrinkPreferenceButton } from '@/components/members/member-drink-preference-button'
 import type { StaffMemoNote } from '@/lib/actions/staff-memo-notes'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 
@@ -266,6 +266,7 @@ interface AthleteTileProps {
   onMemberLinked: (originalLessonId: string, lesson: Lesson, deletedIds?: string[]) => void
   onLessonEdited: (lesson: Lesson) => void
   onLessonDeleted: (lessonIds: string[]) => void
+  onMemberDrinkPreferenceChange: (memberId: string, drinkPreference: string | null) => void
 }
 
 function resolveLessonInstructorColor(
@@ -293,6 +294,7 @@ const AthleteTile = memo(function AthleteTile({
   onMemberLinked,
   onLessonEdited,
   onLessonDeleted,
+  onMemberDrinkPreferenceChange,
 }: AthleteTileProps) {
   const [signatureOpen, setSignatureOpen] = useState(false)
   const [memberLinkOpen, setMemberLinkOpen] = useState(false)
@@ -502,38 +504,48 @@ const AthleteTile = memo(function AthleteTile({
       }
     >
       {isMemberLinked && lesson.member_id ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                'truncate text-left font-semibold leading-tight text-foreground hover:text-primary hover:underline',
-                expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
-              )}
-              title={`${label} — 수업 수정 · 회원 페이지 · 성장 페이지`}
-            >
-              {label}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-[9.5rem]">
-            <DropdownMenuItem onSelect={() => setEditLessonOpen(true)}>
-              <Pencil className="size-4" />
-              수업 수정
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`/dashboard/members/${lesson.member_id}`}>
-                <UserRound className="size-4" />
-                회원 페이지
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`/dashboard/members/${lesson.member_id}/weight`}>
-                <TrendingUp className="size-4" />
-                성장 페이지
-              </Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="flex min-w-0 items-start gap-0.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  'min-w-0 flex-1 truncate text-left font-semibold leading-tight text-foreground hover:text-primary hover:underline',
+                  expanded ? 'text-sm' : compact ? 'text-xs' : 'text-[11px]',
+                )}
+                title={`${label} — 수업 수정 · 회원 페이지 · 성장 페이지`}
+              >
+                {label}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-[9.5rem]">
+              <DropdownMenuItem onSelect={() => setEditLessonOpen(true)}>
+                <Pencil className="size-4" />
+                수업 수정
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href={`/dashboard/members/${lesson.member_id}`}>
+                  <UserRound className="size-4" />
+                  회원 페이지
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href={`/dashboard/members/${lesson.member_id}/weight`}>
+                  <TrendingUp className="size-4" />
+                  성장 페이지
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <MemberDrinkPreferenceButton
+            memberId={lesson.member_id}
+            value={lesson.member?.drink_preference}
+            compact={!expanded}
+            onChanged={(next) =>
+              onMemberDrinkPreferenceChange(lesson.member_id!, next)
+            }
+          />
+        </div>
       ) : (
         <>
           <button
@@ -1008,6 +1020,7 @@ interface TimeSlotsPanelProps {
   onMemberLinked: (originalLessonId: string, lesson: Lesson, deletedIds?: string[]) => void
   onLessonEdited: (lesson: Lesson) => void
   onLessonDeleted: (lessonIds: string[]) => void
+  onMemberDrinkPreferenceChange: (memberId: string, drinkPreference: string | null) => void
   bodyWeightByKey: Record<string, LessonStatusBodyWeightSnapshot>
   onBodyWeightChange: (
     memberId: string,
@@ -1056,6 +1069,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   onMemberLinked,
   onLessonEdited,
   onLessonDeleted,
+  onMemberDrinkPreferenceChange,
   emptyMessage = '등록된 수업이 없습니다.',
   autoScrollToNow = false,
 }: TimeSlotsPanelProps) {
@@ -1160,7 +1174,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         const target = event.target as HTMLElement
                         if (
                           target.closest(
-                            'button, a, input, textarea, select, label, [role="dialog"]',
+                            'button, a, input, textarea, select, label, [role="dialog"], [data-slot="popover-content"], [data-slot="popover-trigger"]',
                           )
                         ) {
                           return
@@ -1194,6 +1208,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         onMemberLinked={onMemberLinked}
                         onLessonEdited={onLessonEdited}
                         onLessonDeleted={onLessonDeleted}
+                        onMemberDrinkPreferenceChange={onMemberDrinkPreferenceChange}
                       />
                     </div>
                   )
@@ -1267,6 +1282,7 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         onMemberLinked={onMemberLinked}
                         onLessonEdited={onLessonEdited}
                         onLessonDeleted={onLessonDeleted}
+                        onMemberDrinkPreferenceChange={onMemberDrinkPreferenceChange}
                       />
                     ))}
                   </div>
@@ -2020,6 +2036,23 @@ export function LessonStatusView({
     [instructors],
   )
 
+  const handleMemberDrinkPreferenceChange = useCallback(
+    (memberId: string, drinkPreference: string | null) => {
+      setLessons((prev) =>
+        prev.map((lesson) => {
+          if (lesson.member_id !== memberId) return lesson
+          return {
+            ...lesson,
+            member: lesson.member
+              ? { ...lesson.member, drink_preference: drinkPreference }
+              : lesson.member,
+          }
+        }),
+      )
+    },
+    [],
+  )
+
   const panelProps = {
     instructors,
     instructorLookup,
@@ -2034,6 +2067,7 @@ export function LessonStatusView({
     onMemberLinked: handleMemberLinked,
     onLessonEdited: handleLessonEdited,
     onLessonDeleted: handleLessonDeleted,
+    onMemberDrinkPreferenceChange: handleMemberDrinkPreferenceChange,
     autoScrollToNow: viewMode === 'day' && currentDate === today && !isLoadingDate,
   }
 
@@ -2143,6 +2177,7 @@ export function LessonStatusView({
                           onMemberLinked={handleMemberLinked}
                           onLessonEdited={handleLessonEdited}
                           onLessonDeleted={handleLessonDeleted}
+                          onMemberDrinkPreferenceChange={handleMemberDrinkPreferenceChange}
                         />
                       </div>
                     </div>

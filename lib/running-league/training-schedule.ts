@@ -1,3 +1,5 @@
+import { getKstDateKey } from '@/lib/member-backup/kst-date'
+
 export const TRAINING_WEEKDAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'] as const
 
 export type TrainingWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
@@ -153,6 +155,49 @@ export function normalizeTrainingScheduleDate(
 ): string | null {
   const raw = value?.trim().slice(0, 10)
   return raw || null
+}
+
+/** 한국시간 기준 이번 주 월요일 (YYYY-MM-DD). weekStartsOn=월요일 */
+export function getKstTrainingWeekMondayDateKey(date = new Date()): string {
+  const today = getKstDateKey(date)
+  return getMondayDateKeyForDateKey(today)
+}
+
+/** YYYY-MM-DD 기준 해당 주의 월요일 */
+export function getMondayDateKeyForDateKey(dateKey: string): string {
+  const raw = normalizeTrainingScheduleDate(dateKey)
+  if (!raw) return dateKey
+  const [year, month, day] = raw.split('-').map(Number)
+  // 정오 KST ≈ 03:00 UTC — DST 없는 한국에서 요일 계산 안정
+  const noonUtcMs = Date.UTC(year, month - 1, day, 3, 0, 0)
+  const utcDay = new Date(noonUtcMs).getUTCDay() // 0=일 … 6=토
+  const offsetToMonday = utcDay === 0 ? -6 : 1 - utcDay
+  return addDaysToDateKey(raw, offsetToMonday)
+}
+
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const raw = normalizeTrainingScheduleDate(dateKey)
+  if (!raw) return dateKey
+  const [year, month, day] = raw.split('-').map(Number)
+  const noonUtcMs = Date.UTC(year, month - 1, day, 3, 0, 0)
+  const next = new Date(noonUtcMs)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next.toISOString().slice(0, 10)
+}
+
+/** 스케줄 행들에서 월요일(weekday 0) 날짜 */
+export function getTrainingWeekStartFromDays(
+  days: Array<{ weekday: number; schedule_date?: string | null }>,
+): string | null {
+  const monday = days.find((day) => day.weekday === 0)
+  const fromMonday = normalizeTrainingScheduleDate(monday?.schedule_date)
+  if (fromMonday) return fromMonday
+  for (const day of days) {
+    const date = normalizeTrainingScheduleDate(day.schedule_date)
+    if (!date) continue
+    return getMondayDateKeyForDateKey(date)
+  }
+  return null
 }
 
 /** 스케줄 저장 시 참여 투표 초기화 여부 판단용 */

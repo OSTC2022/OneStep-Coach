@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { deleteSessionPackage } from '@/lib/actions/sessions'
+import {
+  deleteSessionPackage,
+  pauseSessionPackage,
+  resumeSessionPackage,
+} from '@/lib/actions/sessions'
 import { MemberPhysicalInfoEditor } from '@/components/members/member-physical-info-editor'
 import { MemberBasicInfoEditor } from '@/components/members/member-basic-info-editor'
 import type { MemberBodyRecord } from '@/lib/actions/member-body-records'
@@ -40,6 +44,8 @@ import {
   FileText,
   CreditCard,
   Trash2,
+  Pause,
+  Play,
 } from 'lucide-react'
 import { formatPrimaryInstructorName } from '@/lib/member-utils'
 import { isAdultGeneralSport } from '@/lib/adult-member-programs'
@@ -67,8 +73,10 @@ import {
   formatPackageTallyTotalDisplay,
   formatSessionOverageAlert,
   getPackageRemainingColorClass,
+  isMonthlyPlanPackage,
   isPackageUsableForLesson,
   isSessionPackageOverage,
+  isSessionPackagePaused,
   UNLIMITED_SESSIONS_DISPLAY,
 } from '@/lib/session-package-utils'
 import { GroupedPackageUsageDisplay } from '@/components/sessions/grouped-package-usage-display'
@@ -139,6 +147,9 @@ export function MemberDetail({
   const [lessonRecords, setLessonRecords] = useState(lessons)
   const [deleteTarget, setDeleteTarget] = useState<SessionPackage | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [pauseTarget, setPauseTarget] = useState<SessionPackage | null>(null)
+  const [pauseAction, setPauseAction] = useState<'pause' | 'resume' | null>(null)
+  const [pausing, setPausing] = useState(false)
   const [trashCount, setTrashCount] = useState(initialTrashCount)
   const [recentTrashItems, setRecentTrashItems] = useState<SessionPackage[]>([])
   const removedPackageIdsRef = useRef(new Set<string>())
@@ -260,6 +271,71 @@ export function MemberDetail({
     setTrashCount((c) => c + 1)
     setDeleteTarget(null)
     toast.success('수업권이 휴지통으로 이동했습니다.')
+  }
+
+  async function handlePauseOrResumePackage() {
+    if (!pauseTarget || !pauseAction) return
+    setPausing(true)
+
+    if (pauseAction === 'pause') {
+      const result = await pauseSessionPackage(pauseTarget.id)
+      setPausing(false)
+      if (result.error) {
+        toast.error('일시정지 실패', { description: result.error })
+        return
+      }
+      if (result.data) {
+        const updated = result.data
+        setSessionPackages((prev) =>
+          prev.map((pkg) =>
+            pkg.id === updated.id
+              ? {
+                  ...pkg,
+                  paused_at: updated.paused_at ?? null,
+                  total_paused_days: updated.total_paused_days ?? 0,
+                  is_active: updated.is_active,
+                  expires_at: updated.expires_at,
+                }
+              : pkg,
+          ),
+        )
+      }
+      setPauseTarget(null)
+      setPauseAction(null)
+      toast.success('월정액 회원권을 일시정지했습니다.')
+      return
+    }
+
+    const result = await resumeSessionPackage(pauseTarget.id)
+    setPausing(false)
+    if (result.error) {
+      toast.error('재개 실패', { description: result.error })
+      return
+    }
+    if (result.data) {
+      const updated = result.data
+      setSessionPackages((prev) =>
+        prev.map((pkg) =>
+          pkg.id === updated.id
+            ? {
+                ...pkg,
+                paused_at: updated.paused_at ?? null,
+                total_paused_days: updated.total_paused_days ?? 0,
+                is_active: updated.is_active,
+                expires_at: updated.expires_at,
+              }
+            : pkg,
+        ),
+      )
+    }
+    const days = result.extendedDays
+    setPauseTarget(null)
+    setPauseAction(null)
+    toast.success(
+      days != null && days > 0
+        ? `재개했습니다. 만료일이 ${days}일 연장되었습니다.`
+        : '월정액 회원권을 재개했습니다.',
+    )
   }
 
   return (
@@ -439,6 +515,7 @@ export function MemberDetail({
                       isActive={activePackage.is_active}
                       expiresAt={activePackage.expires_at}
                       paidAt={activePackage.paid_at}
+                      pausedAt={activePackage.paused_at}
                     />
                   </span>
                 </p>
@@ -552,10 +629,16 @@ export function MemberDetail({
                 <span className="hidden w-[4.5rem] shrink-0 sm:block">금액</span>
                 <span className="hidden w-[4.75rem] shrink-0 md:block">결제일</span>
                 <span className="w-[3.25rem] shrink-0 text-center">상태</span>
-                {canManage ? <span className="w-[4.25rem] shrink-0" aria-hidden /> : null}
+                {canManage ? <span className="w-[6.5rem] shrink-0" aria-hidden /> : null}
               </div>
               <ul className="divide-y divide-border">
-                {sortedSessionPackages.map((pkg) => (
+                {sortedSessionPackages.map((pkg) => {
+                  const paused = isSessionPackagePaused(pkg)
+                  const canPauseMonthly =
+                    canManage &&
+                    isMonthlyPlanPackage(pkg.note) &&
+                    pkg.is_active
+                  return (
                   <li
                     key={pkg.id}
                     className="flex min-w-0 items-center gap-2 px-0.5 py-2.5 text-sm"
@@ -570,6 +653,7 @@ export function MemberDetail({
                           pkg.remaining_sessions,
                           pkg.note,
                           pkg.is_active,
+                          pkg.paused_at,
                         ),
                       )}
                     >
@@ -578,6 +662,7 @@ export function MemberDetail({
                         pkg.note,
                         pkg.expires_at,
                         pkg.paid_at,
+                        pkg.paused_at,
                       )}{' '}
                       {formatPackageSessionsDisplay(pkg.total_sessions, pkg.note)}
                       {isSessionPackageOverage(pkg.remaining_sessions, pkg.note) ? (
@@ -592,14 +677,40 @@ export function MemberDetail({
                     </span>
                     <span className="flex w-[3.25rem] shrink-0 justify-center">
                       <Badge
-                        variant={pkg.is_active ? 'default' : 'secondary'}
-                        className="px-1.5 text-[10px]"
+                        variant={
+                          paused ? 'outline' : pkg.is_active ? 'default' : 'secondary'
+                        }
+                        className={cn(
+                          'px-1.5 text-[10px]',
+                          paused && 'border-amber-500/50 text-amber-400',
+                        )}
                       >
-                        {pkg.is_active ? '사용중' : '종료'}
+                        {paused ? '일시정지' : pkg.is_active ? '사용중' : '종료'}
                       </Badge>
                     </span>
                     {canManage ? (
-                      <div className="flex w-[4.25rem] shrink-0 justify-end gap-0">
+                      <div className="flex w-[6.5rem] shrink-0 justify-end gap-0">
+                        {canPauseMonthly ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                              'h-8 w-8',
+                              paused
+                                ? 'text-primary hover:text-primary'
+                                : 'text-amber-400 hover:text-amber-300',
+                            )}
+                            aria-label={paused ? '일시정지 재개' : '회원권 일시정지'}
+                            title={paused ? '재개' : '일시정지'}
+                            onClick={() => {
+                              setPauseTarget(pkg)
+                              setPauseAction(paused ? 'resume' : 'pause')
+                            }}
+                          >
+                            {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                          </Button>
+                        ) : null}
                         <Link href={`/dashboard/members/${member.id}/packages/${pkg.id}/edit`}>
                           <Button
                             variant="ghost"
@@ -623,7 +734,8 @@ export function MemberDetail({
                       </div>
                     ) : null}
                   </li>
-                ))}
+                  )
+                })}
               </ul>
             </div>
             </>
@@ -820,6 +932,47 @@ export function MemberDetail({
               }}
             >
               {deleting ? '삭제 중…' : '삭제'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pauseTarget != null && pauseAction != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPauseTarget(null)
+            setPauseAction(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pauseAction === 'resume' ? '일시정지 재개' : '회원권 일시정지'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pauseAction === 'pause'
+                ? '월정액 회원권을 일시정지할까요? 정지 중에는 수업 등록에 사용할 수 없고, 재개하면 정지한 일수만큼 만료일이 연장됩니다.'
+                : '일시정지를 해제하고 다시 이용할까요? 정지 기간만큼 만료일이 연장됩니다.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pausing}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pausing}
+              onClick={(e) => {
+                e.preventDefault()
+                void handlePauseOrResumePackage()
+              }}
+            >
+              {pausing
+                ? pauseAction === 'resume'
+                  ? '재개 중…'
+                  : '정지 중…'
+                : pauseAction === 'resume'
+                  ? '재개'
+                  : '일시정지'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

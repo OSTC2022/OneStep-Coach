@@ -105,10 +105,17 @@ export const LESSON_CALENDAR_SELECT_LEGACY = `
   instructor:instructors(id, name, calendar_color)
 `
 
-export const LESSON_CALENDAR_SELECT = `
+export const LESSON_CALENDAR_SELECT_NO_DRINK = `
   ${LESSON_CORE_SELECT},
   ${LESSON_RECURRENCE_SELECT},
   member:members(id, name, sport, age, birth_date, height_cm),
+  instructor:instructors(id, name, calendar_color)
+`
+
+export const LESSON_CALENDAR_SELECT = `
+  ${LESSON_CORE_SELECT},
+  ${LESSON_RECURRENCE_SELECT},
+  member:members(id, name, sport, age, birth_date, height_cm, drink_preference),
   instructor:instructors(id, name, calendar_color)
 `
 
@@ -152,6 +159,24 @@ export const SESSION_PACKAGE_LIST_SELECT = `
   is_active,
   created_at,
   deleted_at,
+  paused_at,
+  total_paused_days,
+  note,
+  member:members(id, name, phone, deleted_at)
+`
+
+export const SESSION_PACKAGE_LIST_SELECT_NO_PAUSE = `
+  id,
+  member_id,
+  total_sessions,
+  remaining_sessions,
+  price,
+  paid_at,
+  expires_at,
+  payment_method,
+  is_active,
+  created_at,
+  deleted_at,
   note,
   member:members(id, name, phone, deleted_at)
 `
@@ -172,6 +197,9 @@ export const SESSION_PACKAGE_LIST_SELECT_LEGACY = `
 `
 
 export const SESSION_PACKAGE_DETAIL_SELECT =
+  'id, member_id, total_sessions, remaining_sessions, price, paid_at, expires_at, payment_method, is_active, created_at, deleted_at, paused_at, total_paused_days, note'
+
+export const SESSION_PACKAGE_DETAIL_SELECT_NO_PAUSE =
   'id, member_id, total_sessions, remaining_sessions, price, paid_at, expires_at, payment_method, is_active, created_at, deleted_at, note'
 
 export const SESSION_TRANSACTION_SELECT =

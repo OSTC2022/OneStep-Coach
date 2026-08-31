@@ -11,6 +11,10 @@ import { createClient } from '@/lib/supabase/server'
 import {
   createEmptyTrainingScheduleDays,
   formatTrainingScheduleDateLabel,
+  getKstTrainingWeekMondayDateKey,
+  getMondayDateKeyForDateKey,
+  getTrainingWeekStartFromDays,
+  addDaysToDateKey,
   normalizeTrainingScheduleDate,
   resolveTrainingScheduleMapHref,
   shouldResetCenterTrainingSignups,
@@ -22,6 +26,7 @@ import {
   type TrainingWeekday,
 } from '@/lib/running-league/training-schedule'
 import {
+  fetchCenterTrainingScheduleWeekSnapshotsByStarts,
   saveCenterTrainingScheduleWeekSnapshot,
 } from '@/lib/actions/center-running-training-schedule-library'
 import { revalidatePath } from 'next/cache'
@@ -114,18 +119,33 @@ type CenterSignupRow = {
 
 export type CenterRunningTrainingScheduleBundle = {
   days: RunningLeagueTrainingScheduleDayView[]
+  /** 직전 주 (스냅샷). 없으면 빈 배열 */
+  previousWeekDays: RunningLeagueTrainingScheduleDayView[]
+  weekStartDate: string | null
+  previousWeekStartDate: string | null
   tableReady: boolean
 }
 
-function centerDayId(weekday: number): string {
+function centerDayId(weekday: number, scheduleDate?: string | null): string {
+  const date = normalizeTrainingScheduleDate(scheduleDate)
+  if (date) return `center-weekday-${weekday}@${date}`
   return `center-weekday-${weekday}`
 }
 
-function parseCenterDayId(id: string): number | null {
+function parseCenterDayId(
+  id: string,
+): { weekday: number; scheduleDate: string | null } | null {
+  const dated = /^center-weekday-(\d)@(\d{4}-\d{2}-\d{2})$/.exec(id)
+  if (dated) {
+    const weekday = Number(dated[1])
+    if (weekday < 0 || weekday > 6) return null
+    return { weekday, scheduleDate: dated[2] }
+  }
   const match = /^center-weekday-(\d)$/.exec(id)
   if (!match) return null
   const weekday = Number(match[1])
-  return weekday >= 0 && weekday <= 6 ? weekday : null
+  if (weekday < 0 || weekday > 6) return null
+  return { weekday, scheduleDate: null }
 }
 
 async function scheduleClient() {
@@ -164,7 +184,7 @@ function buildCenterDayView(
   const weekday = row.weekday as TrainingWeekday
   const scheduleDate = row.schedule_date?.slice(0, 10) ?? null
   return {
-    id: centerDayId(weekday),
+    id: centerDayId(weekday, scheduleDate),
     league_id: '',
     weekday,
     weekday_label: trainingWeekdayLabel(weekday),
@@ -184,6 +204,35 @@ function buildCenterDayView(
       currentMemberId != null
         ? signups.some((signup) => signup.member_id === currentMemberId)
         : false,
+  }
+}
+
+function buildCenterDayViewFromInput(
+  day: RunningLeagueTrainingScheduleDayInput,
+  signups: RunningLeagueTrainingScheduleSignup[],
+  currentMemberId: string | null,
+): RunningLeagueTrainingScheduleDayView {
+  return buildCenterDayView(
+    {
+      weekday: day.weekday,
+      training_summary: day.training_summary,
+      location_label: day.location_label,
+      naver_map_url: day.naver_map_url?.trim() || null,
+      is_hidden: day.is_hidden,
+      schedule_date: day.schedule_date,
+    },
+    signups,
+    currentMemberId,
+  )
+}
+
+function emptyPortalBundle(tableReady: boolean): CenterRunningTrainingScheduleBundle {
+  return {
+    days: [],
+    previousWeekDays: [],
+    weekStartDate: null,
+    previousWeekStartDate: null,
+    tableReady,
   }
 }
 
@@ -220,27 +269,28 @@ function filterSignupsForDay(
 
 export async function fetchCenterRunningTrainingSchedule(
   currentMemberId: string | null = null,
-  options: { includeHidden?: boolean } = {},
+  options: { includeHidden?: boolean; portalWeeks?: boolean } = {},
 ): Promise<CenterRunningTrainingScheduleBundle> {
   const supabase = await scheduleClient()
   const includeHidden = options.includeHidden ?? false
+  const portalWeeks = options.portalWeeks ?? true
 
   const { data: dayRows, error: dayError } = await fetchCenterScheduleDayRows(supabase)
 
   if (isMissingTableError(dayError)) {
-    return { days: [], tableReady: false }
+    return emptyPortalBundle(false)
   }
   if (dayError) {
     console.error('fetchCenterRunningTrainingSchedule.days', dayError)
-    return { days: [], tableReady: true }
+    return emptyPortalBundle(true)
   }
 
-  const days = (dayRows ?? []) as CenterScheduleDayRow[]
-  if (days.length === 0) {
-    return { days: [], tableReady: true }
+  const liveRows = (dayRows ?? []) as CenterScheduleDayRow[]
+  if (liveRows.length === 0) {
+    return emptyPortalBundle(true)
   }
 
-  const weekdays = days.map((day) => day.weekday)
+  const weekdays = liveRows.map((day) => day.weekday)
   let signupSelect =
     'id, weekday, member_id, created_at, schedule_date, member:members(name)'
   let signupResult = await supabase
@@ -271,18 +321,81 @@ export async function fetchCenterRunningTrainingSchedule(
     signupsByWeekday.set(row.weekday, list)
   }
 
-  const views = days
-    .map((row) => {
-      const dayDate = normalizeTrainingScheduleDate(row.schedule_date)
-      const daySignups = filterSignupsForDay(
-        signupsByWeekday.get(row.weekday) ?? [],
-        dayDate,
-      )
-      return buildCenterDayView(row, daySignups, currentMemberId)
-    })
-    .filter((day) => includeHidden || !day.is_hidden)
+  const buildViewsFromRows = (rows: CenterScheduleDayRow[]) =>
+    rows
+      .map((row) => {
+        const dayDate = normalizeTrainingScheduleDate(row.schedule_date)
+        const daySignups = filterSignupsForDay(
+          signupsByWeekday.get(row.weekday) ?? [],
+          dayDate,
+        )
+        return buildCenterDayView(row, daySignups, currentMemberId)
+      })
+      .filter((day) => includeHidden || !day.is_hidden)
 
-  return { days: views, tableReady: true }
+  const buildViewsFromInputs = (inputs: RunningLeagueTrainingScheduleDayInput[]) =>
+    inputs
+      .map((day) => {
+        const dayDate = normalizeTrainingScheduleDate(day.schedule_date)
+        const daySignups = filterSignupsForDay(
+          signupsByWeekday.get(day.weekday) ?? [],
+          dayDate,
+        )
+        return buildCenterDayViewFromInput(day, daySignups, currentMemberId)
+      })
+      .filter((day) => includeHidden || !day.is_hidden)
+
+  const liveViews = buildViewsFromRows(liveRows)
+  const liveWeekStart = getTrainingWeekStartFromDays(liveRows)
+
+  if (!portalWeeks) {
+    return {
+      days: liveViews,
+      previousWeekDays: [],
+      weekStartDate: liveWeekStart,
+      previousWeekStartDate: liveWeekStart
+        ? addDaysToDateKey(liveWeekStart, -7)
+        : null,
+      tableReady: true,
+    }
+  }
+
+  const currentMonday = getKstTrainingWeekMondayDateKey()
+  const previousMonday = addDaysToDateKey(currentMonday, -7)
+
+  const snapshotsNeeded = [currentMonday, previousMonday].filter(
+    (weekStart) => weekStart !== liveWeekStart,
+  )
+  const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(snapshotsNeeded)
+
+  const resolveWeekDays = (weekStart: string): RunningLeagueTrainingScheduleDayView[] => {
+    if (liveWeekStart === weekStart) return liveViews
+    const snapshotDays = snapshots.get(weekStart)
+    if (snapshotDays && snapshotDays.length > 0) {
+      return buildViewsFromInputs(snapshotDays)
+    }
+    return []
+  }
+
+  // 라이브가 미래 주로 넘어가도 이번 주는 스냅샷으로 유지 (토요에 다음 주 저장해도 일요 일정 유지)
+  let currentWeekDays = resolveWeekDays(currentMonday)
+  if (currentWeekDays.length === 0 && liveWeekStart && liveWeekStart <= currentMonday) {
+    currentWeekDays = liveViews
+  }
+
+  const previousWeekDays = resolveWeekDays(previousMonday)
+
+  return {
+    days: currentWeekDays,
+    previousWeekDays,
+    weekStartDate: currentWeekDays.length
+      ? getTrainingWeekStartFromDays(currentWeekDays) ?? currentMonday
+      : currentMonday,
+    previousWeekStartDate: previousWeekDays.length
+      ? getTrainingWeekStartFromDays(previousWeekDays) ?? previousMonday
+      : previousMonday,
+    tableReady: true,
+  }
 }
 
 export async function getCenterRunningTrainingScheduleForAdmin(): Promise<{
@@ -290,7 +403,10 @@ export async function getCenterRunningTrainingScheduleForAdmin(): Promise<{
   tableReady: boolean
 }> {
   await requireRole(['admin'])
-  const bundle = await fetchCenterRunningTrainingSchedule(null, { includeHidden: true })
+  const bundle = await fetchCenterRunningTrainingSchedule(null, {
+    includeHidden: true,
+    portalWeeks: false,
+  })
 
   if (!bundle.tableReady) {
     return { days: createEmptyTrainingScheduleDays(), tableReady: false }
@@ -346,6 +462,29 @@ export async function saveCenterRunningTrainingSchedule(
     normalized,
   )
 
+  // 다음 주로 덮어쓰기 전에 현재 라이브 주를 스냅샷으로 보존 (일요일 일정 유실 방지)
+  const existingWeekStart = getTrainingWeekStartFromDays(
+    (existingDayRows ?? []) as CenterScheduleDayRow[],
+  )
+  const nextWeekStart = getTrainingWeekStartFromDays(normalized)
+  if (
+    existingWeekStart &&
+    nextWeekStart &&
+    existingWeekStart !== nextWeekStart &&
+    (existingDayRows?.length ?? 0) > 0
+  ) {
+    await saveCenterTrainingScheduleWeekSnapshot(
+      ((existingDayRows ?? []) as CenterScheduleDayRow[]).map((row) => ({
+        weekday: row.weekday as TrainingWeekday,
+        training_summary: row.training_summary ?? '',
+        location_label: row.location_label ?? '',
+        naver_map_url: row.naver_map_url ?? '',
+        is_hidden: Boolean(row.is_hidden),
+        schedule_date: normalizeTrainingScheduleDate(row.schedule_date),
+      })),
+    )
+  }
+
   let warning: string | undefined
   let result = await supabase
     .from('center_running_training_schedule_days')
@@ -380,7 +519,14 @@ export async function saveCenterRunningTrainingSchedule(
   }
 
   if (shouldResetSignups) {
-    await clearAllCenterTrainingScheduleSignups(supabase)
+    const existingStart = getTrainingWeekStartFromDays(
+      (existingDayRows ?? []) as CenterScheduleDayRow[],
+    )
+    const nextStart = getTrainingWeekStartFromDays(normalized)
+    // 주가 바뀌면(다음 주 선반영) 지난·이번 주 참여 기록은 유지
+    if (!existingStart || !nextStart || existingStart === nextStart) {
+      await clearAllCenterTrainingScheduleSignups(supabase)
+    }
   }
 
   revalidateCenterTrainingSchedulePaths()
@@ -414,8 +560,9 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   const [member, user] = await Promise.all([getRunningPortalMemberForCurrentUser(), getCurrentUser()])
   if (!member) return { ok: false, error: '로그인이 필요합니다.' }
 
-  const weekday = parseCenterDayId(scheduleDayId)
-  if (weekday == null) return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
+  const parsed = parseCenterDayId(scheduleDayId)
+  if (parsed == null) return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
+  const { weekday } = parsed
 
   const supabase = await scheduleClient()
   const isAdultMember = user?.role === 'adult_member'
@@ -442,13 +589,29 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   if (dayError || !dayRow) {
     return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
   }
-  if (!isVotableCenterDay(dayRow)) {
-    return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
-  }
 
-  const scheduleDate = normalizeTrainingScheduleDate(
+  const liveScheduleDate = normalizeTrainingScheduleDate(
     (dayRow as { schedule_date?: string | null }).schedule_date,
   )
+  const scheduleDate = parsed.scheduleDate ?? liveScheduleDate
+
+  // 라이브가 다른 주여도(다음 주 선반영) 요청한 날짜의 스냅샷으로 운영 여부 확인
+  let votable =
+    isVotableCenterDay(dayRow) &&
+    (!scheduleDate || !liveScheduleDate || liveScheduleDate === scheduleDate)
+
+  if (!votable && scheduleDate) {
+    const weekStart = getMondayDateKeyForDateKey(scheduleDate)
+    const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts([weekStart])
+    const snapshotDay = snapshots.get(weekStart)?.find((day) => day.weekday === weekday)
+    if (snapshotDay) {
+      votable = isVotableCenterDay(snapshotDay)
+    }
+  }
+
+  if (!votable) {
+    return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
+  }
 
   let existingQuery = supabase
     .from('center_running_training_schedule_signups')
