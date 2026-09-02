@@ -4,6 +4,12 @@ export const TRAINING_WEEKDAY_LABELS = ['월', '화', '수', '목', '금', '토'
 
 export type TrainingWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
 
+export type RunningLeagueTrainingScheduleSignup = {
+  member_id: string
+  member_name: string
+  signed_at: string
+}
+
 export type RunningLeagueTrainingScheduleDayInput = {
   weekday: TrainingWeekday
   training_summary: string
@@ -11,12 +17,8 @@ export type RunningLeagueTrainingScheduleDayInput = {
   naver_map_url: string
   is_hidden: boolean
   schedule_date: string | null
-}
-
-export type RunningLeagueTrainingScheduleSignup = {
-  member_id: string
-  member_name: string
-  signed_at: string
+  /** 주간 스냅샷에만 저장 — 당시 참여 인원 */
+  signups?: RunningLeagueTrainingScheduleSignup[]
 }
 
 export type RunningLeagueTrainingScheduleDayView = {
@@ -241,13 +243,25 @@ export function shouldResetCenterTrainingSignups(
   return false
 }
 
-/** 참여 신청이 해당 요일의 이번 주 날짜와 일치하는지 */
+/** 참여 신청이 해당 요일의 스케줄 날짜와 일치하는지 */
 export function trainingSignupMatchesScheduleDate(
   signupScheduleDate: string | null | undefined,
   dayScheduleDate: string | null | undefined,
+  signupCreatedAt?: string | null,
 ): boolean {
   const dayDate = normalizeTrainingScheduleDate(dayScheduleDate)
   const signupDate = normalizeTrainingScheduleDate(signupScheduleDate)
-  if (dayDate) return signupDate === dayDate
+  if (dayDate) {
+    if (signupDate === dayDate) return true
+    // schedule_date 없는 예전 기록 — 신청일(KST)이 훈련일과 같으면 포함
+    if (!signupDate && signupCreatedAt) {
+      try {
+        return getKstDateKey(new Date(signupCreatedAt)) === dayDate
+      } catch {
+        return false
+      }
+    }
+    return false
+  }
   return signupDate == null
 }

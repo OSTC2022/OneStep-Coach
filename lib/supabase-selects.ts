@@ -121,6 +121,13 @@ export const LESSON_CALENDAR_SELECT = `
 
 export const LESSON_LIST_SELECT_LEGACY = `
   ${LESSON_CORE_SELECT},
+  member:members(id, name, phone, sport, age, birth_date, drink_preference),
+  instructor:instructors(id, name, calendar_color),
+  session_package:session_packages(id, total_sessions, remaining_sessions, is_active)
+`
+
+export const LESSON_LIST_SELECT_LEGACY_NO_DRINK = `
+  ${LESSON_CORE_SELECT},
   member:members(id, name, phone, sport, age, birth_date),
   instructor:instructors(id, name, calendar_color),
   session_package:session_packages(id, total_sessions, remaining_sessions, is_active)
@@ -129,12 +136,18 @@ export const LESSON_LIST_SELECT_LEGACY = `
 export const LESSON_LIST_SELECT = `
   ${LESSON_CORE_SELECT},
   ${LESSON_RECURRENCE_SELECT},
-  member:members(id, name, phone, sport, age, birth_date),
+  member:members(id, name, phone, sport, age, birth_date, drink_preference),
   instructor:instructors(id, name, calendar_color),
   session_package:session_packages(id, total_sessions, remaining_sessions, is_active)
 `
 
 export const LESSON_MUTATION_SELECT_LEGACY = `
+  ${LESSON_CORE_SELECT},
+  member:members(id, name, phone, sport, age, birth_date, drink_preference),
+  instructor:instructors(id, name, calendar_color)
+`
+
+export const LESSON_MUTATION_SELECT_LEGACY_NO_DRINK = `
   ${LESSON_CORE_SELECT},
   member:members(id, name, phone, sport, age, birth_date),
   instructor:instructors(id, name, calendar_color)
@@ -143,7 +156,7 @@ export const LESSON_MUTATION_SELECT_LEGACY = `
 export const LESSON_MUTATION_SELECT = `
   ${LESSON_CORE_SELECT},
   ${LESSON_RECURRENCE_SELECT},
-  member:members(id, name, phone, sport, age, birth_date),
+  member:members(id, name, phone, sport, age, birth_date, drink_preference),
   instructor:instructors(id, name, calendar_color)
 `
 

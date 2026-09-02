@@ -3,9 +3,13 @@
 import { requireRole } from '@/lib/actions/auth'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE } from '@/lib/running-league/center-training-schedule-attendance'
 import {
   formatTrainingScheduleDateLabel,
+  normalizeTrainingScheduleDate,
+  trainingSignupMatchesScheduleDate,
   type RunningLeagueTrainingScheduleDayInput,
+  type RunningLeagueTrainingScheduleSignup,
 } from '@/lib/running-league/training-schedule'
 
 export type CenterTrainingScheduleWeekSnapshot = {
@@ -45,6 +49,29 @@ function isMissingLibraryTableError(error: { code?: string; message?: string } |
     message.includes('center_running_training_schedule_location_presets')
 }
 
+function normalizeSnapshotSignups(raw: unknown): RunningLeagueTrainingScheduleSignup[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const row = item as Record<string, unknown>
+      const memberId = typeof row.member_id === 'string' ? row.member_id.trim() : ''
+      if (!memberId) return null
+      return {
+        member_id: memberId,
+        member_name:
+          typeof row.member_name === 'string' && row.member_name.trim()
+            ? row.member_name.trim()
+            : '회원',
+        signed_at:
+          typeof row.signed_at === 'string' && row.signed_at
+            ? row.signed_at
+            : new Date(0).toISOString(),
+      }
+    })
+    .filter((item): item is RunningLeagueTrainingScheduleSignup => item != null)
+}
+
 function normalizeSnapshotDays(raw: unknown): RunningLeagueTrainingScheduleDayInput[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -53,6 +80,7 @@ function normalizeSnapshotDays(raw: unknown): RunningLeagueTrainingScheduleDayIn
       const row = item as Record<string, unknown>
       const weekday = Number(row.weekday)
       if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return null
+      const signups = normalizeSnapshotSignups(row.signups)
       return {
         weekday: weekday as RunningLeagueTrainingScheduleDayInput['weekday'],
         training_summary: String(row.training_summary ?? ''),
@@ -61,6 +89,7 @@ function normalizeSnapshotDays(raw: unknown): RunningLeagueTrainingScheduleDayIn
         is_hidden: Boolean(row.is_hidden),
         schedule_date:
           typeof row.schedule_date === 'string' ? row.schedule_date.slice(0, 10) : null,
+        ...(signups.length > 0 ? { signups } : {}),
       }
     })
     .filter((day): day is RunningLeagueTrainingScheduleDayInput => day != null)
@@ -99,7 +128,133 @@ function serializeSnapshotDays(
     naver_map_url: day.naver_map_url?.trim() ?? '',
     is_hidden: Boolean(day.is_hidden),
     schedule_date: day.schedule_date?.trim().slice(0, 10) || null,
+    ...(day.signups && day.signups.length > 0
+      ? {
+          signups: day.signups.map((signup) => ({
+            member_id: signup.member_id,
+            member_name: signup.member_name,
+            signed_at: signup.signed_at,
+          })),
+        }
+      : {}),
   }))
+}
+
+async function attachSignupsToSnapshotDays(
+  days: RunningLeagueTrainingScheduleDayInput[],
+): Promise<RunningLeagueTrainingScheduleDayInput[]> {
+  const dates = [
+    ...new Set(
+      days
+        .map((day) => normalizeTrainingScheduleDate(day.schedule_date))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ]
+  if (dates.length === 0) return days
+
+  const supabase = await libraryClient()
+  const weekdays = days.map((day) => day.weekday)
+
+  let signupSelect =
+    'id, weekday, member_id, created_at, schedule_date, member:members(name)'
+  let signupResult = await supabase
+    .from('center_running_training_schedule_signups')
+    .select(signupSelect)
+    .in('weekday', weekdays)
+    .order('created_at', { ascending: true })
+
+  if (
+    signupResult.error &&
+    (signupResult.error.message?.includes('schedule_date') ||
+      signupResult.error.code === '42703')
+  ) {
+    signupSelect = 'id, weekday, member_id, created_at, member:members(name)'
+    signupResult = await supabase
+      .from('center_running_training_schedule_signups')
+      .select(signupSelect)
+      .in('weekday', weekdays)
+      .order('created_at', { ascending: true })
+  }
+
+  if (signupResult.error) {
+    console.error('attachSignupsToSnapshotDays', signupResult.error)
+  }
+
+  type SignupRow = {
+    weekday: number
+    member_id: string
+    created_at: string
+    schedule_date?: string | null
+    member: { name: string } | { name: string }[] | null
+  }
+
+  const rows = (signupResult.data ?? []) as SignupRow[]
+
+  const attendanceResult = await supabase
+    .from('lesson_sessions')
+    .select('member_id, session_date, checked_in_at, member:members(name)')
+    .eq('notes', CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE)
+    .in('session_date', dates)
+
+  if (attendanceResult.error) {
+    console.error('attachSignupsToSnapshotDays.attendance', attendanceResult.error)
+  }
+
+  const attendanceByDate = new Map<string, RunningLeagueTrainingScheduleSignup[]>()
+  for (const row of attendanceResult.data ?? []) {
+    const sessionDate = normalizeTrainingScheduleDate(row.session_date)
+    if (!sessionDate || !row.member_id) continue
+    const memberRaw = row.member as { name?: string } | { name?: string }[] | null
+    const memberName = Array.isArray(memberRaw) ? memberRaw[0]?.name : memberRaw?.name
+    const list = attendanceByDate.get(sessionDate) ?? []
+    list.push({
+      member_id: row.member_id,
+      member_name: memberName?.trim() || '회원',
+      signed_at:
+        typeof row.checked_in_at === 'string' && row.checked_in_at
+          ? row.checked_in_at
+          : new Date(0).toISOString(),
+    })
+    attendanceByDate.set(sessionDate, list)
+  }
+
+  return days.map((day) => {
+    const dayDate = normalizeTrainingScheduleDate(day.schedule_date)
+    const matched = rows.filter(
+      (row) =>
+        row.weekday === day.weekday &&
+        trainingSignupMatchesScheduleDate(
+          row.schedule_date,
+          dayDate,
+          row.created_at,
+        ),
+    )
+
+    const fromLive: RunningLeagueTrainingScheduleSignup[] = matched.map((row) => {
+      const memberRaw = row.member
+      const memberName = Array.isArray(memberRaw) ? memberRaw[0]?.name : memberRaw?.name
+      return {
+        member_id: row.member_id,
+        member_name: memberName?.trim() || '회원',
+        signed_at: row.created_at,
+      }
+    })
+
+    const fromAttendance = dayDate ? (attendanceByDate.get(dayDate) ?? []) : []
+    const existing = day.signups ?? []
+
+    const byMember = new Map<string, RunningLeagueTrainingScheduleSignup>()
+    for (const signup of [...existing, ...fromAttendance, ...fromLive]) {
+      if (!signup.member_id) continue
+      byMember.set(signup.member_id, signup)
+    }
+    const signups = Array.from(byMember.values()).sort((a, b) =>
+      a.signed_at.localeCompare(b.signed_at),
+    )
+
+    if (signups.length === 0) return day
+    return { ...day, signups }
+  })
 }
 
 export async function fetchCenterTrainingScheduleLibrary(): Promise<CenterTrainingScheduleLibrary> {
@@ -199,7 +354,8 @@ export async function saveCenterTrainingScheduleWeekSnapshot(
   days: RunningLeagueTrainingScheduleDayInput[],
 ): Promise<void> {
   const supabase = await libraryClient()
-  const normalized = serializeSnapshotDays(days)
+  const withSignups = await attachSignupsToSnapshotDays(days)
+  const normalized = serializeSnapshotDays(withSignups)
   const weekStartDate = normalized.find((day) => day.weekday === 0)?.schedule_date ?? null
   const now = new Date().toISOString()
 

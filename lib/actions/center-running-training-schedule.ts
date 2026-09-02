@@ -8,6 +8,7 @@ import { getCurrentUser, requireRole } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE } from '@/lib/running-league/center-training-schedule-attendance'
 import {
   createEmptyTrainingScheduleDays,
   formatTrainingScheduleDateLabel,
@@ -16,6 +17,7 @@ import {
   getTrainingWeekStartFromDays,
   addDaysToDateKey,
   normalizeTrainingScheduleDate,
+  propagateTrainingWeekDatesFromMonday,
   resolveTrainingScheduleMapHref,
   shouldResetCenterTrainingSignups,
   trainingSignupMatchesScheduleDate,
@@ -243,16 +245,39 @@ function isVotableCenterDay(day: {
   return !day.is_hidden && Boolean(day.training_summary?.trim())
 }
 
-async function clearAllCenterTrainingScheduleSignups(
+/** 같은 주 내용 변경 시에만 — 해당 주 날짜의 참여만 지우고 다른 주 기록은 유지 */
+async function clearCenterTrainingScheduleSignupsForWeekDates(
   supabase: Awaited<ReturnType<typeof scheduleClient>>,
+  days: Array<{ schedule_date?: string | null }>,
 ) {
+  const dates = [
+    ...new Set(
+      days
+        .map((day) => normalizeTrainingScheduleDate(day.schedule_date))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ]
+
+  if (dates.length > 0) {
+    const { error } = await supabase
+      .from('center_running_training_schedule_signups')
+      .delete()
+      .in('schedule_date', dates)
+
+    if (error && !isMissingTableError(error)) {
+      console.error('clearCenterTrainingScheduleSignupsForWeekDates', error)
+    }
+    return
+  }
+
+  // 날짜 컬럼 없는 레거시 — null schedule_date만 삭제 (날짜 있는 과거 주 보존)
   const { error } = await supabase
     .from('center_running_training_schedule_signups')
     .delete()
-    .gte('weekday', 0)
+    .is('schedule_date', null)
 
   if (error && !isMissingTableError(error)) {
-    console.error('clearAllCenterTrainingScheduleSignups', error)
+    console.error('clearCenterTrainingScheduleSignupsForWeekDates.null', error)
   }
 }
 
@@ -262,9 +287,82 @@ function filterSignupsForDay(
 ): RunningLeagueTrainingScheduleSignup[] {
   return rawRows
     .filter((row) =>
-      trainingSignupMatchesScheduleDate(row.schedule_date, scheduleDate),
+      trainingSignupMatchesScheduleDate(
+        row.schedule_date,
+        scheduleDate,
+        row.created_at,
+      ),
     )
     .map((row) => mapSignupRow(row))
+}
+
+function mergeTrainingSignups(
+  ...groups: RunningLeagueTrainingScheduleSignup[][]
+): RunningLeagueTrainingScheduleSignup[] {
+  const byMember = new Map<string, RunningLeagueTrainingScheduleSignup>()
+  for (const group of groups) {
+    for (const signup of group) {
+      if (!signup.member_id) continue
+      byMember.set(signup.member_id, signup)
+    }
+  }
+  return Array.from(byMember.values()).sort((a, b) =>
+    a.signed_at.localeCompare(b.signed_at),
+  )
+}
+
+function weekDatesFromMonday(weekStart: string | null): string[] {
+  if (!weekStart) return []
+  return propagateTrainingWeekDatesFromMonday(
+    createEmptyTrainingScheduleDays(),
+    weekStart,
+  )
+    .map((day) => normalizeTrainingScheduleDate(day.schedule_date))
+    .filter((value): value is string => Boolean(value))
+}
+
+/** 성인회원 참여 시 남긴 출석 기록 — 주 변경으로 signup이 지워져도 인원 복원 */
+async function fetchTrainingSignupsFromAttendance(
+  supabase: Awaited<ReturnType<typeof scheduleClient>>,
+  dates: string[],
+): Promise<Map<string, RunningLeagueTrainingScheduleSignup[]>> {
+  const result = new Map<string, RunningLeagueTrainingScheduleSignup[]>()
+  const uniqueDates = [...new Set(dates.filter(Boolean))]
+  if (uniqueDates.length === 0) return result
+
+  const { data, error } = await supabase
+    .from('lesson_sessions')
+    .select('member_id, session_date, checked_in_at, member:members(name)')
+    .eq('notes', CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE)
+    .in('session_date', uniqueDates)
+
+  if (error) {
+    console.error('fetchTrainingSignupsFromAttendance', error)
+    return result
+  }
+
+  for (const row of data ?? []) {
+    const sessionDate = normalizeTrainingScheduleDate(row.session_date)
+    if (!sessionDate || !row.member_id) continue
+    const memberRaw = row.member as { name?: string } | { name?: string }[] | null
+    const memberName = Array.isArray(memberRaw) ? memberRaw[0]?.name : memberRaw?.name
+    const list = result.get(sessionDate) ?? []
+    list.push({
+      member_id: row.member_id,
+      member_name: memberName?.trim() || '회원',
+      signed_at:
+        typeof row.checked_in_at === 'string' && row.checked_in_at
+          ? row.checked_in_at
+          : new Date(0).toISOString(),
+    })
+    result.set(sessionDate, list)
+  }
+
+  for (const [date, list] of result) {
+    result.set(date, mergeTrainingSignups(list))
+  }
+
+  return result
 }
 
 export async function fetchCenterRunningTrainingSchedule(
@@ -321,14 +419,49 @@ export async function fetchCenterRunningTrainingSchedule(
     signupsByWeekday.set(row.weekday, list)
   }
 
+  const liveWeekStart = getTrainingWeekStartFromDays(liveRows)
+  const currentMonday = getKstTrainingWeekMondayDateKey()
+  const previousMonday = addDaysToDateKey(currentMonday, -7)
+
+  const snapshotsNeeded = portalWeeks
+    ? [currentMonday, previousMonday].filter((weekStart) => weekStart !== liveWeekStart)
+    : []
+  const snapshots = portalWeeks
+    ? await fetchCenterTrainingScheduleWeekSnapshotsByStarts(snapshotsNeeded)
+    : new Map<string, RunningLeagueTrainingScheduleDayInput[]>()
+
+  const attendanceDates = [
+    ...weekDatesFromMonday(liveWeekStart),
+    ...weekDatesFromMonday(currentMonday),
+    ...weekDatesFromMonday(previousMonday),
+  ]
+  for (const snapshotDays of snapshots.values()) {
+    for (const day of snapshotDays) {
+      const date = normalizeTrainingScheduleDate(day.schedule_date)
+      if (date) attendanceDates.push(date)
+    }
+  }
+  const attendanceByDate = await fetchTrainingSignupsFromAttendance(
+    supabase,
+    attendanceDates,
+  )
+
+  const resolveDaySignups = (
+    weekday: number,
+    dayDate: string | null,
+    snapshotSignups: RunningLeagueTrainingScheduleSignup[] = [],
+  ) =>
+    mergeTrainingSignups(
+      filterSignupsForDay(signupsByWeekday.get(weekday) ?? [], dayDate),
+      snapshotSignups,
+      dayDate ? (attendanceByDate.get(dayDate) ?? []) : [],
+    )
+
   const buildViewsFromRows = (rows: CenterScheduleDayRow[]) =>
     rows
       .map((row) => {
         const dayDate = normalizeTrainingScheduleDate(row.schedule_date)
-        const daySignups = filterSignupsForDay(
-          signupsByWeekday.get(row.weekday) ?? [],
-          dayDate,
-        )
+        const daySignups = resolveDaySignups(row.weekday, dayDate)
         return buildCenterDayView(row, daySignups, currentMemberId)
       })
       .filter((day) => includeHidden || !day.is_hidden)
@@ -337,16 +470,12 @@ export async function fetchCenterRunningTrainingSchedule(
     inputs
       .map((day) => {
         const dayDate = normalizeTrainingScheduleDate(day.schedule_date)
-        const daySignups = filterSignupsForDay(
-          signupsByWeekday.get(day.weekday) ?? [],
-          dayDate,
-        )
+        const daySignups = resolveDaySignups(day.weekday, dayDate, day.signups ?? [])
         return buildCenterDayViewFromInput(day, daySignups, currentMemberId)
       })
       .filter((day) => includeHidden || !day.is_hidden)
 
   const liveViews = buildViewsFromRows(liveRows)
-  const liveWeekStart = getTrainingWeekStartFromDays(liveRows)
 
   if (!portalWeeks) {
     return {
@@ -359,14 +488,6 @@ export async function fetchCenterRunningTrainingSchedule(
       tableReady: true,
     }
   }
-
-  const currentMonday = getKstTrainingWeekMondayDateKey()
-  const previousMonday = addDaysToDateKey(currentMonday, -7)
-
-  const snapshotsNeeded = [currentMonday, previousMonday].filter(
-    (weekStart) => weekStart !== liveWeekStart,
-  )
-  const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(snapshotsNeeded)
 
   const resolveWeekDays = (weekStart: string): RunningLeagueTrainingScheduleDayView[] => {
     if (liveWeekStart === weekStart) return liveViews
@@ -523,9 +644,12 @@ export async function saveCenterRunningTrainingSchedule(
       (existingDayRows ?? []) as CenterScheduleDayRow[],
     )
     const nextStart = getTrainingWeekStartFromDays(normalized)
-    // 주가 바뀌면(다음 주 선반영) 지난·이번 주 참여 기록은 유지
+    // 주가 바뀌면 지난·이번 주 참여 기록은 유지. 같은 주 내용만 바뀌면 그 주 날짜만 초기화
     if (!existingStart || !nextStart || existingStart === nextStart) {
-      await clearAllCenterTrainingScheduleSignups(supabase)
+      await clearCenterTrainingScheduleSignupsForWeekDates(
+        supabase,
+        (existingDayRows ?? []) as CenterScheduleDayRow[],
+      )
     }
   }
 
@@ -726,6 +850,15 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   }
 
   // 참여 토글은 클라이언트 낙관적 UI로 반영. revalidate하면 메뉴·스크롤이 초기화됨.
+  if (scheduleDate) {
+    const weekStart = getMondayDateKeyForDateKey(scheduleDate)
+    const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts([weekStart])
+    const snapshotDays = snapshots.get(weekStart)
+    if (snapshotDays && snapshotDays.length > 0) {
+      void saveCenterTrainingScheduleWeekSnapshot(snapshotDays)
+    }
+  }
+
   return {
     ok: true,
     signedUp: !existing,

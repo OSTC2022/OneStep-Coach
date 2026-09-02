@@ -77,8 +77,10 @@ import {
   LESSON_CALENDAR_SELECT_NO_DRINK,
   LESSON_LIST_SELECT,
   LESSON_LIST_SELECT_LEGACY,
+  LESSON_LIST_SELECT_LEGACY_NO_DRINK,
   LESSON_MUTATION_SELECT,
   LESSON_MUTATION_SELECT_LEGACY,
+  LESSON_MUTATION_SELECT_LEGACY_NO_DRINK,
 } from '@/lib/supabase-selects'
 
 type LessonMutationResult = {
@@ -199,8 +201,10 @@ function lessonSelectFallback(
   if (select === LESSON_CALENDAR_SELECT) return LESSON_CALENDAR_SELECT_NO_DRINK
   if (select === LESSON_CALENDAR_SELECT_NO_DRINK) return LESSON_CALENDAR_SELECT_LEGACY
   if (select === LESSON_LIST_SELECT) return LESSON_LIST_SELECT_LEGACY
+  if (select === LESSON_LIST_SELECT_LEGACY) return LESSON_LIST_SELECT_LEGACY_NO_DRINK
   if (select === LESSON_MUTATION_SELECT) return LESSON_MUTATION_SELECT_LEGACY
-  return includeSessionPackage ? LESSON_LIST_SELECT_LEGACY : LESSON_CALENDAR_SELECT_LEGACY
+  if (select === LESSON_MUTATION_SELECT_LEGACY) return LESSON_MUTATION_SELECT_LEGACY_NO_DRINK
+  return includeSessionPackage ? LESSON_LIST_SELECT_LEGACY_NO_DRINK : LESSON_CALENDAR_SELECT_LEGACY
 }
 
 function stripRecurrenceFields(payload: Record<string, unknown>) {
@@ -217,6 +221,36 @@ function normalizeLessonRecord(lesson: Lesson): Lesson {
     return { ...enriched, title }
   }
   return enriched
+}
+
+/** 생성/수정 응답 member에 drink_preference가 빠졌을 때 회원 프로필에서 보강 */
+async function ensureLessonMemberDrinkPreference(
+  supabase: Awaited<ReturnType<typeof lessonWriteClient>>,
+  lesson: Lesson,
+): Promise<Lesson> {
+  const memberId = lesson.member_id
+  if (!memberId) return lesson
+
+  const member = lesson.member as { drink_preference?: string | null } | null | undefined
+  if (member && Object.prototype.hasOwnProperty.call(member, 'drink_preference')) {
+    return lesson
+  }
+
+  const { data, error } = await supabase
+    .from('members')
+    .select('drink_preference')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  if (error || !data) return lesson
+
+  return {
+    ...lesson,
+    member: {
+      ...(lesson.member ?? { id: memberId, name: '' }),
+      drink_preference: (data.drink_preference as string | null | undefined) ?? null,
+    } as Lesson['member'],
+  }
 }
 
 /** 응답을 막지 않도록 대시보드 캐시 무효화는 요청 이후로 미룸 */
@@ -957,6 +991,16 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
     .select(LESSON_MUTATION_SELECT_LEGACY)
     .single()
 
+  if (error && isMissingDrinkPreferenceColumn(error)) {
+    const retry = await supabase
+      .from('lessons')
+      .insert(payload)
+      .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
+      .single()
+    data = retry.data
+    error = retry.error
+  }
+
   if (error && isMissingTitleColumn(error) && !memberId && title) {
     const fallbackPayload = buildInsertPayload(
       formData,
@@ -969,7 +1013,7 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
     const retry = await supabase
       .from('lessons')
       .insert(fallbackPayload)
-      .select(LESSON_MUTATION_SELECT_LEGACY)
+      .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
       .single()
 
     data = retry.data
@@ -991,7 +1035,10 @@ export async function createLesson(formData: LessonFormData): Promise<LessonMuta
     return { error: message }
   }
 
-  const lesson = normalizeLessonRecord(data as Lesson)
+  const lesson = await ensureLessonMemberDrinkPreference(
+    supabase,
+    normalizeLessonRecord(data as Lesson),
+  )
   const createdMemberId = memberId
 
   after(() => {
@@ -1101,6 +1148,16 @@ async function createRecurringMasterLesson(
     .select(LESSON_MUTATION_SELECT)
     .single()
 
+  if (error && isMissingDrinkPreferenceColumn(error)) {
+    const retryDrink = await supabase
+      .from('lessons')
+      .insert(payload)
+      .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
+      .single()
+    data = retryDrink.data
+    error = retryDrink.error
+  }
+
   if (error?.message.includes('event_type') || error?.message.includes('recurrence_pattern')) {
     const legacyInsert = await supabase
       .from('lessons')
@@ -1109,6 +1166,16 @@ async function createRecurringMasterLesson(
       .single()
     data = legacyInsert.data
     error = legacyInsert.error
+
+    if (error && isMissingDrinkPreferenceColumn(error)) {
+      const retryDrink = await supabase
+        .from('lessons')
+        .insert(payload)
+        .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
+        .single()
+      data = retryDrink.data
+      error = retryDrink.error
+    }
   }
 
   if (error?.message.includes('event_type')) {
@@ -1122,7 +1189,10 @@ async function createRecurringMasterLesson(
     return { error: mapLessonError(error.message) }
   }
 
-  const lesson = normalizeLessonRecord(data as Lesson)
+  const lesson = await ensureLessonMemberDrinkPreference(
+    supabase,
+    normalizeLessonRecord(data as Lesson),
+  )
   await syncTrialPayForLesson(supabase, lesson, user?.id ?? null)
 
   scheduleGoogleLessonPush(lesson.id)
@@ -1499,6 +1569,17 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     .select(LESSON_MUTATION_SELECT_LEGACY)
     .maybeSingle()
 
+  if (error && isMissingDrinkPreferenceColumn(error)) {
+    const retry = await supabase
+      .from('lessons')
+      .update(payload)
+      .eq('id', id)
+      .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
+      .maybeSingle()
+    data = retry.data
+    error = retry.error
+  }
+
   if (!error && !data) {
     return { error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.' }
   }
@@ -1511,7 +1592,7 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
       .from('lessons')
       .update(fallbackPayload)
       .eq('id', id)
-      .select(LESSON_MUTATION_SELECT_LEGACY)
+      .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
       .maybeSingle()
 
     data = retry.data
@@ -1556,7 +1637,10 @@ export async function updateLesson(id: string, updates: Partial<LessonFormData>)
     return { error: '수업을 찾을 수 없습니다. 새로고침 후 다시 시도해주세요.' }
   }
 
-  const lesson = normalizeLessonRecord(data as Lesson)
+  const lesson = await ensureLessonMemberDrinkPreference(
+    supabase,
+    normalizeLessonRecord(data as Lesson),
+  )
   after(() => {
     void (async () => {
       try {
@@ -1620,17 +1704,32 @@ export async function markAttendance(
   }
 
   const supabase = await createStaffDataClient()
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('lessons')
     .select(LESSON_MUTATION_SELECT_LEGACY)
     .eq('id', lessonId)
     .single()
 
+  if (error && isMissingDrinkPreferenceColumn(error)) {
+    const retry = await supabase
+      .from('lessons')
+      .select(LESSON_MUTATION_SELECT_LEGACY_NO_DRINK)
+      .eq('id', lessonId)
+      .single()
+    data = retry.data
+    error = retry.error
+  }
+
   if (error) {
     return { error: error.message }
   }
 
-  return { data: normalizeLessonRecord(data as Lesson) }
+  return {
+    data: await ensureLessonMemberDrinkPreference(
+      supabase,
+      normalizeLessonRecord(data as Lesson),
+    ),
+  }
 }
 
 const LESSON_UPDATE_ALLOWED_KEYS = [
