@@ -203,8 +203,9 @@ export function MemberRankingDetailPanel({
     return buildLeagueMileageComparisonChart({
       participants: filteredParticipants,
       logs: periodMileageLogs,
+      ensureMemberIds: [memberId],
     })
-  }, [filteredParticipants, periodMileageLogs, rankingBundle])
+  }, [filteredParticipants, memberId, periodMileageLogs, rankingBundle])
 
   const beatRivalMileageComparisonChart = useMemo(() => {
     if (!rankingBundle || !beatRivalMemberId) return null
@@ -212,8 +213,9 @@ export function MemberRankingDetailPanel({
       participants: filteredParticipants,
       logs: periodMileageLogs,
       beatRivalMemberId,
+      ensureMemberIds: [memberId],
     })
-  }, [beatRivalMemberId, filteredParticipants, periodMileageLogs, rankingBundle])
+  }, [beatRivalMemberId, filteredParticipants, memberId, periodMileageLogs, rankingBundle])
 
   const attendanceComparisonChart = useMemo(() => {
     if (!rankingBundle) return null
@@ -221,8 +223,9 @@ export function MemberRankingDetailPanel({
       participants: filteredParticipants,
       logs: rankingBundle.mileageLogs,
       period: rankingPeriod,
+      ensureMemberIds: [memberId],
     })
-  }, [filteredParticipants, rankingBundle, rankingPeriod])
+  }, [filteredParticipants, memberId, rankingBundle, rankingPeriod])
 
   const graphSummary = useMemo(
     () =>
@@ -344,6 +347,7 @@ export function MemberRankingDetailPanel({
           activeTab={graphChartTab}
           onActiveTabChange={onGraphChartTabChange}
           beatRivalMemberId={beatRivalMemberId}
+          focusMemberId={memberId}
           className="animate-in fade-in-0 duration-300"
         />
       </div>

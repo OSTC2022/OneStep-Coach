@@ -739,6 +739,8 @@ interface MemberRankingChartsProps {
   activeTab?: GraphChartTab
   onActiveTabChange?: (tab: GraphChartTab) => void
   beatRivalMemberId?: string | null
+  /** 선택 시 해당 회원 라인만 표시 (색상은 전체 회원 팔레트 유지) */
+  focusMemberId?: string | null
 }
 
 export function MemberRankingCharts({
@@ -762,6 +764,7 @@ export function MemberRankingCharts({
   activeTab: activeTabProp,
   onActiveTabChange,
   beatRivalMemberId = null,
+  focusMemberId = null,
 }: MemberRankingChartsProps) {
   const [internalTab, setInternalTab] = useState<GraphChartTab>(() =>
     graphChartTabForRankingView(mode),
@@ -884,6 +887,7 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
+        focusMemberId={focusMemberId}
       />
     ) : aggregateMode ? (
       <GraphEmptyState
@@ -906,6 +910,7 @@ export function MemberRankingCharts({
       />
     )
 
+  const focusedMileageTitle = focusMemberId ? '누적 마일리지' : undefined
   const mileagePanel =
     mileageComparisonChart && mileageComparisonChart.rows.length > 0 ? (
       <MileageAggregateTrendChart
@@ -913,6 +918,8 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
+        focusMemberId={focusMemberId}
+        title={focusedMileageTitle}
       />
     ) : mileageData.length === 0 ? (
       <GraphEmptyState
@@ -929,7 +936,9 @@ export function MemberRankingCharts({
       />
     )
 
-  const beatRivalChart = beatRivalMileageComparisonChart ?? mileageComparisonChart
+  const beatRivalChart = focusMemberId
+    ? mileageComparisonChart
+    : (beatRivalMileageComparisonChart ?? mileageComparisonChart)
   const beatRivalPanel =
     beatRivalChart && beatRivalChart.rows.length > 0 ? (
       <MileageAggregateTrendChart
@@ -937,7 +946,8 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
-        beatRivalMemberId={beatRivalMemberId}
+        beatRivalMemberId={focusMemberId ? null : beatRivalMemberId}
+        focusMemberId={focusMemberId}
         title="이겨라 · 마일리지"
       />
     ) : (
@@ -954,7 +964,8 @@ export function MemberRankingCharts({
         chartShellClass={chartShellClass}
         chartAxisClass={chartAxisClass}
         compact={compact}
-        title="전체 회원 출석 횟수"
+        focusMemberId={focusMemberId}
+        title={focusMemberId ? '출석 횟수' : '전체 회원 출석 횟수'}
         valueUnit="회"
         footerHint={`${ATTENDANCE_KING_DAY_RULE_LABEL} · 위로 갈수록 출석이 늘어납니다.`}
       />
@@ -1353,15 +1364,24 @@ function PbRecordAggregateTrendChart({
   chartShellClass,
   chartAxisClass,
   compact = false,
+  focusMemberId = null,
 }: {
   chart: LeaguePbRecordComparisonChart
   chartShellClass: string
   chartAxisClass: string
   compact?: boolean
+  focusMemberId?: string | null
 }) {
   const memberColorMap = useMemo(
     () => buildMemberChartColorMap(chart.members.map((member) => member.memberId)),
     [chart.members],
+  )
+  const visibleMembers = useMemo(
+    () =>
+      focusMemberId
+        ? chart.members.filter((member) => member.memberId === focusMemberId)
+        : chart.members,
+    [chart.members, focusMemberId],
   )
   const {
     setListDragging,
@@ -1375,7 +1395,7 @@ function PbRecordAggregateTrendChart({
     <div className={chartShellClass}>
       {!compact ? (
         <p className={cn('mb-2 text-xs font-medium text-lime-300')}>
-          전체 회원 PB 기록 추이
+          {focusMemberId ? 'PB 기록 추이' : '전체 회원 PB 기록 추이'}
         </p>
       ) : null}
       <ChartContainer config={timeChartConfig} className={chartAxisClass}>
@@ -1407,13 +1427,13 @@ function PbRecordAggregateTrendChart({
                 active={props.active}
                 payload={props.payload}
                 label={props.label}
-                members={chart.members}
+                members={visibleMembers}
                 memberColorMap={memberColorMap}
                 onListDragChange={setListDragging}
               />
             ))}
           />
-          {chart.members.map((member) => (
+          {visibleMembers.map((member) => (
             <Line
               key={member.memberId}
               type="stepAfter"
@@ -1443,6 +1463,7 @@ function MileageAggregateTrendChart({
   chartAxisClass,
   compact = false,
   beatRivalMemberId = null,
+  focusMemberId = null,
   title = '전체 회원 누적 마일리지',
   valueUnit = 'km',
   footerHint,
@@ -1452,6 +1473,7 @@ function MileageAggregateTrendChart({
   chartAxisClass: string
   compact?: boolean
   beatRivalMemberId?: string | null
+  focusMemberId?: string | null
   title?: string
   valueUnit?: 'km' | '회'
   footerHint?: string
@@ -1464,11 +1486,18 @@ function MileageAggregateTrendChart({
       ),
     [beatRivalMemberId, chart.members],
   )
+  const visibleMembers = useMemo(
+    () =>
+      focusMemberId
+        ? chart.members.filter((member) => member.memberId === focusMemberId)
+        : chart.members,
+    [chart.members, focusMemberId],
+  )
   const attendanceYMax = useMemo(() => {
     if (valueUnit !== '회') return null
     const values: number[] = []
     for (const row of chart.rows) {
-      for (const member of chart.members) {
+      for (const member of visibleMembers) {
         const value = row[`km_${member.memberId}`]
         if (typeof value === 'number' && Number.isFinite(value)) {
           values.push(value)
@@ -1476,7 +1505,7 @@ function MileageAggregateTrendChart({
       }
     }
     return resolveCountChartYMax(values)
-  }, [chart.members, chart.rows, valueUnit])
+  }, [chart.rows, valueUnit, visibleMembers])
   const {
     setListDragging,
     updateTooltipPosition,
@@ -1520,7 +1549,7 @@ function MileageAggregateTrendChart({
                 active={props.active}
                 payload={props.payload}
                 label={props.label}
-                members={chart.members}
+                members={visibleMembers}
                 memberColorMap={memberColorMap}
                 beatRivalMemberId={beatRivalMemberId}
                 valueUnit={valueUnit}
@@ -1528,7 +1557,7 @@ function MileageAggregateTrendChart({
               />
             ))}
           />
-          {chart.members.map((member) => {
+          {visibleMembers.map((member) => {
             const isBeatRival =
               beatRivalMemberId != null && member.memberId === beatRivalMemberId
             return (

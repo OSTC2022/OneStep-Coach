@@ -1,5 +1,6 @@
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
+import { isOfflineClassAttendanceLog } from '@/lib/running-league/attendance-king'
 import type { RunningLeagueMileageLog, RunningLeagueParticipant } from '@/lib/types'
 
 export type MileageRankHistoryPoint = {
@@ -26,6 +27,7 @@ function sumMileageUpToDate(
   for (const log of logs) {
     if (log.member_id !== memberId) continue
     if (log.logged_at > asOfDate) continue
+    if (isOfflineClassAttendanceLog(log)) continue
     total += Number(log.distance_km ?? 0)
   }
   return Math.round(total * 10) / 10

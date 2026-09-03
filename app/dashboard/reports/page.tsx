@@ -10,8 +10,13 @@ const ReportDashboard = dynamic(
   { loading: () => <StatCardsSkeleton count={4} /> },
 )
 
-export default async function ReportsPage() {
-  const data = await getReportDashboardData()
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>
+}) {
+  const params = await searchParams
+  const data = await getReportDashboardData(params.month)
 
   return (
     <div className="space-y-6 pt-12 lg:pt-0">
@@ -23,10 +28,15 @@ export default async function ReportsPage() {
       </div>
 
       <ReportDashboard
+        selectedMonth={data.selectedMonth}
+        previousMonth={data.previousMonth}
+        isCurrentMonth={data.isCurrentMonth}
+        daysInSelectedMonth={data.daysInSelectedMonth}
         stats={data.stats}
         instructorStats={data.instructorStats}
         instructorPayroll={data.instructorPayroll}
         sportStats={data.sportStats}
+        monthlyRevenueTrend={data.monthlyRevenueTrend}
       />
     </div>
   )

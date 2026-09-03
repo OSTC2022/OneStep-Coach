@@ -1,7 +1,7 @@
 import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import {
-  isMileageLogAttendanceQualified,
+  isAttendanceKingQualifiedLog,
   resolveAttendanceDayKey,
 } from '@/lib/running-league/attendance-king'
 import { filterMileageLogsForPeriod } from '@/lib/running-league/ranking-period'
@@ -21,7 +21,7 @@ function formatChartDate(value: string): string {
   }
 }
 
-/** 회원 출석 누적 그래프 (3km+ · 하루 1회) */
+/** 회원 출석 누적 그래프 (3km+ 또는 오프라인 수업 · 하루 1회) */
 export function buildMemberAttendanceHistorySeries(
   memberId: string,
   logs: ReadonlyArray<RunningLeagueMileageLog>,
@@ -32,7 +32,7 @@ export function buildMemberAttendanceHistorySeries(
 
   for (const log of scopedLogs) {
     if (log.member_id !== memberId) continue
-    if (!isMileageLogAttendanceQualified(log.distance_km)) continue
+    if (!isAttendanceKingQualifiedLog(log)) continue
     attendanceDays.add(resolveAttendanceDayKey(log.logged_at))
   }
 

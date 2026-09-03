@@ -47,6 +47,7 @@ import {
   RankingStatusMessageSlot,
   resolveRankingRowGridClass,
 } from '@/components/dashboard/ranking-member-name-block'
+import { RankingSelfQuickActions } from '@/components/dashboard/ranking-self-quick-actions'
 import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
@@ -931,6 +932,7 @@ function RankingPreview({
   rankingPeriod,
   rankingCaption,
   rankingCaptionStyle,
+  selfActionsDisabled = false,
 }: {
   rankingView: RankingView
   pbDistance: PbLeaderboardDistance
@@ -951,6 +953,7 @@ function RankingPreview({
   rankingPeriod: ReturnType<typeof rankingPeriodFromMonthKey>
   rankingCaption?: string | null
   rankingCaptionStyle?: PortalTextStyleConfig
+  selfActionsDisabled?: boolean
 }) {
   const allRows = usesAttendanceLeaderboard(rankingView)
     ? attendanceLeaderboard
@@ -1206,6 +1209,17 @@ function RankingPreview({
                 </button>
               ) : null}
             </div>
+            {highlightMemberId && selectedMemberId === highlightMemberId ? (
+              <RankingSelfQuickActions
+                disabled={selfActionsDisabled}
+                initialStatusMessage={
+                  statusByMemberId.get(highlightMemberId)?.message ?? ''
+                }
+                initialStatusColor={
+                  statusByMemberId.get(highlightMemberId)?.color ?? null
+                }
+              />
+            ) : null}
             {canScrollRanks ? (
               <p className="text-center text-[10px] text-zinc-500">
                 휠로 순위 이동 · {windowStart + 1}–{Math.min(allRows.length, windowStart + RANKING_PREVIEW_VISIBLE)}위 / {allRows.length}명
@@ -2236,6 +2250,18 @@ function FullRankingDialog({
               rankingView={rankingView}
             />
           )}
+          {highlightMemberId && selectedMemberId === highlightMemberId ? (
+            <div className="sticky bottom-0 mt-3 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-transparent pt-2 pb-1">
+              <RankingSelfQuickActions
+                initialStatusMessage={
+                  statusByMemberId.get(highlightMemberId)?.message ?? ''
+                }
+                initialStatusColor={
+                  statusByMemberId.get(highlightMemberId)?.color ?? null
+                }
+              />
+            </div>
+          ) : null}
         </ScrollArea>
 
         {showPagination ? (
@@ -2525,6 +2551,8 @@ export function MemberRunningLeagueRankings({
       return
     }
     setSelectedMember({ id: memberId, name: memberName })
+    // 자기 행 클릭 시에는 출석/상태메시지 버튼을 보여 주고, 그래프로는 스크롤하지 않음
+    if (memberId === highlightMemberId) return
     window.requestAnimationFrame(() => {
       graphPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
@@ -2694,6 +2722,7 @@ export function MemberRunningLeagueRankings({
           rankingPeriod={rankingPeriod}
           rankingCaption={portalRankingCaption}
           rankingCaptionStyle={portalRankingCaptionStyle}
+          selfActionsDisabled={readOnly}
         />
 
         <div ref={graphPanelRef} className="scroll-mt-4">

@@ -2,6 +2,7 @@
 
 import { requireRole } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
+import { OFFLINE_CLASS_ATTENDANCE_NOTE } from '@/lib/running-league/attendance-king'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -1744,7 +1745,7 @@ async function syncParticipantMileageFromLogs(
   const { start, end } = await getPortalRankingDateRangeForSync()
   const { data, error } = await supabase
     .from('running_league_mileage_logs')
-    .select('distance_km')
+    .select('distance_km, notes')
     .eq('participant_id', participantId)
     .gte('logged_at', start)
     .lte('logged_at', end)
@@ -2103,12 +2104,16 @@ export async function saveMemberMileageLog(input: {
   }
 
   try {
-    const mileageKm = await addParticipantMileageDelta(
-      supabase,
-      participant.id,
-      Number(participant.mileage_km ?? 0),
-      roundedDistance,
-    )
+    const isOfflineAttendance =
+      (input.notes?.trim() ?? '') === OFFLINE_CLASS_ATTENDANCE_NOTE
+    const mileageKm = isOfflineAttendance
+      ? await syncParticipantMileageFromLogs(supabase, participant.id)
+      : await addParticipantMileageDelta(
+          supabase,
+          participant.id,
+          Number(participant.mileage_km ?? 0),
+          roundedDistance,
+        )
     revalidateMemberMileagePaths()
     return { ok: true, mileageKm }
   } catch (syncError) {

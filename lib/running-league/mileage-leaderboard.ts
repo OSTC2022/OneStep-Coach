@@ -1,4 +1,5 @@
 import type { RunningLeagueMileageLog, RunningLeagueParticipant } from '@/lib/types'
+import { isOfflineClassAttendanceLog } from '@/lib/running-league/attendance-king'
 
 /**
  * 마일리지 랭킹 — member_id 기준 월 distance_km 합계, 내림차순.
@@ -31,11 +32,14 @@ export interface MileageDistanceLeaderboard {
   }>
 }
 
-/** 로그 distance_km 합산 — syncParticipantMileageFromLogs 와 동일 */
+/** 로그 distance_km 합산 — syncParticipantMileageFromLogs 와 동일 (오프라인 출석 더미 제외) */
 export function sumMileageLogsKm(
-  logs: ReadonlyArray<Pick<RunningLeagueMileageLog, 'distance_km'>>,
+  logs: ReadonlyArray<Pick<RunningLeagueMileageLog, 'distance_km' | 'notes'>>,
 ): number {
-  const total = logs.reduce((sum, row) => sum + Number(row.distance_km ?? 0), 0)
+  const total = logs.reduce((sum, row) => {
+    if (isOfflineClassAttendanceLog(row)) return sum
+    return sum + Number(row.distance_km ?? 0)
+  }, 0)
   return Math.round(total * 10) / 10
 }
 
@@ -43,12 +47,15 @@ export function sumMileageLogsKm(
  * GROUP BY member_id — SUM(distance_km) AS monthly_distance
  */
 export function aggregateMonthlyMileageByMember(
-  logs: ReadonlyArray<Pick<RunningLeagueMileageLog, 'member_id' | 'distance_km'>>,
+  logs: ReadonlyArray<
+    Pick<RunningLeagueMileageLog, 'member_id' | 'distance_km' | 'notes'>
+  >,
 ): Map<string, number> {
   const totals = new Map<string, number>()
 
   for (const log of logs) {
     if (!log.member_id) continue
+    if (isOfflineClassAttendanceLog(log)) continue
     const next = (totals.get(log.member_id) ?? 0) + Number(log.distance_km ?? 0)
     totals.set(log.member_id, next)
   }

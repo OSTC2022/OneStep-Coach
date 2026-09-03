@@ -4,7 +4,14 @@ import type { RunningLeagueMileageLog, RunningLeagueParticipant } from '@/lib/ty
 /** 출석 인정 최소 러닝 거리 (km) */
 export const ATTENDANCE_KING_MIN_KM = 3
 
-export const ATTENDANCE_KING_DAY_RULE_LABEL = '3km+ · 1일 1회 = 출석'
+/** 오프라인 센터 수업 출석 로그 식별용 notes */
+export const OFFLINE_CLASS_ATTENDANCE_NOTE = 'offline-class-attendance'
+
+/** 마일리지 합산에서 제외할 출석 전용 더미 거리 (CHECK distance_km > 0) */
+export const OFFLINE_CLASS_ATTENDANCE_DISTANCE_KM = 0.01
+
+export const ATTENDANCE_KING_DAY_RULE_LABEL =
+  '3km+ 또는 오프라인 수업 · 1일 1회 = 출석'
 
 export type AttendanceKingRow = {
   participantId: string
@@ -17,6 +24,19 @@ export type AttendanceKingRow = {
 
 export function isMileageLogAttendanceQualified(distanceKm: number): boolean {
   return Number(distanceKm) >= ATTENDANCE_KING_MIN_KM
+}
+
+export function isOfflineClassAttendanceLog(
+  log: Pick<RunningLeagueMileageLog, 'notes'> | { notes?: string | null },
+): boolean {
+  return (log.notes ?? '').trim() === OFFLINE_CLASS_ATTENDANCE_NOTE
+}
+
+export function isAttendanceKingQualifiedLog(
+  log: Pick<RunningLeagueMileageLog, 'distance_km' | 'notes'>,
+): boolean {
+  if (isOfflineClassAttendanceLog(log)) return true
+  return isMileageLogAttendanceQualified(log.distance_km)
 }
 
 /** 마일리지 로그 날짜 → 출석 집계용 일자 키 (YYYY-MM-DD) */
@@ -49,10 +69,12 @@ export function countMemberAttendanceStats(
       const asOfDay = resolveAttendanceDayKey(options.asOfDate)
       if (resolveAttendanceDayKey(log.logged_at) > asOfDay) continue
     }
-    if (!isMileageLogAttendanceQualified(log.distance_km)) continue
+    if (!isAttendanceKingQualifiedLog(log)) continue
 
     attendanceDays.add(resolveAttendanceDayKey(log.logged_at))
-    totalKm += Number(log.distance_km) || 0
+    if (!isOfflineClassAttendanceLog(log)) {
+      totalKm += Number(log.distance_km) || 0
+    }
   }
 
   return {
@@ -62,8 +84,8 @@ export function countMemberAttendanceStats(
 }
 
 /**
- * 출석왕 — 기간 내 3km+ 러닝이 있는 날 = 출석 1회 (같은 날 여러 번 뛰어도 1회)
- * 출석 일수 · 누적 km 내림차순
+ * 출석왕 — 기간 내 3km+ 러닝 또는 오프라인 수업 출석이 있는 날 = 1회
+ * (같은 날 여러 번이어도 1회) · 출석 일수 · 누적 km 내림차순
  */
 export function buildAttendanceKingLeaderboard(
   participants: ReadonlyArray<RunningLeagueParticipant>,
@@ -89,7 +111,7 @@ export function buildAttendanceKingLeaderboard(
 
   // 참가자 목록에 없는 로그만 있는 회원도 반영
   for (const log of filterMileageLogsForPeriod(logs, period)) {
-    if (!isMileageLogAttendanceQualified(log.distance_km)) continue
+    if (!isAttendanceKingQualifiedLog(log)) continue
     if (tallies.has(log.member_id)) continue
 
     const stats = countMemberAttendanceStats(log.member_id, logs, { period })

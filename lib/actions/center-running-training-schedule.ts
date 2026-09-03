@@ -1,9 +1,7 @@
 'use server'
 
-import {
-  clearCenterTrainingScheduleAttendance,
-  recordCenterTrainingScheduleAttendance,
-} from '@/lib/actions/center-training-schedule-attendance'
+import { clearOfflineClassAttendanceForDate } from '@/lib/actions/offline-class-attendance'
+import { clearCenterTrainingScheduleAttendance } from '@/lib/actions/center-training-schedule-attendance'
 import { getCurrentUser, requireRole } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -779,6 +777,10 @@ export async function toggleCenterRunningTrainingScheduleSignup(
           attendanceResult.error,
         )
       }
+      await clearOfflineClassAttendanceForDate({
+        memberId: member.id,
+        scheduleDate,
+      })
     }
   } else {
     const insertPayload: {
@@ -813,23 +815,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       return { ok: false, error: '참여 신청에 실패했습니다.' }
     }
 
-    if (isAdultMember && user) {
-      const attendanceResult = await recordCenterTrainingScheduleAttendance({
-        member,
-        weekday,
-        scheduleDate,
-        checkedInBy: user.id,
-      })
-
-      if (!attendanceResult.ok) {
-        await supabase
-          .from('center_running_training_schedule_signups')
-          .delete()
-          .eq('weekday', weekday)
-          .eq('member_id', member.id)
-        return { ok: false, error: attendanceResult.error }
-      }
-    }
+    // 출석왕 반영은 회원이 '내 회원 정보'에서 출석 버튼을 눌렀을 때만 처리
   }
 
   let countQuery = supabase

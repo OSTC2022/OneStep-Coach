@@ -298,3 +298,58 @@ export async function updateMyProfile(input: {
   }
   return { success: true as const }
 }
+
+/** 랭킹 상태메시지만 빠르게 수정 (성인회원 육상) */
+export async function updateMyRankingStatusMessage(input: {
+  message: string
+  color?: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireAuth()
+  if (user.role !== 'adult_member') {
+    return { ok: false, error: '성인회원만 상태메시지를 설정할 수 있습니다.' }
+  }
+
+  if (input.message.trim().length > RANKING_STATUS_MESSAGE_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `상태 메시지는 ${RANKING_STATUS_MESSAGE_MAX_LENGTH}자 이내로 입력해주세요.`,
+    }
+  }
+
+  const message = normalizeRankingStatusMessage(input.message)
+  const color = normalizeRankingStatusMessageColor(input.color)
+
+  const supabase = await createClient()
+  const memberPatch: Record<string, string | null> = {
+    ranking_status_message: message,
+    ranking_status_message_color: color,
+  }
+
+  let memberUpdate = await supabase
+    .from('members')
+    .update(memberPatch)
+    .or(`auth_user_id.eq.${user.id},user_id.eq.${user.id}`)
+
+  if (
+    memberUpdate.error &&
+    memberUpdate.error.code === '42703' &&
+    memberUpdate.error.message?.includes('ranking_status_message_color')
+  ) {
+    memberUpdate = await supabase
+      .from('members')
+      .update({ ranking_status_message: message })
+      .or(`auth_user_id.eq.${user.id},user_id.eq.${user.id}`)
+  }
+
+  if (memberUpdate.error) {
+    return { ok: false, error: memberUpdate.error.message }
+  }
+
+  revalidatePath('/dashboard/my', 'page')
+  revalidatePath('/dashboard/my/running-league', 'page')
+  revalidatePath('/dashboard/running-portal', 'page')
+  revalidatePath('/dashboard/my/profile', 'page')
+  revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG, 'max')
+  return { ok: true }
+}
+

@@ -2,7 +2,7 @@ import { format, parseISO } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import {
   countMemberAttendanceStats,
-  isMileageLogAttendanceQualified,
+  isAttendanceKingQualifiedLog,
   resolveAttendanceDayKey,
 } from '@/lib/running-league/attendance-king'
 import { maskMemberNameForRanking } from '@/lib/running-league/mask-member-name'
@@ -29,7 +29,7 @@ function collectAttendanceSnapshotDays(
   const scopedLogs = period ? filterMileageLogsForPeriod(logs, period) : logs
   const days = new Set<string>()
   for (const log of scopedLogs) {
-    if (!isMileageLogAttendanceQualified(log.distance_km)) continue
+    if (!isAttendanceKingQualifiedLog(log)) continue
     days.add(resolveAttendanceDayKey(log.logged_at))
   }
   const sorted = [...days].sort()
@@ -76,6 +76,7 @@ export function buildLeagueAttendanceComparisonChart(input: {
   logs: ReadonlyArray<RunningLeagueMileageLog>
   period?: { start: string; end: string }
   maxMembers?: number
+  ensureMemberIds?: ReadonlyArray<string | null | undefined>
 }): LeagueAttendanceComparisonChart | null {
   const days = collectAttendanceSnapshotDays(input.logs, input.period)
   if (days.length === 0) return null
@@ -88,9 +89,28 @@ export function buildLeagueAttendanceComparisonChart(input: {
     period: input.period,
     maxMembers: input.maxMembers ?? 20,
   })
-  if (rankedMembers.length === 0) return null
 
-  const members: LeagueRankMemberSeries[] = rankedMembers.map((row) => ({
+  const memberRows = [...rankedMembers]
+  for (const rawId of input.ensureMemberIds ?? []) {
+    const memberId = rawId?.trim()
+    if (!memberId) continue
+    if (memberRows.some((row) => row.memberId === memberId)) continue
+    const participant = input.participants.find((row) => row.member_id === memberId)
+    if (!participant) continue
+    memberRows.push({
+      memberId: participant.member_id,
+      memberName: participant.member?.name?.trim() || '회원',
+      count: countAttendanceUpToDay(
+        participant.member_id,
+        input.logs,
+        latestDay,
+        input.period,
+      ),
+    })
+  }
+  if (memberRows.length === 0) return null
+
+  const members: LeagueRankMemberSeries[] = memberRows.map((row) => ({
     memberId: row.memberId,
     memberName: maskMemberNameForRanking(row.memberName),
     isSelected: false,
