@@ -27,6 +27,7 @@ import {
 import { updateMemberBodyBaseline } from '@/lib/actions/members'
 import { describeBodyRecordMigrationHint } from '@/lib/member-body-record-messages'
 import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
+import { isAdultRunningSport } from '@/lib/adult-member-programs'
 import {
   buildBodyAnalysisStats,
   buildChartAxisDateLabel,
@@ -146,7 +147,7 @@ interface MemberBodyAnalysisViewProps {
   readOnly?: boolean
   /** 대시보드에서 공유 링크 패널 표시 */
   showShareLink?: boolean
-  /** 성인회원 포털 — '선수' 대신 회원님 표기 */
+  /** 성인회원(육상) 등 — '선수' 대신 '님' 표기 */
   reportVariant?: 'athlete' | 'adult'
 }
 
@@ -168,7 +169,29 @@ export function MemberBodyAnalysisView({
   reportVariant = 'athlete',
 }: MemberBodyAnalysisViewProps) {
   const router = useRouter()
-  const memberBackHref = backHref ?? `/dashboard/members/${member.id}`
+  const fallbackBackHref = backHref ?? `/dashboard/members/${member.id}`
+  const useAdultHonorific =
+    reportVariant === 'adult' || isAdultRunningSport(member.sport)
+
+  function handleBack() {
+    if (typeof window !== 'undefined') {
+      const ref = document.referrer
+      try {
+        if (ref && new URL(ref).origin === window.location.origin) {
+          router.back()
+          return
+        }
+      } catch {
+        /* ignore invalid referrer */
+      }
+      if (window.history.length > 1) {
+        router.back()
+        return
+      }
+    }
+    router.push(fallbackBackHref)
+  }
+
   const [records, setRecords] = useState(initialRecords)
   const [formValues, setFormValues] = useState<MemberBodyRecordFormValues>(() => {
     const latest = initialRecords.at(-1)
@@ -633,21 +656,26 @@ export function MemberBodyAnalysisView({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           {!readOnly ? (
-            <Link href={memberBackHref}>
-              <Button variant="ghost" size="icon" className="mt-1">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="mt-1"
+              aria-label="이전 페이지로"
+              onClick={handleBack}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
           ) : null}
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
               Athlete Condition Report
             </p>
             <h1 className="text-2xl font-bold lg:text-3xl">
-              {reportVariant === 'adult' ? (
+              {useAdultHonorific ? (
                 <>
-                  <span className="mr-1">{member.name}</span>
-                  회원님의 컨디션 &amp; 신체변화
+                  <span className="mr-0.5">{member.name}</span>
+                  님의 컨디션 &amp; 신체변화
                 </>
               ) : (
                 <>

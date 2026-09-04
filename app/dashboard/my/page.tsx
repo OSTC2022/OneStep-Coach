@@ -8,7 +8,7 @@ import { getAdultRunningPortalDisplaySettings } from '@/lib/actions/adult-runnin
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { MemberPortalUnavailable } from '@/components/dashboard/member-portal-unavailable'
 import { MemberAdultGeneralPortal } from '@/components/dashboard/member-adult-general-portal'
-import { isAdultGeneralSport } from '@/lib/adult-member-programs'
+import { isAdultGeneralSport, isAdultRunningSport } from '@/lib/adult-member-programs'
 import { isMemberPortalRole } from '@/lib/member-portal-routes'
 import { MemberMyPage } from './member-my-page'
 
@@ -22,17 +22,22 @@ export default async function MyDashboardPage() {
     }
   }
 
+  const portalData = await getMemberPortalData()
+  const useAdultRunningPortal =
+    profile?.role === 'adult_member' ||
+    isAdultRunningSport(portalData?.member.sport)
+
   const [data, runningLeagueHome, centerTrainingSchedule, marathonSchedule, portalDisplay] =
     await Promise.all([
-      getMemberPortalData(),
-      profile?.role === 'adult_member' ? getMemberRunningLeagueHome() : Promise.resolve(null),
-      profile?.role === 'adult_member'
+      Promise.resolve(portalData),
+      useAdultRunningPortal ? getMemberRunningLeagueHome() : Promise.resolve(null),
+      useAdultRunningPortal
         ? getCenterRunningTrainingScheduleForMember()
         : Promise.resolve(null),
-      profile?.role === 'adult_member'
+      useAdultRunningPortal
         ? getCenterMarathonScheduleForMember()
         : Promise.resolve(null),
-      profile?.role === 'adult_member'
+      useAdultRunningPortal
         ? getAdultRunningPortalDisplaySettings()
         : Promise.resolve(null),
     ])

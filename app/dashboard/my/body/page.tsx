@@ -6,7 +6,8 @@ import {
   getMemberBodyRecords,
   getMemberProteinSettings,
 } from '@/lib/actions/member-body-records'
-import { isMemberPortalRole } from '@/lib/member-portal-routes'
+import { isMemberPortalRole, resolveMemberPortalHomePath } from '@/lib/member-portal-routes'
+import { isAdultGeneralSport, isAdultRunningSport } from '@/lib/adult-member-programs'
 import { MemberBodyAnalysisView } from '@/components/members/member-body-analysis-view'
 
 export default async function MyBodyPage() {
@@ -33,6 +34,11 @@ export default async function MyBodyPage() {
       getMemberProteinSettings(member.id),
     ])
 
+  const backHref = resolveMemberPortalHomePath({
+    role: profile?.role,
+    sport: member.sport,
+  })
+
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-6">
       <MemberBodyAnalysisView
@@ -49,8 +55,14 @@ export default async function MyBodyPage() {
         wellnessColumnsReady={wellnessColumnsReady}
         nutritionColumnsReady={nutritionColumnsReady}
         proteinSettings={proteinSettings}
-        backHref="/dashboard/my"
-        reportVariant={profile?.role === 'adult_member' ? 'adult' : 'athlete'}
+        backHref={backHref}
+        reportVariant={
+          profile?.role === 'adult_member' ||
+          isAdultRunningSport(member.sport) ||
+          isAdultGeneralSport(member.sport)
+            ? 'adult'
+            : 'athlete'
+        }
       />
     </div>
   )

@@ -312,6 +312,28 @@ function resolveMonthlyPackageExpiryDate(
   return null
 }
 
+/** 포털·목록용 — 기간권 만료일 (만료일 없으면 결제·월정액 note로 추정) */
+export function resolvePackagePeriodExpiryDate(pkg: {
+  note?: string | null
+  expires_at?: string | null
+  paid_at?: string | null
+}): string | null {
+  return resolveMonthlyPackageExpiryDate(pkg.note, pkg.expires_at, pkg.paid_at)
+}
+
+/** 월정액·만료일·총회차 0(기간형 UI) — 횟수가 아닌 기간으로 취급 */
+export function isPeriodBasedSessionPackage(pkg: {
+  note?: string | null
+  expires_at?: string | null
+  total_sessions?: number | null
+}): boolean {
+  if (isMonthlyPlanPackage(pkg.note)) return true
+  if (pkg.expires_at?.trim()) return true
+  // 월 정액 폼은 총 회차를 0으로 저장
+  if ((pkg.total_sessions ?? 0) <= 0) return true
+  return false
+}
+
 /** 잔여 0 미만일 때 초과 횟수 (예: -2 → 2) */
 export function getSessionPackageOverageCount(remainingSessions: number): number {
   return remainingSessions < 0 ? Math.abs(remainingSessions) : 0

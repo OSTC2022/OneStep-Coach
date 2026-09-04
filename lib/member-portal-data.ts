@@ -14,20 +14,81 @@ import {
 import { buildMemberPortalSessionStatus } from '@/lib/member-portal-session-status'
 import { buildMemberPortalSummary } from '@/lib/member-portal-summary'
 import type { MemberPortalData } from '@/lib/member-portal-types'
+import {
+  isAttendanceKingQualifiedLog,
+  resolveAttendanceDayKey,
+} from '@/lib/running-league/attendance-king'
 import { toVisibleSnsAccount } from '@/lib/sns-account'
+import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
 import type { Lesson, LessonSession, Member } from '@/lib/types'
 
+function maxDateKey(dates: Array<string | null | undefined>): string | null {
+  let best: string | null = null
+  for (const raw of dates) {
+    if (!raw) continue
+    const key = resolveAttendanceDayKey(raw)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue
+    if (!best || key > best) best = key
+  }
+  return best
+}
+
+/** 강사·회원 오프라인 출석(출석왕) + 수업 출석 중 가장 최근 일자 */
 function resolveRecentAttendanceDate(
   recentSessions: LessonSession[],
   recentLessons: Lesson[],
+  portalAttendanceDates: string[],
 ): string | null {
-  return (
-    recentSessions[0]?.session_date ??
-    recentLessons.find((lesson) => lesson.attendance_status === 'present')
-      ?.lesson_date ??
-    recentLessons[0]?.lesson_date ??
-    null
-  )
+  const presentSessionDates = recentSessions
+    .filter((session) => session.status === 'present' || Boolean(session.checked_in_at))
+    .map((session) => session.session_date)
+
+  const presentLessonDates = recentLessons
+    .filter((lesson) => lesson.attendance_status === 'present')
+    .map((lesson) => lesson.lesson_date)
+
+  return maxDateKey([
+    ...portalAttendanceDates,
+    ...presentSessionDates,
+    ...presentLessonDates,
+  ])
+}
+
+/** 러닝 포털 출석(오프라인 수업·3km+ 출석 인정) 최근 일자 */
+async function fetchPortalAttendanceDates(memberId: string): Promise<string[]> {
+  try {
+    const supabase = await createStaffDataClient()
+    const { data, error } = await supabase
+      .from('running_league_mileage_logs')
+      .select('logged_at, distance_km, notes')
+      .eq('member_id', memberId)
+      .order('logged_at', { ascending: false })
+      .limit(60)
+
+    if (error) {
+      console.error('fetchPortalAttendanceDates:', error.message)
+      return []
+    }
+
+    const dates: string[] = []
+    for (const row of data ?? []) {
+      if (
+        !isAttendanceKingQualifiedLog({
+          distance_km: Number(row.distance_km ?? 0),
+          notes: row.notes,
+        })
+      ) {
+        continue
+      }
+      dates.push(resolveAttendanceDayKey(String(row.logged_at)))
+      if (dates.length >= 10) break
+    }
+
+    return dates
+  } catch (error) {
+    console.error('fetchPortalAttendanceDates:', error)
+    return []
+  }
 }
 
 export async function loadMemberPortalData(member: Member): Promise<MemberPortalData> {
@@ -39,6 +100,7 @@ export async function loadMemberPortalData(member: Member): Promise<MemberPortal
     centerSettings,
     bodyData,
     packagesResult,
+    portalAttendanceDates,
   ] = await Promise.all([
     getNextLessonForMember(member.id),
     getLessons({ memberId: member.id, limit: 10, upToNow: true }),
@@ -52,6 +114,7 @@ export async function loadMemberPortalData(member: Member): Promise<MemberPortal
       body_baseline_recorded_at: member.body_baseline_recorded_at,
     }),
     getSessionPackages({ memberId: member.id }),
+    fetchPortalAttendanceDates(member.id),
   ])
 
   const instructor = member.primary_instructor
@@ -86,7 +149,11 @@ export async function loadMemberPortalData(member: Member): Promise<MemberPortal
     bodyTableReady: bodyData.tableReady,
     summary: buildMemberPortalSummary(
       bodyData.records,
-      resolveRecentAttendanceDate(recentSessions, recentLessons),
+      resolveRecentAttendanceDate(
+        recentSessions,
+        recentLessons,
+        portalAttendanceDates,
+      ),
     ),
     sessionStatus: buildMemberPortalSessionStatus(member, packagesResult.data),
   }

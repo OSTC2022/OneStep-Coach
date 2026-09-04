@@ -40,6 +40,7 @@ import { portalStatusToneClass } from '@/lib/member-portal-status'
 import type { Member } from '@/lib/types'
 import { formatPackageExpiryDateLabel } from '@/lib/session-package-utils'
 import { MEMBER_PORTAL_SHELL_CLASS } from '@/lib/running-league/member-portal-layout'
+import { isAdultRunningSport } from '@/lib/adult-member-programs'
 import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
@@ -150,7 +151,8 @@ export function MemberMyPage({
   canPinMarathonEvents = false,
 }: MemberMyPageProps) {
   const { member, summary, sessionStatus } = data
-  const isAdultMember = role === 'adult_member'
+  const isAdultMember =
+    role === 'adult_member' || isAdultRunningSport(member.sport)
   const showRunningPortalSection = showRunningPortal || isAdultMember
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const sportProfile = formatSportProfile(member)
@@ -307,7 +309,7 @@ export function MemberMyPage({
                   ? format(parseISO(summary.recentAttendanceDate), 'M/d')
                   : '기록 없음'
               }
-              hint="마지막 수업"
+              hint="센터 출석 기준"
               compact
               className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
@@ -328,6 +330,9 @@ export function MemberMyPage({
                 summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
               }
               hint={formatTodayRecordHint(summary.todayRecorded)}
+              actionHref="/dashboard/my/body#report-top"
+              actionLabel={summary.todayRecorded ? '수정하기' : '입력하기'}
+              actionEmphasis={!summary.todayRecorded}
               compact
               className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
@@ -435,7 +440,7 @@ export function MemberMyPage({
                   ? format(parseISO(summary.recentAttendanceDate), 'M/d')
                   : '기록 없음'
               }
-              hint="마지막 수업"
+              hint="센터 출석 기준"
             />
             <SummaryCard
               title="최근 컨디션"
@@ -452,6 +457,9 @@ export function MemberMyPage({
                 summary.todayRecorded ? 'text-emerald-300' : 'text-amber-300'
               }
               hint={formatTodayRecordHint(summary.todayRecorded)}
+              actionHref="/dashboard/my/body#report-top"
+              actionLabel={summary.todayRecorded ? '수정하기' : '입력하기'}
+              actionEmphasis={!summary.todayRecorded}
             />
           </div>
         </>
@@ -697,6 +705,9 @@ function SummaryCard({
   value,
   valueClassName,
   hint,
+  actionHref,
+  actionLabel,
+  actionEmphasis = false,
   compact = false,
   className,
 }: {
@@ -705,9 +716,14 @@ function SummaryCard({
   value: string
   valueClassName?: string
   hint: string
+  actionHref?: string
+  actionLabel?: string
+  actionEmphasis?: boolean
   compact?: boolean
   className?: string
 }) {
+  const hasAction = Boolean(actionHref && actionLabel)
+
   return (
     <Card
       className={cn(
@@ -719,8 +735,18 @@ function SummaryCard({
         className={cn(
           'grid h-full gap-0',
           compact
-            ? 'min-h-[108px] grid-rows-[auto_1fr_auto] px-3 py-3'
-            : 'min-h-[132px] grid-rows-[auto_1fr_auto] px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0',
+            ? cn(
+                'min-h-[108px] px-3 py-3',
+                hasAction
+                  ? 'grid-rows-[auto_1fr_auto_auto] gap-y-1.5'
+                  : 'grid-rows-[auto_1fr_auto]',
+              )
+            : cn(
+                'min-h-[132px] px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0',
+                hasAction
+                  ? 'grid-rows-[auto_1fr_auto_auto] gap-y-1.5'
+                  : 'grid-rows-[auto_1fr_auto]',
+              ),
         )}
       >
         <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -739,6 +765,22 @@ function SummaryCard({
         <p className="text-xs leading-snug text-muted-foreground md:text-[13px]">
           {hint}
         </p>
+        {hasAction ? (
+          <Button
+            asChild
+            size="sm"
+            variant={actionEmphasis ? 'default' : 'outline'}
+            className={cn(
+              'w-full justify-center',
+              compact ? 'h-8 px-2 text-xs' : 'h-9 text-xs sm:text-sm',
+            )}
+          >
+            <Link href={actionHref!} scroll={false}>
+              {actionLabel}
+              <ChevronRight className="ml-0.5 h-3.5 w-3.5 shrink-0" />
+            </Link>
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   )

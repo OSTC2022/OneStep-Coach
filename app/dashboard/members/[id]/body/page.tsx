@@ -6,6 +6,7 @@ import {
 } from '@/lib/actions/member-body-records'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
 import { canSavePhysicalBaseline } from '@/lib/roles'
+import { isAdultRunningSport } from '@/lib/adult-member-programs'
 import { MemberBodyAnalysisView } from '@/components/members/member-body-analysis-view'
 
 export default async function MemberBodyPage({
@@ -45,6 +46,7 @@ export default async function MemberBodyPage({
         nutritionColumnsReady={nutritionColumnsReady}
         proteinSettings={proteinSettings}
         canEditBodyBaseline={canSavePhysicalBaseline(profile?.role ?? 'member')}
+        reportVariant={isAdultRunningSport(member.sport) ? 'adult' : 'athlete'}
       />
     </div>
   )
