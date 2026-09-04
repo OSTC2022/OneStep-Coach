@@ -48,6 +48,8 @@ import {
   resolveRankingRowGridClass,
 } from '@/components/dashboard/ranking-member-name-block'
 import { RankingSelfQuickActions } from '@/components/dashboard/ranking-self-quick-actions'
+import { StaffMemberDayAttendanceDialog } from '@/components/dashboard/staff-member-day-attendance-dialog'
+import { StaffMemberRecordsDialog } from '@/components/dashboard/staff-member-records-dialog'
 import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
@@ -703,6 +705,8 @@ interface MemberRunningLeagueRankingsProps {
   portalRankingCaption?: string | null
   portalHeaderStyle?: AdultRunningPortalHeaderStyle
   portalRankingCaptionStyle?: PortalTextStyleConfig
+  /** 관리자·강사 — 회원 그래프 날짜 클릭으로 출석 수정 */
+  canStaffManageAttendance?: boolean
 }
 
 type MemberRankSummary =
@@ -1443,7 +1447,7 @@ function MileageRankingRow({
     >
       <RankChangeBadge delta={rankChangeDelta} />
       <RankMedalDisplay rank={row.rank} />
-      <div className="min-w-0">
+      <div className="min-w-0 overflow-hidden justify-self-start">
         <RankingMemberNameBlock
           memberName={row.memberName}
           beatRivalMemberId={beatRivalMemberId}
@@ -2328,6 +2332,7 @@ export function MemberRunningLeagueRankings({
   portalRankingCaption = null,
   portalHeaderStyle,
   portalRankingCaptionStyle,
+  canStaffManageAttendance = false,
 }: MemberRunningLeagueRankingsProps) {
   const [genderFilter, setGenderFilter] = useState<RankingGenderFilter>('all')
   const [rankingView, setRankingView] = useState<RankingView>('mileage')
@@ -2338,6 +2343,15 @@ export function MemberRunningLeagueRankings({
   const [selectedMember, setSelectedMember] = useState<{ id: string; name: string } | null>(null)
   const [pbDialogOpen, setPbDialogOpen] = useState(false)
   const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
+  const [staffAttendanceTarget, setStaffAttendanceTarget] = useState<{
+    memberId: string
+    memberName: string
+    date: string
+  } | null>(null)
+  const [staffRecordsTarget, setStaffRecordsTarget] = useState<{
+    memberId: string
+    memberName: string
+  } | null>(null)
   const router = useRouter()
   const canShowRecordActions = tableReady && !readOnly
   const portalRecordReady = canShowRecordActions
@@ -2632,6 +2646,25 @@ export function MemberRunningLeagueRankings({
       graphChartTab={graphChartTab}
       onGraphChartTabChange={handleGraphChartTabChange}
       beatRivalMemberId={beatRivalMemberId}
+      onFocusMemberDateClick={
+        canStaffManageAttendance
+          ? (date) =>
+              setStaffAttendanceTarget({
+                memberId: panelMember.id,
+                memberName: panelMember.name,
+                date,
+              })
+          : undefined
+      }
+      onManageRecords={
+        canStaffManageAttendance
+          ? () =>
+              setStaffRecordsTarget({
+                memberId: panelMember.id,
+                memberName: panelMember.name,
+              })
+          : undefined
+      }
       className={MEMBER_PORTAL_CARD_CLASS}
     />
   ) : rankingBundle ? (
@@ -2784,6 +2817,29 @@ export function MemberRunningLeagueRankings({
         readOnly={readOnly}
         onSaved={handleMileageSaved}
       />
+
+      {staffAttendanceTarget ? (
+        <StaffMemberDayAttendanceDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setStaffAttendanceTarget(null)
+          }}
+          memberId={staffAttendanceTarget.memberId}
+          memberName={staffAttendanceTarget.memberName}
+          date={staffAttendanceTarget.date}
+        />
+      ) : null}
+
+      {staffRecordsTarget ? (
+        <StaffMemberRecordsDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setStaffRecordsTarget(null)
+          }}
+          memberId={staffRecordsTarget.memberId}
+          memberName={staffRecordsTarget.memberName}
+        />
+      ) : null}
     </section>
   )
 }

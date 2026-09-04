@@ -741,6 +741,8 @@ interface MemberRankingChartsProps {
   beatRivalMemberId?: string | null
   /** 선택 시 해당 회원 라인만 표시 (색상은 전체 회원 팔레트 유지) */
   focusMemberId?: string | null
+  /** 관리자·강사 — 포커스 회원 그래프 날짜 클릭 */
+  onFocusMemberDateClick?: (date: string) => void
 }
 
 export function MemberRankingCharts({
@@ -765,6 +767,7 @@ export function MemberRankingCharts({
   onActiveTabChange,
   beatRivalMemberId = null,
   focusMemberId = null,
+  onFocusMemberDateClick,
 }: MemberRankingChartsProps) {
   const [internalTab, setInternalTab] = useState<GraphChartTab>(() =>
     graphChartTabForRankingView(mode),
@@ -911,6 +914,9 @@ export function MemberRankingCharts({
     )
 
   const focusedMileageTitle = focusMemberId ? '누적 마일리지' : undefined
+  const staffDateHint = onFocusMemberDateClick
+    ? '날짜를 누르면 출석을 처리·취소할 수 있습니다.'
+    : undefined
   const mileagePanel =
     mileageComparisonChart && mileageComparisonChart.rows.length > 0 ? (
       <MileageAggregateTrendChart
@@ -920,6 +926,8 @@ export function MemberRankingCharts({
         compact={compact}
         focusMemberId={focusMemberId}
         title={focusedMileageTitle}
+        onDateClick={onFocusMemberDateClick}
+        footerHint={staffDateHint}
       />
     ) : mileageData.length === 0 ? (
       <GraphEmptyState
@@ -949,6 +957,8 @@ export function MemberRankingCharts({
         beatRivalMemberId={focusMemberId ? null : beatRivalMemberId}
         focusMemberId={focusMemberId}
         title="이겨라 · 마일리지"
+        onDateClick={onFocusMemberDateClick}
+        footerHint={staffDateHint}
       />
     ) : (
       <GraphEmptyState
@@ -967,7 +977,11 @@ export function MemberRankingCharts({
         focusMemberId={focusMemberId}
         title={focusMemberId ? '출석 횟수' : '전체 회원 출석 횟수'}
         valueUnit="회"
-        footerHint={`${ATTENDANCE_KING_DAY_RULE_LABEL} · 위로 갈수록 출석이 늘어납니다.`}
+        onDateClick={onFocusMemberDateClick}
+        footerHint={
+          staffDateHint ??
+          `${ATTENDANCE_KING_DAY_RULE_LABEL} · 위로 갈수록 출석이 늘어납니다.`
+        }
       />
     ) : attendanceData.length > 0 ? (
       <AttendanceRecordTrendChart
@@ -1467,6 +1481,7 @@ function MileageAggregateTrendChart({
   title = '전체 회원 누적 마일리지',
   valueUnit = 'km',
   footerHint,
+  onDateClick,
 }: {
   chart: LeagueMileageComparisonChart
   chartShellClass: string
@@ -1477,6 +1492,7 @@ function MileageAggregateTrendChart({
   title?: string
   valueUnit?: 'km' | '회'
   footerHint?: string
+  onDateClick?: (date: string) => void
 }) {
   const memberColorMap = useMemo(
     () =>
@@ -1514,13 +1530,26 @@ function MileageAggregateTrendChart({
     tooltipWrapperStyle,
   } = useComparisonChartTooltip()
 
+  const dateClickEnabled = Boolean(onDateClick && focusMemberId)
+
   return (
-    <div className={chartShellClass}>
+    <div className={cn(chartShellClass, dateClickEnabled && 'cursor-pointer')}>
       {!compact ? (
         <p className="mb-2 text-xs font-medium text-lime-300">{title}</p>
       ) : null}
       <ChartContainer config={mileageChartConfig} className={chartAxisClass}>
-        <LineChart data={chart.rows} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+        <LineChart
+          data={chart.rows}
+          margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
+          onClick={(state) => {
+            if (!dateClickEnabled || !onDateClick) return
+            const payload = state?.activePayload?.[0]?.payload as
+              | { date?: string }
+              | undefined
+            const date = payload?.date?.trim()
+            if (date) onDateClick(date)
+          }}
+        >
           <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-lime-500/10" />
           <XAxis
             dataKey="label"

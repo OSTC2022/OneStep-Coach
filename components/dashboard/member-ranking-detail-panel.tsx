@@ -57,6 +57,8 @@ interface MemberRankingDetailPanelProps {
   graphChartTab?: GraphChartTab
   onGraphChartTabChange?: (tab: GraphChartTab) => void
   beatRivalMemberId?: string | null
+  onFocusMemberDateClick?: (date: string) => void
+  onManageRecords?: () => void
 }
 
 function MemberGraphSummaryHeader({
@@ -124,6 +126,8 @@ export function MemberRankingDetailPanel({
   graphChartTab,
   onGraphChartTabChange,
   beatRivalMemberId = null,
+  onFocusMemberDateClick,
+  onManageRecords,
 }: MemberRankingDetailPanelProps) {
   const isMobile = variant === 'mobile'
   const isMe = highlightMemberId != null && memberId === highlightMemberId
@@ -328,6 +332,27 @@ export function MemberRankingDetailPanel({
           <MemberRankAspirationPanel insight={aspirationInsight} compact />
         ) : null}
 
+        {onFocusMemberDateClick || onManageRecords ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {onFocusMemberDateClick ? (
+              <p className="text-[11px] text-lime-200/80">
+                그래프 날짜를 누르면 출석을 처리하거나 취소할 수 있습니다.
+              </p>
+            ) : null}
+            {onManageRecords ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="ml-auto h-8 border-lime-500/40 bg-zinc-950/50 text-lime-100 hover:bg-lime-500/10"
+                onClick={onManageRecords}
+              >
+                기록 관리
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         <MemberRankingCharts
           key={`${memberId}-${rankingView}-${distance}`}
           points={historyPoints}
@@ -348,6 +373,7 @@ export function MemberRankingDetailPanel({
           onActiveTabChange={onGraphChartTabChange}
           beatRivalMemberId={beatRivalMemberId}
           focusMemberId={memberId}
+          onFocusMemberDateClick={onFocusMemberDateClick}
           className="animate-in fade-in-0 duration-300"
         />
       </div>

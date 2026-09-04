@@ -42,6 +42,7 @@ export default async function StaffRunningPortalPage() {
       runningLeagueHref="/dashboard/running-portal/league"
       showRunningPortal
       canManageRunningPortal={canManageAdultRunningPortal(profile)}
+      canStaffManageAttendance
       showMarathonManageLink={profile.role === 'admin'}
       canPinMarathonEvents={profile.role === 'admin' || profile.role === 'instructor'}
     />

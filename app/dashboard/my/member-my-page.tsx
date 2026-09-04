@@ -54,6 +54,8 @@ interface MemberMyPageProps {
   showRunningPortal?: boolean
   /** 관리자·승인된 포털 관리 강사만 true — DOM에 관리 링크 노출 */
   canManageRunningPortal?: boolean
+  /** 관리자·강사 — 그래프 날짜 클릭으로 회원 출석 수정 */
+  canStaffManageAttendance?: boolean
   /** 마라톤 일정 관리 링크 (관리자) */
   showMarathonManageLink?: boolean
   /** 관리자·강사 — 대회 상단 고정 */
@@ -143,6 +145,7 @@ export function MemberMyPage({
   runningLeagueHref = '/dashboard/my/running-league',
   showRunningPortal = false,
   canManageRunningPortal = false,
+  canStaffManageAttendance = false,
   showMarathonManageLink = false,
   canPinMarathonEvents = false,
 }: MemberMyPageProps) {
@@ -253,6 +256,7 @@ export function MemberMyPage({
               portalRankingCaptionStyle={portalDisplay?.rankingCaptionStyle}
               showBrandHeader={false}
               showPortalShell={false}
+              canStaffManageAttendance={canStaffManageAttendance}
             />
           ) : null}
         </section>

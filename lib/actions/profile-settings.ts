@@ -299,14 +299,18 @@ export async function updateMyProfile(input: {
   return { success: true as const }
 }
 
-/** 랭킹 상태메시지만 빠르게 수정 (성인회원 육상) */
+/** 랭킹 상태메시지만 빠르게 수정 (성인회원·관리자·강사 러닝 포털) */
 export async function updateMyRankingStatusMessage(input: {
   message: string
   color?: string
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireAuth()
-  if (user.role !== 'adult_member') {
-    return { ok: false, error: '성인회원만 상태메시지를 설정할 수 있습니다.' }
+  if (
+    user.role !== 'adult_member' &&
+    user.role !== 'admin' &&
+    user.role !== 'instructor'
+  ) {
+    return { ok: false, error: '상태메시지를 설정할 권한이 없습니다.' }
   }
 
   if (input.message.trim().length > RANKING_STATUS_MESSAGE_MAX_LENGTH) {
@@ -319,7 +323,24 @@ export async function updateMyRankingStatusMessage(input: {
   const message = normalizeRankingStatusMessage(input.message)
   const color = normalizeRankingStatusMessageColor(input.color)
 
-  const supabase = await createClient()
+  const { getRunningPortalMemberForCurrentUser } = await import(
+    '@/lib/actions/staff-running-portal-member'
+  )
+  const portalMember = await getRunningPortalMemberForCurrentUser()
+  if (!portalMember) {
+    return { ok: false, error: '연결된 회원 프로필을 찾을 수 없습니다.' }
+  }
+
+  let supabase: Awaited<ReturnType<typeof createClient>>
+  try {
+    supabase =
+      user.role === 'admin' || user.role === 'instructor'
+        ? createServiceRoleClient()
+        : await createClient()
+  } catch {
+    supabase = await createClient()
+  }
+
   const memberPatch: Record<string, string | null> = {
     ranking_status_message: message,
     ranking_status_message_color: color,
@@ -328,7 +349,7 @@ export async function updateMyRankingStatusMessage(input: {
   let memberUpdate = await supabase
     .from('members')
     .update(memberPatch)
-    .or(`auth_user_id.eq.${user.id},user_id.eq.${user.id}`)
+    .eq('id', portalMember.id)
 
   if (
     memberUpdate.error &&
@@ -338,7 +359,7 @@ export async function updateMyRankingStatusMessage(input: {
     memberUpdate = await supabase
       .from('members')
       .update({ ranking_status_message: message })
-      .or(`auth_user_id.eq.${user.id},user_id.eq.${user.id}`)
+      .eq('id', portalMember.id)
   }
 
   if (memberUpdate.error) {
@@ -348,6 +369,7 @@ export async function updateMyRankingStatusMessage(input: {
   revalidatePath('/dashboard/my', 'page')
   revalidatePath('/dashboard/my/running-league', 'page')
   revalidatePath('/dashboard/running-portal', 'page')
+  revalidatePath('/dashboard/running-portal/league', 'page')
   revalidatePath('/dashboard/my/profile', 'page')
   revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG, 'max')
   return { ok: true }

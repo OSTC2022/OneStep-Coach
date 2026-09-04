@@ -1,6 +1,6 @@
 'use server'
 
-import { requireRole } from '@/lib/actions/auth'
+import { requireRole, getCurrentUser } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { OFFLINE_CLASS_ATTENDANCE_NOTE } from '@/lib/running-league/attendance-king'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -412,7 +412,7 @@ async function resolvePortalRankingLeague(
 }
 
 /** 포털 기록 저장 시 리그 참가 행을 자동 확보합니다 (리그 참가 등록과 무관). */
-async function ensurePortalParticipantForMember(
+export async function ensurePortalParticipantForMember(
   memberId: string,
 ): Promise<{ ok: true; participant: RunningLeagueParticipant } | { ok: false; error: string }> {
   const supabase = await leagueClient()
@@ -1770,6 +1770,16 @@ async function syncParticipantMileageFromLogs(
   return mileageKm
 }
 
+/** 관리자·강사 출석 수정 등 — 참가자 마일리지 재합산 */
+export async function syncPortalParticipantMileage(
+  participantId: string,
+): Promise<number> {
+  const supabase = await leagueClient()
+  const mileageKm = await syncParticipantMileageFromLogs(supabase, participantId)
+  revalidateMemberMileagePaths()
+  return mileageKm
+}
+
 /** 신규 마일리지 로그 저장 — 월 합산 SELECT 없이 증분 반영 */
 async function addParticipantMileageDelta(
   supabase: Awaited<ReturnType<typeof leagueClient>>,
@@ -1998,6 +2008,26 @@ export async function getMemberRunningLeagueHome(
   }
 }
 
+async function resolveActingMemberId(
+  forMemberId?: string | null,
+): Promise<{ ok: true; memberId: string } | { ok: false; error: string }> {
+  const targetId = forMemberId?.trim() || null
+  if (targetId) {
+    const user = await getCurrentUser()
+    if (!user || (user.role !== 'admin' && user.role !== 'instructor')) {
+      return {
+        ok: false,
+        error: '관리자 또는 강사만 다른 회원 기록을 수정할 수 있습니다.',
+      }
+    }
+    return { ok: true, memberId: targetId }
+  }
+
+  const member = await getRunningPortalMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  return { ok: true, memberId: member.id }
+}
+
 export async function saveMemberMileageLog(input: {
   distance_km: number
   logged_at?: string
@@ -2015,14 +2045,16 @@ export async function saveMemberMileageLog(input: {
   extraction_raw_json?: Record<string, unknown> | null
   verification_status?: 'pending' | 'confirmed' | 'manual' | 'rejected'
   skip_duplicate_check?: boolean
+  /** 관리자·강사 — 다른 회원 기록 대리 저장 */
+  forMemberId?: string | null
 }): Promise<
   | { ok: true; mileageKm: number }
   | { ok: false; error: string; duplicate?: boolean }
 > {
-  const member = await getRunningPortalMemberForCurrentUser()
-  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  const resolved = await resolveActingMemberId(input.forMemberId)
+  if (!resolved.ok) return resolved
 
-  const ensured = await ensurePortalParticipantForMember(member.id)
+  const ensured = await ensurePortalParticipantForMember(resolved.memberId)
   if (!ensured.ok) return ensured
 
   const distanceKm = Number(input.distance_km)
@@ -2183,10 +2215,10 @@ export async function updateMemberMileageLog(
   | { ok: true; mileageKm: number }
   | { ok: false; error: string; duplicate?: boolean }
 > {
-  const member = await getRunningPortalMemberForCurrentUser()
-  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  const resolved = await resolveActingMemberId(input.forMemberId)
+  if (!resolved.ok) return resolved
 
-  const access = await assertMemberOwnsMileageLog(logId, member.id)
+  const access = await assertMemberOwnsMileageLog(logId, resolved.memberId)
   if (!access.ok) return access
 
   const distanceKm = Number(input.distance_km)
@@ -2201,7 +2233,7 @@ export async function updateMemberMileageLog(
     let duplicateQuery = supabase
       .from('running_league_mileage_logs')
       .select('id')
-      .eq('member_id', member.id)
+      .eq('member_id', resolved.memberId)
       .eq('league_id', access.log.league_id)
       .eq('logged_at', loggedAt)
       .eq('distance_km', Math.round(distanceKm * 100) / 100)
@@ -2259,11 +2291,12 @@ export async function updateMemberMileageLog(
 
 export async function deleteMemberMileageLog(
   logId: string,
+  options?: { forMemberId?: string | null },
 ): Promise<{ ok: true; mileageKm: number } | { ok: false; error: string }> {
-  const member = await getRunningPortalMemberForCurrentUser()
-  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  const resolved = await resolveActingMemberId(options?.forMemberId)
+  if (!resolved.ok) return resolved
 
-  const access = await assertMemberOwnsMileageLog(logId, member.id)
+  const access = await assertMemberOwnsMileageLog(logId, resolved.memberId)
   if (!access.ok) return access
 
   const supabase = await leagueClient()
@@ -2670,6 +2703,54 @@ export async function fetchMyPortalPbRecordListAll(): Promise<
   return { ok: true, items }
 }
 
+/** 관리자·강사 — 특정 회원 마일리지·PB 기록 목록 */
+export async function fetchStaffMemberRecords(memberId: string): Promise<
+  | {
+      ok: true
+      memberName: string
+      mileageLogs: RunningLeagueMileageLog[]
+      pbRecords: PortalPbRecordListItem[]
+    }
+  | { ok: false; error: string }
+> {
+  const resolved = await resolveActingMemberId(memberId)
+  if (!resolved.ok) return resolved
+
+  const ensured = await ensurePortalParticipantForMember(resolved.memberId)
+  if (!ensured.ok) return ensured
+
+  const supabase = await leagueClient()
+  const center = await getCenterSettingsCached()
+  const { start, end } = portalRankingDateRange(
+    center.adult_running_portal_ranking_cycle_start_date,
+  )
+
+  const [mileageResult, pbItems, memberResult] = await Promise.all([
+    supabase
+      .from('running_league_mileage_logs')
+      .select('*')
+      .eq('member_id', resolved.memberId)
+      .gte('logged_at', start)
+      .lte('logged_at', end)
+      .order('logged_at', { ascending: false }),
+    buildPortalPbRecordListAll(supabase, ensured.participant),
+    supabase.from('members').select('name').eq('id', resolved.memberId).maybeSingle(),
+  ])
+
+  if (mileageResult.error) {
+    return { ok: false, error: mileageResult.error.message }
+  }
+
+  return {
+    ok: true,
+    memberName: memberResult.data?.name?.trim() || '회원',
+    mileageLogs: (mileageResult.data ?? []).map((row) =>
+      mapMileageLog(row as Record<string, unknown>),
+    ),
+    pbRecords: pbItems,
+  }
+}
+
 /** PB 수정 창 열 때 최신 등록·이력 기록 조회 */
 export async function fetchMyPortalPbRecords(): Promise<
   { ok: true; pbRecords: RunningLeagueRecord[] } | { ok: false; error: string }
@@ -2691,6 +2772,7 @@ export async function saveMemberRunningPb(input: {
   measured_at?: string
   editing_record_id?: string
   editing_is_current?: boolean
+  forMemberId?: string | null
 }): Promise<
   | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
   | { ok: false; error: string }
@@ -2702,6 +2784,7 @@ export async function saveMemberRunningPb(input: {
       time_text: input.time_text,
       measured_at: input.measured_at,
       is_current: input.editing_is_current === true,
+      forMemberId: input.forMemberId,
     })
   }
 
@@ -2712,14 +2795,15 @@ async function insertMemberRunningPbRecord(input: {
   distance_event: RunningLeagueDistanceEvent
   time_text: string
   measured_at?: string
+  forMemberId?: string | null
 }): Promise<
   | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
   | { ok: false; error: string }
 > {
-  const member = await getRunningPortalMemberForCurrentUser()
-  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  const resolved = await resolveActingMemberId(input.forMemberId)
+  if (!resolved.ok) return resolved
 
-  const ensured = await ensurePortalParticipantForMember(member.id)
+  const ensured = await ensurePortalParticipantForMember(resolved.memberId)
   if (!ensured.ok) return ensured
 
   const timeText = input.time_text.trim()
@@ -2906,14 +2990,15 @@ export async function updateMemberRunningPbRecord(input: {
   time_text: string
   measured_at?: string
   is_current?: boolean
+  forMemberId?: string | null
 }): Promise<
   | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
   | { ok: false; error: string }
 > {
-  const member = await getRunningPortalMemberForCurrentUser()
-  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  const resolved = await resolveActingMemberId(input.forMemberId)
+  if (!resolved.ok) return resolved
 
-  const ensured = await ensurePortalParticipantForMember(member.id)
+  const ensured = await ensurePortalParticipantForMember(resolved.memberId)
   if (!ensured.ok) return ensured
 
   const timeText = input.time_text.trim()
@@ -3065,6 +3150,7 @@ export async function updateMemberRunningPbRecord(input: {
 
 export async function deleteMemberRunningPbRecord(input: {
   record_id: string
+  forMemberId?: string | null
 }): Promise<
   | {
       ok: true
@@ -3073,10 +3159,10 @@ export async function deleteMemberRunningPbRecord(input: {
     }
   | { ok: false; error: string }
 > {
-  const member = await getRunningPortalMemberForCurrentUser()
-  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+  const resolved = await resolveActingMemberId(input.forMemberId)
+  if (!resolved.ok) return resolved
 
-  const ensured = await ensurePortalParticipantForMember(member.id)
+  const ensured = await ensurePortalParticipantForMember(resolved.memberId)
   if (!ensured.ok) return ensured
 
   const supabase = await leagueClient()
