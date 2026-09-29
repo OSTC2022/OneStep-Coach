@@ -16,6 +16,8 @@ import {
 import { cn } from '@/lib/utils'
 
 type PortalRouletteGameProps = {
+  /** yyyy-MM — 조회·집계 월과 동일한 경품 저장 키 */
+  monthKey: string
   attendanceSlots: PortalRouletteSlot[]
   mileageSlots: PortalRouletteSlot[]
   beatRivalSlots: PortalRouletteSlot[]
@@ -43,6 +45,7 @@ function modeHint(mode: PortalRouletteMode): string {
 }
 
 export function PortalRouletteGame({
+  monthKey,
   attendanceSlots,
   mileageSlots,
   beatRivalSlots,
@@ -87,7 +90,7 @@ export function PortalRouletteGame({
         {modeHint(mode)}
       </p>
 
-      <PortalRoulettePrizePanel mode={mode} />
+      <PortalRoulettePrizePanel mode={mode} monthKey={monthKey} />
 
       <PortalRouletteWheel key={mode} slots={slots} diameter={300} />
       <PortalRouletteParticipantList

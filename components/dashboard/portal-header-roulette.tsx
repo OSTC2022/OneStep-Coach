@@ -222,7 +222,8 @@ export function PortalHeaderRoulette({
           <div className="px-5 py-5">
             {open ? (
               <PortalRouletteGame
-                key="portal-roulette-game"
+                key={`portal-roulette-game-${period.monthKey}`}
+                monthKey={period.monthKey}
                 attendanceSlots={attendanceSlots}
                 mileageSlots={mileageSlots}
                 beatRivalSlots={beatRivalSlots}

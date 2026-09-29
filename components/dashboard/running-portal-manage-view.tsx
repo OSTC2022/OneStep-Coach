@@ -215,6 +215,7 @@ export function RunningPortalManageView({ data }: RunningPortalManageViewProps) 
               <h2 className="text-sm font-semibold">행운의 룰렛</h2>
               <PortalRouletteGame
                 key={`roulette-${data.monthKey}`}
+                monthKey={data.monthKey}
                 attendanceSlots={attendanceSlots}
                 mileageSlots={mileageSlots}
                 beatRivalSlots={beatRivalSlots}
