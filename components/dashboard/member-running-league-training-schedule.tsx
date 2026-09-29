@@ -8,15 +8,40 @@ import {
   Loader2,
   MapPin,
   Users,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { toggleCenterRunningTrainingScheduleSignup } from '@/lib/actions/center-running-training-schedule'
-import type { RunningLeagueTrainingScheduleDayView } from '@/lib/running-league/training-schedule'
+import {
+  listMembersForTrainingScheduleStaffSignup,
+  staffAddCenterRunningTrainingScheduleSignup,
+  staffRemoveCenterRunningTrainingScheduleSignup,
+  toggleCenterRunningTrainingScheduleSignup,
+} from '@/lib/actions/center-running-training-schedule'
+import type { MemberPickerOption } from '@/lib/actions/members'
+import type {
+  RunningLeagueTrainingScheduleDayView,
+  RunningLeagueTrainingScheduleSignup,
+} from '@/lib/running-league/training-schedule'
 import {
   buildFullWeekScheduleDays,
   isVotableTrainingScheduleDay,
 } from '@/lib/running-league/training-schedule'
+import {
+  isTrainingScheduleSignupClosed,
+  trainingScheduleSignupClosedMessage,
+} from '@/lib/running-league/training-schedule-signup-deadline'
+import { parseTrainingScheduleDayId } from '@/lib/training-schedule-audience'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Dialog,
   DialogContent,
@@ -24,6 +49,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   MEMBER_PORTAL_CARD_CLASS,
@@ -36,6 +62,8 @@ type MemberRunningLeagueTrainingScheduleProps = {
   tableReady: boolean
   canParticipate: boolean
   readOnly?: boolean
+  /** 마감 후 관리자·강사 대리 참여 (회원 선택) */
+  canStaffProxySignup?: boolean
   embedded?: boolean
   /** 카드 헤더 없이 본문만 (툴바 팝업용) */
   contentOnly?: boolean
@@ -61,12 +89,20 @@ function buildSignupDraft(
   return next
 }
 
+function daySignupClosed(day: RunningLeagueTrainingScheduleDayView): boolean {
+  return isTrainingScheduleSignupClosed({
+    weekday: day.weekday,
+    scheduleDate: day.schedule_date,
+  })
+}
+
 export function MemberRunningLeagueTrainingSchedule({
   days,
   previousWeekDays = [],
   tableReady,
   canParticipate,
   readOnly = false,
+  canStaffProxySignup = false,
   embedded = false,
   contentOnly = false,
   title = '훈련 일정',
@@ -82,6 +118,14 @@ export function MemberRunningLeagueTrainingSchedule({
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
     buildSignupDraft([...days, ...previousWeekDays]),
   )
+  const [proxyDay, setProxyDay] = useState<RunningLeagueTrainingScheduleDayView | null>(null)
+  const [proxyMembers, setProxyMembers] = useState<MemberPickerOption[] | null>(null)
+  const [proxyQuery, setProxyQuery] = useState('')
+  const [proxyLoading, setProxyLoading] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<{
+    day: RunningLeagueTrainingScheduleDayView
+    signup: RunningLeagueTrainingScheduleSignup
+  } | null>(null)
 
   useEffect(() => {
     setScheduleDays(days)
@@ -118,49 +162,102 @@ export function MemberRunningLeagueTrainingSchedule({
   )
   const signedUpCount = visibleDays.filter((day) => signupDraft[day.id] ?? day.is_signed_up).length
 
-  function renderWeekRows(
-    weekDays: RunningLeagueTrainingScheduleDayView[],
-    options: { emptyMessage: string; participate: boolean },
+  const filteredProxyMembers = useMemo(() => {
+    if (!proxyMembers) return []
+    const q = proxyQuery.trim().toLowerCase()
+    if (!q) return proxyMembers
+    return proxyMembers.filter((member) => {
+      const name = member.name.toLowerCase()
+      const sport = (member.sport ?? '').toLowerCase()
+      return name.includes(q) || sport.includes(q)
+    })
+  }, [proxyMembers, proxyQuery])
+
+  function patchDaySignup(
+    dayId: string,
+    patch: {
+      signup_count?: number
+      signups?: RunningLeagueTrainingScheduleDayView['signups']
+      is_signed_up?: boolean
+    },
   ) {
-    const hasSchedule = weekDays.some(
-      (day) =>
-        isVotableDay(day) ||
-        day.is_hidden ||
-        Boolean(day.schedule_date) ||
-        Boolean(day.training_summary.trim()),
-    )
-    if (!hasSchedule) {
-      return (
-        <p className="px-2 py-6 text-center text-sm text-zinc-500">{options.emptyMessage}</p>
-      )
-    }
-    return weekDays.map((day) =>
-      isVotableDay(day) ? (
-        <ScheduleDayRow
-          key={day.id}
-          day={day}
-          pending={pending && pendingDayId === day.id}
-          readOnly={readOnly || !options.participate}
-          canParticipate={canParticipate && options.participate}
-          isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
-          onOpenParticipants={() => openParticipants(day)}
-          onToggleSignup={() => toggleSignup(day)}
-        />
-      ) : (
-        <ScheduleRestDayRow key={day.id} day={day} />
-      ),
-    )
+    const apply = (list: RunningLeagueTrainingScheduleDayView[]) =>
+      list.map((day) => (day.id === dayId ? { ...day, ...patch } : day))
+
+    setScheduleDays((current) => apply(current))
+    setPastScheduleDays((current) => apply(current))
+    setActiveDay((current) => (current?.id === dayId ? { ...current, ...patch } : current))
+    setProxyDay((current) => (current?.id === dayId ? { ...current, ...patch } : current))
   }
 
-  function toggleSignup(day: RunningLeagueTrainingScheduleDayView) {
+  function openStaffProxyPicker(day: RunningLeagueTrainingScheduleDayView) {
+    setProxyDay(day)
+    setProxyQuery('')
+    setProxyLoading(true)
+    setProxyMembers(null)
+
+    const audience =
+      parseTrainingScheduleDayId(day.id)?.audience ?? 'adult_running'
+
+    void listMembersForTrainingScheduleStaffSignup(audience)
+      .then((rows) => {
+        setProxyMembers(rows)
+      })
+      .catch(() => {
+        toast.error('회원 목록을 불러오지 못했습니다.')
+        setProxyDay(null)
+      })
+      .finally(() => setProxyLoading(false))
+  }
+
+  function handleParticipate(day: RunningLeagueTrainingScheduleDayView) {
+    const closed = daySignupClosed(day)
+    const isSignedUp = signupDraft[day.id] ?? day.is_signed_up
+    if (isSignedUp) return
+
+    // 마감 후: 관리자·강사만 회원 선택 참여
+    if (closed) {
+      if (canStaffProxySignup) {
+        openStaffProxyPicker(day)
+        return
+      }
+      toast.error(trainingScheduleSignupClosedMessage(day.weekday))
+      return
+    }
+
+    // 마감 전: 일반 회원 본인 신청
     if (readOnly || !canParticipate) {
       toast.error('로그인 후 참여 신청할 수 있습니다.')
       return
     }
 
-    const previous = signupDraft[day.id] ?? day.is_signed_up
-    const optimistic = !previous
+    runSelfToggle(day, true)
+  }
 
+  function handleCancel(day: RunningLeagueTrainingScheduleDayView) {
+    const isSignedUp = signupDraft[day.id] ?? day.is_signed_up
+    if (!isSignedUp) {
+      toast.error('참여 신청된 일정이 아닙니다.')
+      return
+    }
+
+    // 취소는 마감과 무관하게 본인 참여만 해제
+    if (readOnly || !canParticipate) {
+      toast.error('로그인 후 참여를 취소할 수 있습니다.')
+      return
+    }
+
+    runSelfToggle(day, false)
+  }
+
+  function runSelfToggle(
+    day: RunningLeagueTrainingScheduleDayView,
+    expectSignup: boolean,
+  ) {
+    const previous = signupDraft[day.id] ?? day.is_signed_up
+    if (previous === expectSignup) return
+
+    const optimistic = expectSignup
     setSignupDraft((current) => ({
       ...current,
       [day.id]: optimistic,
@@ -184,8 +281,119 @@ export function MemberRunningLeagueTrainingSchedule({
         ...current,
         [day.id]: result.signedUp,
       }))
+      patchDaySignup(day.id, { signup_count: result.signupCount })
       toast.success(result.signedUp ? '참여 신청했습니다.' : '참여를 취소했습니다.')
     })
+  }
+
+  function handleToggleSignup(day: RunningLeagueTrainingScheduleDayView) {
+    const isSignedUp = signupDraft[day.id] ?? day.is_signed_up
+    if (isSignedUp) {
+      handleCancel(day)
+      return
+    }
+    handleParticipate(day)
+  }
+
+  function confirmStaffRemoveSignup() {
+    if (!removeTarget) return
+    const { day, signup } = removeTarget
+    setPendingDayId(day.id)
+
+    startTransition(async () => {
+      const result = await staffRemoveCenterRunningTrainingScheduleSignup(
+        day.id,
+        signup.member_id,
+      )
+      setPendingDayId(null)
+
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+
+      const nextSignups = day.signups.filter(
+        (item) => item.member_id !== signup.member_id,
+      )
+      patchDaySignup(day.id, {
+        signup_count: result.signupCount,
+        signups: nextSignups,
+      })
+
+      toast.success(`${signup.member_name} 님 참여를 취소했습니다.`)
+      setRemoveTarget(null)
+    })
+  }
+
+  function pickProxyMember(member: MemberPickerOption) {
+    if (!proxyDay) return
+    const day = proxyDay
+    setPendingDayId(day.id)
+
+    startTransition(async () => {
+      const result = await staffAddCenterRunningTrainingScheduleSignup(day.id, member.id)
+      setPendingDayId(null)
+
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+
+      const already = day.signups.some((signup) => signup.member_id === member.id)
+      const nextSignups = already
+        ? day.signups
+        : [...day.signups, result.signup]
+
+      patchDaySignup(day.id, {
+        signup_count: result.signupCount,
+        signups: nextSignups,
+      })
+
+      toast.success(
+        result.alreadySignedUp
+          ? `${member.name} 님은 이미 참여 중입니다.`
+          : `${member.name} 님을 참여 처리했습니다.`,
+      )
+      setProxyDay(null)
+    })
+  }
+
+  function renderWeekRows(
+    weekDays: RunningLeagueTrainingScheduleDayView[],
+    options: { emptyMessage: string; participate: boolean },
+  ) {
+    const hasSchedule = weekDays.some(
+      (day) =>
+        isVotableDay(day) ||
+        day.is_hidden ||
+        Boolean(day.schedule_date) ||
+        Boolean(day.training_summary.trim()),
+    )
+    if (!hasSchedule) {
+      return (
+        <p className="px-2 py-6 text-center text-sm text-zinc-500">{options.emptyMessage}</p>
+      )
+    }
+    return weekDays.map((day) =>
+      isVotableDay(day) ? (
+        <ScheduleDayRow
+          key={day.id}
+          day={day}
+          pending={pending && pendingDayId === day.id}
+          showActions={
+            options.participate && (!readOnly || canStaffProxySignup)
+          }
+          canSelfSignup={canParticipate && options.participate}
+          canStaffProxySignup={canStaffProxySignup && options.participate}
+          isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
+          signupClosed={daySignupClosed(day)}
+          onOpenParticipants={() => openParticipants(day)}
+          onToggleSignup={() => handleToggleSignup(day)}
+        />
+      ) : (
+        <ScheduleRestDayRow key={day.id} day={day} />
+      ),
+    )
   }
 
   function openParticipants(day: RunningLeagueTrainingScheduleDayView) {
@@ -247,35 +455,162 @@ export function MemberRunningLeagueTrainingSchedule({
     </div>
   )
 
+  const dialogs = (
+    <>
+      <ParticipantsDialog
+        day={activeDay}
+        isSignedUp={
+          activeDay ? (signupDraft[activeDay.id] ?? activeDay.is_signed_up) : false
+        }
+        onOpenChange={(open) => {
+          if (!open) setActiveDay(null)
+        }}
+        onToggleSignup={() => {
+          if (activeDay) handleToggleSignup(activeDay)
+        }}
+        pending={pending && pendingDayId === activeDay?.id}
+        showActions={!readOnly || canStaffProxySignup}
+        canSelfSignup={canParticipate}
+        canStaffProxySignup={canStaffProxySignup}
+        canStaffRemoveSignup={canStaffProxySignup}
+        signupClosed={activeDay ? daySignupClosed(activeDay) : false}
+        onRequestRemoveSignup={(signup) => {
+          if (!activeDay) return
+          setRemoveTarget({ day: activeDay, signup })
+        }}
+      />
+
+      <AlertDialog
+        open={removeTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null)
+        }}
+      >
+        <AlertDialogContent className="border-lime-500/25 bg-zinc-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lime-100">정말 지우겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400">
+              {removeTarget
+                ? `${removeTarget.signup.member_name} 님의 참여를 취소합니다.`
+                : '선택한 회원의 참여를 취소합니다.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={pending}
+              className="border-zinc-700 bg-zinc-900 text-zinc-200"
+            >
+              아니요
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pending}
+              className="bg-lime-500 text-black hover:bg-lime-400"
+              onClick={(event) => {
+                event.preventDefault()
+                confirmStaffRemoveSignup()
+              }}
+            >
+              {pending ? '처리 중…' : '예'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={proxyDay != null}
+        onOpenChange={(open) => {
+          if (!open) setProxyDay(null)
+        }}
+      >
+        <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950">
+          {proxyDay ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-lime-100">회원 선택 · 참여 등록</DialogTitle>
+                <DialogDescription className="text-left text-zinc-400">
+                  {proxyDay.weekday_label}요일
+                  {proxyDay.schedule_date_label
+                    ? ` ${proxyDay.schedule_date_label}`
+                    : ''}{' '}
+                  · {proxyDay.training_summary}
+                </DialogDescription>
+              </DialogHeader>
+
+              <Input
+                value={proxyQuery}
+                onChange={(event) => setProxyQuery(event.target.value)}
+                placeholder="이름 검색"
+                className="border-zinc-700 bg-black/40 text-zinc-100"
+                autoFocus
+              />
+
+              <div className="max-h-64 overflow-y-auto rounded-md border border-zinc-800">
+                {proxyLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-zinc-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    불러오는 중…
+                  </div>
+                ) : filteredProxyMembers.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-zinc-500">회원이 없습니다.</p>
+                ) : (
+                  <ul className="divide-y divide-zinc-800">
+                    {filteredProxyMembers.map((member) => {
+                      const already = proxyDay.signups.some(
+                        (signup) => signup.member_id === member.id,
+                      )
+                      return (
+                        <li key={member.id}>
+                          <button
+                            type="button"
+                            disabled={pending && pendingDayId === proxyDay.id}
+                            onClick={() => pickProxyMember(member)}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-lime-500/10',
+                              already && 'bg-lime-500/5',
+                            )}
+                          >
+                            <span className="min-w-0">
+                              <span className="block font-medium text-zinc-100">
+                                {member.name}
+                              </span>
+                              {member.sport ? (
+                                <span className="block truncate text-[11px] text-zinc-500">
+                                  {member.sport}
+                                </span>
+                              ) : null}
+                            </span>
+                            {already ? (
+                              <span className="shrink-0 rounded-full border border-lime-500/40 px-2 py-0.5 text-[10px] font-medium text-lime-300">
+                                참여중
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[11px] text-zinc-500">선택</span>
+                            )}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+
   if (contentOnly) {
     return (
       <div className={cn(className)}>
         {scheduleBody}
-        <ParticipantsDialog
-          day={activeDay}
-          isSignedUp={
-            activeDay
-              ? (signupDraft[activeDay.id] ?? activeDay.is_signed_up)
-              : false
-          }
-          onOpenChange={(open) => {
-            if (!open) setActiveDay(null)
-          }}
-          onToggleSignup={() => {
-            if (activeDay) toggleSignup(activeDay)
-          }}
-          pending={pending}
-          readOnly={readOnly}
-          canParticipate={canParticipate}
-        />
+        {dialogs}
       </div>
     )
   }
 
   return (
-    <section
-      className={cn(!embedded && MEMBER_PORTAL_SHELL_CLASS, className)}
-    >
+    <section className={cn(!embedded && MEMBER_PORTAL_SHELL_CLASS, className)}>
       <div className={MEMBER_PORTAL_CARD_CLASS}>
         <button
           type="button"
@@ -300,24 +635,7 @@ export function MemberRunningLeagueTrainingSchedule({
         </button>
 
         {sectionOpen ? scheduleBody : null}
-
-        <ParticipantsDialog
-          day={activeDay}
-          isSignedUp={
-            activeDay
-              ? (signupDraft[activeDay.id] ?? activeDay.is_signed_up)
-              : false
-          }
-          onOpenChange={(open) => {
-            if (!open) setActiveDay(null)
-          }}
-          onToggleSignup={() => {
-            if (activeDay) toggleSignup(activeDay)
-          }}
-          pending={pending}
-          readOnly={readOnly}
-          canParticipate={canParticipate}
-        />
+        {dialogs}
       </div>
     </section>
   )
@@ -408,25 +726,47 @@ function ScheduleRestDayRow({ day }: { day: RunningLeagueTrainingScheduleDayView
   )
 }
 
+function toggleDisabled({
+  isSignedUp,
+  canSelfSignup,
+  canStaffProxySignup,
+  signupClosed,
+}: {
+  isSignedUp: boolean
+  canSelfSignup: boolean
+  canStaffProxySignup: boolean
+  signupClosed: boolean
+}): boolean {
+  if (isSignedUp) return !canSelfSignup
+  return !(
+    (canSelfSignup && !signupClosed) ||
+    (canStaffProxySignup && signupClosed)
+  )
+}
+
 function ScheduleDayRow({
   day,
   pending,
-  readOnly,
-  canParticipate,
+  showActions,
+  canSelfSignup,
+  canStaffProxySignup,
   isSignedUp,
+  signupClosed,
   onOpenParticipants,
   onToggleSignup,
 }: {
   day: RunningLeagueTrainingScheduleDayView
   pending: boolean
-  readOnly: boolean
-  canParticipate: boolean
+  showActions: boolean
+  canSelfSignup: boolean
+  canStaffProxySignup: boolean
   isSignedUp: boolean
+  signupClosed: boolean
   onOpenParticipants: () => void
   onToggleSignup: () => void
 }) {
   return (
-    <div className="flex w-full items-start gap-2 rounded-lg border border-lime-500/15 bg-black/35 px-2.5 py-2">
+    <div className="flex w-full items-center gap-2 rounded-lg border border-lime-500/15 bg-black/35 px-2.5 py-2">
       <button
         type="button"
         onClick={onOpenParticipants}
@@ -465,18 +805,35 @@ function ScheduleDayRow({
                 <ExternalLink className="h-3 w-3" />
               </a>
             ) : null}
-            <span className="inline-flex items-center gap-0.5 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400">
+            <span
+              className={cn(
+                'inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px]',
+                day.signup_count > 0
+                  ? 'border-lime-400/50 bg-lime-500/15 font-medium text-lime-200 shadow-[0_0_10px_rgba(163,230,53,0.25)]'
+                  : 'border-zinc-700 text-zinc-400',
+              )}
+            >
               <Users className="h-3 w-3" />
               {day.signup_count}명 참여
             </span>
+            {isSignedUp ? (
+              <span className="inline-flex items-center rounded-full border border-lime-500/35 bg-lime-500/10 px-2 py-0.5 text-[10px] font-medium text-lime-200">
+                내 참여
+              </span>
+            ) : null}
           </span>
         </span>
       </button>
-      {!readOnly ? (
+      {showActions ? (
         <ParticipationToggle
           active={isSignedUp}
           pending={pending}
-          disabled={!canParticipate}
+          disabled={toggleDisabled({
+            isSignedUp,
+            canSelfSignup,
+            canStaffProxySignup,
+            signupClosed,
+          })}
           onToggle={onToggleSignup}
         />
       ) : null}
@@ -490,16 +847,24 @@ function ParticipantsDialog({
   onOpenChange,
   onToggleSignup,
   pending,
-  readOnly,
-  canParticipate,
+  showActions,
+  canSelfSignup,
+  canStaffProxySignup,
+  canStaffRemoveSignup,
+  signupClosed,
+  onRequestRemoveSignup,
 }: {
   day: RunningLeagueTrainingScheduleDayView | null
   isSignedUp: boolean
   onOpenChange: (open: boolean) => void
   onToggleSignup: () => void
   pending: boolean
-  readOnly: boolean
-  canParticipate: boolean
+  showActions: boolean
+  canSelfSignup: boolean
+  canStaffProxySignup: boolean
+  canStaffRemoveSignup: boolean
+  signupClosed: boolean
+  onRequestRemoveSignup: (signup: RunningLeagueTrainingScheduleSignup) => void
 }) {
   return (
     <Dialog open={day != null} onOpenChange={onOpenChange}>
@@ -522,15 +887,28 @@ function ParticipantsDialog({
 
             <div className="space-y-2">
               {day.signups.length === 0 ? (
-                <p className="py-4 text-center text-sm text-zinc-500">아직 참여 신청한 회원이 없습니다.</p>
+                <p className="py-4 text-center text-sm text-zinc-500">
+                  아직 참여 신청한 회원이 없습니다.
+                </p>
               ) : (
                 <ul className="max-h-56 space-y-1 overflow-y-auto">
                   {day.signups.map((signup) => (
                     <li
                       key={`${signup.member_id}-${signup.signed_at}`}
-                      className="rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
+                      className="flex items-center gap-2 rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
                     >
-                      {signup.member_name}
+                      <span className="min-w-0 flex-1 truncate">{signup.member_name}</span>
+                      {canStaffRemoveSignup ? (
+                        <button
+                          type="button"
+                          aria-label={`${signup.member_name} 참여 취소`}
+                          disabled={pending}
+                          onClick={() => onRequestRemoveSignup(signup)}
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-zinc-700 text-zinc-400 transition-colors hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-50"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -545,11 +923,16 @@ function ParticipantsDialog({
                     </a>
                   </Button>
                 ) : null}
-                {!readOnly ? (
+                {showActions ? (
                   <ParticipationToggle
                     active={isSignedUp}
                     pending={pending}
-                    disabled={!canParticipate}
+                    disabled={toggleDisabled({
+                      isSignedUp,
+                      canSelfSignup,
+                      canStaffProxySignup,
+                      signupClosed,
+                    })}
                     onToggle={onToggleSignup}
                   />
                 ) : null}

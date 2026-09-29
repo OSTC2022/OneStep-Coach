@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { requireDashboardProfile } from '@/lib/auth/dashboard-user'
 import { CenterRunningTrainingSchedulePanel } from '@/components/settings/running-schedule/center-running-training-schedule-panel'
+import { TrainingScheduleStaffSignupPanel } from '@/components/settings/running-schedule/training-schedule-staff-signup-panel'
 
 export default async function YouthAthleticsScheduleSettingsPage() {
   const user = await requireDashboardProfile()
@@ -15,6 +16,7 @@ export default async function YouthAthleticsScheduleSettingsPage() {
         성인 러닝 스케줄과는 별도로 관리됩니다.
       </p>
       <CenterRunningTrainingSchedulePanel audience="youth_athletics" />
+      <TrainingScheduleStaffSignupPanel audience="youth_athletics" />
     </div>
   )
 }

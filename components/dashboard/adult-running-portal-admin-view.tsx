@@ -57,7 +57,7 @@ export function AdultRunningPortalAdminView({
               previousWeekDays={trainingSchedulePreviousWeekDays}
               tableReady={trainingScheduleReady}
               canParticipate={false}
-              readOnly
+              canStaffProxySignup
               embedded
               contentOnly
             />

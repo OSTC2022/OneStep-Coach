@@ -41,6 +41,8 @@ type YouthAthleticsPortalProps = {
   centerTrainingSchedule?: CenterRunningTrainingScheduleBundle | null
   pbBundle?: YouthAthleticsPbBundle | null
   adminPreview?: boolean
+  /** 관리자·강사 — 마감 후 대리 참여 */
+  canStaffProxySignup?: boolean
 }
 
 export function YouthAthleticsPortal({
@@ -48,6 +50,7 @@ export function YouthAthleticsPortal({
   centerTrainingSchedule = null,
   pbBundle = null,
   adminPreview = false,
+  canStaffProxySignup = false,
 }: YouthAthleticsPortalProps) {
   const { member, summary, sessionStatus } = data
   const instructorName = member.primary_instructor?.name ?? '자율배정'
@@ -260,7 +263,8 @@ export function YouthAthleticsPortal({
             previousWeekDays={previousWeekDays}
             tableReady={tableReady}
             canParticipate={!adminPreview}
-            readOnly={adminPreview}
+            readOnly={adminPreview && !canStaffProxySignup}
+            canStaffProxySignup={canStaffProxySignup}
             embedded
             contentOnly
             title="육상선수반 스케줄"

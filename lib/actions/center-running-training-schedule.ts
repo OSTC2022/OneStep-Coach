@@ -35,7 +35,13 @@ import {
   trainingScheduleDayId,
   type TrainingScheduleAudience,
 } from '@/lib/training-schedule-audience'
+import {
+  isTrainingScheduleSignupClosed,
+  trainingScheduleSignupClosedMessage,
+} from '@/lib/running-league/training-schedule-signup-deadline'
 import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
+import type { MemberPickerOption } from '@/lib/actions/members'
+import { getMembers } from '@/lib/actions/members'
 import { revalidatePath } from 'next/cache'
 
 const CENTER_SCHEDULE_DAY_SELECT =
@@ -706,9 +712,11 @@ export async function getCenterRunningTrainingScheduleAdminPreview(): Promise<Ce
 }
 
 /** 캘린더·수업현황 툴바 팝업용 — admin/instructor */
-export async function getCenterRunningTrainingScheduleForStaff(): Promise<CenterRunningTrainingScheduleBundle> {
+export async function getCenterRunningTrainingScheduleForStaff(
+  audience: TrainingScheduleAudience = 'adult_running',
+): Promise<CenterRunningTrainingScheduleBundle> {
   await requireRole(['admin', 'instructor'])
-  return fetchCenterRunningTrainingSchedule(null, { includeHidden: true })
+  return fetchCenterRunningTrainingSchedule(null, { includeHidden: true, audience })
 }
 
 export async function toggleCenterRunningTrainingScheduleSignup(
@@ -797,6 +805,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   }
 
   if (existing) {
+    // 참여 취소는 마감 후에도 항상 가능
     const { error: deleteError } = await supabase
       .from(tables.signupsTable)
       .delete()
@@ -825,6 +834,18 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       })
     }
   } else {
+    if (
+      isTrainingScheduleSignupClosed({
+        weekday,
+        scheduleDate,
+      })
+    ) {
+      return {
+        ok: false,
+        error: trainingScheduleSignupClosedMessage(weekday),
+      }
+    }
+
     const insertPayload: {
       weekday: number
       member_id: string
@@ -895,6 +916,360 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     signedUp: !existing,
     signupCount: count ?? 0,
   }
+}
+
+/** 마감 후 관리자·강사 대리 참여 — 선택한 회원을 해당 일정에 참여 처리 */
+export async function staffAddCenterRunningTrainingScheduleSignup(
+  scheduleDayId: string,
+  memberId: string,
+): Promise<
+  | {
+      ok: true
+      signupCount: number
+      signup: RunningLeagueTrainingScheduleSignup
+      alreadySignedUp: boolean
+    }
+  | { ok: false; error: string }
+> {
+  await requireRole(['admin', 'instructor'])
+
+  const targetMemberId = memberId.trim()
+  if (!targetMemberId) return { ok: false, error: '회원을 선택해 주세요.' }
+
+  const parsed = parseCenterDayId(scheduleDayId)
+  if (parsed == null) return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
+  const { weekday, audience } = parsed
+  const tables = trainingScheduleConfig(audience)
+
+  const supabase = await scheduleClient()
+
+  let dayResult = await supabase
+    .from(tables.daysTable)
+    .select('weekday, is_hidden, training_summary, schedule_date')
+    .eq('weekday', weekday)
+    .maybeSingle()
+
+  if (isMissingColumnError(dayResult.error)) {
+    dayResult = await supabase
+      .from(tables.daysTable)
+      .select('weekday, is_hidden, training_summary')
+      .eq('weekday', weekday)
+      .maybeSingle()
+  }
+
+  const { data: dayRow, error: dayError } = dayResult
+
+  if (isMissingTableError(dayError)) {
+    return { ok: false, error: '러닝 스케줄 기능이 준비되지 않았습니다.' }
+  }
+  if (dayError || !dayRow) {
+    return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
+  }
+
+  const liveScheduleDate = normalizeTrainingScheduleDate(
+    (dayRow as { schedule_date?: string | null }).schedule_date,
+  )
+  const scheduleDate = parsed.scheduleDate ?? liveScheduleDate
+
+  let votable =
+    isVotableCenterDay(dayRow) &&
+    (!scheduleDate || !liveScheduleDate || liveScheduleDate === scheduleDate)
+
+  if (!votable && scheduleDate) {
+    const weekStart = getMondayDateKeyForDateKey(scheduleDate)
+    const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(
+      [weekStart],
+      audience,
+    )
+    const snapshotDay = snapshots.get(weekStart)?.find((day) => day.weekday === weekday)
+    if (snapshotDay) {
+      votable = isVotableCenterDay(snapshotDay)
+    }
+  }
+
+  if (!votable) {
+    return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
+  }
+
+  const { data: memberRow, error: memberError } = await supabase
+    .from('members')
+    .select('id, name')
+    .eq('id', targetMemberId)
+    .maybeSingle()
+
+  if (memberError || !memberRow) {
+    return { ok: false, error: '회원을 찾을 수 없습니다.' }
+  }
+
+  let existingQuery = supabase
+    .from(tables.signupsTable)
+    .select('id, created_at')
+    .eq('weekday', weekday)
+    .eq('member_id', targetMemberId)
+
+  if (scheduleDate) {
+    existingQuery = existingQuery.eq('schedule_date', scheduleDate)
+  } else {
+    existingQuery = existingQuery.is('schedule_date', null)
+  }
+
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle()
+
+  if (existingError && !isMissingTableError(existingError)) {
+    console.error('staffAddCenterRunningTrainingScheduleSignup.existing', existingError)
+    return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+  }
+
+  if (!existing) {
+    const insertPayload: {
+      weekday: number
+      member_id: string
+      schedule_date?: string | null
+    } = {
+      weekday,
+      member_id: targetMemberId,
+    }
+    if (scheduleDate) {
+      insertPayload.schedule_date = scheduleDate
+    }
+
+    let insertResult = await supabase.from(tables.signupsTable).insert(insertPayload)
+
+    if (isMissingColumnError(insertResult.error, 'schedule_date')) {
+      insertResult = await supabase.from(tables.signupsTable).insert({
+        weekday,
+        member_id: targetMemberId,
+      })
+    }
+
+    if (insertResult.error) {
+      console.error('staffAddCenterRunningTrainingScheduleSignup.insert', insertResult.error)
+      return { ok: false, error: '참여 등록에 실패했습니다.' }
+    }
+  }
+
+  let countQuery = supabase
+    .from(tables.signupsTable)
+    .select('id', { count: 'exact', head: true })
+    .eq('weekday', weekday)
+
+  if (scheduleDate) {
+    countQuery = countQuery.eq('schedule_date', scheduleDate)
+  } else {
+    countQuery = countQuery.is('schedule_date', null)
+  }
+
+  const { count, error: countError } = await countQuery
+  if (countError) {
+    console.error('staffAddCenterRunningTrainingScheduleSignup.count', countError)
+  }
+
+  if (scheduleDate) {
+    const weekStart = getMondayDateKeyForDateKey(scheduleDate)
+    const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(
+      [weekStart],
+      audience,
+    )
+    const snapshotDays = snapshots.get(weekStart)
+    if (snapshotDays && snapshotDays.length > 0) {
+      void saveCenterTrainingScheduleWeekSnapshot(snapshotDays, audience)
+    }
+  }
+
+  return {
+    ok: true,
+    signupCount: count ?? 0,
+    alreadySignedUp: Boolean(existing),
+    signup: {
+      member_id: targetMemberId,
+      member_name: (memberRow.name as string)?.trim() || '회원',
+      signed_at: existing?.created_at ?? new Date().toISOString(),
+    },
+  }
+}
+
+/** 관리자·강사 — 참여 명단에서 특정 회원 참여 취소 */
+export async function staffRemoveCenterRunningTrainingScheduleSignup(
+  scheduleDayId: string,
+  memberId: string,
+): Promise<
+  | { ok: true; signupCount: number }
+  | { ok: false; error: string }
+> {
+  await requireRole(['admin', 'instructor'])
+
+  const targetMemberId = memberId.trim()
+  if (!targetMemberId) return { ok: false, error: '회원을 선택해 주세요.' }
+
+  const parsed = parseCenterDayId(scheduleDayId)
+  if (parsed == null) return { ok: false, error: '스케줄을 찾을 수 없습니다.' }
+  const { weekday, audience } = parsed
+  const tables = trainingScheduleConfig(audience)
+
+  const supabase = await scheduleClient()
+
+  let dayResult = await supabase
+    .from(tables.daysTable)
+    .select('weekday, schedule_date')
+    .eq('weekday', weekday)
+    .maybeSingle()
+
+  if (isMissingColumnError(dayResult.error)) {
+    dayResult = await supabase
+      .from(tables.daysTable)
+      .select('weekday')
+      .eq('weekday', weekday)
+      .maybeSingle()
+  }
+
+  if (isMissingTableError(dayResult.error)) {
+    return { ok: false, error: '러닝 스케줄 기능이 준비되지 않았습니다.' }
+  }
+
+  const liveScheduleDate = normalizeTrainingScheduleDate(
+    (dayResult.data as { schedule_date?: string | null } | null)?.schedule_date,
+  )
+  const scheduleDate = parsed.scheduleDate ?? liveScheduleDate
+
+  let existingQuery = supabase
+    .from(tables.signupsTable)
+    .select('id')
+    .eq('weekday', weekday)
+    .eq('member_id', targetMemberId)
+
+  if (scheduleDate) {
+    existingQuery = existingQuery.eq('schedule_date', scheduleDate)
+  } else {
+    existingQuery = existingQuery.is('schedule_date', null)
+  }
+
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle()
+
+  if (existingError && !isMissingTableError(existingError)) {
+    console.error('staffRemoveCenterRunningTrainingScheduleSignup.existing', existingError)
+    return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+  }
+
+  if (!existing) {
+    return { ok: false, error: '참여 신청 내역이 없습니다.' }
+  }
+
+  const { error: deleteError } = await supabase
+    .from(tables.signupsTable)
+    .delete()
+    .eq('id', existing.id)
+
+  if (deleteError) {
+    console.error('staffRemoveCenterRunningTrainingScheduleSignup.delete', deleteError)
+    return { ok: false, error: '참여 취소에 실패했습니다.' }
+  }
+
+  const attendanceResult = await clearCenterTrainingScheduleAttendance({
+    memberId: targetMemberId,
+    weekday,
+    scheduleDate,
+  })
+  if (!attendanceResult.ok) {
+    console.error(
+      'staffRemoveCenterRunningTrainingScheduleSignup.clearAttendance',
+      attendanceResult.error,
+    )
+  }
+  await clearOfflineClassAttendanceForDate({
+    memberId: targetMemberId,
+    scheduleDate,
+  })
+
+  let countQuery = supabase
+    .from(tables.signupsTable)
+    .select('id', { count: 'exact', head: true })
+    .eq('weekday', weekday)
+
+  if (scheduleDate) {
+    countQuery = countQuery.eq('schedule_date', scheduleDate)
+  } else {
+    countQuery = countQuery.is('schedule_date', null)
+  }
+
+  const { count, error: countError } = await countQuery
+  if (countError) {
+    console.error('staffRemoveCenterRunningTrainingScheduleSignup.count', countError)
+  }
+
+  if (scheduleDate) {
+    const weekStart = getMondayDateKeyForDateKey(scheduleDate)
+    const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(
+      [weekStart],
+      audience,
+    )
+    const snapshotDays = snapshots.get(weekStart)
+    if (snapshotDays && snapshotDays.length > 0) {
+      void saveCenterTrainingScheduleWeekSnapshot(snapshotDays, audience)
+    }
+  }
+
+  return {
+    ok: true,
+    signupCount: count ?? 0,
+  }
+}
+
+/** 대리 참여용 회원 명단 (강사·해당 반 회원 포함) */
+export async function listMembersForTrainingScheduleStaffSignup(
+  audience: TrainingScheduleAudience = 'adult_running',
+): Promise<MemberPickerOption[]> {
+  await requireRole(['admin', 'instructor'])
+
+  const { data } = await getMembers({
+    isActive: true,
+    limit: 800,
+    orderBy: 'name',
+    orderAsc: true,
+  })
+
+  const mapped: MemberPickerOption[] = data.map((m) => ({
+    id: m.id,
+    name: m.name,
+    sport: m.sport,
+    age: m.age,
+    birth_date: m.birth_date,
+  }))
+
+  if (audience === 'youth_athletics') {
+    const youth = mapped.filter((member) => isYouthAthleticsClassSport(member.sport))
+    const instructors = mapped.filter((member) => {
+      const sport = (member.sport ?? '').toLowerCase()
+      return sport.includes('강사') || sport.includes('instructor') || sport.includes('코치')
+    })
+    const byId = new Map<string, MemberPickerOption>()
+    for (const row of [...youth, ...instructors]) {
+      if (!byId.has(row.id)) byId.set(row.id, row)
+    }
+    const preferred = [...byId.values()]
+    if (preferred.length > 0) {
+      return preferred.sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    }
+    return mapped
+  }
+
+  const running = mapped.filter((member) => {
+    const sport = (member.sport ?? '').toLowerCase()
+    if (sport.includes('일반')) return false
+    return (
+      sport.includes('러닝') ||
+      sport.includes('running') ||
+      sport.includes('성인') ||
+      sport.includes('마라톤') ||
+      sport.includes('강사') ||
+      sport.includes('instructor') ||
+      sport.includes('코치') ||
+      sport.includes('10k') ||
+      sport.includes('5k')
+    )
+  })
+
+  const source = running.length > 0 ? running : mapped
+  return source
 }
 
 export async function saveMemberCenterTrainingScheduleVote(
@@ -990,6 +1365,20 @@ export async function saveMemberCenterTrainingScheduleVote(
   }
 
   if (toInsert.length > 0) {
+    const closedWeekday = toInsert.find((weekday) => {
+      const day = dayByWeekday.get(weekday)
+      return isTrainingScheduleSignupClosed({
+        weekday,
+        scheduleDate: day?.schedule_date ?? null,
+      })
+    })
+    if (closedWeekday != null) {
+      return {
+        ok: false,
+        error: trainingScheduleSignupClosedMessage(closedWeekday),
+      }
+    }
+
     const insertRows = toInsert.map((weekday) => {
       const day = dayByWeekday.get(weekday)
       const scheduleDate = normalizeTrainingScheduleDate(day?.schedule_date)

@@ -167,6 +167,10 @@ export function MemberMyPage({
   const trainingSchedulePreviousWeekDays =
     centerTrainingSchedule?.previousWeekDays ?? []
   const trainingScheduleReady = centerTrainingSchedule?.tableReady ?? true
+  const canStaffProxySignup =
+    canStaffManageAttendance ||
+    role === 'admin' ||
+    role === 'instructor'
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-4 sm:space-y-6">
@@ -212,7 +216,8 @@ export function MemberMyPage({
                 previousWeekDays={trainingSchedulePreviousWeekDays}
                 tableReady={trainingScheduleReady}
                 canParticipate={!adminPreview}
-                readOnly={adminPreview}
+                readOnly={adminPreview && !canStaffProxySignup}
+                canStaffProxySignup={canStaffProxySignup}
                 embedded
                 contentOnly
               />

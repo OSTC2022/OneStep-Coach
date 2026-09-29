@@ -92,7 +92,7 @@ export function RunningScheduleToolbarButton({
             previousWeekDays={bundle?.previousWeekDays ?? []}
             tableReady={bundle?.tableReady ?? true}
             canParticipate={false}
-            readOnly
+            canStaffProxySignup
             contentOnly
           />
         </div>
