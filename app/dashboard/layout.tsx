@@ -17,16 +17,24 @@ export default async function DashboardLayout({
   const profile = await requireDashboardProfile()
 
   let adultProgram: AdultMemberProgram | null = null
-  if (profile.role === 'adult_member') {
+  let memberSport: string | null = null
+  if (
+    profile.role === 'adult_member' ||
+    profile.role === 'member' ||
+    profile.role === 'guardian'
+  ) {
     const member = await getMemberForCurrentUser()
-    adultProgram = resolveAdultMemberProgram(member?.sport)
+    memberSport = member?.sport ?? null
+    if (profile.role === 'adult_member') {
+      adultProgram = resolveAdultMemberProgram(member?.sport)
+    }
   }
 
   return (
     <>
       <NavPrefetch />
       <RouteTapIndicator />
-      <DashboardShell user={profile} adultProgram={adultProgram}>
+      <DashboardShell user={profile} adultProgram={adultProgram} memberSport={memberSport}>
         {children}
       </DashboardShell>
     </>

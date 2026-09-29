@@ -22,6 +22,7 @@ type MemberPortalAccordionMenusProps = {
   marathon?: ReactNode
   hasNotice?: boolean
   hasMarathon?: boolean
+  trainingLabel?: string
   className?: string
 }
 
@@ -52,6 +53,7 @@ export function MemberPortalAccordionMenus({
   marathon,
   hasNotice = Boolean(notice),
   hasMarathon = Boolean(marathon),
+  trainingLabel = '훈련 일정',
   className,
 }: MemberPortalAccordionMenusProps) {
   const [openKey, setOpenKey] = useState<MemberPortalMenuKey | null>(null)
@@ -78,7 +80,7 @@ export function MemberPortalAccordionMenus({
     },
     {
       key: 'training',
-      label: '훈련 일정',
+      label: trainingLabel,
       icon: CalendarDays,
       available: true,
     },

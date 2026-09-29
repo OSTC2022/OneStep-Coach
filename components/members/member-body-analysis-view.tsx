@@ -28,6 +28,7 @@ import { updateMemberBodyBaseline } from '@/lib/actions/members'
 import { describeBodyRecordMigrationHint } from '@/lib/member-body-record-messages'
 import { isBootstrapBodyRecord } from '@/lib/member-body-record-utils'
 import { isAdultRunningSport } from '@/lib/adult-member-programs'
+import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
 import {
   buildBodyAnalysisStats,
   buildChartAxisDateLabel,
@@ -171,7 +172,8 @@ export function MemberBodyAnalysisView({
   const router = useRouter()
   const fallbackBackHref = backHref ?? `/dashboard/members/${member.id}`
   const useAdultHonorific =
-    reportVariant === 'adult' || isAdultRunningSport(member.sport)
+    !isYouthAthleticsClassSport(member.sport) &&
+    (reportVariant === 'adult' || isAdultRunningSport(member.sport))
 
   function handleBack() {
     if (typeof window !== 'undefined') {

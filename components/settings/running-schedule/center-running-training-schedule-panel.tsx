@@ -48,6 +48,8 @@ import { Input } from '@/components/ui/input'
 import { KoreanDatePicker } from '@/components/ui/korean-date-picker'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import type { TrainingScheduleAudience } from '@/lib/training-schedule-audience'
+import { trainingScheduleConfig } from '@/lib/training-schedule-audience'
 
 function formatSavedAtLabel(savedAt: string): string {
   try {
@@ -201,7 +203,13 @@ function SavedScheduleLibrary({
   )
 }
 
-export function CenterRunningTrainingSchedulePanel() {
+export function CenterRunningTrainingSchedulePanel({
+  audience = 'adult_running',
+}: {
+  audience?: TrainingScheduleAudience
+}) {
+  const tables = trainingScheduleConfig(audience)
+  const isYouth = audience === 'youth_athletics'
   const [pending, startTransition] = useTransition()
   const [loading, setLoading] = useState(true)
   const [tableReady, setTableReady] = useState(true)
@@ -216,17 +224,17 @@ export function CenterRunningTrainingSchedulePanel() {
 
   const refreshLibrary = useCallback(() => {
     startTransition(async () => {
-      const result = await fetchCenterTrainingScheduleLibrary()
+      const result = await fetchCenterTrainingScheduleLibrary(audience)
       setLibrary(result)
     })
-  }, [])
+  }, [audience])
 
   useEffect(() => {
     let cancelled = false
     startTransition(async () => {
       const [scheduleResult, libraryResult] = await Promise.all([
-        getCenterRunningTrainingScheduleForAdmin(),
-        fetchCenterTrainingScheduleLibrary(),
+        getCenterRunningTrainingScheduleForAdmin(audience),
+        fetchCenterTrainingScheduleLibrary(audience),
       ])
       if (cancelled) return
       setTableReady(scheduleResult.tableReady)
@@ -236,7 +244,7 @@ export function CenterRunningTrainingSchedulePanel() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [audience])
 
   function updateDay(
     weekday: number,
@@ -276,6 +284,7 @@ export function CenterRunningTrainingSchedulePanel() {
       const result = await saveCenterTrainingScheduleLocationPreset({
         location_label: day.location_label,
         naver_map_url: day.naver_map_url,
+        audience,
       })
       if (!result.ok) {
         toast.error(result.error)
@@ -288,7 +297,7 @@ export function CenterRunningTrainingSchedulePanel() {
 
   function deleteLocationPreset(presetId: string) {
     startTransition(async () => {
-      const result = await deleteCenterTrainingScheduleLocationPreset(presetId)
+      const result = await deleteCenterTrainingScheduleLocationPreset(presetId, audience)
       if (!result.ok) {
         toast.error(result.error)
         return
@@ -300,7 +309,7 @@ export function CenterRunningTrainingSchedulePanel() {
 
   function save() {
     startTransition(async () => {
-      const result = await saveCenterRunningTrainingSchedule(days)
+      const result = await saveCenterRunningTrainingSchedule(days, audience)
       if (!result.ok) {
         toast.error(result.error)
         return
@@ -311,7 +320,11 @@ export function CenterRunningTrainingSchedulePanel() {
         refreshLibrary()
         return
       }
-      toast.success('주간 러닝 스케줄을 저장했습니다. 새 주차를 작성할 수 있습니다.')
+      toast.success(
+        isYouth
+          ? '육상선수반 스케줄을 저장했습니다. 새 주차를 작성할 수 있습니다.'
+          : '주간 러닝 스케줄을 저장했습니다. 새 주차를 작성할 수 있습니다.',
+      )
       resetDraftForm()
       refreshLibrary()
     })
@@ -334,8 +347,8 @@ export function CenterRunningTrainingSchedulePanel() {
     return (
       <Card className="border-dashed">
         <CardContent className="py-6 text-sm text-muted-foreground">
-          러닝 스케줄 테이블이 없습니다.{' '}
-          <code className="text-xs">add-center-running-training-schedule.sql</code>을 실행해주세요.
+          {isYouth ? '육상선수반 스케줄' : '러닝 스케줄'} 테이블이 없습니다.{' '}
+          <code className="text-xs">{tables.missingSql}</code>을 실행해주세요.
         </CardContent>
       </Card>
     )
@@ -344,15 +357,18 @@ export function CenterRunningTrainingSchedulePanel() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">주간 훈련 스케줄</CardTitle>
+        <CardTitle className="text-base">
+          {isYouth ? '육상선수반 주간 훈련' : '주간 훈련 스케줄'}
+        </CardTitle>
         <p className="text-sm text-muted-foreground">
-          저장하면 성인 회원 포털에 즉시 반영되고, 작성 폼은 비워집니다. 이전 주차는 상단 저장
-          목록에서 불러와 수정할 수 있습니다.
+          {isYouth
+            ? '저장하면 회원(육상선수반) 포털의 육상선수반 스케줄에 즉시 반영되고, 작성 폼은 비워집니다. 이전 주차는 상단 저장 목록에서 불러와 수정할 수 있습니다.'
+            : '저장하면 성인 회원 포털에 즉시 반영되고, 작성 폼은 비워집니다. 이전 주차는 상단 저장 목록에서 불러와 수정할 수 있습니다.'}
         </p>
         {!library.tableReady ? (
           <p className="text-xs text-amber-300/90">
             저장 목록·장소 프리셋을 쓰려면{' '}
-            <code className="text-[11px]">add-center-running-training-schedule-library.sql</code>을
+            <code className="text-[11px]">{tables.missingSql}</code>을
             실행해주세요.
           </p>
         ) : null}
@@ -421,7 +437,11 @@ export function CenterRunningTrainingSchedulePanel() {
                 onChange={(event) =>
                   updateDay(day.weekday, { training_summary: event.target.value })
                 }
-                placeholder="간략한 훈련 내용 (예: 5km 인터벌 + 스트레칭)"
+                placeholder={
+                  isYouth
+                    ? '간략한 훈련 내용 (예: 트랙 200m 인터벌 + 스타트 연습)'
+                    : '간략한 훈련 내용 (예: 5km 인터벌 + 스트레칭)'
+                }
                 rows={2}
                 className="min-h-[60px] resize-y text-sm"
               />
@@ -433,7 +453,7 @@ export function CenterRunningTrainingSchedulePanel() {
                     onChange={(event) =>
                       updateDay(day.weekday, { location_label: event.target.value })
                     }
-                    placeholder="장소 (예: 한강 잠실)"
+                    placeholder={isYouth ? '장소 (예: 올림픽공원 트랙)' : '장소 (예: 한강 잠실)'}
                     className="pl-9 text-sm"
                   />
                 </div>

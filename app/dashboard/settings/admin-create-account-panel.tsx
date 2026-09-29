@@ -6,12 +6,12 @@ import { toast } from 'sonner'
 import { createAccountByAdmin } from '@/lib/actions/auth-registration'
 import type {
   InstructorRoleRow,
-  SettingsAssignableRole,
 } from '@/lib/settings-accounts-types'
 import {
-  adultProgramFromRoleSelect,
-  type AdultMemberProgram,
-} from '@/lib/adult-member-programs'
+  SETTINGS_ROLE_SELECT_OPTIONS,
+  parseSettingsRoleSelect,
+  type SettingsRoleSelectValue,
+} from '@/lib/settings-role-select'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,31 +29,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-type RoleSelectValue =
-  | SettingsAssignableRole
-  | 'adult_member_athletics'
-  | 'adult_member_general'
-
-const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
-  { value: 'member', label: '회원' },
-  { value: 'adult_member_athletics', label: '성인회원(육상)' },
-  { value: 'adult_member_general', label: '성인회원(일반)' },
-  { value: 'guardian', label: '학부모' },
-  { value: 'admin', label: '관리자' },
-  { value: 'instructor', label: '강사' },
-]
-
-function parseRoleSelect(value: RoleSelectValue): {
-  role: SettingsAssignableRole
-  adultProgram: AdultMemberProgram | null
-} {
-  const adultProgram = adultProgramFromRoleSelect(value)
-  if (adultProgram) {
-    return { role: 'adult_member', adultProgram }
-  }
-  return { role: value as SettingsAssignableRole, adultProgram: null }
-}
-
 interface AdminCreateAccountPanelProps {
   instructors: InstructorRoleRow[]
   onAccountCreated?: () => void | Promise<void>
@@ -67,11 +42,14 @@ export function AdminCreateAccountPanel({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
-  const [roleSelect, setRoleSelect] = useState<RoleSelectValue>('member')
+  const [roleSelect, setRoleSelect] = useState<SettingsRoleSelectValue>('member')
   const [instructorId, setInstructorId] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const { role, adultProgram } = parseRoleSelect(roleSelect)
+  const parsedRole = parseSettingsRoleSelect(roleSelect)
+  const role = parsedRole.role
+  const adultProgram = parsedRole.adultProgram
+  const memberProgram = parsedRole.memberProgram
 
   const unlinkedInstructors = useMemo(
     () => instructors.filter((i) => i.is_active && !i.hasCoachAccess),
@@ -101,6 +79,11 @@ export function AdminCreateAccountPanel({
       return
     }
 
+    if (!role) {
+      toast.error('권한을 선택해주세요.')
+      return
+    }
+
     setSaving(true)
     const result = await createAccountByAdmin({
       fullName,
@@ -110,6 +93,7 @@ export function AdminCreateAccountPanel({
       role,
       instructorId: role === 'instructor' ? instructorId : null,
       adultProgram,
+      memberProgram,
     })
     setSaving(false)
 
@@ -221,9 +205,9 @@ export function AdminCreateAccountPanel({
             <Select
               value={roleSelect}
               onValueChange={(v) => {
-                const next = v as RoleSelectValue
+                const next = v as SettingsRoleSelectValue
                 setRoleSelect(next)
-                if (parseRoleSelect(next).role !== 'instructor') {
+                if (parseSettingsRoleSelect(next).role !== 'instructor') {
                   setInstructorId('')
                 }
               }}
@@ -233,7 +217,7 @@ export function AdminCreateAccountPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ROLE_SELECT_OPTIONS.map((r) => (
+                {SETTINGS_ROLE_SELECT_OPTIONS.map((r) => (
                   <SelectItem key={r.value} value={r.value}>
                     {r.label}
                   </SelectItem>
@@ -247,6 +231,10 @@ export function AdminCreateAccountPanel({
             ) : adultProgram === 'athletics' ? (
               <p className="text-[11px] text-muted-foreground">
                 성인회원(육상): 승인 후 러닝·육상 포털을 사용합니다.
+              </p>
+            ) : memberProgram === 'youth_athletics' ? (
+              <p className="text-[11px] text-muted-foreground">
+                회원(육상선수반): 승인 후 내 러닝 포털(육상)을 사용합니다.
               </p>
             ) : null}
           </div>

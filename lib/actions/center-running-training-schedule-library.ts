@@ -11,6 +11,10 @@ import {
   type RunningLeagueTrainingScheduleDayInput,
   type RunningLeagueTrainingScheduleSignup,
 } from '@/lib/running-league/training-schedule'
+import {
+  trainingScheduleConfig,
+  type TrainingScheduleAudience,
+} from '@/lib/training-schedule-audience'
 
 export type CenterTrainingScheduleWeekSnapshot = {
   id: string
@@ -45,8 +49,12 @@ function isMissingLibraryTableError(error: { code?: string; message?: string } |
   if (!error) return false
   if (error.code === '42P01') return true
   const message = error.message?.toLowerCase() ?? ''
-  return message.includes('center_running_training_schedule_week_snapshots') ||
-    message.includes('center_running_training_schedule_location_presets')
+  return (
+    message.includes('center_running_training_schedule_week_snapshots') ||
+    message.includes('center_running_training_schedule_location_presets') ||
+    message.includes('center_youth_athletics_training_schedule_week_snapshots') ||
+    message.includes('center_youth_athletics_training_schedule_location_presets')
+  )
 }
 
 function normalizeSnapshotSignups(raw: unknown): RunningLeagueTrainingScheduleSignup[] {
@@ -142,6 +150,7 @@ function serializeSnapshotDays(
 
 async function attachSignupsToSnapshotDays(
   days: RunningLeagueTrainingScheduleDayInput[],
+  audience: TrainingScheduleAudience = 'adult_running',
 ): Promise<RunningLeagueTrainingScheduleDayInput[]> {
   const dates = [
     ...new Set(
@@ -158,7 +167,7 @@ async function attachSignupsToSnapshotDays(
   let signupSelect =
     'id, weekday, member_id, created_at, schedule_date, member:members(name)'
   let signupResult = await supabase
-    .from('center_running_training_schedule_signups')
+    .from(trainingScheduleConfig(audience).signupsTable)
     .select(signupSelect)
     .in('weekday', weekdays)
     .order('created_at', { ascending: true })
@@ -170,7 +179,7 @@ async function attachSignupsToSnapshotDays(
   ) {
     signupSelect = 'id, weekday, member_id, created_at, member:members(name)'
     signupResult = await supabase
-      .from('center_running_training_schedule_signups')
+      .from(trainingScheduleConfig(audience).signupsTable)
       .select(signupSelect)
       .in('weekday', weekdays)
       .order('created_at', { ascending: true })
@@ -257,18 +266,21 @@ async function attachSignupsToSnapshotDays(
   })
 }
 
-export async function fetchCenterTrainingScheduleLibrary(): Promise<CenterTrainingScheduleLibrary> {
+export async function fetchCenterTrainingScheduleLibrary(
+  audience: TrainingScheduleAudience = 'adult_running',
+): Promise<CenterTrainingScheduleLibrary> {
   await requireRole(['admin'])
   const supabase = await libraryClient()
+  const tables = trainingScheduleConfig(audience)
 
   const [snapshotsResult, presetsResult] = await Promise.all([
     supabase
-      .from('center_running_training_schedule_week_snapshots')
+      .from(tables.snapshotsTable)
       .select('id, week_start_date, days, saved_at')
       .order('saved_at', { ascending: false })
       .limit(20),
     supabase
-      .from('center_running_training_schedule_location_presets')
+      .from(tables.locationsTable)
       .select('id, location_label, naver_map_url, saved_at')
       .order('saved_at', { ascending: false })
       .limit(30),
@@ -316,6 +328,7 @@ export async function fetchCenterTrainingScheduleLibrary(): Promise<CenterTraini
 
 export async function fetchCenterTrainingScheduleWeekSnapshotsByStarts(
   weekStartDates: string[],
+  audience: TrainingScheduleAudience = 'adult_running',
 ): Promise<Map<string, RunningLeagueTrainingScheduleDayInput[]>> {
   const unique = [
     ...new Set(
@@ -329,7 +342,7 @@ export async function fetchCenterTrainingScheduleWeekSnapshotsByStarts(
 
   const supabase = await libraryClient()
   const { data, error } = await supabase
-    .from('center_running_training_schedule_week_snapshots')
+    .from(trainingScheduleConfig(audience).snapshotsTable)
     .select('week_start_date, days, saved_at')
     .in('week_start_date', unique)
     .order('saved_at', { ascending: false })
@@ -352,16 +365,18 @@ export async function fetchCenterTrainingScheduleWeekSnapshotsByStarts(
 
 export async function saveCenterTrainingScheduleWeekSnapshot(
   days: RunningLeagueTrainingScheduleDayInput[],
+  audience: TrainingScheduleAudience = 'adult_running',
 ): Promise<void> {
   const supabase = await libraryClient()
-  const withSignups = await attachSignupsToSnapshotDays(days)
+  const snapshotsTable = trainingScheduleConfig(audience).snapshotsTable
+  const withSignups = await attachSignupsToSnapshotDays(days, audience)
   const normalized = serializeSnapshotDays(withSignups)
   const weekStartDate = normalized.find((day) => day.weekday === 0)?.schedule_date ?? null
   const now = new Date().toISOString()
 
   if (weekStartDate) {
     const { data: existing, error: existingError } = await supabase
-      .from('center_running_training_schedule_week_snapshots')
+      .from(snapshotsTable)
       .select('id')
       .eq('week_start_date', weekStartDate)
       .maybeSingle()
@@ -373,7 +388,7 @@ export async function saveCenterTrainingScheduleWeekSnapshot(
 
     if (existing?.id) {
       const { error } = await supabase
-        .from('center_running_training_schedule_week_snapshots')
+        .from(snapshotsTable)
         .update({
           days: normalized,
           saved_at: now,
@@ -387,7 +402,7 @@ export async function saveCenterTrainingScheduleWeekSnapshot(
     }
   }
 
-  const { error } = await supabase.from('center_running_training_schedule_week_snapshots').insert({
+  const { error } = await supabase.from(snapshotsTable).insert({
     week_start_date: weekStartDate,
     days: normalized,
     saved_at: now,
@@ -401,6 +416,7 @@ export async function saveCenterTrainingScheduleWeekSnapshot(
 export async function saveCenterTrainingScheduleLocationPreset(input: {
   location_label: string
   naver_map_url: string
+  audience?: TrainingScheduleAudience
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireRole(['admin'])
 
@@ -412,7 +428,8 @@ export async function saveCenterTrainingScheduleLocationPreset(input: {
   }
 
   const supabase = await libraryClient()
-  const { error } = await supabase.from('center_running_training_schedule_location_presets').upsert(
+  const locationsTable = trainingScheduleConfig(input.audience).locationsTable
+  const { error } = await supabase.from(locationsTable).upsert(
     {
       location_label: locationLabel,
       naver_map_url: naverMapUrl,
@@ -438,12 +455,13 @@ export async function saveCenterTrainingScheduleLocationPreset(input: {
 
 export async function deleteCenterTrainingScheduleLocationPreset(
   presetId: string,
+  audience: TrainingScheduleAudience = 'adult_running',
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireRole(['admin'])
   const supabase = await libraryClient()
 
   const { error } = await supabase
-    .from('center_running_training_schedule_location_presets')
+    .from(trainingScheduleConfig(audience).locationsTable)
     .delete()
     .eq('id', presetId)
 

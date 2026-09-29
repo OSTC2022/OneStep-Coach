@@ -5,6 +5,7 @@ import { requireRole } from '@/lib/actions/auth'
 import {
   appRoleToProfileRole,
   getAdultMemberRoleLabel,
+  getMemberRoleLabel,
   getRoleLabel,
   profileRoleToAppRole,
 } from '@/lib/roles'
@@ -134,7 +135,9 @@ async function mapRegisteredAccounts(
       ? '관리자'
       : appRole === 'adult_member'
         ? getAdultMemberRoleLabel(linked?.sport)
-        : getRoleLabel(appRole)
+        : appRole === 'member'
+          ? getMemberRoleLabel(linked?.sport)
+          : getRoleLabel(appRole)
 
     return {
       id: row.id,
@@ -436,6 +439,8 @@ export type UpdateAccountRoleOptions = {
   memberId?: string | null
   /** 성인회원 프로그램: 육상 | 일반(체중관리). running은 육상과 동일 */
   adultProgram?: 'athletics' | 'general' | 'running' | null
+  /** 일반 회원 세부: 육상선수반 */
+  memberProgram?: 'youth_athletics' | null
 }
 
 export async function updateAccountRole(
@@ -539,6 +544,33 @@ export async function updateAccountRole(
           .eq('id', memberId)
         if (sportError) {
           console.error('updateAccountRole sport:', sportError)
+        }
+      } else if (profileRole === 'member') {
+        const { YOUTH_ATHLETICS_CLASS_SPORT, isYouthAthleticsClassSport } =
+          await import('@/lib/youth-athletics-class')
+        const { data: currentMember } = await admin
+          .from('members')
+          .select('sport')
+          .eq('id', memberId)
+          .maybeSingle()
+        const currentSport = (currentMember?.sport as string | null) ?? null
+
+        if (options?.memberProgram === 'youth_athletics') {
+          const { error: sportError } = await admin
+            .from('members')
+            .update({ sport: YOUTH_ATHLETICS_CLASS_SPORT })
+            .eq('id', memberId)
+          if (sportError) {
+            console.error('updateAccountRole youth sport:', sportError)
+          }
+        } else if (isYouthAthleticsClassSport(currentSport)) {
+          const { error: sportError } = await admin
+            .from('members')
+            .update({ sport: '육상' })
+            .eq('id', memberId)
+          if (sportError) {
+            console.error('updateAccountRole clear youth sport:', sportError)
+          }
         }
       }
     }

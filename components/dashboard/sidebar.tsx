@@ -86,6 +86,7 @@ const MENU_ICONS: Record<string, LucideIcon> = {
   '/dashboard/settings/center-contact': MessageCircle,
   '/dashboard/settings/adult-running-portal': Eye,
   '/dashboard/settings/running-schedule': CalendarDays,
+  '/dashboard/settings/youth-athletics-schedule': CalendarDays,
   '/dashboard/settings/marathon-schedule': Trophy,
   '/dashboard/settings': Settings,
 }
@@ -96,6 +97,9 @@ function isMenuItemActive(pathname: string, url: string) {
   }
   if (url === '/dashboard/settings/running-schedule') {
     return pathname.startsWith('/dashboard/settings/running-schedule')
+  }
+  if (url === '/dashboard/settings/youth-athletics-schedule') {
+    return pathname.startsWith('/dashboard/settings/youth-athletics-schedule')
   }
   if (url === '/dashboard/settings/marathon-schedule') {
     return pathname.startsWith('/dashboard/settings/marathon-schedule')

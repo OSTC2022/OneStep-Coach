@@ -41,6 +41,7 @@ import type { Member } from '@/lib/types'
 import { formatPackageExpiryDateLabel } from '@/lib/session-package-utils'
 import { MEMBER_PORTAL_SHELL_CLASS } from '@/lib/running-league/member-portal-layout'
 import { isAdultRunningSport } from '@/lib/adult-member-programs'
+import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
 import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
@@ -152,7 +153,8 @@ export function MemberMyPage({
 }: MemberMyPageProps) {
   const { member, summary, sessionStatus } = data
   const isAdultMember =
-    role === 'adult_member' || isAdultRunningSport(member.sport)
+    (role === 'adult_member' || isAdultRunningSport(member.sport)) &&
+    !isYouthAthleticsClassSport(member.sport)
   const showRunningPortalSection = showRunningPortal || isAdultMember
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const sportProfile = formatSportProfile(member)

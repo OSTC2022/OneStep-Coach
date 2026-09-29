@@ -11,10 +11,7 @@ import {
   rejectAccount,
   type PendingAccountRow,
 } from '@/lib/actions/auth-registration'
-import type {
-  InstructorRoleRow,
-  SettingsAssignableRole,
-} from '@/lib/settings-accounts-types'
+import type { InstructorRoleRow } from '@/lib/settings-accounts-types'
 import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -45,44 +42,10 @@ import {
 import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
 import { formatBirthDateDisplay } from '@/lib/member-utils'
 import {
-  adultProgramFromRoleSelect,
-  type AdultMemberProgram,
-} from '@/lib/adult-member-programs'
-
-type RoleSelectValue =
-  | SettingsAssignableRole
-  | 'adult_member_athletics'
-  | 'adult_member_general'
-  | 'on_hold'
-
-const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
-  { value: 'member', label: '회원' },
-  { value: 'adult_member_athletics', label: '성인회원(육상)' },
-  { value: 'adult_member_general', label: '성인회원(일반)' },
-  { value: 'guardian', label: '학부모' },
-  { value: 'admin', label: '관리자' },
-  { value: 'instructor', label: '강사' },
-  { value: 'on_hold', label: '보류' },
-]
-
-function parseRoleSelect(value: RoleSelectValue): {
-  role: SettingsAssignableRole | null
-  adultProgram: AdultMemberProgram | null
-  onHold: boolean
-} {
-  if (value === 'on_hold') {
-    return { role: null, adultProgram: null, onHold: true }
-  }
-  const adultProgram = adultProgramFromRoleSelect(value)
-  if (adultProgram) {
-    return { role: 'adult_member', adultProgram, onHold: false }
-  }
-  return {
-    role: value as SettingsAssignableRole,
-    adultProgram: null,
-    onHold: false,
-  }
-}
+  SETTINGS_ROLE_SELECT_OPTIONS_WITH_HOLD,
+  parseSettingsRoleSelect,
+  type SettingsRoleSelectValue,
+} from '@/lib/settings-role-select'
 
 function formatDate(iso: string) {
   try {
@@ -116,7 +79,7 @@ export function PendingApprovalsPanel({
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [approveRoleSelect, setApproveRoleSelect] =
-    useState<RoleSelectValue>('member')
+    useState<SettingsRoleSelectValue>('member')
   const [instructorId, setInstructorId] = useState<string>('')
   const [memberId, setMemberId] = useState<string>('')
   const [busy, setBusy] = useState(false)
@@ -126,9 +89,10 @@ export function PendingApprovalsPanel({
     setPending(initialPending)
   }, [initialPending])
 
-  const approveParsed = parseRoleSelect(approveRoleSelect)
+  const approveParsed = parseSettingsRoleSelect(approveRoleSelect)
   const approveRole = approveParsed.role
   const adultProgram = approveParsed.adultProgram
+  const memberProgram = approveParsed.memberProgram
   const isOnHoldAction = approveParsed.onHold
 
   const filtered = useMemo(() => {
@@ -206,6 +170,7 @@ export function PendingApprovalsPanel({
         ? memberId || selected.signupMemberId
         : null,
       adultProgram,
+      memberProgram,
     )
     setBusy(false)
 
@@ -295,7 +260,7 @@ export function PendingApprovalsPanel({
                       onClick={() => {
                         setSelectedId(row.id)
                         setMemberId(row.signupMemberId ?? '')
-                        setApproveRole(
+                        setApproveRoleSelect(
                           row.role === 'guardian'
                             ? 'guardian'
                             : row.role === 'admin'
@@ -403,9 +368,9 @@ export function PendingApprovalsPanel({
                 <Select
                   value={approveRoleSelect}
                   onValueChange={(v) => {
-                    const next = v as RoleSelectValue
+                    const next = v as SettingsRoleSelectValue
                     setApproveRoleSelect(next)
-                    const parsed = parseRoleSelect(next)
+                    const parsed = parseSettingsRoleSelect(next)
                     if (parsed.onHold || parsed.role !== 'instructor') {
                       setInstructorId('')
                     }
@@ -418,7 +383,7 @@ export function PendingApprovalsPanel({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROLE_SELECT_OPTIONS.map((r) => (
+                    {SETTINGS_ROLE_SELECT_OPTIONS_WITH_HOLD.map((r) => (
                       <SelectItem key={r.value} value={r.value}>
                         {r.label}
                       </SelectItem>

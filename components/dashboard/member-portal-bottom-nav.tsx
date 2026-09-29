@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AdultMemberProgram } from '@/lib/adult-member-programs'
+import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
 
 const ATHLETE_NAV_ITEMS = [
   {
@@ -103,24 +104,58 @@ const ADULT_GENERAL_NAV_ITEMS = [
   },
 ] as const
 
+const YOUTH_ATHLETICS_NAV_ITEMS = [
+  {
+    href: '/dashboard/my',
+    label: '홈',
+    icon: Home,
+    isActive: (path: string, _hash: string) => path === '/dashboard/my',
+  },
+  {
+    href: '/dashboard/my/body#today-record',
+    label: '컨디션',
+    icon: ClipboardList,
+    isActive: (path: string, hash: string) =>
+      path.startsWith('/dashboard/my/body') && hash === '#today-record',
+  },
+  {
+    href: '/dashboard/my/body#report-top',
+    label: '리포트',
+    icon: ChartLine,
+    isActive: (path: string, hash: string) =>
+      path.startsWith('/dashboard/my/body') &&
+      (hash === '#report-top' || hash === ''),
+  },
+  {
+    href: '/dashboard/my/sessions',
+    label: '수업',
+    icon: CalendarDays,
+    isActive: (path: string, _hash: string) => path.startsWith('/dashboard/my/sessions'),
+  },
+] as const
+
 interface MemberPortalBottomNavProps {
   role?: string | null
   adultProgram?: AdultMemberProgram | null
+  memberSport?: string | null
 }
 
 export function MemberPortalBottomNav({
   role,
   adultProgram = null,
+  memberSport = null,
 }: MemberPortalBottomNavProps) {
   const pathname = usePathname()
   const [hash, setHash] = useState('')
   const isAdultMember = role === 'adult_member'
+  const youthClass = isYouthAthleticsClassSport(memberSport)
 
   const navItems = useMemo(() => {
+    if (youthClass) return YOUTH_ATHLETICS_NAV_ITEMS
     if (!isAdultMember) return ATHLETE_NAV_ITEMS
     if (adultProgram === 'general') return ADULT_GENERAL_NAV_ITEMS
     return ADULT_RUNNING_NAV_ITEMS
-  }, [adultProgram, isAdultMember])
+  }, [adultProgram, isAdultMember, youthClass])
 
   useEffect(() => {
     function syncHash() {

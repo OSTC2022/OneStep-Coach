@@ -41,6 +41,7 @@ const SETTINGS_TABS = [
       !path.startsWith('/dashboard/settings/adult-center-board') &&
       !path.startsWith('/dashboard/settings/adult-running-portal') &&
       !path.startsWith('/dashboard/settings/running-schedule') &&
+      !path.startsWith('/dashboard/settings/youth-athletics-schedule') &&
       !path.startsWith('/dashboard/settings/marathon-schedule') &&
       !path.startsWith('/dashboard/settings/running-league') &&
       !path.startsWith('/dashboard/settings/backup'),
@@ -58,6 +59,14 @@ const SETTINGS_TABS = [
     label: '러닝 스케줄',
     icon: CalendarDays,
     isActive: (path: string) => path.startsWith('/dashboard/settings/running-schedule'),
+  },
+  {
+    id: '/dashboard/settings/youth-athletics-schedule',
+    href: '/dashboard/settings/youth-athletics-schedule',
+    label: '육상선수반 스케줄',
+    icon: CalendarDays,
+    isActive: (path: string) =>
+      path.startsWith('/dashboard/settings/youth-athletics-schedule'),
   },
   {
     id: '/dashboard/settings/marathon-schedule',

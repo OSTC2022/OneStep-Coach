@@ -107,6 +107,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin'],
   },
   {
+    id: '/dashboard/settings/youth-athletics-schedule',
+    title: '육상선수반 스케줄',
+    url: '/dashboard/settings/youth-athletics-schedule',
+    roles: ['admin'],
+  },
+  {
     id: '/dashboard/settings/marathon-schedule',
     title: '마라톤 일정',
     url: '/dashboard/settings/marathon-schedule',

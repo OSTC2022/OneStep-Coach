@@ -185,6 +185,13 @@ a[href] {
   }
 }
 
+/* 트랙 레인 dash — dash+gap 주기만큼만 이동해 루프 이음매가 안 보임 */
+@keyframes youth-track-dash-flow {
+  to {
+    stroke-dashoffset: -64;
+  }
+}
+
 @keyframes onestep-heartbeat-pulse {
   0%,
   100% {
@@ -209,6 +216,11 @@ a[href] {
 .onestep-pulse-line {
   stroke-dasharray: 140;
   animation: onestep-pulse-travel 2.4s linear infinite;
+}
+
+.youth-track-dash-flow {
+  stroke-dasharray: 14 50;
+  animation: youth-track-dash-flow 2s linear infinite;
 }
 
 .onestep-heartbeat {

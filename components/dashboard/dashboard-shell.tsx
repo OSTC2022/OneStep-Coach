@@ -21,12 +21,14 @@ interface DashboardShellProps {
   user: User
   children: ReactNode
   adultProgram?: AdultMemberProgram | null
+  memberSport?: string | null
 }
 
 export function DashboardShell({
   user,
   children,
   adultProgram = null,
+  memberSport = null,
 }: DashboardShellProps) {
   const pathname = usePathname()
   const memberPortal =
@@ -38,14 +40,18 @@ export function DashboardShell({
         <AuthSessionKeepAlive />
         <VisualViewportOffsetHandler />
         <MemberPortalScrollHandler />
-        <MemberPortalHeader user={user} />
+        <MemberPortalHeader user={user} memberSport={memberSport} />
         <main
           id="member-portal-main"
           className="flex-1 overflow-auto pb-24 md:pb-6"
         >
           {children}
         </main>
-        <MemberPortalBottomNav role={user.role} adultProgram={adultProgram} />
+        <MemberPortalBottomNav
+          role={user.role}
+          adultProgram={adultProgram}
+          memberSport={memberSport}
+        />
       </div>
     )
   }

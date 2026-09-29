@@ -48,6 +48,7 @@ export function isAdultRunningSport(sport: string | null | undefined): boolean {
   const value = normalizeSportLabel(sport)
   if (!value) return false
   if (isAdultGeneralSport(sport)) return false
+  if (value.includes('육상선수반') || value.includes('선수반')) return false
   return (
     value.includes('성인회원(육상)') ||
     value.includes('러닝') ||
@@ -56,8 +57,7 @@ export function isAdultRunningSport(sport: string | null | undefined): boolean {
     value.includes('성인') ||
     value.includes('마라톤') ||
     value.includes('10k') ||
-    value.includes('5k') ||
-    value.includes('육상')
+    value.includes('5k')
   )
 }
 

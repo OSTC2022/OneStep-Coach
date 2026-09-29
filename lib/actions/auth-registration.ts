@@ -213,6 +213,7 @@ export async function approveAccount(
   instructorId?: string | null,
   memberId?: string | null,
   adultProgram?: 'athletics' | 'general' | 'running' | null,
+  memberProgram?: 'youth_athletics' | null,
 ): Promise<{ error?: string; loginEmail?: string }> {
   await requireRole(['admin'])
 
@@ -245,6 +246,8 @@ export async function approveAccount(
   let linkedInstructorId = instructorId ?? null
   let resolvedAdultProgram =
     role === 'adult_member' ? adultProgram ?? null : null
+  let resolvedMemberProgram =
+    role === 'member' ? memberProgram ?? null : null
   if (role === 'instructor' && !linkedInstructorId) {
     try {
       const { data: authData } = await admin.auth.admin.getUserById(userId)
@@ -263,6 +266,17 @@ export async function approveAccount(
       if (requested === 'general') resolvedAdultProgram = 'general'
       else if (requested === 'athletics' || requested === 'running') {
         resolvedAdultProgram = 'athletics'
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (role === 'member' && !resolvedMemberProgram) {
+    try {
+      const { data: authData } = await admin.auth.admin.getUserById(userId)
+      const meta = authData.user?.user_metadata ?? {}
+      if (meta.requested_member_program === 'youth_athletics') {
+        resolvedMemberProgram = 'youth_athletics'
       }
     } catch {
       /* ignore */
@@ -348,6 +362,7 @@ export async function approveAccount(
       skipApprovalCheck: true,
       memberId: requiresMemberLinkRole(role) ? resolvedMemberId : null,
       adultProgram: role === 'adult_member' ? resolvedAdultProgram ?? 'athletics' : null,
+      memberProgram: role === 'member' ? resolvedMemberProgram ?? null : null,
     })
     if (result.error) return result
   }
@@ -499,6 +514,8 @@ export type AdminCreateAccountInput = {
   instructorId?: string | null
   /** 성인회원(육상/일반) — role이 adult_member일 때 */
   adultProgram?: 'athletics' | 'general' | 'running' | null
+  /** 회원(육상선수반) — role이 member일 때 */
+  memberProgram?: 'youth_athletics' | null
 }
 
 function isAlreadyRegisteredError(message: string) {
@@ -611,6 +628,10 @@ export async function createAccountByAdmin(
         ? input.adultProgram === 'general'
           ? 'general'
           : 'athletics'
+        : null,
+    requested_member_program:
+      input.role === 'member' && input.memberProgram === 'youth_athletics'
+        ? 'youth_athletics'
         : null,
     approval_status: 'pending' as const,
   }

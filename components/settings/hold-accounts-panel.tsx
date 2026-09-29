@@ -11,10 +11,7 @@ import {
   restoreAccountToPending,
   type PendingAccountRow,
 } from '@/lib/actions/auth-registration'
-import type {
-  InstructorRoleRow,
-  SettingsAssignableRole,
-} from '@/lib/settings-accounts-types'
+import type { InstructorRoleRow } from '@/lib/settings-accounts-types'
 import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -42,34 +39,10 @@ import {
 } from '@/components/ui/table'
 import { AccountMemberLinkSelect } from '@/components/settings/account-member-link-select'
 import {
-  adultProgramFromRoleSelect,
-  type AdultMemberProgram,
-} from '@/lib/adult-member-programs'
-
-type RoleSelectValue =
-  | SettingsAssignableRole
-  | 'adult_member_athletics'
-  | 'adult_member_general'
-
-const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
-  { value: 'member', label: '회원' },
-  { value: 'adult_member_athletics', label: '성인회원(육상)' },
-  { value: 'adult_member_general', label: '성인회원(일반)' },
-  { value: 'guardian', label: '학부모' },
-  { value: 'admin', label: '관리자' },
-  { value: 'instructor', label: '강사' },
-]
-
-function parseRoleSelect(value: RoleSelectValue): {
-  role: SettingsAssignableRole
-  adultProgram: AdultMemberProgram | null
-} {
-  const adultProgram = adultProgramFromRoleSelect(value)
-  if (adultProgram) {
-    return { role: 'adult_member', adultProgram }
-  }
-  return { role: value as SettingsAssignableRole, adultProgram: null }
-}
+  SETTINGS_ROLE_SELECT_OPTIONS,
+  parseSettingsRoleSelect,
+  type SettingsRoleSelectValue,
+} from '@/lib/settings-role-select'
 
 function formatDate(iso: string) {
   try {
@@ -101,7 +74,7 @@ export function HoldAccountsPanel({
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [approveRoleSelect, setApproveRoleSelect] =
-    useState<RoleSelectValue>('member')
+    useState<SettingsRoleSelectValue>('member')
   const [instructorId, setInstructorId] = useState('')
   const [memberId, setMemberId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -111,9 +84,10 @@ export function HoldAccountsPanel({
     setRows(initialHold)
   }, [initialHold])
 
-  const approveParsed = parseRoleSelect(approveRoleSelect)
+  const approveParsed = parseSettingsRoleSelect(approveRoleSelect)
   const approveRole = approveParsed.role
   const adultProgram = approveParsed.adultProgram
+  const memberProgram = approveParsed.memberProgram
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -147,6 +121,10 @@ export function HoldAccountsPanel({
 
   async function handleApprove() {
     if (!selected) return
+    if (!approveRole) {
+      toast.error('권한을 선택해주세요.')
+      return
+    }
     if (approveRole === 'instructor' && !instructorId) {
       toast.error('강사 프로필을 선택해주세요.')
       return
@@ -169,6 +147,7 @@ export function HoldAccountsPanel({
         ? memberId || selected.signupMemberId
         : null,
       adultProgram,
+      memberProgram,
     )
     setBusy(false)
 
@@ -337,18 +316,20 @@ export function HoldAccountsPanel({
                 <Select
                   value={approveRoleSelect}
                   onValueChange={(v) => {
-                    const next = v as RoleSelectValue
+                    const next = v as SettingsRoleSelectValue
                     setApproveRoleSelect(next)
-                    const parsed = parseRoleSelect(next)
+                    const parsed = parseSettingsRoleSelect(next)
                     if (parsed.role !== 'instructor') setInstructorId('')
-                    if (!requiresMemberLinkRole(parsed.role)) setMemberId('')
+                    if (!parsed.role || !requiresMemberLinkRole(parsed.role)) {
+                      setMemberId('')
+                    }
                   }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROLE_SELECT_OPTIONS.map((r) => (
+                    {SETTINGS_ROLE_SELECT_OPTIONS.map((r) => (
                       <SelectItem key={r.value} value={r.value}>
                         {r.label}
                       </SelectItem>
@@ -357,7 +338,7 @@ export function HoldAccountsPanel({
                 </Select>
               </div>
 
-              {requiresMemberLinkRole(approveRole) ? (
+                {approveRole && requiresMemberLinkRole(approveRole) ? (
                 <AccountMemberLinkSelect
                   accountUserId={selected.id}
                   value={memberId}

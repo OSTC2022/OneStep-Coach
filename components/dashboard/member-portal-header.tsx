@@ -24,29 +24,44 @@ import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
   DEFAULT_ADULT_RUNNING_PORTAL_TITLE,
 } from '@/lib/running-league/adult-running-portal-defaults'
+import {
+  YOUTH_ATHLETICS_PORTAL_LEAGUE_LABEL,
+  YOUTH_ATHLETICS_PORTAL_TITLE,
+  isYouthAthleticsClassSport,
+} from '@/lib/youth-athletics-class'
 import type { User } from '@/lib/types'
 import { toast } from 'sonner'
 
-function portalTitle(pathname: string, hash: string, role?: string | null): string {
+function portalTitle(
+  pathname: string,
+  hash: string,
+  role?: string | null,
+  sport?: string | null,
+): string {
+  const youthClass = isYouthAthleticsClassSport(sport)
   const isAdult = role === 'adult_member'
   if (pathname.startsWith('/dashboard/my/running-league')) return '러닝 챌린지'
   if (pathname.startsWith('/dashboard/my/profile')) return '프로필'
   if (pathname.startsWith('/dashboard/my/body')) {
+    if (youthClass) return hash === '#today-record' ? '컨디션' : '리포트'
     return hash === '#today-record' ? (isAdult ? '컨디션' : '오늘 기록') : isAdult ? '컨디션' : '리포트'
   }
   if (pathname.startsWith('/dashboard/my/sessions')) return '수업'
+  if (youthClass) return YOUTH_ATHLETICS_PORTAL_TITLE
   return isAdult ? DEFAULT_ADULT_RUNNING_PORTAL_TITLE : '내 선수 리포트'
 }
 
-function portalBrandLabel(role?: string | null): string {
+function portalBrandLabel(role?: string | null, sport?: string | null): string {
+  if (isYouthAthleticsClassSport(sport)) return YOUTH_ATHLETICS_PORTAL_LEAGUE_LABEL
   return role === 'adult_member' ? DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL : 'OneStep Athlete'
 }
 
 interface MemberPortalHeaderProps {
   user: User
+  memberSport?: string | null
 }
 
-export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
+export function MemberPortalHeader({ user, memberSport = null }: MemberPortalHeaderProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [hash, setHash] = useState('')
@@ -60,8 +75,8 @@ export function MemberPortalHeader({ user }: MemberPortalHeaderProps) {
     return () => window.removeEventListener('hashchange', syncHash)
   }, [pathname])
 
-  const title = portalTitle(pathname, hash, user.role)
-  const brandLabel = portalBrandLabel(user.role)
+  const title = portalTitle(pathname, hash, user.role, memberSport)
+  const brandLabel = portalBrandLabel(user.role, memberSport)
 
   async function handleSignOut() {
     const supabase = createClient()

@@ -15,10 +15,7 @@ import {
   setAdultRunningPortalManageAccess,
   updateAccountRole,
 } from '@/lib/actions/settings-accounts'
-import type {
-  RegisteredAccount,
-  SettingsAssignableRole,
-} from '@/lib/settings-accounts-types'
+import type { RegisteredAccount } from '@/lib/settings-accounts-types'
 import { requiresMemberLinkRole } from '@/lib/settings-accounts-types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -66,61 +63,15 @@ import { AccountMemberLinkSelect } from '@/components/settings/account-member-li
 import type { PendingAccountRow } from '@/lib/actions/auth-registration'
 import type { InstructorRoleRow } from '@/lib/settings-accounts-types'
 import {
+  SETTINGS_ROLE_SELECT_OPTIONS_WITH_HOLD,
+  accountToSettingsRoleSelect,
+  parseSettingsRoleSelect,
+  settingsRoleHint,
+  type SettingsRoleSelectValue,
+} from '@/lib/settings-role-select'
+import {
   adultProgramDisplayLabel,
-  adultProgramFromRoleSelect,
-  resolveAdultMemberProgram,
-  roleSelectFromAdultProgram,
-  type AdultMemberProgram,
 } from '@/lib/adult-member-programs'
-
-/** 설정 UI 권한 셀렉트 — 성인회원은 육상/일반로 분리 표시 */
-type RoleSelectValue =
-  | SettingsAssignableRole
-  | 'adult_member_athletics'
-  | 'adult_member_general'
-  | 'on_hold'
-
-const ROLE_SELECT_OPTIONS: { value: RoleSelectValue; label: string }[] = [
-  { value: 'member', label: '회원' },
-  { value: 'adult_member_athletics', label: '성인회원(육상)' },
-  { value: 'adult_member_general', label: '성인회원(일반)' },
-  { value: 'guardian', label: '학부모' },
-  { value: 'admin', label: '관리자' },
-  { value: 'instructor', label: '강사' },
-  { value: 'on_hold', label: '보류' },
-]
-
-function parseRoleSelect(value: RoleSelectValue): {
-  role: SettingsAssignableRole | null
-  adultProgram: AdultMemberProgram | null
-  onHold: boolean
-} {
-  if (value === 'on_hold') {
-    return { role: null, adultProgram: null, onHold: true }
-  }
-  const adultProgram = adultProgramFromRoleSelect(value)
-  if (adultProgram) {
-    return { role: 'adult_member', adultProgram, onHold: false }
-  }
-  return {
-    role: value as SettingsAssignableRole,
-    adultProgram: null,
-    onHold: false,
-  }
-}
-
-function accountToRoleSelect(account: RegisteredAccount): RoleSelectValue | null {
-  if (account.isProtected) return null
-  if (account.appRole === 'instructor') return 'instructor'
-  if (account.appRole === 'guardian') return 'guardian'
-  if (account.appRole === 'admin') return 'admin'
-  if (account.appRole === 'adult_member') {
-    return roleSelectFromAdultProgram(
-      resolveAdultMemberProgram(account.linkedMemberSport),
-    )
-  }
-  return 'member'
-}
 
 function formatDate(iso: string) {
   try {
@@ -207,7 +158,7 @@ export function AccountRoleManagement({
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pendingRoleSelect, setPendingRoleSelect] =
-    useState<RoleSelectValue>('member')
+    useState<SettingsRoleSelectValue>('member')
   const [memberId, setMemberId] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -304,15 +255,16 @@ export function AccountRoleManagement({
   }, [activeAccounts, query])
 
   const selected = activeAccounts.find((a) => a.id === selectedId) ?? null
-  const selectedRoleSelect = selected ? accountToRoleSelect(selected) : null
-  const pendingParsed = parseRoleSelect(pendingRoleSelect)
+  const selectedRoleSelect = selected ? accountToSettingsRoleSelect(selected) : null
+  const pendingParsed = parseSettingsRoleSelect(pendingRoleSelect)
   const pendingRole = pendingParsed.role
   const adultProgram = pendingParsed.adultProgram
+  const memberProgram = pendingParsed.memberProgram
   const isOnHoldAction = pendingParsed.onHold
 
   function selectAccount(account: RegisteredAccount) {
     setSelectedId(account.id)
-    const roleSelect = accountToRoleSelect(account)
+    const roleSelect = accountToSettingsRoleSelect(account)
     if (roleSelect) setPendingRoleSelect(roleSelect)
     setMemberId(account.linkedMemberId ?? '')
   }
@@ -365,6 +317,7 @@ export function AccountRoleManagement({
         ? memberId || selected.linkedMemberId
         : null,
       adultProgram,
+      memberProgram,
     })
     setSaving(false)
 
@@ -380,7 +333,7 @@ export function AccountRoleManagement({
       setMemberId(updated.linkedMemberId)
     }
     if (updated) {
-      const nextSelect = accountToRoleSelect(updated)
+      const nextSelect = accountToSettingsRoleSelect(updated)
       if (nextSelect) setPendingRoleSelect(nextSelect)
     }
 
@@ -391,9 +344,11 @@ export function AccountRoleManagement({
     toast.success(
       pendingRole === 'adult_member' && adultLabel
         ? `${adultLabel} 권한이 저장되었습니다.`
-        : requiresMemberLinkRole(pendingRole)
-          ? '회원 연결이 저장되었습니다.'
-          : '권한이 변경되었습니다.',
+        : memberProgram === 'youth_athletics'
+          ? '회원(육상선수반) 권한이 저장되었습니다.'
+          : requiresMemberLinkRole(pendingRole)
+            ? '회원 연결이 저장되었습니다.'
+            : '권한이 변경되었습니다.',
       {
         description:
           pendingRole === 'adult_member' && adultLabel
@@ -403,8 +358,9 @@ export function AccountRoleManagement({
             : requiresMemberLinkRole(pendingRole) && updated?.linkedMemberName
               ? `${selected.full_name || selected.email} → ${updated.linkedMemberName}`
               : `${selected.full_name || selected.email} → ${
-                  ROLE_SELECT_OPTIONS.find((r) => r.value === pendingRoleSelect)
-                    ?.label
+                  SETTINGS_ROLE_SELECT_OPTIONS_WITH_HOLD.find(
+                    (r) => r.value === pendingRoleSelect,
+                  )?.label
                 }`,
       },
     )
@@ -664,9 +620,9 @@ export function AccountRoleManagement({
                 <Select
                   value={pendingRoleSelect}
                   onValueChange={(v) => {
-                    const next = v as RoleSelectValue
+                    const next = v as SettingsRoleSelectValue
                     setPendingRoleSelect(next)
-                    const parsed = parseRoleSelect(next)
+                    const parsed = parseSettingsRoleSelect(next)
                     if (
                       parsed.onHold ||
                       !parsed.role ||
@@ -680,7 +636,7 @@ export function AccountRoleManagement({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROLE_SELECT_OPTIONS.map((r) => (
+                    {SETTINGS_ROLE_SELECT_OPTIONS_WITH_HOLD.map((r) => (
                       <SelectItem key={r.value} value={r.value}>
                         {r.label}
                       </SelectItem>
@@ -690,7 +646,7 @@ export function AccountRoleManagement({
                 <p className="text-[11px] text-muted-foreground">
                   {isOnHoldAction
                     ? '보류로 보내면 가입 계정 목록에서 빠지고, 로그인 시 「회원가입 대기중」으로 안내됩니다.'
-                    : '성인회원(육상): 러닝·육상 포털 · 성인회원(일반): 체중 관리 포털 · 회원: 일반 마이페이지 · 학부모: 보호자 · 강사: 캘린더·출석'}
+                    : settingsRoleHint(pendingRoleSelect)}
                 </p>
               </div>
 

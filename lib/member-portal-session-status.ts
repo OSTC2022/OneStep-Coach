@@ -68,6 +68,17 @@ export function buildMemberPortalSessionStatus(
     return buildPeriodSessionStatus(periodGroup.primary)
   }
 
+  // 횟수권이어도 만료일·월정액 note로 기간을 추정할 수 있으면 일수 표시
+  for (const pkg of scoped) {
+    const expiresAt = resolvePackagePeriodExpiryDate(pkg)
+    if (expiresAt) {
+      return buildPeriodSessionStatus({
+        ...pkg,
+        expires_at: expiresAt,
+      })
+    }
+  }
+
   const remaining = member.remaining_sessions ?? 0
 
   return {
