@@ -965,13 +965,20 @@ function RankingPreview({
       ? activePbLeaderboard.ranked
       : activeMileageLeaderboard.ranked
 
+  const firstRow = allRows[0] ?? null
+  const restRows = allRows.slice(1)
+  /** 1위 고정 후 아래에 보이는 행 수 */
+  const scrollVisibleCount = Math.max(1, RANKING_PREVIEW_VISIBLE - 1)
+
   const myIndex = useMemo(() => {
     if (!highlightMemberId) return -1
     return allRows.findIndex((row) => row.memberId === highlightMemberId)
   }, [allRows, highlightMemberId])
 
+  const myRestIndex = myIndex <= 0 ? -1 : myIndex - 1
+
   const [windowStart, setWindowStart] = useState(() =>
-    resolveRankingWindowStart(allRows.length, myIndex),
+    resolveRankingWindowStart(restRows.length, myRestIndex, scrollVisibleCount),
   )
   const wheelLockRef = useRef(false)
   const windowStartRef = useRef(windowStart)
@@ -979,15 +986,17 @@ function RankingPreview({
   const canScrollRanksRef = useRef(false)
 
   useEffect(() => {
-    setWindowStart(resolveRankingWindowStart(allRows.length, myIndex))
-  }, [allRows.length, myIndex, rankingView, pbDistance, genderFilter])
+    setWindowStart(
+      resolveRankingWindowStart(restRows.length, myRestIndex, scrollVisibleCount),
+    )
+  }, [restRows.length, myRestIndex, scrollVisibleCount, rankingView, pbDistance, genderFilter])
 
-  const maxWindowStart = Math.max(0, allRows.length - RANKING_PREVIEW_VISIBLE)
-  const previewRows = allRows.slice(
+  const maxWindowStart = Math.max(0, restRows.length - scrollVisibleCount)
+  const previewRestRows = restRows.slice(
     windowStart,
-    windowStart + RANKING_PREVIEW_VISIBLE,
+    windowStart + scrollVisibleCount,
   )
-  const canScrollRanks = allRows.length > RANKING_PREVIEW_VISIBLE
+  const canScrollRanks = restRows.length > scrollVisibleCount
   const listRef = useRef<HTMLDivElement>(null)
 
   windowStartRef.current = windowStart
@@ -1090,6 +1099,64 @@ function RankingPreview({
     })
   }
 
+  function renderPreviewRow(
+    row:
+      | AttendanceKingRow
+      | PbDistanceRankRow
+      | MileageDistanceRankRow,
+  ) {
+    const isMe = highlightMemberId != null && row.memberId === highlightMemberId
+    if (usesAttendanceLeaderboard(rankingView)) {
+      return (
+        <AttendanceRankingRow
+          key={row.memberId}
+          row={row as AttendanceKingRow}
+          isMe={isMe}
+          onMemberSelect={onMemberSelect}
+          isSelected={selectedMemberId === row.memberId}
+          rankingStatus={statusByMemberId.get(row.memberId) ?? null}
+        />
+      )
+    }
+    return usesPbLeaderboard(rankingView) ? (
+      <PbRankingRow
+        key={(row as PbDistanceRankRow).participantId}
+        row={row as PbDistanceRankRow}
+        isMe={isMe}
+        distanceLabel={formatPbDistanceLabel(pbDistance)}
+        showDistanceLabel={false}
+        rankChangeDelta={resolveRankChangeDelta(row.memberId)}
+        onMemberSelect={onMemberSelect}
+        isSelected={selectedMemberId === row.memberId}
+        beatRivalMemberId={beatRivalMemberId}
+        showBeatRivalLabel={showBeatRivalLabel}
+        rankingStatus={statusByMemberId.get(row.memberId) ?? null}
+      />
+    ) : (
+      <MileageRankingRow
+        key={(row as MileageDistanceRankRow).participantId}
+        row={row as MileageDistanceRankRow}
+        isMe={isMe}
+        rankChangeDelta={resolveRankChangeDelta(row.memberId)}
+        onMemberSelect={onMemberSelect}
+        isSelected={selectedMemberId === row.memberId}
+        beatRivalMemberId={beatRivalMemberId}
+        showBeatRivalLabel={showBeatRivalLabel}
+        beatRivalGapLabel={
+          isMe && showBeatRivalLabel ? beatRivalHeader?.gapLabel ?? null : null
+        }
+        beatRivalGapAccent={beatRivalHeader?.gap?.accentClass}
+        rankingStatus={statusByMemberId.get(row.memberId) ?? null}
+      />
+    )
+  }
+
+  const restWindowFrom = restRows.length === 0 ? null : windowStart + 2
+  const restWindowTo =
+    restRows.length === 0
+      ? null
+      : Math.min(allRows.length, windowStart + 1 + scrollVisibleCount)
+
   return (
     <div className={MEMBER_PORTAL_CARD_CLASS}>
       <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
@@ -1144,6 +1211,12 @@ function RankingPreview({
               role="list"
               aria-label="랭킹 미리보기"
             >
+              {firstRow ? (
+                <div className="relative z-[1] rounded-lg bg-zinc-950/90 pb-0.5 shadow-[0_8px_16px_-8px_rgba(0,0,0,0.85)]">
+                  {renderPreviewRow(firstRow)}
+                </div>
+              ) : null}
+
               {canScrollRanks && windowStart > 0 ? (
                 <button
                   type="button"
@@ -1155,52 +1228,7 @@ function RankingPreview({
                 </button>
               ) : null}
 
-              {previewRows.map((row) => {
-                const isMe = highlightMemberId != null && row.memberId === highlightMemberId
-                if (usesAttendanceLeaderboard(rankingView)) {
-                  return (
-                    <AttendanceRankingRow
-                      key={row.memberId}
-                      row={row as AttendanceKingRow}
-                      isMe={isMe}
-                      onMemberSelect={onMemberSelect}
-                      isSelected={selectedMemberId === row.memberId}
-                      rankingStatus={statusByMemberId.get(row.memberId) ?? null}
-                    />
-                  )
-                }
-                return usesPbLeaderboard(rankingView) ? (
-                  <PbRankingRow
-                    key={(row as PbDistanceRankRow).participantId}
-                    row={row as PbDistanceRankRow}
-                    isMe={isMe}
-                    distanceLabel={formatPbDistanceLabel(pbDistance)}
-                    showDistanceLabel={false}
-                    rankChangeDelta={resolveRankChangeDelta(row.memberId)}
-                    onMemberSelect={onMemberSelect}
-                    isSelected={selectedMemberId === row.memberId}
-                    beatRivalMemberId={beatRivalMemberId}
-                    showBeatRivalLabel={showBeatRivalLabel}
-                    rankingStatus={statusByMemberId.get(row.memberId) ?? null}
-                  />
-                ) : (
-                  <MileageRankingRow
-                    key={(row as MileageDistanceRankRow).participantId}
-                    row={row as MileageDistanceRankRow}
-                    isMe={isMe}
-                    rankChangeDelta={resolveRankChangeDelta(row.memberId)}
-                    onMemberSelect={onMemberSelect}
-                    isSelected={selectedMemberId === row.memberId}
-                    beatRivalMemberId={beatRivalMemberId}
-                    showBeatRivalLabel={showBeatRivalLabel}
-                    beatRivalGapLabel={
-                      isMe && showBeatRivalLabel ? beatRivalHeader?.gapLabel ?? null : null
-                    }
-                    beatRivalGapAccent={beatRivalHeader?.gap?.accentClass}
-                    rankingStatus={statusByMemberId.get(row.memberId) ?? null}
-                  />
-                )
-              })}
+              {previewRestRows.map((row) => renderPreviewRow(row))}
 
               {canScrollRanks && windowStart < maxWindowStart ? (
                 <button
@@ -1226,7 +1254,11 @@ function RankingPreview({
             ) : null}
             {canScrollRanks ? (
               <p className="text-center text-[10px] text-zinc-500">
-                휠로 순위 이동 · {windowStart + 1}–{Math.min(allRows.length, windowStart + RANKING_PREVIEW_VISIBLE)}위 / {allRows.length}명
+                1위 고정 · 휠로 순위 이동
+                {restWindowFrom != null && restWindowTo != null
+                  ? ` · ${restWindowFrom}–${restWindowTo}위`
+                  : ''}{' '}
+                / {allRows.length}명
               </p>
             ) : null}
             {leagueStatus?.isSoloRanked ? (

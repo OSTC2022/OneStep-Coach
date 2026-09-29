@@ -9,13 +9,18 @@ import {
 import {
   formatPortalRouletteHint,
   formatPortalRouletteResult,
+  formatPortalRouletteResultKindLabel,
   pickPortalRouletteSlot,
   portalRouletteTargetRotation,
   type PortalRouletteSlot,
 } from '@/lib/running-league/portal-roulette'
 import { cn } from '@/lib/utils'
 
-const SPIN_MS = 4800
+/** 약 10초 회전 */
+const SPIN_MS = 10000
+/** 오래 도는 감이 나도록 추가 바퀴 */
+const EXTRA_SPINS_MIN = 14
+const EXTRA_SPINS_RANGE = 6
 
 type PortalRouletteWheelProps = {
   slots: PortalRouletteSlot[]
@@ -24,14 +29,22 @@ type PortalRouletteWheelProps = {
   onResult?: (label: string) => void
 }
 
-function RoulettePointer() {
+function RoulettePointer({ spinning }: { spinning: boolean }) {
   return (
     <div
       className="pointer-events-none absolute left-1/2 top-0 z-30 -translate-x-1/2"
       style={{ marginTop: '-4px' }}
       aria-hidden
     >
-      <svg width="28" height="32" viewBox="0 0 28 32" className="drop-shadow-lg">
+      <svg
+        width="28"
+        height="32"
+        viewBox="0 0 28 32"
+        className={cn(
+          'block drop-shadow-lg transition-[filter] duration-300',
+          spinning && 'portal-roulette-pointer-spinning drop-shadow-[0_0_10px_rgba(190,242,100,0.85)]',
+        )}
+      >
         <path d="M14 28 L4 6 Q14 2 24 6 Z" fill="#d9f99d" stroke="#365314" strokeWidth="1.5" />
         <circle cx="14" cy="8" r="3" fill="#ecfccb" stroke="#365314" strokeWidth="1" />
       </svg>
@@ -87,6 +100,7 @@ export function PortalRouletteWheel({
   const [rotation, setRotation] = useState(0)
   const [spinning, setSpinning] = useState(false)
   const [result, setResult] = useState<string | null>(null)
+  const [resultKind, setResultKind] = useState<string | null>(null)
 
   const segments = useMemo(() => buildPortalRouletteSegments(slots), [slots])
   const cx = diameter / 2
@@ -99,16 +113,20 @@ export function PortalRouletteWheel({
 
     const picked = pickPortalRouletteSlot(slots)
     const label = formatPortalRouletteResult(picked)
+    const kindLabel = formatPortalRouletteResultKindLabel(picked)
+    const extraSpins = EXTRA_SPINS_MIN + Math.floor(Math.random() * EXTRA_SPINS_RANGE)
     const nextRotation =
-      rotation + portalRouletteTargetRotation(slots, picked.id, 6 + Math.floor(Math.random() * 3))
+      rotation + portalRouletteTargetRotation(slots, picked.id, extraSpins)
 
     setSpinning(true)
     setResult(null)
+    setResultKind(null)
     setRotation(nextRotation)
 
     window.setTimeout(() => {
       setSpinning(false)
       setResult(label)
+      setResultKind(kindLabel)
       onResult?.(label)
     }, SPIN_MS)
   }
@@ -116,21 +134,24 @@ export function PortalRouletteWheel({
   return (
     <div className={cn('flex w-full flex-col items-center gap-4', className)}>
       <div className="relative" style={{ width: diameter, height: diameter }}>
-        <RoulettePointer />
+        <RoulettePointer spinning={spinning} />
 
         {/* 고정 외곽 프레임 */}
         <div
-          className="absolute inset-0 rounded-full bg-gradient-to-b from-zinc-500 via-zinc-800 to-zinc-950 p-[7px] shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-lime-500/30"
+          className={cn(
+            'absolute inset-0 rounded-full bg-gradient-to-b from-zinc-500 via-zinc-800 to-zinc-950 p-[7px] shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-lime-500/30',
+            spinning && 'portal-roulette-frame-spinning ring-lime-400/60',
+          )}
           style={{ width: diameter, height: diameter }}
         >
           <div className="relative h-full w-full overflow-hidden rounded-full bg-zinc-950">
             <svg
               viewBox={`0 0 ${diameter} ${diameter}`}
-              className="h-full w-full"
+              className="h-full w-full will-change-transform"
               style={{
                 transform: `rotate(${rotation}deg)`,
                 transition: spinning
-                  ? `transform ${SPIN_MS}ms cubic-bezier(0.12, 0.85, 0.18, 1)`
+                  ? `transform ${SPIN_MS}ms cubic-bezier(0.08, 0.72, 0.12, 1)`
                   : undefined,
               }}
             >
@@ -153,6 +174,18 @@ export function PortalRouletteWheel({
                 strokeWidth={1}
               />
             </svg>
+
+            {spinning ? (
+              <div
+                className="portal-roulette-shimmer pointer-events-none absolute inset-[-20%] rounded-full"
+                style={{
+                  background:
+                    'conic-gradient(from 0deg, transparent 0deg, rgba(190,242,100,0.35) 40deg, transparent 80deg, transparent 180deg, rgba(255,255,255,0.18) 210deg, transparent 250deg)',
+                  mixBlendMode: 'screen',
+                }}
+                aria-hidden
+              />
+            ) : null}
           </div>
         </div>
 
@@ -165,7 +198,7 @@ export function PortalRouletteWheel({
           className={cn(
             'absolute left-1/2 top-1/2 z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-2 border-lime-400/60 bg-gradient-to-b from-zinc-700 to-zinc-950 font-bold text-lime-50 shadow-[0_6px_20px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.15)] transition-all',
             spinning
-              ? 'pointer-events-none scale-95 opacity-80'
+              ? 'portal-roulette-hub-spinning pointer-events-none border-lime-300 text-lime-100'
               : 'hover:scale-105 hover:border-lime-300 hover:shadow-[0_0_24px_rgba(132,204,22,0.4)] active:scale-95',
           )}
           style={{ width: hubRadius * 2, height: hubRadius * 2 }}
@@ -175,15 +208,15 @@ export function PortalRouletteWheel({
       </div>
 
       {result ? (
-        <div className="w-full animate-in fade-in slide-in-from-bottom-2 rounded-xl border border-lime-400/40 bg-gradient-to-b from-lime-500/15 to-lime-500/5 px-4 py-3 text-center duration-300">
+        <div className="w-full animate-in fade-in zoom-in-95 slide-in-from-bottom-2 rounded-xl border border-lime-400/40 bg-gradient-to-b from-lime-500/15 to-lime-500/5 px-4 py-3 text-center duration-500">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/90">
-            출석왕
+            {resultKind ?? '결과'}
           </p>
           <p className="mt-1 text-lg font-bold text-lime-50">{result}</p>
         </div>
       ) : (
         <p className="text-center text-xs leading-relaxed text-zinc-500">
-          {formatPortalRouletteHint(slots)}
+          {spinning ? '돌리는 중…' : formatPortalRouletteHint(slots)}
         </p>
       )}
     </div>

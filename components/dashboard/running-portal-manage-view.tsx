@@ -20,10 +20,16 @@ import {
   ATTENDANCE_KING_DAY_RULE_LABEL,
   buildAttendanceKingLeaderboard,
 } from '@/lib/running-league/attendance-king'
+import { buildMileageDistanceLeaderboard } from '@/lib/running-league/mileage-leaderboard'
 import { formatRankingMemberName } from '@/lib/running-league/mask-member-name'
 import { buildPortalRouletteMemberColorMap } from '@/lib/running-league/portal-member-color-sync'
 import { formatPortalManageMonthOptionLabel } from '@/lib/running-league/portal-manage-month'
-import { buildPortalRouletteSlots } from '@/lib/running-league/portal-roulette'
+import {
+  buildPortalRouletteAttendanceSlots,
+  buildPortalRouletteBeatRivalSlots,
+  buildPortalRouletteMileageSlots,
+} from '@/lib/running-league/portal-roulette'
+import { filterMileageLogsForPeriod } from '@/lib/running-league/ranking-period'
 import { MEMBER_PORTAL_SHELL_CLASS } from '@/lib/running-league/member-portal-layout'
 import { cn } from '@/lib/utils'
 
@@ -41,6 +47,16 @@ export function RunningPortalManageView({ data }: RunningPortalManageViewProps) 
     [data.mileageLogs, data.participants, data.period],
   )
 
+  const periodMileageLogs = useMemo(
+    () => filterMileageLogsForPeriod(data.mileageLogs, data.period),
+    [data.mileageLogs, data.period],
+  )
+
+  const mileageRows = useMemo(
+    () => buildMileageDistanceLeaderboard(data.participants, periodMileageLogs).ranked,
+    [data.participants, periodMileageLogs],
+  )
+
   const memberColorMap = useMemo(
     () =>
       buildPortalRouletteMemberColorMap({
@@ -48,19 +64,49 @@ export function RunningPortalManageView({ data }: RunningPortalManageViewProps) 
         mileageLogs: data.mileageLogs,
         period: data.period,
         beatRivalMemberId: data.beatRivalMemberId,
-        attendanceMemberIds: attendanceRows.map((row) => row.memberId),
+        attendanceMemberIds: [
+          ...attendanceRows.map((row) => row.memberId),
+          ...mileageRows.map((row) => row.memberId),
+        ],
       }),
-    [attendanceRows, data.beatRivalMemberId, data.mileageLogs, data.participants, data.period],
+    [
+      attendanceRows,
+      data.beatRivalMemberId,
+      data.mileageLogs,
+      data.participants,
+      data.period,
+      mileageRows,
+    ],
   )
 
-  const slots = useMemo(
+  const attendanceSlots = useMemo(
     () =>
-      buildPortalRouletteSlots({
+      buildPortalRouletteAttendanceSlots({
         attendanceRows,
         memberColorMap,
         beatRivalMemberId: data.beatRivalMemberId,
       }),
     [attendanceRows, data.beatRivalMemberId, memberColorMap],
+  )
+
+  const mileageSlots = useMemo(
+    () =>
+      buildPortalRouletteMileageSlots({
+        mileageRows,
+        memberColorMap,
+        beatRivalMemberId: data.beatRivalMemberId,
+      }),
+    [data.beatRivalMemberId, memberColorMap, mileageRows],
+  )
+
+  const beatRivalSlots = useMemo(
+    () =>
+      buildPortalRouletteBeatRivalSlots({
+        mileageRows,
+        memberColorMap,
+        beatRivalMemberId: data.beatRivalMemberId,
+      }),
+    [data.beatRivalMemberId, memberColorMap, mileageRows],
   )
 
   function handleMonthChange(nextMonth: string) {
@@ -169,8 +215,11 @@ export function RunningPortalManageView({ data }: RunningPortalManageViewProps) 
               <h2 className="text-sm font-semibold">행운의 룰렛</h2>
               <PortalRouletteGame
                 key={`roulette-${data.monthKey}`}
-                slots={slots}
+                attendanceSlots={attendanceSlots}
+                mileageSlots={mileageSlots}
+                beatRivalSlots={beatRivalSlots}
                 attendanceRows={attendanceRows}
+                mileageRows={mileageRows}
                 memberColorMap={memberColorMap}
                 beatRivalMemberId={data.beatRivalMemberId}
               />

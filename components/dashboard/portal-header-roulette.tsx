@@ -12,9 +12,16 @@ import {
 } from '@/components/ui/dialog'
 import { buildAttendanceKingLeaderboard } from '@/lib/running-league/attendance-king'
 import type { MemberRunningLeagueHome } from '@/lib/running-league/member-ranking-types'
+import { buildMileageDistanceLeaderboard } from '@/lib/running-league/mileage-leaderboard'
 import { buildPortalRouletteMemberColorMap } from '@/lib/running-league/portal-member-color-sync'
-import { buildPortalRouletteSlots } from '@/lib/running-league/portal-roulette'
 import {
+  buildPortalRouletteAttendanceSlots,
+  buildPortalRouletteBeatRivalSlots,
+  buildPortalRouletteMileageSlots,
+  MILEAGE_KM_PER_ROULETTE_SLOT,
+} from '@/lib/running-league/portal-roulette'
+import {
+  filterMileageLogsForPeriod,
   rankingPeriodFromMonthKey,
   resolveEffectiveRankingPeriod,
 } from '@/lib/running-league/ranking-period'
@@ -122,9 +129,20 @@ export function PortalHeaderRoulette({
         rankingReferenceDate ?? null,
         rankingCycleStartDate ?? null,
       ).period
+
+  const periodMileageLogs = useMemo(
+    () => filterMileageLogsForPeriod([...mileageLogs], period),
+    [mileageLogs, period],
+  )
+
   const attendanceRows = useMemo(
     () => buildAttendanceKingLeaderboard(participants, mileageLogs, period),
     [mileageLogs, participants, period],
+  )
+
+  const mileageRows = useMemo(
+    () => buildMileageDistanceLeaderboard([...participants], periodMileageLogs).ranked,
+    [participants, periodMileageLogs],
   )
 
   const memberColorMap = useMemo(
@@ -134,19 +152,42 @@ export function PortalHeaderRoulette({
         mileageLogs,
         period,
         beatRivalMemberId,
-        attendanceMemberIds: attendanceRows.map((row) => row.memberId),
+        attendanceMemberIds: [
+          ...attendanceRows.map((row) => row.memberId),
+          ...mileageRows.map((row) => row.memberId),
+        ],
       }),
-    [attendanceRows, beatRivalMemberId, mileageLogs, participants, period],
+    [attendanceRows, beatRivalMemberId, mileageLogs, mileageRows, participants, period],
   )
 
-  const slots = useMemo(
+  const attendanceSlots = useMemo(
     () =>
-      buildPortalRouletteSlots({
+      buildPortalRouletteAttendanceSlots({
         attendanceRows,
         memberColorMap,
         beatRivalMemberId,
       }),
     [attendanceRows, beatRivalMemberId, memberColorMap],
+  )
+
+  const mileageSlots = useMemo(
+    () =>
+      buildPortalRouletteMileageSlots({
+        mileageRows,
+        memberColorMap,
+        beatRivalMemberId,
+      }),
+    [beatRivalMemberId, memberColorMap, mileageRows],
+  )
+
+  const beatRivalSlots = useMemo(
+    () =>
+      buildPortalRouletteBeatRivalSlots({
+        mileageRows,
+        memberColorMap,
+        beatRivalMemberId,
+      }),
+    [beatRivalMemberId, memberColorMap, mileageRows],
   )
 
   return (
@@ -160,7 +201,7 @@ export function PortalHeaderRoulette({
           className,
         )}
       >
-        <PortalRouletteIcon slots={slots} />
+        <PortalRouletteIcon slots={mileageSlots.length > 1 ? mileageSlots : attendanceSlots} />
         <span className="text-[10px] font-semibold leading-none text-lime-200">돌림판</span>
       </button>
 
@@ -173,7 +214,8 @@ export function PortalHeaderRoulette({
           <DialogHeader className="border-b border-lime-500/15 px-5 pb-3 pt-5 text-left">
             <DialogTitle className="text-lg text-lime-100">행운의 룰렛</DialogTitle>
             <DialogDescription className="text-zinc-400">
-              출석왕 참가자만 룰렛에 표시됩니다. 출석 1회마다 칸이 하나씩 늘어납니다.
+              마일리지왕 · 이겨라 · 출석왕 메뉴로 나눠 돌릴 수 있습니다. 마일리지·이겨라는{' '}
+              {MILEAGE_KM_PER_ROULETTE_SLOT}km당 1칸, 출석은 1회당 1칸입니다.
             </DialogDescription>
           </DialogHeader>
 
@@ -181,8 +223,11 @@ export function PortalHeaderRoulette({
             {open ? (
               <PortalRouletteGame
                 key="portal-roulette-game"
-                slots={slots}
+                attendanceSlots={attendanceSlots}
+                mileageSlots={mileageSlots}
+                beatRivalSlots={beatRivalSlots}
                 attendanceRows={attendanceRows}
+                mileageRows={mileageRows}
                 memberColorMap={memberColorMap}
                 beatRivalMemberId={beatRivalMemberId}
               />
