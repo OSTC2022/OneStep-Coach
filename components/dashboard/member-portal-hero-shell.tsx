@@ -1,9 +1,11 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import { BRAND_PULSE_GREEN } from '@/lib/brand-pulse-svg'
 import { cn } from '@/lib/utils'
+
+const BRAND_NAME = '원스텝'
 
 type MemberPortalHeroShellProps = {
   children: ReactNode
@@ -11,6 +13,47 @@ type MemberPortalHeroShellProps = {
   /** SVG id 접두사 — 같은 페이지에 여러 히어로가 있을 때 충돌 방지 */
   idPrefix?: string
   eyebrow?: ReactNode
+}
+
+/** 심볼 + 원스텝 브랜드를 한 묶음으로, 이어지는 제목은 옆에 배치 */
+export function PortalBrandTitleLockup({
+  title,
+  className,
+  style,
+}: {
+  title: string
+  className?: string
+  style?: CSSProperties
+}) {
+  const trimmed = title.trim()
+  const hasBrandPrefix = trimmed.startsWith(BRAND_NAME)
+  const brandLabel = hasBrandPrefix ? BRAND_NAME : trimmed
+  const rest = hasBrandPrefix ? trimmed.slice(BRAND_NAME.length).trimStart() : ''
+
+  return (
+    <h1 className="flex flex-wrap items-center gap-x-[0.32em] gap-y-1 leading-none tracking-tight">
+      <span className="inline-flex items-center gap-2.5 sm:gap-3">
+        <span className="relative inline-flex h-12 w-12 shrink-0 items-center justify-center sm:h-14 sm:w-14">
+          <span
+            aria-hidden
+            className="absolute inset-[-28%] rounded-full bg-[#AAFF00]/15 blur-xl"
+          />
+          <BrandPulseAppIcon
+            glow
+            className="onestep-symbol-soft-blink relative !h-full !w-full"
+          />
+        </span>
+        <span className={cn('whitespace-nowrap', className)} style={style}>
+          {brandLabel}
+        </span>
+      </span>
+      {rest ? (
+        <span className={cn('min-w-0', className)} style={style}>
+          {rest}
+        </span>
+      ) : null}
+    </h1>
+  )
 }
 
 /**

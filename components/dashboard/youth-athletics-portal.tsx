@@ -15,6 +15,7 @@ import {
   User,
 } from 'lucide-react'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
+import { PortalBrandTitleLockup } from '@/components/dashboard/member-portal-hero-shell'
 import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal-accordion-menus'
 import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/member-running-league-training-schedule'
 import { YouthAthleticsPbPanel } from '@/components/dashboard/youth-athletics-pb-panel'
@@ -176,50 +177,40 @@ export function YouthAthleticsPortal({
           className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[#AAFF00]/25 to-transparent"
         />
 
-        <div className="relative z-10 flex items-start gap-3.5 sm:gap-5">
-          <div className="relative shrink-0">
-            <div
-              aria-hidden
-              className="absolute inset-[-30%] rounded-full bg-[#AAFF00]/15 blur-xl"
-            />
-            <BrandPulseAppIcon
-              glow
-              className="onestep-symbol-soft-blink relative h-12 w-12 sm:h-14 sm:w-14"
+        <div className="relative z-10">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[#AAFF00] sm:text-[11px]">
+              TRACK CLASS
+            </p>
+            <span className="h-1 w-1 rounded-full bg-[#AAFF00]/80" />
+            <p className="text-[10px] font-semibold tracking-[0.18em] text-[#AAFF00]/80 sm:text-[11px]">
+              {YOUTH_ATHLETICS_PORTAL_LEAGUE_LABEL}
+            </p>
+          </div>
+
+          <div className="mt-2">
+            <PortalBrandTitleLockup
+              title={YOUTH_ATHLETICS_PORTAL_TITLE}
+              className="text-[1.65rem] font-black text-white sm:text-[2.1rem]"
             />
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.34em] text-[#AAFF00] sm:text-[11px]">
-                TRACK CLASS
-              </p>
-              <span className="h-1 w-1 rounded-full bg-[#AAFF00]/80" />
-              <p className="text-[10px] font-semibold tracking-[0.18em] text-[#AAFF00]/80 sm:text-[11px]">
-                {YOUTH_ATHLETICS_PORTAL_LEAGUE_LABEL}
-              </p>
-            </div>
+          <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <p className="text-xl font-black tracking-tight text-white sm:text-2xl">
+              {member.name}
+            </p>
+            <span className="text-sm font-semibold text-[#AAFF00]">선수</span>
+            {primaryEventLabel ? (
+              <span className="inline-flex items-center rounded-full border border-[#AAFF00]/35 bg-[#AAFF00]/10 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#AAFF00] sm:text-sm">
+                {primaryEventLabel}
+              </span>
+            ) : null}
+          </div>
 
-            <h1 className="mt-2 text-[1.65rem] font-black leading-none tracking-tight text-white sm:text-[2.1rem]">
-              {YOUTH_ATHLETICS_PORTAL_TITLE}
-            </h1>
-
-            <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <p className="text-xl font-black tracking-tight text-white sm:text-2xl">
-                {member.name}
-              </p>
-              <span className="text-sm font-semibold text-[#AAFF00]">선수</span>
-              {primaryEventLabel ? (
-                <span className="inline-flex items-center rounded-full border border-[#AAFF00]/35 bg-[#AAFF00]/10 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#AAFF00] sm:text-sm">
-                  {primaryEventLabel}
-                </span>
-              ) : null}
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-2 text-[11px] sm:text-xs">
-              <InfoChip icon={<User className="h-3 w-3" />} label={`코치 ${instructorName}`} />
-              {member.sport ? <InfoChip label={member.sport} /> : null}
-              {schoolLine ? <InfoChip label={schoolLine} /> : null}
-            </div>
+          <div className="mt-4 flex flex-wrap gap-2 text-[11px] sm:text-xs">
+            <InfoChip icon={<User className="h-3 w-3" />} label={`코치 ${instructorName}`} />
+            {member.sport ? <InfoChip label={member.sport} /> : null}
+            {schoolLine ? <InfoChip label={schoolLine} /> : null}
           </div>
         </div>
       </section>

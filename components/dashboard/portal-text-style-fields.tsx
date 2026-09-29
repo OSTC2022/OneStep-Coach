@@ -9,12 +9,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 import type { PortalTextStyleConfig } from '@/lib/running-league/adult-running-portal-styles'
 import {
+  FONT_FAMILY_CLASS,
+  FONT_FAMILY_STACK,
   PORTAL_FONT_FAMILY_OPTIONS,
   PORTAL_FONT_SIZE_OPTIONS,
   PORTAL_FONT_WEIGHT_OPTIONS,
   PORTAL_TEXT_ALIGN_OPTIONS,
+  PORTAL_TEXT_EFFECT_OPTIONS,
+  TEXT_EFFECT_CLASS,
 } from '@/lib/running-league/adult-running-portal-styles'
 
 const DEFAULT_OPTION = '__default__'
@@ -115,7 +120,7 @@ export function PortalTextStyleFields({
         </div>
 
         <div className="space-y-1.5">
-          <Label className="text-[11px] text-zinc-400">글꼴</Label>
+          <Label className="text-[11px] text-zinc-400">글씨체</Label>
           <Select
             value={value.fontFamily ?? DEFAULT_OPTION}
             onValueChange={(next) =>
@@ -132,7 +137,46 @@ export function PortalTextStyleFields({
               <SelectItem value={DEFAULT_OPTION}>기본값</SelectItem>
               {PORTAL_FONT_FAMILY_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+                  <span className="flex flex-col gap-0.5 py-0.5">
+                    <span
+                      className={FONT_FAMILY_CLASS[option.value]}
+                      style={{ fontFamily: FONT_FAMILY_STACK[option.value] }}
+                    >
+                      {option.label}
+                    </span>
+                    <span
+                      className="text-[11px] text-zinc-500"
+                      style={{ fontFamily: FONT_FAMILY_STACK[option.value] }}
+                    >
+                      {option.sample}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label className="text-[11px] text-zinc-400">특수효과</Label>
+          <Select
+            value={value.effect ?? DEFAULT_OPTION}
+            onValueChange={(next) =>
+              updateStyle(value, onChange, {
+                effect: next === DEFAULT_OPTION ? null : (next as PortalTextStyleConfig['effect']),
+              })
+            }
+          >
+            <SelectTrigger className="border-lime-500/20 bg-black/40">
+              <SelectValue placeholder="없음" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DEFAULT_OPTION}>없음</SelectItem>
+              {PORTAL_TEXT_EFFECT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  <span className={cn('text-lime-100', TEXT_EFFECT_CLASS[option.value])}>
+                    {option.label}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>

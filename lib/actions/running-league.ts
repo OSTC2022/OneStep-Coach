@@ -111,7 +111,7 @@ import type {
   MemberRunningLeagueRankingBundle,
 } from '@/lib/running-league/member-ranking-types'
 import { runRunningLeagueSelectQuery } from '@/lib/running-league/league-select'
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath, revalidateTag, updateTag } from 'next/cache'
 
 function mapLeague(row: Record<string, unknown>): RunningLeague {
   return {
@@ -2423,7 +2423,7 @@ export async function resetPortalRankingCycle(): Promise<
 
   revalidateMemberMileagePaths()
   revalidateRunningLeaguePaths(league.id)
-  revalidateTag('center-settings', 'max')
+  updateTag('center-settings')
   revalidatePath('/dashboard/settings/adult-running-portal')
   revalidatePath('/dashboard/my')
 

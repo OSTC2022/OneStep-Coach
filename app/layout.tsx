@@ -1,5 +1,18 @@
 import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
+import {
+  Black_Han_Sans,
+  Caveat,
+  Dancing_Script,
+  Do_Hyeon,
+  Gaegu,
+  Geist,
+  Geist_Mono,
+  Nanum_Pen_Script,
+  Noto_Sans_KR,
+  Noto_Serif_KR,
+  Orbitron,
+  Pacifico,
+} from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
@@ -19,6 +32,81 @@ const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
   display: 'swap',
 })
+const notoSansKr = Noto_Sans_KR({
+  subsets: ['latin'],
+  weight: ['400', '500', '700', '900'],
+  variable: '--font-noto-sans-kr',
+  display: 'swap',
+})
+const notoSerifKr = Noto_Serif_KR({
+  subsets: ['latin'],
+  weight: ['400', '600', '700'],
+  variable: '--font-noto-serif-kr',
+  display: 'swap',
+})
+const blackHanSans = Black_Han_Sans({
+  subsets: ['latin'],
+  weight: '400',
+  variable: '--font-black-han-sans',
+  display: 'swap',
+})
+const doHyeon = Do_Hyeon({
+  subsets: ['latin'],
+  weight: '400',
+  variable: '--font-do-hyeon',
+  display: 'swap',
+})
+const orbitron = Orbitron({
+  subsets: ['latin'],
+  weight: ['500', '700', '800'],
+  variable: '--font-orbitron',
+  display: 'swap',
+})
+const nanumPen = Nanum_Pen_Script({
+  subsets: ['latin'],
+  weight: '400',
+  variable: '--font-nanum-pen',
+  display: 'swap',
+})
+const gaegu = Gaegu({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  variable: '--font-gaegu',
+  display: 'swap',
+})
+const pacifico = Pacifico({
+  subsets: ['latin'],
+  weight: '400',
+  variable: '--font-pacifico',
+  display: 'swap',
+})
+const dancingScript = Dancing_Script({
+  subsets: ['latin'],
+  weight: ['500', '700'],
+  variable: '--font-dancing-script',
+  display: 'swap',
+})
+const caveat = Caveat({
+  subsets: ['latin'],
+  weight: ['500', '700'],
+  variable: '--font-caveat',
+  display: 'swap',
+})
+
+const portalFontVariables = [
+  geistSans.variable,
+  geistMono.variable,
+  notoSansKr.variable,
+  notoSerifKr.variable,
+  blackHanSans.variable,
+  doHyeon.variable,
+  orbitron.variable,
+  nanumPen.variable,
+  gaegu.variable,
+  pacifico.variable,
+  dancingScript.variable,
+  caveat.variable,
+].join(' ')
 
 export const metadata: Metadata = {
   title: {
@@ -66,7 +154,7 @@ export default function RootLayout({
     <html
       lang="ko"
       suppressHydrationWarning
-      className={`dark bg-[#070d18] ${geistSans.variable} ${geistMono.variable}`}
+      className={`dark bg-[#070d18] ${portalFontVariables}`}
     >
       <head>
         <PwaSplashHeadLinks />

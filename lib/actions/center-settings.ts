@@ -7,7 +7,7 @@ import {
 } from '@/lib/data/center-settings-read'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 import type { CenterSettings } from '@/lib/types'
 
 const CENTER_SETTINGS_ID = 'default'
@@ -133,7 +133,7 @@ export async function updateCenterSettings(formData: {
       return { error: legacyResult.error.message }
     }
 
-    revalidateTag('center-settings')
+    updateTag('center-settings')
     revalidatePath('/dashboard/settings')
     revalidatePath('/dashboard')
     revalidatePath('/dashboard/my')
@@ -147,7 +147,7 @@ export async function updateCenterSettings(formData: {
     }
   }
 
-  revalidateTag('center-settings')
+  updateTag('center-settings')
   revalidatePath('/dashboard/settings')
   revalidatePath('/dashboard')
   revalidatePath('/dashboard/my')

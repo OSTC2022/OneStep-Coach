@@ -14,7 +14,7 @@ import {
 import type { PortalRouletteMode } from '@/lib/running-league/portal-roulette'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 
 const CENTER_SETTINGS_ID = 'default'
 
@@ -173,7 +173,7 @@ export async function updatePortalRoulettePrize(input: {
   const saved = await savePrizesByMonth(byMonth)
   if (!saved.ok) return saved
 
-  revalidateTag('center-settings')
+  updateTag('center-settings')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/running-portal')
   revalidatePath('/dashboard/running-portal/manage')

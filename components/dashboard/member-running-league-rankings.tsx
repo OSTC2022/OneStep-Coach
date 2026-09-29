@@ -130,8 +130,7 @@ import {
   buildAttendanceKingLeaderboard,
   type AttendanceKingRow,
 } from '@/lib/running-league/attendance-king'
-import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
-import { MemberPortalHeroShell } from '@/components/dashboard/member-portal-hero-shell'
+import { MemberPortalHeroShell, PortalBrandTitleLockup } from '@/components/dashboard/member-portal-hero-shell'
 import { MemberPortalHeaderRoulette } from '@/components/dashboard/portal-header-roulette'
 
 function filterRankedBySearch<R extends { memberId: string; memberName: string }>(
@@ -882,7 +881,7 @@ function MemberPortalBrandHeader({
   })
   const portalTitlePresentation = resolvePortalTextPresentation(headerStyle?.portalTitle, {
     className:
-      'mt-2 text-[1.65rem] font-black leading-none tracking-tight text-white sm:text-[2.1rem]',
+      'text-[1.65rem] font-black leading-none tracking-tight text-white sm:text-[2.1rem]',
   })
   const resolvedRoulette =
     roulette ??
@@ -903,41 +902,32 @@ function MemberPortalBrandHeader({
           resolveContainerAlignClass(headerStyle?.containerAlign),
         )}
       >
-        <div className="flex min-w-0 flex-1 items-start gap-3.5 sm:gap-4">
-          <div className="relative shrink-0">
-            <div
-              aria-hidden
-              className="absolute inset-[-30%] rounded-full bg-[#AAFF00]/15 blur-xl"
-            />
-            <BrandPulseAppIcon
-              glow
-              className="onestep-symbol-soft-blink relative h-12 w-12 sm:h-14 sm:w-14"
-            />
-          </div>
-
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="space-y-0.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <p
-                  className={leagueLabelPresentation.className}
-                  style={leagueLabelPresentation.style}
-                >
-                  {leagueLabel}
-                </p>
-                <span className="h-1 w-1 rounded-full bg-[#AAFF00]/80" />
-                <p className="text-[10px] font-semibold tracking-[0.18em] text-[#AAFF00]/80 sm:text-[11px]">
-                  RUNNING LEAGUE
-                </p>
-              </div>
-              <h1
-                className={portalTitlePresentation.className}
-                style={portalTitlePresentation.style}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <p
+                className={leagueLabelPresentation.className}
+                style={leagueLabelPresentation.style}
               >
-                {portalTitle}
-              </h1>
+                {leagueLabel}
+              </p>
+              <span className="h-1 w-1 rounded-full bg-[#AAFF00]/80" />
+              <p className="text-[10px] font-semibold tracking-[0.18em] text-[#AAFF00]/80 sm:text-[11px]">
+                RUNNING LEAGUE
+              </p>
             </div>
-            {action}
+            <div className="mt-2">
+              <PortalBrandTitleLockup
+                title={portalTitle}
+                className={cn(
+                  portalTitlePresentation.className,
+                  'mt-0',
+                )}
+                style={portalTitlePresentation.style}
+              />
+            </div>
           </div>
+          {action}
         </div>
 
         {resolvedRoulette ? (

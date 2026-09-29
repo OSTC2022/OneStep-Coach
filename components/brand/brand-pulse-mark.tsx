@@ -20,6 +20,7 @@ export function BrandPulseAppIcon({
         'relative inline-flex shrink-0',
         glow &&
           'before:pointer-events-none before:absolute before:inset-[8%] before:rounded-[22%] before:bg-[radial-gradient(circle,rgba(170,255,0,0.38)_0%,transparent_72%)] before:blur-md',
+        className,
       )}
     >
       <Image
@@ -29,7 +30,7 @@ export function BrandPulseAppIcon({
         height={512}
         unoptimized
         aria-hidden
-        className={cn('relative bg-transparent', glow && GLOW_CLASS, className)}
+        className={cn('relative h-full w-full bg-transparent', glow && GLOW_CLASS)}
       />
     </span>
   )

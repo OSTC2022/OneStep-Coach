@@ -89,6 +89,16 @@
 @theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-portal-noto: var(--font-noto-sans-kr), var(--font-geist-sans), sans-serif;
+  --font-portal-myeongjo: var(--font-noto-serif-kr), ui-serif, Georgia, serif;
+  --font-portal-blackhan: var(--font-black-han-sans), var(--font-noto-sans-kr), sans-serif;
+  --font-portal-dohyeon: var(--font-do-hyeon), var(--font-noto-sans-kr), sans-serif;
+  --font-portal-orbitron: var(--font-orbitron), var(--font-geist-sans), sans-serif;
+  --font-portal-nanumpen: var(--font-nanum-pen), var(--font-noto-sans-kr), cursive;
+  --font-portal-gaegu: var(--font-gaegu), var(--font-noto-sans-kr), cursive;
+  --font-portal-pacifico: var(--font-pacifico), var(--font-geist-sans), cursive;
+  --font-portal-dancing: var(--font-dancing-script), var(--font-geist-sans), cursive;
+  --font-portal-caveat: var(--font-caveat), var(--font-geist-sans), cursive;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -420,4 +430,115 @@ html.onestep-splash-active body {
 .portal-roulette-hub-spinning {
   animation: portal-roulette-hub-pulse 0.9s ease-in-out infinite;
 }
+
+/* ── 포털 헤더 텍스트 특수효과 ── */
+.portal-fx-glow {
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 18px color-mix(in srgb, currentColor 55%, transparent),
+    0 0 32px color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.portal-fx-neon {
+  text-shadow:
+    0 0 4px #fff,
+    0 0 10px currentColor,
+    0 0 20px currentColor,
+    0 0 40px currentColor,
+    0 0 70px currentColor;
+}
+
+.portal-fx-fire {
+  background-image: linear-gradient(180deg, #fff7ed 0%, #fdba74 28%, #f97316 55%, #dc2626 82%, #7f1d1d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+  filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.55));
+}
+
+.portal-fx-ice {
+  background-image: linear-gradient(180deg, #ffffff 0%, #e0f2fe 30%, #7dd3fc 65%, #0284c7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+  filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.55));
+}
+
+.portal-fx-chrome {
+  background-image: linear-gradient(
+    115deg,
+    #71717a 0%,
+    #fafafa 22%,
+    #a1a1aa 42%,
+    #ffffff 58%,
+    #52525b 78%,
+    #d4d4d8 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
+}
+
+@keyframes portal-fx-pulse-glow {
+  0%,
+  100% {
+    text-shadow:
+      0 0 6px currentColor,
+      0 0 14px color-mix(in srgb, currentColor 40%, transparent);
+    opacity: 0.92;
+  }
+  50% {
+    text-shadow:
+      0 0 10px currentColor,
+      0 0 28px currentColor,
+      0 0 48px color-mix(in srgb, currentColor 55%, transparent);
+    opacity: 1;
+  }
+}
+
+.portal-fx-pulse {
+  animation: portal-fx-pulse-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes portal-fx-shimmer-move {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.portal-fx-shimmer {
+  background-image: linear-gradient(
+    110deg,
+    currentColor 0%,
+    currentColor 35%,
+    #ffffff 50%,
+    currentColor 65%,
+    currentColor 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+  animation: portal-fx-shimmer-move 2.4s linear infinite;
+}
+
+.portal-fx-outline {
+  -webkit-text-stroke: 1.2px currentColor;
+  color: transparent !important;
+  paint-order: stroke fill;
+  text-shadow: 0 0 12px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.portal-fx-shadow {
+  text-shadow:
+    0 1px 0 color-mix(in srgb, currentColor 35%, #000),
+    0 3px 0 color-mix(in srgb, currentColor 22%, #000),
+    0 6px 12px rgba(0, 0, 0, 0.65),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
 

@@ -1,12 +1,15 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, RotateCcw, Save, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateAdultRunningPortalSettings } from '@/lib/actions/adult-running-portal-settings'
 import { resetPortalRankingCycle } from '@/lib/actions/running-league'
-import type { AdultRunningPortalAdminSettings } from '@/lib/actions/adult-running-portal-settings'
+import type {
+  AdultRunningPortalAdminSettings,
+  AdultRunningPortalDraftPreview,
+} from '@/lib/actions/adult-running-portal-settings'
 import { formatRankingCycleLabel } from '@/lib/running-league/portal-ranking-cycle'
 import {
   DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL,
@@ -46,8 +49,15 @@ const DEFAULT_OPTION = '__default__'
 
 export function AdultRunningPortalSettingsPanel({
   settings,
+  draft,
+  onDraftChange,
+  onSaved,
 }: {
   settings: AdultRunningPortalAdminSettings
+  draft: AdultRunningPortalDraftPreview
+  onDraftChange: (next: AdultRunningPortalDraftPreview) => void
+  /** 저장 성공 직후 — stale refresh로 draft가 덮이지 않게 함 */
+  onSaved?: (saved: AdultRunningPortalDraftPreview) => void
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -57,31 +67,32 @@ export function AdultRunningPortalSettingsPanel({
     settings.rankingCycleStartDate,
     new Date().toISOString().slice(0, 10),
   )
-  const [leagueLabel, setLeagueLabel] = useState(settings.leagueLabel)
-  const [portalTitle, setPortalTitle] = useState(settings.portalTitle)
-  const [notice, setNotice] = useState(settings.notice ?? '')
   const [beatRivalMemberId, setBeatRivalMemberId] = useState(settings.beatRivalMemberId ?? NONE_VALUE)
   const [rankingReferenceDate, setRankingReferenceDate] = useState(
     settings.rankingReferenceDate?.slice(0, 10) ?? '',
   )
-  const [rankingCaption, setRankingCaption] = useState(settings.rankingCaption ?? '')
-  const [headerStyle, setHeaderStyle] = useState<AdultRunningPortalHeaderStyle>(settings.headerStyle)
-  const [rankingCaptionStyle, setRankingCaptionStyle] = useState<PortalTextStyleConfig>(
-    settings.rankingCaptionStyle,
-  )
+
+  useEffect(() => {
+    setBeatRivalMemberId(settings.beatRivalMemberId ?? NONE_VALUE)
+    setRankingReferenceDate(settings.rankingReferenceDate?.slice(0, 10) ?? '')
+  }, [settings.beatRivalMemberId, settings.rankingReferenceDate])
+
+  function patchDraft(patch: Partial<AdultRunningPortalDraftPreview>) {
+    onDraftChange({ ...draft, ...patch })
+  }
 
   function handleSave() {
     startTransition(async () => {
       const result = await updateAdultRunningPortalSettings({
-        leagueLabel,
-        portalTitle,
-        notice,
+        leagueLabel: draft.leagueLabel,
+        portalTitle: draft.portalTitle,
+        notice: draft.notice,
         beatRivalMemberId: beatRivalMemberId === NONE_VALUE ? null : beatRivalMemberId,
         leagueId: settings.leagueId,
         rankingReferenceDate: rankingReferenceDate || null,
-        rankingCaption,
-        headerStyle,
-        rankingCaptionStyle,
+        rankingCaption: draft.rankingCaption,
+        headerStyle: draft.headerStyle,
+        rankingCaptionStyle: draft.rankingCaptionStyle,
       })
 
       if (!result.ok) {
@@ -89,6 +100,8 @@ export function AdultRunningPortalSettingsPanel({
         return
       }
 
+      onSaved?.(result.saved)
+      onDraftChange(result.saved)
       toast.success('성인 러닝 포털 설정을 저장했습니다.')
       router.refresh()
     })
@@ -126,7 +139,7 @@ export function AdultRunningPortalSettingsPanel({
           포털 설정
         </CardTitle>
         <p className="text-xs text-zinc-500">
-          문구·공지·이겨라 대상은 성인회원 마이페이지에 바로 반영됩니다.
+          문구·글씨체 변경은 아래 미리보기에 바로 반영됩니다. 저장해야 회원 화면에 적용됩니다.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -135,8 +148,8 @@ export function AdultRunningPortalSettingsPanel({
             <Label htmlFor="portal-league-label">리그 문구</Label>
             <Input
               id="portal-league-label"
-              value={leagueLabel}
-              onChange={(event) => setLeagueLabel(event.target.value)}
+              value={draft.leagueLabel}
+              onChange={(event) => patchDraft({ leagueLabel: event.target.value })}
               placeholder={DEFAULT_ADULT_RUNNING_PORTAL_LEAGUE_LABEL}
               className="border-lime-500/20 bg-black/40"
             />
@@ -145,8 +158,8 @@ export function AdultRunningPortalSettingsPanel({
             <Label htmlFor="portal-title">포털 제목</Label>
             <Input
               id="portal-title"
-              value={portalTitle}
-              onChange={(event) => setPortalTitle(event.target.value)}
+              value={draft.portalTitle}
+              onChange={(event) => patchDraft({ portalTitle: event.target.value })}
               placeholder={DEFAULT_ADULT_RUNNING_PORTAL_TITLE}
               className="border-lime-500/20 bg-black/40"
             />
@@ -157,21 +170,23 @@ export function AdultRunningPortalSettingsPanel({
           <div>
             <p className="text-sm font-semibold text-lime-100">헤더 스타일</p>
             <p className="text-[11px] text-zinc-500">
-              상단 리그 문구·포털 제목의 색상, 크기, 정렬을 설정합니다.
+              상단 리그 문구·포털 제목의 색상, 크기, 글씨체, 특수효과, 정렬을 설정합니다.
             </p>
           </div>
           <div className="space-y-1.5">
             <Label className="text-[11px] text-zinc-400">헤더 전체 정렬</Label>
             <Select
-              value={headerStyle.containerAlign ?? DEFAULT_OPTION}
+              value={draft.headerStyle.containerAlign ?? DEFAULT_OPTION}
               onValueChange={(next) =>
-                setHeaderStyle((current) => ({
-                  ...current,
-                  containerAlign:
-                    next === DEFAULT_OPTION
-                      ? null
-                      : (next as AdultRunningPortalHeaderStyle['containerAlign']),
-                }))
+                patchDraft({
+                  headerStyle: {
+                    ...draft.headerStyle,
+                    containerAlign:
+                      next === DEFAULT_OPTION
+                        ? null
+                        : (next as AdultRunningPortalHeaderStyle['containerAlign']),
+                  },
+                })
               }
             >
               <SelectTrigger className="border-lime-500/20 bg-black/40">
@@ -189,16 +204,20 @@ export function AdultRunningPortalSettingsPanel({
           </div>
           <PortalTextStyleFields
             label="리그 문구"
-            value={headerStyle.leagueLabel ?? {}}
+            value={draft.headerStyle.leagueLabel ?? {}}
             onChange={(next) =>
-              setHeaderStyle((current) => ({ ...current, leagueLabel: next }))
+              patchDraft({
+                headerStyle: { ...draft.headerStyle, leagueLabel: next },
+              })
             }
           />
           <PortalTextStyleFields
             label="포털 제목"
-            value={headerStyle.portalTitle ?? {}}
+            value={draft.headerStyle.portalTitle ?? {}}
             onChange={(next) =>
-              setHeaderStyle((current) => ({ ...current, portalTitle: next }))
+              patchDraft({
+                headerStyle: { ...draft.headerStyle, portalTitle: next },
+              })
             }
           />
         </div>
@@ -207,8 +226,8 @@ export function AdultRunningPortalSettingsPanel({
           <Label htmlFor="portal-notice">공지사항</Label>
           <Textarea
             id="portal-notice"
-            value={notice}
-            onChange={(event) => setNotice(event.target.value)}
+            value={draft.notice}
+            onChange={(event) => patchDraft({ notice: event.target.value })}
             placeholder="성인회원에게 보여줄 공지를 입력하세요. (접이식, 기본 접힘)"
             rows={4}
             className="border-lime-500/20 bg-black/40"
@@ -243,8 +262,8 @@ export function AdultRunningPortalSettingsPanel({
             <Label htmlFor="ranking-caption">랭킹 헤더 한줄 문구</Label>
             <Input
               id="ranking-caption"
-              value={rankingCaption}
-              onChange={(event) => setRankingCaption(event.target.value)}
+              value={draft.rankingCaption}
+              onChange={(event) => patchDraft({ rankingCaption: event.target.value })}
               placeholder="날짜 우측에 표시할 문구"
               className="border-lime-500/20 bg-black/40"
             />
@@ -253,8 +272,8 @@ export function AdultRunningPortalSettingsPanel({
 
         <PortalTextStyleFields
           label="랭킹 한줄 문구 스타일"
-          value={rankingCaptionStyle}
-          onChange={setRankingCaptionStyle}
+          value={draft.rankingCaptionStyle}
+          onChange={(next: PortalTextStyleConfig) => patchDraft({ rankingCaptionStyle: next })}
         />
 
         <div className="space-y-2">

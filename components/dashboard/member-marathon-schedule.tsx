@@ -674,7 +674,14 @@ function MarathonEventRow({
                 <ExternalLink className="h-3 w-3" />
               </a>
             ) : null}
-            <span className="inline-flex items-center gap-0.5 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400">
+            <span
+              className={cn(
+                'inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px]',
+                signupCount > 0
+                  ? 'border-lime-400/50 bg-lime-500/15 font-medium text-lime-200 shadow-[0_0_10px_rgba(163,230,53,0.25)]'
+                  : 'border-zinc-700 text-zinc-400',
+              )}
+            >
               <Users className="h-3 w-3" />
               {signupCount}명 참여
             </span>

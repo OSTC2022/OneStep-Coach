@@ -16,10 +16,14 @@ import type {
   AdultRunningPortalHeaderStyle,
   PortalTextStyleConfig,
 } from '@/lib/running-league/adult-running-portal-styles'
+import {
+  parseAdultRunningPortalHeaderStyle,
+  parsePortalTextStyleConfig,
+} from '@/lib/running-league/adult-running-portal-styles'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { updateRunningLeagueBeatRivalMember } from '@/lib/actions/running-league'
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 
 const CENTER_SETTINGS_ID = 'default'
 
@@ -38,6 +42,16 @@ export type AdultRunningPortalDisplaySettings = {
 export type AdultRunningPortalAdminSettings = AdultRunningPortalDisplaySettings & {
   leagueId: string | null
   adultMemberOptions: Array<{ id: string; name: string }>
+}
+
+/** 관리 화면 실시간 미리보기용 초안 */
+export type AdultRunningPortalDraftPreview = {
+  leagueLabel: string
+  portalTitle: string
+  notice: string
+  rankingCaption: string
+  headerStyle: AdultRunningPortalHeaderStyle
+  rankingCaptionStyle: PortalTextStyleConfig
 }
 
 async function settingsClient() {
@@ -123,7 +137,10 @@ export async function updateAdultRunningPortalSettings(input: {
   rankingCaption?: string | null
   headerStyle?: AdultRunningPortalHeaderStyle
   rankingCaptionStyle?: PortalTextStyleConfig
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; saved: AdultRunningPortalDraftPreview }
+  | { ok: false; error: string }
+> {
   await requireRole(['admin'])
   const supabase = await settingsClient()
 
@@ -136,30 +153,28 @@ export async function updateAdultRunningPortalSettings(input: {
     : null
 
   const current = await getCenterSettingsCached()
-  const headerStyle = input.headerStyle ?? readAdultRunningPortalHeaderStyle(current)
-  const rankingCaptionStyle =
-    input.rankingCaptionStyle ?? readAdultRunningPortalRankingCaptionStyle(current)
+  const headerStyle = parseAdultRunningPortalHeaderStyle(
+    input.headerStyle ?? current.adult_running_portal_header_style ?? {},
+  )
+  const rankingCaptionStyle = parsePortalTextStyleConfig(
+    input.rankingCaptionStyle ?? current.adult_running_portal_ranking_caption_style ?? {},
+  )
 
-  const { error } = await supabase.from('center_settings').upsert({
-    id: CENTER_SETTINGS_ID,
-    name: current.name,
-    kakao_id: current.kakao_id,
-    instagram_id: current.instagram_id,
-    blog_url: current.blog_url,
-    center_phone: current.center_phone ?? null,
-    naver_place_url: current.naver_place_url ?? null,
-    center_address: current.center_address ?? null,
-    business_hours: current.business_hours ?? null,
-    show_instructor_contact: current.show_instructor_contact ?? false,
-    adult_running_portal_league_label: leagueLabel,
-    adult_running_portal_title: portalTitle,
-    adult_running_portal_notice: notice,
-    adult_running_portal_ranking_reference_date: rankingReferenceDate,
-    adult_running_portal_ranking_caption: rankingCaption,
-    adult_running_portal_header_style: headerStyle,
-    adult_running_portal_ranking_caption_style: rankingCaptionStyle,
-    updated_at: new Date().toISOString(),
-  })
+  const { data: updated, error } = await supabase
+    .from('center_settings')
+    .update({
+      adult_running_portal_league_label: leagueLabel,
+      adult_running_portal_title: portalTitle,
+      adult_running_portal_notice: notice,
+      adult_running_portal_ranking_reference_date: rankingReferenceDate,
+      adult_running_portal_ranking_caption: rankingCaption,
+      adult_running_portal_header_style: headerStyle,
+      adult_running_portal_ranking_caption_style: rankingCaptionStyle,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', CENTER_SETTINGS_ID)
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     if (error.code === '42703' || error.message.includes('adult_running_portal_')) {
@@ -172,6 +187,40 @@ export async function updateAdultRunningPortalSettings(input: {
     return { ok: false, error: error.message }
   }
 
+  if (!updated) {
+    const { error: insertError } = await supabase.from('center_settings').upsert({
+      id: CENTER_SETTINGS_ID,
+      name: current.name,
+      kakao_id: current.kakao_id,
+      instagram_id: current.instagram_id,
+      blog_url: current.blog_url,
+      center_phone: current.center_phone ?? null,
+      naver_place_url: current.naver_place_url ?? null,
+      center_address: current.center_address ?? null,
+      business_hours: current.business_hours ?? null,
+      show_instructor_contact: current.show_instructor_contact ?? false,
+      adult_running_portal_league_label: leagueLabel,
+      adult_running_portal_title: portalTitle,
+      adult_running_portal_notice: notice,
+      adult_running_portal_ranking_reference_date: rankingReferenceDate,
+      adult_running_portal_ranking_caption: rankingCaption,
+      adult_running_portal_header_style: headerStyle,
+      adult_running_portal_ranking_caption_style: rankingCaptionStyle,
+      updated_at: new Date().toISOString(),
+    })
+
+    if (insertError) {
+      if (insertError.code === '42703' || insertError.message.includes('adult_running_portal_')) {
+        return {
+          ok: false,
+          error:
+            '포털 설정 컬럼이 없습니다. supabase/add-adult-running-portal-settings.sql을 실행해주세요.',
+        }
+      }
+      return { ok: false, error: insertError.message }
+    }
+  }
+
   if (input.leagueId) {
     const rivalResult = await updateRunningLeagueBeatRivalMember(
       input.leagueId,
@@ -182,9 +231,21 @@ export async function updateAdultRunningPortalSettings(input: {
     }
   }
 
-  revalidateTag('center-settings')
+  // Next.js 16: 저장 직후 읽기용 — stale-while-revalidate 방지
+  updateTag('center-settings')
   revalidatePath('/dashboard/settings/adult-running-portal')
+  revalidatePath('/dashboard/running-portal')
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/my/running-league')
-  return { ok: true }
+
+  const saved: AdultRunningPortalDraftPreview = {
+    leagueLabel,
+    portalTitle,
+    notice: notice ?? '',
+    rankingCaption: rankingCaption ?? '',
+    headerStyle,
+    rankingCaptionStyle,
+  }
+
+  return { ok: true, saved }
 }
