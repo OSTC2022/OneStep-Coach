@@ -40,6 +40,7 @@ import {
   EyeOff,
   Trophy,
   Dices,
+  Flag,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { User } from '@/lib/types'
@@ -71,6 +72,7 @@ import { cn } from '@/lib/utils'
 const MENU_ICONS: Record<string, LucideIcon> = {
   '/dashboard/my': LayoutDashboard,
   '/dashboard/running-portal': Trophy,
+  '/dashboard/youth-athletics-portal': Flag,
   '/dashboard/running-portal/manage': Dices,
   '/dashboard': LayoutDashboard,
   '/dashboard/lesson-status': ListChecks,
@@ -109,6 +111,9 @@ function isMenuItemActive(pathname: string, url: string) {
   }
   if (url === '/dashboard/running-portal/manage') {
     return pathname.startsWith('/dashboard/running-portal/manage')
+  }
+  if (url === '/dashboard/youth-athletics-portal') {
+    return pathname.startsWith('/dashboard/youth-athletics-portal')
   }
   if (url === '/dashboard/running-portal') {
     return (

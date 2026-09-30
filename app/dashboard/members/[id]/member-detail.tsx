@@ -37,6 +37,7 @@ import {
   ArrowLeft,
   Edit,
   Trophy,
+  Flag,
   Scale,
   Calendar,
   Target,
@@ -49,6 +50,7 @@ import {
 } from 'lucide-react'
 import { formatPrimaryInstructorName } from '@/lib/member-utils'
 import { isAdultGeneralSport } from '@/lib/adult-member-programs'
+import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
 import { mergeMemberWithDetailPatch } from '@/lib/member-detail-sync'
 import { MemberNewSignupBadge } from '@/components/members/member-new-signup-badge'
 import { MemberContactEditor } from '@/components/members/member-contact-editor'
@@ -388,6 +390,15 @@ export function MemberDetail({
                   </Button>
                 </Link>
               )
+            ) : isYouthAthleticsClassSport(memberState.sport) ? (
+              <Link
+                href={`/dashboard/members/${memberState.id}/youth-athletics-portal`}
+              >
+                <Button variant="outline">
+                  <Flag className="mr-2 h-4 w-4" />
+                  육상선수반 포털 보기
+                </Button>
+              </Link>
             ) : null}
             <Link href={`/dashboard/members/${memberState.id}/edit`}>
               <Button>

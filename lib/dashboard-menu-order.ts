@@ -89,6 +89,12 @@ export const SIDEBAR_MENU_ITEMS: SidebarMenuItemDef[] = [
     roles: ['admin', 'instructor'],
   },
   {
+    id: '/dashboard/youth-athletics-portal',
+    title: '육상선수반 포털',
+    url: '/dashboard/youth-athletics-portal',
+    roles: ['admin', 'instructor'],
+  },
+  {
     id: '/dashboard/running-portal/manage',
     title: '러닝 포털 관리',
     url: '/dashboard/running-portal/manage',
@@ -155,6 +161,7 @@ const RUNNING_SCHEDULE_MENU_ID = '/dashboard/settings/running-schedule'
 const MARATHON_SCHEDULE_MENU_ID = '/dashboard/settings/marathon-schedule'
 const SETTINGS_MENU_ID = '/dashboard/settings'
 const MY_RUNNING_PORTAL_MENU_ID = '/dashboard/running-portal'
+const YOUTH_ATHLETICS_PORTAL_MENU_ID = '/dashboard/youth-athletics-portal'
 const RUNNING_PORTAL_MANAGE_MENU_ID = '/dashboard/running-portal/manage'
 const ADULT_RUNNING_PORTAL_MENU_ID = '/dashboard/settings/adult-running-portal'
 
@@ -173,17 +180,39 @@ function pinMyRunningPortalAboveAdultRunningPortal(order: string[]): string[] {
   return next
 }
 
-/** 「내 러닝 포털」 바로 아래에 「러닝 포털 관리」 고정 */
-function pinRunningPortalManageBelowMyPortal(order: string[]): string[] {
-  const manageIndex = order.indexOf(RUNNING_PORTAL_MANAGE_MENU_ID)
+/** 「내 러닝 포털」 바로 아래에 「육상선수반 포털」 고정 */
+function pinYouthAthleticsPortalBelowMyPortal(order: string[]): string[] {
+  const youthIndex = order.indexOf(YOUTH_ATHLETICS_PORTAL_MENU_ID)
   const myPortalIndex = order.indexOf(MY_RUNNING_PORTAL_MENU_ID)
-  if (manageIndex < 0 || myPortalIndex < 0) return order
-  if (manageIndex === myPortalIndex + 1) return order
+  if (youthIndex < 0 || myPortalIndex < 0) return order
+  if (youthIndex === myPortalIndex + 1) return order
 
-  const next = order.filter((id) => id !== RUNNING_PORTAL_MANAGE_MENU_ID)
+  const next = order.filter((id) => id !== YOUTH_ATHLETICS_PORTAL_MENU_ID)
   const nextMyPortalIndex = next.indexOf(MY_RUNNING_PORTAL_MENU_ID)
   if (nextMyPortalIndex < 0) return order
-  next.splice(nextMyPortalIndex + 1, 0, RUNNING_PORTAL_MANAGE_MENU_ID)
+  next.splice(nextMyPortalIndex + 1, 0, YOUTH_ATHLETICS_PORTAL_MENU_ID)
+  return next
+}
+
+/** 「육상선수반 포털」(없으면 내 러닝 포털) 바로 아래에 「러닝 포털 관리」 고정 */
+function pinRunningPortalManageBelowMyPortal(order: string[]): string[] {
+  const manageIndex = order.indexOf(RUNNING_PORTAL_MANAGE_MENU_ID)
+  const anchorIndex = (() => {
+    const youthIndex = order.indexOf(YOUTH_ATHLETICS_PORTAL_MENU_ID)
+    if (youthIndex >= 0) return youthIndex
+    return order.indexOf(MY_RUNNING_PORTAL_MENU_ID)
+  })()
+  if (manageIndex < 0 || anchorIndex < 0) return order
+  if (manageIndex === anchorIndex + 1) return order
+
+  const next = order.filter((id) => id !== RUNNING_PORTAL_MANAGE_MENU_ID)
+  const nextAnchorIndex = (() => {
+    const youthIndex = next.indexOf(YOUTH_ATHLETICS_PORTAL_MENU_ID)
+    if (youthIndex >= 0) return youthIndex
+    return next.indexOf(MY_RUNNING_PORTAL_MENU_ID)
+  })()
+  if (nextAnchorIndex < 0) return order
+  next.splice(nextAnchorIndex + 1, 0, RUNNING_PORTAL_MANAGE_MENU_ID)
   return next
 }
 
@@ -265,7 +294,9 @@ export function normalizeSidebarMenuOrder(
   return pinRunningScheduleAboveSettings(
     pinMarathonScheduleBelowRunningSchedule(
       pinRunningPortalManageBelowMyPortal(
-        pinMyRunningPortalAboveAdultRunningPortal(next),
+        pinYouthAthleticsPortalBelowMyPortal(
+          pinMyRunningPortalAboveAdultRunningPortal(next),
+        ),
       ),
     ),
   )
