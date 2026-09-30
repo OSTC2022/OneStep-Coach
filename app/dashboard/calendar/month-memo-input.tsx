@@ -69,6 +69,36 @@ export function MonthMemoInput({
   const containerRef = useRef<HTMLDivElement>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const submittingRef = useRef(false)
+  const clickGuardCleanupRef = useRef<(() => void) | null>(null)
+
+  /** 자동완성 선택 직후 뒤 레이어(일정 이름)로 클릭이 새는 것 방지 */
+  function armSuggestionClickGuard() {
+    clickGuardCleanupRef.current?.()
+    const until = Date.now() + 400
+    const block = (event: Event) => {
+      if (Date.now() > until) {
+        cleanup()
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const cleanup = () => {
+      document.removeEventListener('click', block, true)
+      document.removeEventListener('pointerup', block, true)
+      document.removeEventListener('mouseup', block, true)
+      if (clickGuardCleanupRef.current === cleanup) {
+        clickGuardCleanupRef.current = null
+      }
+    }
+    clickGuardCleanupRef.current = cleanup
+    document.addEventListener('click', block, true)
+    document.addEventListener('pointerup', block, true)
+    document.addEventListener('mouseup', block, true)
+    window.setTimeout(cleanup, 420)
+  }
+
+  useEffect(() => () => clickGuardCleanupRef.current?.(), [])
 
   const parsed = useMemo(() => parseMemoQuickAdd(memo), [memo])
   const memberQuery = useMemo(
@@ -294,6 +324,7 @@ export function MonthMemoInput({
   }
 
   function selectMember(member: MemoMember) {
+    armSuggestionClickGuard()
     // 시간이 이미 있으면 클릭 한 번에 바로 등록
     if (parsed.startTime) {
       submitWithMember(member, memo)
@@ -357,7 +388,11 @@ export function MonthMemoInput({
               top: anchorRect.top - 4,
               transform: 'translateY(-100%)',
             }}
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => {
+              // 입력 포커스 유지 + 뒤 레이어로 이벤트 전달 방지
+              e.preventDefault()
+              e.stopPropagation()
+            }}
           >
             <li className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
               {parsed.startTime
@@ -385,6 +420,11 @@ export function MonthMemoInput({
                     )}
                     onMouseEnter={() => setActiveIndex(index)}
                     onPointerDown={(e) => {
+                      // pointerdown에서 목록을 닫지 않음 — 닫히면 click이 뒤 일정 이름으로 전달됨
+                      e.preventDefault()
+                      e.stopPropagation()
+                    }}
+                    onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
                       selectMember(member)
