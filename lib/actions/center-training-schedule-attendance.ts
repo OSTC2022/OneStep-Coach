@@ -3,9 +3,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import {
-  CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE,
   resolveCenterTrainingScheduleSessionDate,
+  trainingScheduleAttendanceNote,
+  trainingScheduleAttendanceNotesForQuery,
 } from '@/lib/running-league/center-training-schedule-attendance'
+import type { TrainingScheduleAudience } from '@/lib/training-schedule-audience'
 import type { Member } from '@/lib/types'
 import { revalidatePath } from 'next/cache'
 
@@ -30,13 +32,17 @@ type SessionRow = {
   session_deducted: boolean
 }
 
-/** 성인회원 훈련 스케줄 참여 시 해당 날짜 출석 체크 */
+/** 훈련 스케줄 참여 시 해당 날짜 출석 체크 (성인/육상 notes 분리) */
 export async function recordCenterTrainingScheduleAttendance(input: {
   member: Pick<Member, 'id' | 'primary_instructor_id'>
   weekday: number
   scheduleDate: string | null | undefined
   checkedInBy: string
+  audience?: TrainingScheduleAudience
 }): Promise<{ ok: true; sessionDate: string } | { ok: false; error: string }> {
+  const audience = input.audience ?? 'adult_running'
+  const note = trainingScheduleAttendanceNote(audience)
+  const ownNotes = new Set(trainingScheduleAttendanceNotesForQuery(audience))
   const sessionDate = resolveCenterTrainingScheduleSessionDate(
     input.weekday,
     input.scheduleDate,
@@ -56,10 +62,10 @@ export async function recordCenterTrainingScheduleAttendance(input: {
   }
 
   const rows = (existingSessions ?? []) as SessionRow[]
-  const ownRow = rows.find((row) => row.notes === CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE)
+  const ownRow = rows.find((row) => row.notes != null && ownNotes.has(row.notes))
   const hasOtherAttendance = rows.some(
     (row) =>
-      row.notes !== CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE &&
+      (row.notes == null || !ownNotes.has(row.notes)) &&
       (row.lesson_id != null || row.session_deducted),
   )
 
@@ -71,7 +77,7 @@ export async function recordCenterTrainingScheduleAttendance(input: {
     status: 'present' as const,
     checked_in_at: now,
     checked_in_by: input.checkedInBy,
-    notes: CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE,
+    notes: note,
     updated_at: now,
   }
 
@@ -121,7 +127,10 @@ export async function clearCenterTrainingScheduleAttendance(input: {
   memberId: string
   weekday: number
   scheduleDate: string | null | undefined
+  audience?: TrainingScheduleAudience
 }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const audience = input.audience ?? 'adult_running'
+  const notes = trainingScheduleAttendanceNotesForQuery(audience)
   const sessionDate = resolveCenterTrainingScheduleSessionDate(
     input.weekday,
     input.scheduleDate,
@@ -133,7 +142,7 @@ export async function clearCenterTrainingScheduleAttendance(input: {
     .delete()
     .eq('member_id', input.memberId)
     .eq('session_date', sessionDate)
-    .eq('notes', CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE)
+    .in('notes', notes)
     .eq('session_deducted', false)
     .is('lesson_id', null)
 

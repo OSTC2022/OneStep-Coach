@@ -6,7 +6,7 @@ import { getCurrentUser, requireRole } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE } from '@/lib/running-league/center-training-schedule-attendance'
+import { trainingScheduleAttendanceNotesForQuery } from '@/lib/running-league/center-training-schedule-attendance'
 import {
   createEmptyTrainingScheduleDays,
   formatTrainingScheduleDateLabel,
@@ -40,9 +40,35 @@ import {
   trainingScheduleSignupClosedMessage,
 } from '@/lib/running-league/training-schedule-signup-deadline'
 import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
+import { memberMatchesTrainingScheduleAudience } from '@/lib/running-league/training-schedule-audience-match'
 import type { MemberPickerOption } from '@/lib/actions/members'
 import { getMembers } from '@/lib/actions/members'
 import { revalidatePath } from 'next/cache'
+
+async function fetchMemberSportsById(
+  supabase: Awaited<ReturnType<typeof scheduleClient>>,
+  memberIds: string[],
+): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>()
+  const unique = [...new Set(memberIds.filter(Boolean))]
+  if (unique.length === 0) return map
+
+  const { data, error } = await supabase
+    .from('members')
+    .select('id, sport')
+    .in('id', unique)
+
+  if (error) {
+    console.error('fetchMemberSportsById', error)
+    return map
+  }
+
+  for (const row of data ?? []) {
+    if (!row.id) continue
+    map.set(String(row.id), typeof row.sport === 'string' ? row.sport : null)
+  }
+  return map
+}
 
 const CENTER_SCHEDULE_DAY_SELECT =
   'weekday, training_summary, location_label, naver_map_url, is_hidden, schedule_date, created_at, updated_at'
@@ -338,19 +364,21 @@ function weekDatesFromMonday(weekStart: string | null): string[] {
     .filter((value): value is string => Boolean(value))
 }
 
-/** 성인회원 참여 시 남긴 출석 기록 — 주 변경으로 signup이 지워져도 인원 복원 */
+/** 훈련 스케줄 참여 시 남긴 출석 기록 — 성인/육상 notes 로 분리 조회 */
 async function fetchTrainingSignupsFromAttendance(
   supabase: Awaited<ReturnType<typeof scheduleClient>>,
   dates: string[],
+  audience: TrainingScheduleAudience = 'adult_running',
 ): Promise<Map<string, RunningLeagueTrainingScheduleSignup[]>> {
   const result = new Map<string, RunningLeagueTrainingScheduleSignup[]>()
   const uniqueDates = [...new Set(dates.filter(Boolean))]
   if (uniqueDates.length === 0) return result
 
+  const notes = trainingScheduleAttendanceNotesForQuery(audience)
   const { data, error } = await supabase
     .from('lesson_sessions')
     .select('member_id, session_date, checked_in_at, member:members(name)')
-    .eq('notes', CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE)
+    .in('notes', notes)
     .in('session_date', uniqueDates)
 
   if (error) {
@@ -416,7 +444,7 @@ export async function fetchCenterRunningTrainingSchedule(
 
   const weekdays = liveRows.map((day) => day.weekday)
   let signupSelect =
-    'id, weekday, member_id, created_at, schedule_date, member:members(name)'
+    'id, weekday, member_id, created_at, schedule_date, member:members(name, sport)'
   let signupResult = await supabase
     .from(tables.signupsTable)
     .select(signupSelect)
@@ -424,7 +452,7 @@ export async function fetchCenterRunningTrainingSchedule(
     .order('created_at', { ascending: true })
 
   if (isMissingColumnError(signupResult.error, 'schedule_date')) {
-    signupSelect = 'id, weekday, member_id, created_at, member:members(name)'
+    signupSelect = 'id, weekday, member_id, created_at, member:members(name, sport)'
     signupResult = await supabase
       .from(tables.signupsTable)
       .select(signupSelect)
@@ -467,9 +495,30 @@ export async function fetchCenterRunningTrainingSchedule(
       if (date) attendanceDates.push(date)
     }
   }
-  const attendanceByDate = await fetchTrainingSignupsFromAttendance(
+
+  // 육상 스케줄은 성인 출석 복원 합치기를 쓰지 않음 (반 섞임 방지)
+  const attendanceByDate =
+    audience === 'youth_athletics'
+      ? new Map<string, RunningLeagueTrainingScheduleSignup[]>()
+      : await fetchTrainingSignupsFromAttendance(supabase, attendanceDates, audience)
+
+  const candidateMemberIds = new Set<string>()
+  for (const rows of signupsByWeekday.values()) {
+    for (const row of rows) candidateMemberIds.add(row.member_id)
+  }
+  for (const list of attendanceByDate.values()) {
+    for (const signup of list) candidateMemberIds.add(signup.member_id)
+  }
+  for (const snapshotDays of snapshots.values()) {
+    for (const day of snapshotDays) {
+      for (const signup of day.signups ?? []) {
+        candidateMemberIds.add(signup.member_id)
+      }
+    }
+  }
+  const sportsByMemberId = await fetchMemberSportsById(
     supabase,
-    attendanceDates,
+    [...candidateMemberIds],
   )
 
   const resolveDaySignups = (
@@ -481,6 +530,11 @@ export async function fetchCenterRunningTrainingSchedule(
       filterSignupsForDay(signupsByWeekday.get(weekday) ?? [], dayDate),
       snapshotSignups,
       dayDate ? (attendanceByDate.get(dayDate) ?? []) : [],
+    ).filter((signup) =>
+      memberMatchesTrainingScheduleAudience(
+        sportsByMemberId.get(signup.member_id) ?? null,
+        audience,
+      ),
     )
 
   const buildViewsFromRows = (rows: CenterScheduleDayRow[]) =>
@@ -733,6 +787,16 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   const { weekday, audience } = parsed
   const tables = trainingScheduleConfig(audience)
 
+  if (!memberMatchesTrainingScheduleAudience(member.sport, audience)) {
+    return {
+      ok: false,
+      error:
+        audience === 'youth_athletics'
+          ? '육상선수반 스케줄은 육상선수반 회원만 참여할 수 있습니다.'
+          : '성인 러닝 스케줄은 육상선수반 회원이 참여할 수 없습니다.',
+    }
+  }
+
   const supabase = await scheduleClient()
   const isAdultMember = user?.role === 'adult_member'
 
@@ -821,6 +885,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
         memberId: member.id,
         weekday,
         scheduleDate,
+        audience,
       })
       if (!attendanceResult.ok) {
         console.error(
@@ -993,12 +1058,22 @@ export async function staffAddCenterRunningTrainingScheduleSignup(
 
   const { data: memberRow, error: memberError } = await supabase
     .from('members')
-    .select('id, name')
+    .select('id, name, sport')
     .eq('id', targetMemberId)
     .maybeSingle()
 
   if (memberError || !memberRow) {
     return { ok: false, error: '회원을 찾을 수 없습니다.' }
+  }
+
+  if (!memberMatchesTrainingScheduleAudience(memberRow.sport, audience)) {
+    return {
+      ok: false,
+      error:
+        audience === 'youth_athletics'
+          ? '육상선수반 스케줄에는 육상선수반 회원만 등록할 수 있습니다.'
+          : '성인 러닝 스케줄에는 육상선수반 회원을 등록할 수 없습니다.',
+    }
   }
 
   let existingQuery = supabase
@@ -1168,6 +1243,7 @@ export async function staffRemoveCenterRunningTrainingScheduleSignup(
     memberId: targetMemberId,
     weekday,
     scheduleDate,
+    audience,
   })
   if (!attendanceResult.ok) {
     console.error(

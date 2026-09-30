@@ -3,7 +3,10 @@
 import { requireRole } from '@/lib/actions/auth'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE } from '@/lib/running-league/center-training-schedule-attendance'
+import {
+  trainingScheduleAttendanceNotesForQuery,
+} from '@/lib/running-league/center-training-schedule-attendance'
+import { memberMatchesTrainingScheduleAudience } from '@/lib/running-league/training-schedule-audience-match'
 import {
   formatTrainingScheduleDateLabel,
   normalizeTrainingScheduleDate,
@@ -199,32 +202,64 @@ async function attachSignupsToSnapshotDays(
 
   const rows = (signupResult.data ?? []) as SignupRow[]
 
-  const attendanceResult = await supabase
-    .from('lesson_sessions')
-    .select('member_id, session_date, checked_in_at, member:members(name)')
-    .eq('notes', CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE)
-    .in('session_date', dates)
+  // 육상 스냅샷은 성인 출석 notes 와 섞이지 않도록 출석 복원을 쓰지 않음
+  const attendanceByDate = new Map<string, RunningLeagueTrainingScheduleSignup[]>()
+  if (audience !== 'youth_athletics') {
+    const attendanceResult = await supabase
+      .from('lesson_sessions')
+      .select('member_id, session_date, checked_in_at, member:members(name)')
+      .in('notes', trainingScheduleAttendanceNotesForQuery(audience))
+      .in('session_date', dates)
 
-  if (attendanceResult.error) {
-    console.error('attachSignupsToSnapshotDays.attendance', attendanceResult.error)
+    if (attendanceResult.error) {
+      console.error('attachSignupsToSnapshotDays.attendance', attendanceResult.error)
+    }
+
+    for (const row of attendanceResult.data ?? []) {
+      const sessionDate = normalizeTrainingScheduleDate(row.session_date)
+      if (!sessionDate || !row.member_id) continue
+      const memberRaw = row.member as { name?: string } | { name?: string }[] | null
+      const memberName = Array.isArray(memberRaw) ? memberRaw[0]?.name : memberRaw?.name
+      const list = attendanceByDate.get(sessionDate) ?? []
+      list.push({
+        member_id: row.member_id,
+        member_name: memberName?.trim() || '회원',
+        signed_at:
+          typeof row.checked_in_at === 'string' && row.checked_in_at
+            ? row.checked_in_at
+            : new Date(0).toISOString(),
+      })
+      attendanceByDate.set(sessionDate, list)
+    }
   }
 
-  const attendanceByDate = new Map<string, RunningLeagueTrainingScheduleSignup[]>()
-  for (const row of attendanceResult.data ?? []) {
-    const sessionDate = normalizeTrainingScheduleDate(row.session_date)
-    if (!sessionDate || !row.member_id) continue
-    const memberRaw = row.member as { name?: string } | { name?: string }[] | null
-    const memberName = Array.isArray(memberRaw) ? memberRaw[0]?.name : memberRaw?.name
-    const list = attendanceByDate.get(sessionDate) ?? []
-    list.push({
-      member_id: row.member_id,
-      member_name: memberName?.trim() || '회원',
-      signed_at:
-        typeof row.checked_in_at === 'string' && row.checked_in_at
-          ? row.checked_in_at
-          : new Date(0).toISOString(),
-    })
-    attendanceByDate.set(sessionDate, list)
+  const candidateIds = new Set<string>()
+  for (const row of rows) candidateIds.add(row.member_id)
+  for (const list of attendanceByDate.values()) {
+    for (const signup of list) candidateIds.add(signup.member_id)
+  }
+  for (const day of days) {
+    for (const signup of day.signups ?? []) candidateIds.add(signup.member_id)
+  }
+
+  const sportsByMemberId = new Map<string, string | null>()
+  const uniqueIds = [...candidateIds].filter(Boolean)
+  if (uniqueIds.length > 0) {
+    const { data: memberRows, error: memberError } = await supabase
+      .from('members')
+      .select('id, sport')
+      .in('id', uniqueIds)
+    if (memberError) {
+      console.error('attachSignupsToSnapshotDays.members', memberError)
+    } else {
+      for (const row of memberRows ?? []) {
+        if (!row.id) continue
+        sportsByMemberId.set(
+          String(row.id),
+          typeof row.sport === 'string' ? row.sport : null,
+        )
+      }
+    }
   }
 
   return days.map((day) => {
@@ -255,13 +290,24 @@ async function attachSignupsToSnapshotDays(
     const byMember = new Map<string, RunningLeagueTrainingScheduleSignup>()
     for (const signup of [...existing, ...fromAttendance, ...fromLive]) {
       if (!signup.member_id) continue
+      if (
+        !memberMatchesTrainingScheduleAudience(
+          sportsByMemberId.get(signup.member_id) ?? null,
+          audience,
+        )
+      ) {
+        continue
+      }
       byMember.set(signup.member_id, signup)
     }
     const signups = Array.from(byMember.values()).sort((a, b) =>
       a.signed_at.localeCompare(b.signed_at),
     )
 
-    if (signups.length === 0) return day
+    if (signups.length === 0) {
+      const { signups: _drop, ...rest } = day
+      return rest
+    }
     return { ...day, signups }
   })
 }

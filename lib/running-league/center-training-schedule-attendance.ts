@@ -1,8 +1,31 @@
 import { addDays, format, startOfWeek } from 'date-fns'
+import type { TrainingScheduleAudience } from '@/lib/training-schedule-audience'
 
-/** 훈련 스케줄 참여로 자동 생성된 출석 세션 식별용 */
+/** 성인 러닝 훈련 스케줄 참여로 자동 생성된 출석 세션 (레거시 공통 노트 포함) */
 export const CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE =
   'center-running-training-schedule'
+
+/** 육상선수반 훈련 스케줄 참여 출석 — 성인과 분리 */
+export const YOUTH_TRAINING_SCHEDULE_ATTENDANCE_NOTE =
+  'center-youth-athletics-training-schedule'
+
+export function trainingScheduleAttendanceNote(
+  audience: TrainingScheduleAudience | null | undefined,
+): string {
+  return audience === 'youth_athletics'
+    ? YOUTH_TRAINING_SCHEDULE_ATTENDANCE_NOTE
+    : CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE
+}
+
+/** 조회 시 매칭할 notes (성인은 레거시 공통 노트도 포함) */
+export function trainingScheduleAttendanceNotesForQuery(
+  audience: TrainingScheduleAudience | null | undefined,
+): string[] {
+  if (audience === 'youth_athletics') {
+    return [YOUTH_TRAINING_SCHEDULE_ATTENDANCE_NOTE]
+  }
+  return [CENTER_TRAINING_SCHEDULE_ATTENDANCE_NOTE]
+}
 
 export function resolveCenterTrainingScheduleSessionDate(
   weekday: number,

@@ -479,6 +479,7 @@ export async function checkInOfflineClassAttendance(input?: {
     weekday: scheduleDay.weekday,
     scheduleDate: scheduleDay.scheduleDate,
     checkedInBy: user.id,
+    audience: 'adult_running',
   })
 
   if (!attendanceResult.ok) {
@@ -631,6 +632,7 @@ export async function staffSetMemberOfflineAttendance(input: {
       memberId: member.id,
       weekday,
       scheduleDate: date,
+      audience: 'adult_running',
     })
 
     const ensured = await ensurePortalParticipantForMember(member.id)
@@ -683,6 +685,7 @@ export async function staffSetMemberOfflineAttendance(input: {
     weekday,
     scheduleDate: date,
     checkedInBy: user.id,
+    audience: 'adult_running',
   })
   if (!attendanceResult.ok) {
     console.error('staffSetMemberOfflineAttendance.lessonSession', attendanceResult.error)

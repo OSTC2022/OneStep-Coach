@@ -239,6 +239,7 @@ export function CenterRunningTrainingSchedulePanel({
       if (cancelled) return
       setTableReady(scheduleResult.tableReady)
       setLibrary(libraryResult)
+      setDays(mergeLoadedDays(scheduleResult.days))
       setLoading(false)
     })
     return () => {
@@ -362,8 +363,8 @@ export function CenterRunningTrainingSchedulePanel({
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           {isYouth
-            ? '저장하면 회원(육상선수반) 포털의 육상선수반 스케줄에 즉시 반영되고, 작성 폼은 비워집니다. 이전 주차는 상단 저장 목록에서 불러와 수정할 수 있습니다.'
-            : '저장하면 성인 회원 포털에 즉시 반영되고, 작성 폼은 비워집니다. 이전 주차는 상단 저장 목록에서 불러와 수정할 수 있습니다.'}
+            ? '성인 러닝 스케줄과 완전히 분리된 표입니다. 저장하면 육상선수반 포털에만 반영됩니다. 이전 주차는 상단 저장 목록에서 불러올 수 있습니다.'
+            : '육상선수반 스케줄과 완전히 분리된 표입니다. 저장하면 성인 러닝 포털에만 반영됩니다. 이전 주차는 상단 저장 목록에서 불러올 수 있습니다.'}
         </p>
         {!library.tableReady ? (
           <p className="text-xs text-amber-300/90">
