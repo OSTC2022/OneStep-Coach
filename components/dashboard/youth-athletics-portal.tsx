@@ -57,6 +57,7 @@ export function YouthAthleticsPortal({
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const days = centerTrainingSchedule?.days ?? []
   const previousWeekDays = centerTrainingSchedule?.previousWeekDays ?? []
+  const nextWeekDays = centerTrainingSchedule?.nextWeekDays ?? []
   const tableReady = centerTrainingSchedule?.tableReady ?? true
   const visibleDays = days.filter((day) => !day.is_hidden)
   const schoolLine = [member.school, member.grade].filter((value) => value?.trim()).join(' · ')
@@ -252,6 +253,7 @@ export function YouthAthleticsPortal({
           <MemberRunningLeagueTrainingSchedule
             days={days}
             previousWeekDays={previousWeekDays}
+            nextWeekDays={nextWeekDays}
             tableReady={tableReady}
             canParticipate={!adminPreview}
             readOnly={adminPreview && !canStaffProxySignup}

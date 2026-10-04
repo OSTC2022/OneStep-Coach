@@ -59,6 +59,8 @@ import {
 type MemberRunningLeagueTrainingScheduleProps = {
   days: RunningLeagueTrainingScheduleDayView[]
   previousWeekDays?: RunningLeagueTrainingScheduleDayView[]
+  /** 다음 주 미리보기 (일요일부터 노출) */
+  nextWeekDays?: RunningLeagueTrainingScheduleDayView[]
   tableReady: boolean
   canParticipate: boolean
   readOnly?: boolean
@@ -99,6 +101,7 @@ function daySignupClosed(day: RunningLeagueTrainingScheduleDayView): boolean {
 export function MemberRunningLeagueTrainingSchedule({
   days,
   previousWeekDays = [],
+  nextWeekDays = [],
   tableReady,
   canParticipate,
   readOnly = false,
@@ -112,11 +115,13 @@ export function MemberRunningLeagueTrainingSchedule({
   const [pendingDayId, setPendingDayId] = useState<string | null>(null)
   const [scheduleDays, setScheduleDays] = useState(days)
   const [pastScheduleDays, setPastScheduleDays] = useState(previousWeekDays)
-  const [showPastWeek, setShowPastWeek] = useState(false)
+  const [upcomingScheduleDays, setUpcomingScheduleDays] = useState(nextWeekDays)
+  /** 한 번에 한 주만 펼침 */
+  const [openWeek, setOpenWeek] = useState<'past' | 'current' | 'next'>('current')
   const [activeDay, setActiveDay] = useState<RunningLeagueTrainingScheduleDayView | null>(null)
   const [sectionOpen, setSectionOpen] = useState(contentOnly)
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
-    buildSignupDraft([...days, ...previousWeekDays]),
+    buildSignupDraft([...days, ...previousWeekDays, ...nextWeekDays]),
   )
   const [proxyDay, setProxyDay] = useState<RunningLeagueTrainingScheduleDayView | null>(null)
   const [proxyMembers, setProxyMembers] = useState<MemberPickerOption[] | null>(null)
@@ -130,16 +135,25 @@ export function MemberRunningLeagueTrainingSchedule({
   useEffect(() => {
     setScheduleDays(days)
     setPastScheduleDays(previousWeekDays)
-    setSignupDraft((current) => buildSignupDraft([...days, ...previousWeekDays], current))
+    setUpcomingScheduleDays(nextWeekDays)
+    setSignupDraft((current) =>
+      buildSignupDraft([...days, ...previousWeekDays, ...nextWeekDays], current),
+    )
     setActiveDay((current) => {
       if (!current) return current
       return (
         days.find((day) => day.id === current.id) ??
         previousWeekDays.find((day) => day.id === current.id) ??
+        nextWeekDays.find((day) => day.id === current.id) ??
         null
       )
     })
-  }, [days, previousWeekDays])
+    setOpenWeek((current) => {
+      if (current === 'next' && nextWeekDays.length === 0) return 'current'
+      if (current === 'past' && previousWeekDays.length === 0) return 'current'
+      return current
+    })
+  }, [days, previousWeekDays, nextWeekDays])
 
   const fullWeekDays = useMemo(
     () => buildFullWeekScheduleDays(scheduleDays),
@@ -149,11 +163,22 @@ export function MemberRunningLeagueTrainingSchedule({
     () => buildFullWeekScheduleDays(pastScheduleDays),
     [pastScheduleDays],
   )
+  const fullNextWeekDays = useMemo(
+    () => buildFullWeekScheduleDays(upcomingScheduleDays),
+    [upcomingScheduleDays],
+  )
   const visibleDays = useMemo(
     () => fullWeekDays.filter(isVotableDay),
     [fullWeekDays],
   )
   const hasPastWeekSchedule = fullPastWeekDays.some(
+    (day) =>
+      isVotableDay(day) ||
+      day.is_hidden ||
+      Boolean(day.schedule_date) ||
+      Boolean(day.training_summary.trim()),
+  )
+  const hasNextWeekSchedule = fullNextWeekDays.some(
     (day) =>
       isVotableDay(day) ||
       day.is_hidden ||
@@ -186,6 +211,7 @@ export function MemberRunningLeagueTrainingSchedule({
 
     setScheduleDays((current) => apply(current))
     setPastScheduleDays((current) => apply(current))
+    setUpcomingScheduleDays((current) => apply(current))
     setActiveDay((current) => (current?.id === dayId ? { ...current, ...patch } : current))
     setProxyDay((current) => (current?.id === dayId ? { ...current, ...patch } : current))
   }
@@ -400,6 +426,7 @@ export function MemberRunningLeagueTrainingSchedule({
     const latest =
       scheduleDays.find((item) => item.id === day.id) ??
       pastScheduleDays.find((item) => item.id === day.id) ??
+      upcomingScheduleDays.find((item) => item.id === day.id) ??
       day
     setActiveDay(latest)
   }
@@ -415,25 +442,34 @@ export function MemberRunningLeagueTrainingSchedule({
         ? '등록된 일정 없음'
         : '준비 중'
 
-  const scheduleBody = (
-    <div className={cn(contentOnly ? 'space-y-1.5' : 'space-y-1.5 p-2.5 sm:p-3')}>
-      {hasPastWeekSchedule ? (
-        <div className="px-0.5 pb-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 w-full border-zinc-700/80 bg-zinc-900/40 text-xs text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
-            onClick={() => setShowPastWeek((value) => !value)}
-          >
-            {showPastWeek ? '지난 훈련 일정 숨기기' : '지난 훈련 일정 보기'}
-          </Button>
-        </div>
-      ) : null}
+  function weekTabButton(week: 'past' | 'current' | 'next', label: string) {
+    const isOpen = openWeek === week
+    return (
+      <button
+        type="button"
+        onClick={() => setOpenWeek((current) => (current === week ? current : week))}
+        className={cn(
+          'min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors',
+          isOpen
+            ? 'bg-lime-500/20 text-lime-100 ring-1 ring-inset ring-lime-500/40'
+            : 'text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-200',
+        )}
+      >
+        {label}
+      </button>
+    )
+  }
 
-      {showPastWeek && hasPastWeekSchedule ? (
+  const scheduleBody = (
+    <div className={cn(contentOnly ? 'space-y-2' : 'space-y-2 p-2.5 sm:p-3')}>
+      <div className="flex items-center gap-0.5 rounded-lg border border-zinc-700/70 bg-zinc-950/50 p-0.5">
+        {hasPastWeekSchedule ? weekTabButton('past', '지난 주') : null}
+        {weekTabButton('current', '이번 주')}
+        {hasNextWeekSchedule ? weekTabButton('next', '다음 주') : null}
+      </div>
+
+      {openWeek === 'past' && hasPastWeekSchedule ? (
         <div className="space-y-1.5 rounded-md border border-dashed border-zinc-700/70 bg-zinc-950/40 p-1.5">
-          <p className="px-1 pb-0.5 text-[11px] font-medium text-zinc-500">지난 주</p>
           {renderWeekRows(fullPastWeekDays, {
             emptyMessage: '지난 주 등록된 훈련 일정이 없습니다.',
             participate: false,
@@ -441,17 +477,25 @@ export function MemberRunningLeagueTrainingSchedule({
         </div>
       ) : null}
 
-      <div className="space-y-1.5">
-        {showPastWeek && hasPastWeekSchedule ? (
-          <p className="px-1 pb-0.5 text-[11px] font-medium text-zinc-500">이번 주</p>
-        ) : null}
-        {renderWeekRows(fullWeekDays, {
-          emptyMessage: tableReady
-            ? '이번 주 등록된 훈련 일정이 없습니다.'
-            : '훈련 스케줄 기능을 준비 중입니다.',
-          participate: true,
-        })}
-      </div>
+      {openWeek === 'current' ? (
+        <div className="space-y-1.5">
+          {renderWeekRows(fullWeekDays, {
+            emptyMessage: tableReady
+              ? '이번 주 등록된 훈련 일정이 없습니다.'
+              : '훈련 스케줄 기능을 준비 중입니다.',
+            participate: true,
+          })}
+        </div>
+      ) : null}
+
+      {openWeek === 'next' && hasNextWeekSchedule ? (
+        <div className="space-y-1.5 rounded-md border border-lime-500/20 bg-lime-500/5 p-1.5">
+          {renderWeekRows(fullNextWeekDays, {
+            emptyMessage: '다음 주 등록된 훈련 일정이 없습니다.',
+            participate: true,
+          })}
+        </div>
+      ) : null}
     </div>
   )
 

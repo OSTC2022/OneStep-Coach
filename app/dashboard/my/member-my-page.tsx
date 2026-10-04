@@ -166,6 +166,8 @@ export function MemberMyPage({
   const trainingScheduleDays = centerTrainingSchedule?.days ?? []
   const trainingSchedulePreviousWeekDays =
     centerTrainingSchedule?.previousWeekDays ?? []
+  const trainingScheduleNextWeekDays =
+    centerTrainingSchedule?.nextWeekDays ?? []
   const trainingScheduleReady = centerTrainingSchedule?.tableReady ?? true
   const canStaffProxySignup =
     canStaffManageAttendance ||
@@ -214,6 +216,7 @@ export function MemberMyPage({
               <MemberRunningLeagueTrainingSchedule
                 days={trainingScheduleDays}
                 previousWeekDays={trainingSchedulePreviousWeekDays}
+                nextWeekDays={trainingScheduleNextWeekDays}
                 tableReady={trainingScheduleReady}
                 canParticipate={!adminPreview}
                 readOnly={adminPreview && !canStaffProxySignup}

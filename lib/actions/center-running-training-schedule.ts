@@ -165,8 +165,14 @@ export type CenterRunningTrainingScheduleBundle = {
   days: RunningLeagueTrainingScheduleDayView[]
   /** 직전 주 (스냅샷). 없으면 빈 배열 */
   previousWeekDays: RunningLeagueTrainingScheduleDayView[]
+  /**
+   * 다음 주 미리보기 — 관리자가 다음 주로 저장한 경우
+   * (이번 주와 동시에 펼치지 않고, UI에서 칸을 눌러 확인)
+   */
+  nextWeekDays?: RunningLeagueTrainingScheduleDayView[]
   weekStartDate: string | null
   previousWeekStartDate: string | null
+  nextWeekStartDate?: string | null
   tableReady: boolean
 }
 
@@ -276,8 +282,10 @@ function emptyPortalBundle(tableReady: boolean): CenterRunningTrainingScheduleBu
   return {
     days: [],
     previousWeekDays: [],
+    nextWeekDays: [],
     weekStartDate: null,
     previousWeekStartDate: null,
+    nextWeekStartDate: null,
     tableReady,
   }
 }
@@ -564,10 +572,12 @@ export async function fetchCenterRunningTrainingSchedule(
     return {
       days: liveViews,
       previousWeekDays: [],
+      nextWeekDays: [],
       weekStartDate: liveWeekStart,
       previousWeekStartDate: liveWeekStart
         ? addDaysToDateKey(liveWeekStart, -7)
         : null,
+      nextWeekStartDate: null,
       tableReady: true,
     }
   }
@@ -589,15 +599,22 @@ export async function fetchCenterRunningTrainingSchedule(
 
   const previousWeekDays = resolveWeekDays(previousMonday)
 
+  // 관리자가 다음 주로 저장해 두면 미리보기 칸에만 노출 (이번 주와 동시 펼침 없음)
+  const nextMonday = addDaysToDateKey(currentMonday, 7)
+  const nextWeekDays =
+    liveWeekStart === nextMonday && liveViews.length > 0 ? liveViews : []
+
   return {
     days: currentWeekDays,
     previousWeekDays,
+    nextWeekDays,
     weekStartDate: currentWeekDays.length
       ? getTrainingWeekStartFromDays(currentWeekDays) ?? currentMonday
       : currentMonday,
     previousWeekStartDate: previousWeekDays.length
       ? getTrainingWeekStartFromDays(previousWeekDays) ?? previousMonday
       : previousMonday,
+    nextWeekStartDate: nextWeekDays.length ? nextMonday : null,
     tableReady: true,
   }
 }
