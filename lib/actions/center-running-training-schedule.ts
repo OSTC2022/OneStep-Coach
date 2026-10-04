@@ -1,6 +1,9 @@
 'use server'
 
-import { clearOfflineClassAttendanceForDate } from '@/lib/actions/offline-class-attendance'
+import {
+  clearOfflineClassAttendanceForDate,
+  recordOfflineClassAttendanceForMember,
+} from '@/lib/actions/offline-class-attendance'
 import { clearCenterTrainingScheduleAttendance } from '@/lib/actions/center-training-schedule-attendance'
 import { getCurrentUser, requireRole } from '@/lib/actions/auth'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
@@ -798,7 +801,6 @@ export async function toggleCenterRunningTrainingScheduleSignup(
   }
 
   const supabase = await scheduleClient()
-  const isAdultMember = user?.role === 'adult_member'
 
   let dayResult = await supabase
     .from(tables.daysTable)
@@ -880,7 +882,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       return { ok: false, error: '참여 취소에 실패했습니다.' }
     }
 
-    if (isAdultMember) {
+    if (audience === 'adult_running') {
       const attendanceResult = await clearCenterTrainingScheduleAttendance({
         memberId: member.id,
         weekday,
@@ -943,7 +945,21 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       return { ok: false, error: '참여 신청에 실패했습니다.' }
     }
 
-    // 출석왕 반영은 회원이 '내 회원 정보'에서 출석 버튼을 눌렀을 때만 처리
+    // 성인 오프라인 수업 참여 = 출석왕 1회 자동 반영 (마일리지 무관)
+    if (audience === 'adult_running' && scheduleDate && user?.id) {
+      const autoAttendance = await recordOfflineClassAttendanceForMember({
+        memberId: member.id,
+        scheduleDate,
+        checkedInBy: user.id,
+        weekday,
+      })
+      if (!autoAttendance.ok) {
+        console.error(
+          'toggleCenterRunningTrainingScheduleSignup.autoAttendance',
+          autoAttendance.error,
+        )
+      }
+    }
   }
 
   let countQuery = supabase
@@ -1120,6 +1136,25 @@ export async function staffAddCenterRunningTrainingScheduleSignup(
     if (insertResult.error) {
       console.error('staffAddCenterRunningTrainingScheduleSignup.insert', insertResult.error)
       return { ok: false, error: '참여 등록에 실패했습니다.' }
+    }
+  }
+
+  // 성인 오프라인 수업 참여 = 출석왕 1회 자동 반영
+  if (audience === 'adult_running' && scheduleDate) {
+    const staffUser = await getCurrentUser()
+    if (staffUser?.id) {
+      const autoAttendance = await recordOfflineClassAttendanceForMember({
+        memberId: targetMemberId,
+        scheduleDate,
+        checkedInBy: staffUser.id,
+        weekday,
+      })
+      if (!autoAttendance.ok) {
+        console.error(
+          'staffAddCenterRunningTrainingScheduleSignup.autoAttendance',
+          autoAttendance.error,
+        )
+      }
     }
   }
 

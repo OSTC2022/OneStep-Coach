@@ -7,7 +7,6 @@ import {
 } from '@/lib/actions/center-training-schedule-attendance'
 import {
   ensurePortalParticipantForMember,
-  saveMemberMileageLog,
   syncPortalParticipantMileage,
 } from '@/lib/actions/running-league'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
@@ -25,7 +24,8 @@ import {
   normalizeTrainingScheduleDate,
   TRAINING_WEEKDAY_LABELS,
 } from '@/lib/running-league/training-schedule'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
+import { CENTER_PORTAL_RANKINGS_CACHE_TAG } from '@/lib/running-league/center-portal-rankings-data'
 
 export type OfflineClassAttendanceStatus = {
   today: string
@@ -344,6 +344,148 @@ async function hasOfflineAttendanceLog(
   return Boolean(data?.id)
 }
 
+/**
+ * 성인 러닝 오프라인 수업 출석 1회 기록 (출석왕 + lesson_sessions).
+ * 마일리지 km와 무관 · 이미 있으면 건너뜀.
+ */
+export async function recordOfflineClassAttendanceForMember(input: {
+  memberId: string
+  scheduleDate: string
+  checkedInBy: string
+  weekday?: number
+}): Promise<
+  | { ok: true; alreadyCheckedIn?: boolean; sessionDate: string }
+  | { ok: false; error: string }
+> {
+  const date = normalizeTrainingScheduleDate(input.scheduleDate)
+  if (!date) return { ok: false, error: '날짜가 올바르지 않습니다.' }
+
+  const supabase = await attendanceDb()
+  const { data: member, error: memberError } = await supabase
+    .from('members')
+    .select('id, name, primary_instructor_id')
+    .eq('id', input.memberId)
+    .maybeSingle()
+
+  if (memberError || !member) {
+    return { ok: false, error: '회원을 찾을 수 없습니다.' }
+  }
+
+  if (await hasOfflineAttendanceLog(member.id, date)) {
+    return { ok: true, alreadyCheckedIn: true, sessionDate: date }
+  }
+
+  const ensured = await ensurePortalParticipantForMember(member.id)
+  if (!ensured.ok) return ensured
+
+  const participant = ensured.participant
+  const { error: insertError } = await supabase.from('running_league_mileage_logs').insert({
+    participant_id: participant.id,
+    league_id: participant.league_id,
+    member_id: member.id,
+    distance_km: OFFLINE_CLASS_ATTENDANCE_DISTANCE_KM,
+    logged_at: date,
+    source: 'lesson',
+    notes: OFFLINE_CLASS_ATTENDANCE_NOTE,
+    verification_status: 'confirmed',
+    updated_at: new Date().toISOString(),
+  })
+
+  if (insertError) {
+    console.error('recordOfflineClassAttendanceForMember.insert', insertError)
+    return { ok: false, error: '출석 기록 저장에 실패했습니다.' }
+  }
+
+  const weekday = input.weekday ?? weekdayFromDateKey(date)
+  const attendanceResult = await recordCenterTrainingScheduleAttendance({
+    member: {
+      id: member.id,
+      primary_instructor_id: member.primary_instructor_id,
+    },
+    weekday,
+    scheduleDate: date,
+    checkedInBy: input.checkedInBy,
+    audience: 'adult_running',
+  })
+  if (!attendanceResult.ok) {
+    console.error(
+      'recordOfflineClassAttendanceForMember.lessonSession',
+      attendanceResult.error,
+    )
+  }
+
+  try {
+    await syncPortalParticipantMileage(participant.id)
+  } catch (error) {
+    console.error('recordOfflineClassAttendanceForMember.sync', error)
+  }
+
+  revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG, 'max')
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/running-portal')
+  revalidatePath('/dashboard/running-portal/league')
+
+  return { ok: true, sessionDate: date }
+}
+
+/** 해당 날짜 성인 스케줄 참여자 중 출석 없는 회원에 자동 출석 보정 */
+export async function backfillOfflineAttendanceFromAdultScheduleSignups(
+  scheduleDate: string,
+): Promise<
+  | { ok: true; total: number; recorded: number; skipped: number }
+  | { ok: false; error: string }
+> {
+  const user = await getCurrentUser()
+  if (!user || !isStaffAttendanceManager(user.role)) {
+    return { ok: false, error: '관리자 또는 강사만 보정할 수 있습니다.' }
+  }
+
+  const date = normalizeTrainingScheduleDate(scheduleDate)
+  if (!date) return { ok: false, error: '날짜가 올바르지 않습니다.' }
+
+  const supabase = await attendanceDb()
+  const { data: signups, error } = await supabase
+    .from('center_running_training_schedule_signups')
+    .select('member_id, weekday')
+    .eq('schedule_date', date)
+
+  if (error) {
+    console.error('backfillOfflineAttendanceFromAdultScheduleSignups', error)
+    return { ok: false, error: '참여 명단을 불러오지 못했습니다.' }
+  }
+
+  const rows = signups ?? []
+  let recorded = 0
+  let skipped = 0
+
+  for (const row of rows) {
+    if (!row.member_id) continue
+    const result = await recordOfflineClassAttendanceForMember({
+      memberId: row.member_id,
+      scheduleDate: date,
+      checkedInBy: user.id,
+      weekday: typeof row.weekday === 'number' ? row.weekday : undefined,
+    })
+    if (!result.ok) {
+      console.error(
+        'backfillOfflineAttendanceFromAdultScheduleSignups.member',
+        row.member_id,
+        result.error,
+      )
+      continue
+    }
+    if (result.alreadyCheckedIn) skipped += 1
+    else recorded += 1
+  }
+
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/my/running-league')
+  revalidatePath('/dashboard/running-portal')
+  revalidatePath('/dashboard/running-portal/league')
+
+  return { ok: true, total: rows.length, recorded, skipped }
+}
+
 export async function getOfflineClassAttendanceStatus(): Promise<OfflineClassAttendanceStatus> {
   const today = getKstDateKey()
   const empty: OfflineClassAttendanceStatus = {
@@ -457,43 +599,20 @@ export async function checkInOfflineClassAttendance(input?: {
     }
   }
 
-  if (await hasOfflineAttendanceLog(member.id, requestedDate)) {
-    return { ok: true, alreadyCheckedIn: true, sessionDate: requestedDate }
-  }
-
-  const mileageResult = await saveMemberMileageLog({
-    distance_km: OFFLINE_CLASS_ATTENDANCE_DISTANCE_KM,
-    logged_at: requestedDate,
-    source: 'lesson',
-    notes: OFFLINE_CLASS_ATTENDANCE_NOTE,
-    skip_duplicate_check: true,
-    verification_status: 'confirmed',
-  })
-
-  if (!mileageResult.ok) {
-    return { ok: false, error: mileageResult.error }
-  }
-
-  const attendanceResult = await recordCenterTrainingScheduleAttendance({
-    member,
-    weekday: scheduleDay.weekday,
+  const result = await recordOfflineClassAttendanceForMember({
+    memberId: member.id,
     scheduleDate: scheduleDay.scheduleDate,
     checkedInBy: user.id,
-    audience: 'adult_running',
+    weekday: scheduleDay.weekday,
   })
 
-  if (!attendanceResult.ok) {
-    console.error(
-      'checkInOfflineClassAttendance.lessonSession',
-      attendanceResult.error,
-    )
-  }
+  if (!result.ok) return result
 
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/my/running-league')
   revalidatePath('/dashboard/running-portal')
 
-  return { ok: true, sessionDate: requestedDate }
+  return result
 }
 
 /** 참여 취소 시 같은 날짜 오프라인 출석왕 로그 제거 */
@@ -652,50 +771,13 @@ export async function staffSetMemberOfflineAttendance(input: {
     return { ok: true }
   }
 
-  if (await hasOfflineAttendanceLog(member.id, date)) {
-    return { ok: true }
-  }
-
-  const ensured = await ensurePortalParticipantForMember(member.id)
-  if (!ensured.ok) return ensured
-
-  const participant = ensured.participant
-  const { error: insertError } = await supabase.from('running_league_mileage_logs').insert({
-    participant_id: participant.id,
-    league_id: participant.league_id,
-    member_id: member.id,
-    distance_km: OFFLINE_CLASS_ATTENDANCE_DISTANCE_KM,
-    logged_at: date,
-    source: 'lesson',
-    notes: OFFLINE_CLASS_ATTENDANCE_NOTE,
-    verification_status: 'confirmed',
-    updated_at: new Date().toISOString(),
-  })
-
-  if (insertError) {
-    console.error('staffSetMemberOfflineAttendance.insert', insertError)
-    return { ok: false, error: '출석 기록 저장에 실패했습니다.' }
-  }
-
-  const attendanceResult = await recordCenterTrainingScheduleAttendance({
-    member: {
-      id: member.id,
-      primary_instructor_id: member.primary_instructor_id,
-    },
-    weekday,
+  const result = await recordOfflineClassAttendanceForMember({
+    memberId: member.id,
     scheduleDate: date,
     checkedInBy: user.id,
-    audience: 'adult_running',
+    weekday,
   })
-  if (!attendanceResult.ok) {
-    console.error('staffSetMemberOfflineAttendance.lessonSession', attendanceResult.error)
-  }
-
-  try {
-    await syncPortalParticipantMileage(participant.id)
-  } catch (error) {
-    console.error('staffSetMemberOfflineAttendance.sync', error)
-  }
+  if (!result.ok) return result
 
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/my/running-league')

@@ -119,7 +119,7 @@ export async function getAdultRunningPortalManageMonthData(
 
     const { data: mileageRows, error: mileageError } = await supabase
       .from('running_league_mileage_logs')
-      .select('id, participant_id, league_id, member_id, distance_km, logged_at')
+      .select('id, participant_id, league_id, member_id, distance_km, logged_at, notes')
       .eq('league_id', league.id)
       .gte('logged_at', period.start)
       .lte('logged_at', period.end)

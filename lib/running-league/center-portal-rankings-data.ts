@@ -114,7 +114,9 @@ export async function loadCenterPortalLeagueRankingsData(
           .in('distance_event', ['5km', '10km', 'half', 'full']),
         leaderboardSupabase
           .from('running_league_mileage_logs')
-          .select('id, participant_id, league_id, member_id, distance_km, logged_at')
+          .select(
+            'id, participant_id, league_id, member_id, distance_km, logged_at, notes',
+          )
           .eq('league_id', leagueId)
           .gte('logged_at', mileageLookbackStart),
         leaderboardSupabase

@@ -75,8 +75,8 @@ export function OfflineClassAttendanceButton({
             {status.checkedIn
               ? '오늘 출석이 완료되었습니다. 출석왕에 반영됩니다.'
               : status.signedUp
-                ? `오늘 참여 신청한 수업${summaryHint ? ` · ${summaryHint}` : ''} — 수업 후 출석을 눌러 주세요.`
-                : '훈련 일정에서 오늘 수업에 참여 신청한 뒤 출석할 수 있습니다.'}
+                ? `오늘 참여 신청한 수업${summaryHint ? ` · ${summaryHint}` : ''} — 참여 시 출석이 자동 반영됩니다.`
+                : '훈련 일정에서 오늘 수업에 참여하면 출석왕에 1회 자동 반영됩니다.'}
           </p>
         </div>
         <Button

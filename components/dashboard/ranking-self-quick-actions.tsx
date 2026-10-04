@@ -165,8 +165,8 @@ export function RankingSelfQuickActions({
           <DialogHeader>
             <DialogTitle>출석할 수업 날짜</DialogTitle>
             <DialogDescription className="text-zinc-400">
-              훈련 일정에 있는 수업(오늘·지난 수업)을 골라 출석할 수 있습니다. 참여 신청을
-              깜박해도 출석 가능합니다.
+              훈련 일정 참여 시 출석이 자동으로 반영됩니다. 빠뜨린 날짜가 있으면 여기서
+              보완할 수 있습니다.
             </DialogDescription>
           </DialogHeader>
 
