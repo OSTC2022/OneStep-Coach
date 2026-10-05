@@ -193,6 +193,7 @@ export function PortalHeaderRoulette({
   return (
     <>
       <button
+        id="portal-header-roulette"
         type="button"
         onClick={() => setOpen(true)}
         aria-label="룰렛 열기"

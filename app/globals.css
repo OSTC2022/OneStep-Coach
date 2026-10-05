@@ -614,6 +614,20 @@ html.onestep-splash-active body {
   transform: scale(0.96);
 }
 
+.pb-laurel-fab[data-dragging='true'] {
+  animation: none !important;
+  transform: none !important;
+  filter: drop-shadow(0 0 8px rgba(250, 204, 21, 0.45))
+    drop-shadow(0 6px 12px rgba(234, 179, 8, 0.35));
+}
+
+.pb-laurel-fab[data-dragging='true'] .pb-laurel-glow,
+.pb-laurel-fab[data-dragging='true'] .pb-laurel-ring,
+.pb-laurel-fab[data-dragging='true'] .pb-laurel-shimmer::after,
+.pb-laurel-fab[data-dragging='true'] .pb-laurel-sparkle {
+  animation-play-state: paused;
+}
+
 .pb-laurel-glow {
   position: absolute;
   inset: 2%;
