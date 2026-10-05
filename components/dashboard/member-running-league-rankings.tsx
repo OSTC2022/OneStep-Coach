@@ -8,6 +8,7 @@ import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-lo
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberRunningLeagueRankingsSkeleton } from '@/components/dashboard/member-running-league-rankings-skeleton'
 import { MemberRunningPbDialog } from '@/components/dashboard/member-running-pb-panel'
+import { PbHallOfFameWidget } from '@/components/dashboard/pb-hall-of-fame-widget'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -2894,6 +2895,17 @@ export function MemberRunningLeagueRankings({
           }}
           memberId={staffRecordsTarget.memberId}
           memberName={staffRecordsTarget.memberName}
+        />
+      ) : null}
+
+      {!rankingsError ? (
+        <PbHallOfFameWidget
+          leaderboards={{
+            '10km': filteredRankings?.pbByDistance['10km'] ?? EMPTY_PB_LEADERBOARD,
+            half: filteredRankings?.pbByDistance.half ?? EMPTY_PB_LEADERBOARD,
+            full: filteredRankings?.pbByDistance.full ?? EMPTY_PB_LEADERBOARD,
+          }}
+          highlightMemberId={highlightMemberId}
         />
       ) : null}
     </section>

@@ -46,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { matchKoreanNameSearch } from '@/lib/korean-search'
 import { cn } from '@/lib/utils'
 import {
   MEMBER_PORTAL_CARD_CLASS,
@@ -162,14 +163,14 @@ export function MemberMarathonSchedule({
   }, [bundle])
 
   const filteredEvents = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
+    const query = searchQuery.trim()
     const list = events.filter((event) => {
       if (!marathonEventMatchesDistanceFilters(event, distanceFilters)) return false
       if (mySignupsOnly) {
         if (!(signupDraft[event.id] ?? event.is_signed_up)) return false
       }
       if (query) {
-        const haystack = [
+        const parts = [
           event.title,
           event.location_label,
           event.region,
@@ -178,10 +179,16 @@ export function MemberMarathonSchedule({
           event.weekday_label,
           ...(event.custom_labels?.map((label) => label.text) ?? []),
         ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        if (!haystack.includes(query)) return false
+        const haystack = parts.filter(Boolean).join(' ')
+        const matched =
+          matchKoreanNameSearch(haystack, query) ||
+          parts.some(
+            (part) =>
+              Boolean(part) &&
+              (matchKoreanNameSearch(part!, query) ||
+                part!.toLowerCase().includes(query.toLowerCase())),
+          )
+        if (!matched) return false
       }
       return true
     })

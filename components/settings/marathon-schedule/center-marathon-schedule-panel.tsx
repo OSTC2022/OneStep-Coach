@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, EyeOff, Loader2, Plus, Save, Star, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Plus, Save, Search, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   addMarathonEventFromCatalog,
@@ -46,7 +46,20 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { matchKoreanNameSearch } from '@/lib/korean-search'
 import { cn } from '@/lib/utils'
+
+function marathonTextMatchesQuery(
+  query: string,
+  parts: Array<string | null | undefined>,
+): boolean {
+  const q = query.trim()
+  if (!q) return true
+  const haystack = parts.filter(Boolean).join(' ')
+  if (!haystack) return false
+  if (matchKoreanNameSearch(haystack, q)) return true
+  return haystack.toLowerCase().includes(q.toLowerCase())
+}
 
 function eventToInput(event: CenterMarathonScheduleBundle['events'][number]): MarathonEventInput {
   return {
@@ -98,6 +111,8 @@ export function CenterMarathonSchedulePanel() {
   const [recommendMonth, setRecommendMonth] = useState(MARATHON_SCHEDULE_ALL_KEY)
   const [featuredOnly, setFeaturedOnly] = useState(false)
   const [openOnly, setOpenOnly] = useState(false)
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [scheduleSearch, setScheduleSearch] = useState('')
   const [catalogItems, setCatalogItems] = useState<MarathonCatalogItem[]>([])
   const [addedKeys, setAddedKeys] = useState<string[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -149,15 +164,43 @@ export function CenterMarathonSchedulePanel() {
     }
   }, [recommendRegion, recommendMonth, featuredOnly, openOnly, year])
 
+  const filteredCatalogItems = useMemo(() => {
+    return catalogItems.filter((item) =>
+      marathonTextMatchesQuery(catalogSearch, [
+        item.title,
+        item.region,
+        item.location_label,
+        item.notes,
+        item.event_date,
+      ]),
+    )
+  }, [catalogItems, catalogSearch])
+
+  const filteredScheduleEvents = useMemo(() => {
+    const events = bundle?.events ?? []
+    return events.filter((event) =>
+      marathonTextMatchesQuery(scheduleSearch, [
+        event.title,
+        event.region,
+        event.location_label,
+        event.notes,
+        event.event_date,
+        event.event_date_label,
+        event.registration_url,
+        ...(event.custom_labels?.map((label) => label.text) ?? []),
+      ]),
+    )
+  }, [bundle?.events, scheduleSearch])
+
   const recommendTotalPages = Math.max(
     1,
-    Math.ceil(catalogItems.length / MARATHON_CATALOG_PAGE_SIZE),
+    Math.ceil(filteredCatalogItems.length / MARATHON_CATALOG_PAGE_SIZE),
   )
   const recommendPageSafe = Math.min(recommendPage, recommendTotalPages)
   const pagedCatalogItems = useMemo(() => {
     const start = (recommendPageSafe - 1) * MARATHON_CATALOG_PAGE_SIZE
-    return catalogItems.slice(start, start + MARATHON_CATALOG_PAGE_SIZE)
-  }, [catalogItems, recommendPageSafe])
+    return filteredCatalogItems.slice(start, start + MARATHON_CATALOG_PAGE_SIZE)
+  }, [filteredCatalogItems, recommendPageSafe])
 
   const recommendPageNumbers = useMemo(() => {
     const total = recommendTotalPages
@@ -338,6 +381,19 @@ export function CenterMarathonSchedulePanel() {
             >
               신청가능
             </Button>
+            <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={catalogSearch}
+                onChange={(event) => {
+                  setCatalogSearch(event.target.value)
+                  setRecommendPage(1)
+                }}
+                placeholder="대회명·지역 검색"
+                aria-label="추천 대회 검색"
+                className="h-9 pl-8 text-sm"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -348,6 +404,8 @@ export function CenterMarathonSchedulePanel() {
             </div>
           ) : catalogItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">조건에 맞는 추천 대회가 없습니다.</p>
+          ) : filteredCatalogItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">검색 결과가 없습니다.</p>
           ) : (
             <div className="space-y-3">
               <ul className="space-y-2">
@@ -408,8 +466,10 @@ export function CenterMarathonSchedulePanel() {
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
                 <p className="text-xs text-muted-foreground">
-                  전체 {catalogItems.length}건 · {recommendPageSafe}/{recommendTotalPages}페이지
-                  (10개씩)
+                  {catalogSearch.trim()
+                    ? `검색 ${filteredCatalogItems.length}건`
+                    : `전체 ${filteredCatalogItems.length}건`}{' '}
+                  · {recommendPageSafe}/{recommendTotalPages}페이지 (10개씩)
                 </p>
                 <div className="flex flex-wrap items-center gap-1">
                   <Button
@@ -470,18 +530,31 @@ export function CenterMarathonSchedulePanel() {
                 대회명·날짜·참가신청 홈페이지를 등록하면 내 러닝 포털에 표시됩니다.
               </CardDescription>
             </div>
-            <Select value={monthKey} onValueChange={setMonthKey} disabled={pending || loading}>
-              <SelectTrigger className="w-[10rem]">
-                <SelectValue placeholder="월 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                {monthOptions.map((key) => (
-                  <SelectItem key={key} value={key}>
-                    {formatMarathonMonthLabel(key)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={scheduleSearch}
+                  onChange={(event) => setScheduleSearch(event.target.value)}
+                  placeholder="대회명·지역 검색"
+                  aria-label="등록 대회 검색"
+                  className="h-9 pl-8 text-sm"
+                  disabled={pending || loading}
+                />
+              </div>
+              <Select value={monthKey} onValueChange={setMonthKey} disabled={pending || loading}>
+                <SelectTrigger className="w-[10rem]">
+                  <SelectValue placeholder="월 선택" />
+                </SelectTrigger>
+                <SelectContent>
+                  {monthOptions.map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {formatMarathonMonthLabel(key)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -504,9 +577,11 @@ export function CenterMarathonSchedulePanel() {
                 ? '등록된 대회가 없습니다.'
                 : '이 달에 등록된 대회가 없습니다.'}
             </p>
+          ) : filteredScheduleEvents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">검색 결과가 없습니다.</p>
           ) : (
             <ul className="space-y-2">
-              {bundle?.events.map((event) => (
+              {filteredScheduleEvents.map((event) => (
                 <li
                   key={event.id}
                   className={cn(
