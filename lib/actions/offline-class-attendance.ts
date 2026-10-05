@@ -654,6 +654,101 @@ export type StaffMemberDayAttendanceStatus = {
   attended: boolean
 }
 
+export type StaffMemberAttendanceHistoryItem = {
+  date: string
+  offlineCheckedIn: boolean
+  mileageQualified: boolean
+  attended: boolean
+}
+
+const STAFF_ATTENDANCE_HISTORY_LOOKBACK_DAYS = 120
+
+/** 관리자·강사 — 회원이 출석한 날짜 목록 */
+export async function staffListMemberAttendanceHistory(input: {
+  memberId: string
+}): Promise<
+  | {
+      ok: true
+      memberId: string
+      memberName: string
+      today: string
+      items: StaffMemberAttendanceHistoryItem[]
+    }
+  | { ok: false; error: string }
+> {
+  const user = await getCurrentUser()
+  if (!user || !isStaffAttendanceManager(user.role)) {
+    return { ok: false, error: '관리자 또는 강사만 확인할 수 있습니다.' }
+  }
+
+  const memberId = input.memberId.trim()
+  if (!memberId) return { ok: false, error: '회원 정보가 없습니다.' }
+
+  const supabase = await attendanceDb()
+  const { data: member, error: memberError } = await supabase
+    .from('members')
+    .select('id, name')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  if (memberError || !member) {
+    return { ok: false, error: '회원을 찾을 수 없습니다.' }
+  }
+
+  const today = getKstDateKey()
+  const lookbackStart = shiftDateKey(today, -STAFF_ATTENDANCE_HISTORY_LOOKBACK_DAYS)
+
+  const { data: logs, error: logsError } = await supabase
+    .from('running_league_mileage_logs')
+    .select('distance_km, notes, logged_at')
+    .eq('member_id', memberId)
+    .gte('logged_at', lookbackStart)
+    .lte('logged_at', today)
+    .order('logged_at', { ascending: false })
+
+  if (logsError) {
+    return { ok: false, error: '출석 기록을 불러오지 못했습니다.' }
+  }
+
+  const byDate = new Map<
+    string,
+    { offlineCheckedIn: boolean; mileageQualified: boolean }
+  >()
+
+  for (const row of logs ?? []) {
+    const date = normalizeTrainingScheduleDate(String(row.logged_at ?? ''))
+    if (!date) continue
+    const current = byDate.get(date) ?? {
+      offlineCheckedIn: false,
+      mileageQualified: false,
+    }
+    if (isOfflineClassAttendanceLog(row)) {
+      current.offlineCheckedIn = true
+    } else if (isMileageLogAttendanceQualified(Number(row.distance_km ?? 0))) {
+      current.mileageQualified = true
+    }
+    byDate.set(date, current)
+  }
+
+  const items = [...byDate.entries()]
+    .filter(([, value]) => value.offlineCheckedIn || value.mileageQualified)
+    .map(([date, value]) => ({
+      date,
+      offlineCheckedIn: value.offlineCheckedIn,
+      mileageQualified: value.mileageQualified,
+      attended: true,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  return {
+    ok: true,
+    memberId: member.id,
+    memberName: member.name?.trim() || '회원',
+    today,
+    items,
+  }
+}
+
 /** 관리자·강사 — 회원 특정 날짜 출석 상태 */
 export async function staffGetMemberDayAttendance(input: {
   memberId: string
