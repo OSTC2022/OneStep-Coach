@@ -1,55 +1,92 @@
 import type { RunningLeagueDistanceEvent, RunningLeagueRecord } from '@/lib/types'
 
+export const PB_COMPETITION_NAME_MAX_LENGTH = 60
+
 export type PbPortalHistoryEntry = {
   time_text: string
   time_seconds: number | null
   measured_at: string
   archived_at: string
+  competition_name?: string
 }
 
 type PbPortalNotesPayload = {
   label: string
   history: PbPortalHistoryEntry[]
+  /** 현재 PB를 달성한 대회명 */
+  competition_name: string
 }
 
-function isPbPortalNotesPayload(value: unknown): value is PbPortalNotesPayload {
+export function normalizePbCompetitionName(value: string | null | undefined): string {
+  return (value ?? '').trim().slice(0, PB_COMPETITION_NAME_MAX_LENGTH)
+}
+
+function isPbPortalNotesPayload(value: unknown): value is {
+  label?: unknown
+  history: unknown
+  competition_name?: unknown
+} {
   if (!value || typeof value !== 'object') return false
-  const payload = value as PbPortalNotesPayload
-  return Array.isArray(payload.history)
+  return Array.isArray((value as { history?: unknown }).history)
+}
+
+function normalizeHistoryEntry(entry: unknown): PbPortalHistoryEntry | null {
+  if (!entry || typeof entry !== 'object') return null
+  const row = entry as Partial<PbPortalHistoryEntry>
+  if (typeof row.time_text !== 'string' || typeof row.measured_at !== 'string') return null
+  if (!row.time_text.trim()) return null
+  const competition = normalizePbCompetitionName(row.competition_name)
+  return {
+    time_text: row.time_text,
+    time_seconds: typeof row.time_seconds === 'number' ? row.time_seconds : null,
+    measured_at: row.measured_at,
+    archived_at: typeof row.archived_at === 'string' ? row.archived_at : row.measured_at,
+    ...(competition ? { competition_name: competition } : {}),
+  }
 }
 
 /** other 행 notes 에 JSON 이력이 있으면 파싱 */
 export function parsePbPortalNotes(notes: string | null | undefined): PbPortalNotesPayload {
   const raw = notes?.trim() ?? ''
   if (!raw.startsWith('{')) {
-    return { label: raw || '개인 PB', history: [] }
+    return { label: raw || '개인 PB', history: [], competition_name: '' }
   }
 
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!isPbPortalNotesPayload(parsed)) {
-      return { label: raw || '개인 PB', history: [] }
+      return { label: raw || '개인 PB', history: [], competition_name: '' }
     }
     return {
       label: typeof parsed.label === 'string' ? parsed.label : '개인 PB',
-      history: parsed.history.filter(
-        (entry) =>
-          typeof entry.time_text === 'string' &&
-          typeof entry.measured_at === 'string' &&
-          entry.time_text.trim().length > 0,
+      competition_name: normalizePbCompetitionName(
+        typeof parsed.competition_name === 'string' ? parsed.competition_name : '',
       ),
+      history: parsed.history
+        .map((entry) => normalizeHistoryEntry(entry))
+        .filter((entry): entry is PbPortalHistoryEntry => entry != null),
     }
   } catch {
-    return { label: raw || '개인 PB', history: [] }
+    return { label: raw || '개인 PB', history: [], competition_name: '' }
   }
 }
 
 export function serializePbPortalNotes(
   label: string,
   history: ReadonlyArray<PbPortalHistoryEntry>,
+  competitionName?: string | null,
 ): string {
-  if (history.length === 0) return label
-  return JSON.stringify({ label, history })
+  const competition_name = normalizePbCompetitionName(competitionName)
+  if (history.length === 0 && !competition_name) return label
+  return JSON.stringify({
+    label,
+    history,
+    ...(competition_name ? { competition_name } : {}),
+  })
+}
+
+export function competitionNameFromPbNotes(notes: string | null | undefined): string {
+  return parsePbPortalNotes(notes).competition_name
 }
 
 export function noteHistoryRecordId(
@@ -114,7 +151,7 @@ export function parseNoteHistoryRecordId(recordId: string): {
 function historyEntryToRecord(
   row: RunningLeagueRecord,
   entry: PbPortalHistoryEntry,
-  index: number,
+  _index: number,
 ): RunningLeagueRecord {
   return {
     id: noteHistoryRecordId(row.distance_event, entry),
@@ -126,7 +163,7 @@ function historyEntryToRecord(
     time_text: entry.time_text,
     time_seconds: entry.time_seconds,
     measured_at: entry.measured_at,
-    notes: '이전 PB',
+    notes: serializePbPortalNotes('이전 PB', [], entry.competition_name),
     created_at: entry.archived_at,
     updated_at: entry.archived_at,
   }
@@ -176,6 +213,7 @@ export type PortalPbRecordListItem = {
   time_text: string
   measured_at: string
   isCurrent: boolean
+  competition_name?: string
 }
 
 /** 종목별 PB 기록 목록 — 현재 + 이전 이력, 최신순 */
@@ -196,22 +234,26 @@ export function buildPortalPbRecordListForDistance(
   for (const row of expanded) {
     if (row.distance_event !== distance) continue
     if (row.record_phase !== 'pb_history' || !row.time_text?.trim()) continue
+    const competition_name = competitionNameFromPbNotes(row.notes)
     items.push({
       id: row.id,
       distance_event: distance,
       time_text: row.time_text.trim(),
       measured_at: row.measured_at,
       isCurrent: false,
+      ...(competition_name ? { competition_name } : {}),
     })
   }
 
   if (currentRow?.time_text?.trim()) {
+    const competition_name = competitionNameFromPbNotes(currentRow.notes)
     items.push({
       id: currentRow.id,
       distance_event: distance,
       time_text: currentRow.time_text.trim(),
       measured_at: currentRow.measured_at,
       isCurrent: true,
+      ...(competition_name ? { competition_name } : {}),
     })
   }
 
@@ -236,7 +278,10 @@ function sortPortalPbRecordListItems(items: PortalPbRecordListItem[]): PortalPbR
 /** 스냅샷·DB 이력 목록을 합치고 현재 PB를 표시합니다. */
 export function mergePortalPbRecordLists(
   lists: ReadonlyArray<ReadonlyArray<PortalPbRecordListItem>>,
-  current?: (Pick<PortalPbRecordListItem, 'distance_event' | 'measured_at' | 'time_text'> & {
+  current?: (Pick<
+    PortalPbRecordListItem,
+    'distance_event' | 'measured_at' | 'time_text' | 'competition_name'
+  > & {
     id?: string
   }) | null,
 ): PortalPbRecordListItem[] {
@@ -248,7 +293,14 @@ export function mergePortalPbRecordLists(
       const key = portalPbRecordKey(item)
       const existing = byKey.get(key)
       if (!existing || item.isCurrent) {
-        byKey.set(key, { ...item, isCurrent: false })
+        byKey.set(key, {
+          ...item,
+          isCurrent: false,
+          competition_name:
+            item.competition_name || existing?.competition_name || undefined,
+        })
+      } else if (!existing.competition_name && item.competition_name) {
+        byKey.set(key, { ...existing, competition_name: item.competition_name })
       }
     }
   }
@@ -263,6 +315,7 @@ export function mergePortalPbRecordLists(
         'id' in current && typeof current.id === 'string' && current.id.trim()
           ? current.id
           : `current:${currentKey}`
+      const competition_name = normalizePbCompetitionName(current.competition_name)
       items = sortPortalPbRecordListItems([
         ...items,
         {
@@ -271,13 +324,23 @@ export function mergePortalPbRecordLists(
           time_text: current.time_text.trim(),
           measured_at: current.measured_at.slice(0, 10),
           isCurrent: true,
+          ...(competition_name ? { competition_name } : {}),
         },
       ])
     }
-    items = items.map((item) => ({
-      ...item,
-      isCurrent: portalPbRecordKey(item) === currentKey,
-    }))
+    items = items.map((item) => {
+      const isCurrent = portalPbRecordKey(item) === currentKey
+      if (!isCurrent) return { ...item, isCurrent: false }
+      const competition_name =
+        normalizePbCompetitionName(current.competition_name) ||
+        item.competition_name ||
+        undefined
+      return {
+        ...item,
+        isCurrent: true,
+        ...(competition_name ? { competition_name } : {}),
+      }
+    })
   } else if (items.length > 0 && !items.some((item) => item.isCurrent)) {
     items = items.map((item, index) => ({ ...item, isCurrent: index === 0 }))
   }
@@ -312,7 +375,13 @@ export function mergeAllDistancePbRecordLists(
       const key = portalPbRecordKey(item)
       const existing = byKey.get(key)
       if (!existing || item.isCurrent) {
-        byKey.set(key, item)
+        byKey.set(key, {
+          ...item,
+          competition_name:
+            item.competition_name || existing?.competition_name || undefined,
+        })
+      } else if (!existing.competition_name && item.competition_name) {
+        byKey.set(key, { ...existing, competition_name: item.competition_name })
       }
     }
   }

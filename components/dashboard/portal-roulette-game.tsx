@@ -36,10 +36,10 @@ const MODE_TABS: Array<{ value: PortalRouletteMode; label: string }> = [
 
 function modeHint(mode: PortalRouletteMode): string {
   if (mode === 'mileage') {
-    return `마일리지왕 참가자만 표시됩니다. ${MILEAGE_KM_PER_ROULETTE_SLOT}km마다 칸이 1개씩 늘어납니다.`
+    return `마일리지왕 참가자만 표시됩니다. 마일리지는 ${MILEAGE_KM_PER_ROULETTE_SLOT}km당 돌림판 1칸씩 추가됩니다.`
   }
   if (mode === 'beat_rival') {
-    return `이겨라 참가자만 표시됩니다. 기간 마일리지 기준 ${MILEAGE_KM_PER_ROULETTE_SLOT}km마다 칸이 1개씩 늘어납니다.`
+    return `이겨라 참가자만 표시됩니다. 마일리지는 ${MILEAGE_KM_PER_ROULETTE_SLOT}km당 돌림판 1칸씩 추가됩니다.`
   }
   return '출석왕 참가자만 표시됩니다. 출석 1회마다 칸이 하나씩 늘어납니다.'
 }

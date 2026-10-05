@@ -16,6 +16,8 @@ import {
   expandPortalPbRecordsWithNotesHistory,
   parseNoteHistoryRecordId,
   parseCurrentPortalRecordId,
+  competitionNameFromPbNotes,
+  normalizePbCompetitionName,
   parsePbPortalNotes,
   serializePbPortalNotes,
   buildPortalPbRecordListForDistance,
@@ -2654,6 +2656,7 @@ async function buildPortalPbRecordList(
           distance_event: other.distance_event,
           measured_at: other.measured_at,
           time_text: other.time_text ?? '',
+          competition_name: competitionNameFromPbNotes(other.notes),
         }
       : (fromRecords.find((item) => item.isCurrent) ?? fromRecords[0] ?? null)
 
@@ -2803,6 +2806,7 @@ export async function saveMemberRunningPb(input: {
   distance_event: RunningLeagueDistanceEvent
   time_text: string
   measured_at?: string
+  competition_name?: string | null
   editing_record_id?: string
   editing_is_current?: boolean
   forMemberId?: string | null
@@ -2816,6 +2820,7 @@ export async function saveMemberRunningPb(input: {
       distance_event: input.distance_event,
       time_text: input.time_text,
       measured_at: input.measured_at,
+      competition_name: input.competition_name,
       is_current: input.editing_is_current === true,
       forMemberId: input.forMemberId,
     })
@@ -2828,6 +2833,7 @@ async function insertMemberRunningPbRecord(input: {
   distance_event: RunningLeagueDistanceEvent
   time_text: string
   measured_at?: string
+  competition_name?: string | null
   forMemberId?: string | null
 }): Promise<
   | { ok: true; pbRecords: RunningLeagueRecord[]; recordList: PortalPbRecordListItem[] }
@@ -2846,6 +2852,7 @@ async function insertMemberRunningPbRecord(input: {
 
   const participant = ensured.participant
   const measuredAt = input.measured_at ?? new Date().toISOString().slice(0, 10)
+  const competitionName = normalizePbCompetitionName(input.competition_name)
   const supabase = await leagueClient()
 
   const { data: currentRow, error: currentError } = await supabase
@@ -2867,10 +2874,14 @@ async function insertMemberRunningPbRecord(input: {
       })
     : null
   const normalizeMeasuredDate = (value: string) => value.slice(0, 10)
+  const currentCompetition = currentRow
+    ? competitionNameFromPbNotes(currentRow.notes)
+    : ''
   const isSameAsCurrent =
     currentRow != null &&
     currentTimeSeconds === timeSeconds &&
-    normalizeMeasuredDate(currentRow.measured_at) === normalizeMeasuredDate(measuredAt)
+    normalizeMeasuredDate(currentRow.measured_at) === normalizeMeasuredDate(measuredAt) &&
+    currentCompetition === competitionName
 
   if (isSameAsCurrent) {
     const bundle = await loadPortalPbBundle(supabase, participant)
@@ -2886,12 +2897,16 @@ async function insertMemberRunningPbRecord(input: {
     ? parsePbPortalNotes(currentRow.notes).history
     : []
 
-  if (currentRow && !isSameAsCurrent) {
+  if (currentRow && !(
+    currentTimeSeconds === timeSeconds &&
+    normalizeMeasuredDate(currentRow.measured_at) === normalizeMeasuredDate(measuredAt)
+  )) {
     const archiveEntry: PbPortalHistoryEntry = {
       time_text: currentRow.time_text ?? '',
       time_seconds: currentTimeSeconds,
       measured_at: currentRow.measured_at,
       archived_at: new Date().toISOString(),
+      ...(currentCompetition ? { competition_name: currentCompetition } : {}),
     }
     const archiveKey = `${archiveEntry.measured_at}:${archiveEntry.time_text}`
     const alreadyInNotes = notesHistory.some(
@@ -2910,7 +2925,7 @@ async function insertMemberRunningPbRecord(input: {
       time_text: currentRow.time_text,
       time_seconds: currentTimeSeconds,
       measured_at: currentRow.measured_at,
-      notes: '이전 PB',
+      notes: serializePbPortalNotes('이전 PB', [], currentCompetition),
       updated_at: new Date().toISOString(),
     })
 
@@ -2947,7 +2962,7 @@ async function insertMemberRunningPbRecord(input: {
     time_text: timeText,
     time_seconds: timeSeconds,
     measured_at: measuredAt,
-    notes: serializePbPortalNotes('개인 PB', notesHistory),
+    notes: serializePbPortalNotes('개인 PB', notesHistory, competitionName),
     updated_at: new Date().toISOString(),
   }
 
@@ -3022,6 +3037,7 @@ export async function updateMemberRunningPbRecord(input: {
   distance_event: RunningLeagueDistanceEvent
   time_text: string
   measured_at?: string
+  competition_name?: string | null
   is_current?: boolean
   forMemberId?: string | null
 }): Promise<
@@ -3043,6 +3059,7 @@ export async function updateMemberRunningPbRecord(input: {
 
   const participant = ensured.participant
   const measuredAt = (input.measured_at ?? new Date().toISOString()).slice(0, 10)
+  const competitionName = normalizePbCompetitionName(input.competition_name)
   const supabase = await leagueClient()
   let updated = false
 
@@ -3079,21 +3096,28 @@ export async function updateMemberRunningPbRecord(input: {
     if (!otherRow) return { ok: false, error: '수정할 기록을 찾을 수 없습니다.' }
 
     const payload = parsePbPortalNotes(otherRow.notes)
-    const nextHistory = payload.history.map((entry) =>
-      entry.measured_at === noteRef.measured_at && entry.time_text === noteRef.time_text
-        ? {
-            ...entry,
-            time_text: timeText,
-            time_seconds: timeSeconds,
-            measured_at: measuredAt,
-          }
-        : entry,
-    )
+    const nextHistory = payload.history.map((entry) => {
+      if (entry.measured_at !== noteRef.measured_at || entry.time_text !== noteRef.time_text) {
+        return entry
+      }
+      const next: PbPortalHistoryEntry = {
+        time_text: timeText,
+        time_seconds: timeSeconds,
+        measured_at: measuredAt,
+        archived_at: entry.archived_at,
+      }
+      if (competitionName) next.competition_name = competitionName
+      return next
+    })
 
     const { error: updateError } = await supabase
       .from('running_league_records')
       .update({
-        notes: serializePbPortalNotes(payload.label, nextHistory),
+        notes: serializePbPortalNotes(
+          payload.label,
+          nextHistory,
+          payload.competition_name,
+        ),
         updated_at: new Date().toISOString(),
       })
       .eq('id', otherRow.id)
@@ -3111,6 +3135,7 @@ export async function updateMemberRunningPbRecord(input: {
         time_text: timeText,
         time_seconds: timeSeconds,
         measured_at: measuredAt,
+        notes: serializePbPortalNotes('이전 PB', [], competitionName),
         updated_at: new Date().toISOString(),
       })
       .eq('id', input.record_id)
@@ -3131,25 +3156,41 @@ export async function updateMemberRunningPbRecord(input: {
   }
 
   if (!updated) {
-    const { data: otherUpdated, error: otherUpdateError } = await supabase
+    const { data: existingOther, error: existingOtherError } = await supabase
       .from('running_league_records')
-      .update({
-        time_text: timeText,
-        time_seconds: timeSeconds,
-        measured_at: measuredAt,
-        updated_at: new Date().toISOString(),
-      })
+      .select('id, notes')
       .eq('id', input.record_id)
       .eq('participant_id', participant.id)
       .eq('record_phase', 'other')
-      .select('id')
       .maybeSingle()
 
-    if (otherUpdateError) {
-      return { ok: false, error: otherUpdateError.message }
+    if (existingOtherError) {
+      return { ok: false, error: existingOtherError.message }
     }
-    if (otherUpdated) {
-      updated = true
+
+    if (existingOther) {
+      const payload = parsePbPortalNotes(existingOther.notes)
+      const { data: otherUpdated, error: otherUpdateError } = await supabase
+        .from('running_league_records')
+        .update({
+          time_text: timeText,
+          time_seconds: timeSeconds,
+          measured_at: measuredAt,
+          notes: serializePbPortalNotes(payload.label, payload.history, competitionName),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingOther.id)
+        .eq('participant_id', participant.id)
+        .eq('record_phase', 'other')
+        .select('id')
+        .maybeSingle()
+
+      if (otherUpdateError) {
+        return { ok: false, error: otherUpdateError.message }
+      }
+      if (otherUpdated) {
+        updated = true
+      }
     }
   }
 
@@ -3158,12 +3199,22 @@ export async function updateMemberRunningPbRecord(input: {
   }
 
   if (input.is_current) {
+    const { data: otherRow } = await supabase
+      .from('running_league_records')
+      .select('id, notes')
+      .eq('participant_id', participant.id)
+      .eq('distance_event', input.distance_event)
+      .eq('record_phase', 'other')
+      .maybeSingle()
+
+    const history = otherRow ? parsePbPortalNotes(otherRow.notes).history : []
     const { error: syncOtherError } = await supabase
       .from('running_league_records')
       .update({
         time_text: timeText,
         time_seconds: timeSeconds,
         measured_at: measuredAt,
+        notes: serializePbPortalNotes('개인 PB', history, competitionName),
         updated_at: new Date().toISOString(),
       })
       .eq('participant_id', participant.id)

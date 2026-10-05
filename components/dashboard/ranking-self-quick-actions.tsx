@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ClipboardCheck, MessageSquareText } from 'lucide-react'
+import { ClipboardCheck, MessageSquareText, Timer, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -20,7 +20,10 @@ import {
   listMyOfflineAttendanceCheckInOptions,
   type OfflineAttendanceCheckInOption,
 } from '@/lib/actions/offline-class-attendance'
-import { updateMyRankingStatusMessage } from '@/lib/actions/profile-settings'
+import {
+  updateMemberRankingStatusMessage,
+  updateMyRankingStatusMessage,
+} from '@/lib/actions/profile-settings'
 import {
   DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
   RANKING_STATUS_MESSAGE_MAX_LENGTH,
@@ -32,6 +35,18 @@ type RankingSelfQuickActionsProps = {
   initialStatusMessage?: string | null
   initialStatusColor?: string | null
   disabled?: boolean
+  /** 바로가기 제목 (기본: 내 바로가기) */
+  title?: string
+  /** 관리자·강사 — 다른 회원 상태메시지 수정 대상 */
+  statusMemberId?: string | null
+  /** 본인 출석 다이얼로그 대신 외부 출석 처리 */
+  onAttendance?: () => void
+  /** 본인 출석 버튼 숨김 */
+  hideAttendance?: boolean
+  /** 기록 추가(마일리지) — 없으면 버튼 숨김 */
+  onAddMileage?: () => void
+  /** PB 등록 — 없으면 버튼 숨김 */
+  onAddPb?: () => void
   className?: string
 }
 
@@ -39,6 +54,12 @@ export function RankingSelfQuickActions({
   initialStatusMessage = '',
   initialStatusColor = DEFAULT_RANKING_STATUS_MESSAGE_COLOR,
   disabled = false,
+  title = '내 바로가기',
+  statusMemberId = null,
+  onAttendance,
+  hideAttendance = false,
+  onAddMileage,
+  onAddPb,
   className,
 }: RankingSelfQuickActionsProps) {
   const router = useRouter()
@@ -61,7 +82,7 @@ export function RankingSelfQuickActions({
   }, [statusOpen, initialStatusMessage, initialStatusColor])
 
   useEffect(() => {
-    if (!attendanceOpen) return
+    if (!attendanceOpen || onAttendance) return
     let cancelled = false
     setLoadingOptions(true)
     setOptions([])
@@ -84,10 +105,14 @@ export function RankingSelfQuickActions({
     return () => {
       cancelled = true
     }
-  }, [attendanceOpen])
+  }, [attendanceOpen, onAttendance])
 
   function handleOpenAttendance() {
     if (disabled || pendingAttendance) return
+    if (onAttendance) {
+      onAttendance()
+      return
+    }
     setAttendanceOpen(true)
   }
 
@@ -114,10 +139,17 @@ export function RankingSelfQuickActions({
   function handleSaveStatus() {
     if (disabled || pendingStatus) return
     startStatus(async () => {
-      const result = await updateMyRankingStatusMessage({
-        message,
-        color,
-      })
+      const targetId = statusMemberId?.trim() || null
+      const result = targetId
+        ? await updateMemberRankingStatusMessage({
+            memberId: targetId,
+            message,
+            color,
+          })
+        : await updateMyRankingStatusMessage({
+            message,
+            color,
+          })
       if (!result.ok) {
         toast.error('상태메시지 저장 실패', { description: result.error })
         return
@@ -129,6 +161,7 @@ export function RankingSelfQuickActions({
   }
 
   const selectedOption = options.find((option) => option.scheduleDate === selectedDate) ?? null
+  const showAttendance = !hideAttendance
 
   return (
     <div
@@ -137,17 +170,8 @@ export function RankingSelfQuickActions({
         className,
       )}
     >
-      <p className="mb-2 text-[11px] font-medium text-lime-200/90">내 바로가기</p>
+      <p className="mb-2 text-[11px] font-medium text-lime-200/90">{title}</p>
       <div className="grid grid-cols-2 gap-2">
-        <Button
-          type="button"
-          disabled={disabled || pendingAttendance}
-          onClick={handleOpenAttendance}
-          className="min-h-10 gap-1.5 bg-lime-400 text-zinc-950 hover:bg-lime-300"
-        >
-          <ClipboardCheck className="h-4 w-4" />
-          {pendingAttendance ? '처리 중…' : '출석하기'}
-        </Button>
         <Button
           type="button"
           variant="outline"
@@ -158,90 +182,127 @@ export function RankingSelfQuickActions({
           <MessageSquareText className="h-4 w-4" />
           상태메시지
         </Button>
+        {showAttendance ? (
+          <Button
+            type="button"
+            disabled={disabled || pendingAttendance}
+            onClick={handleOpenAttendance}
+            className="min-h-10 gap-1.5 bg-lime-400 text-zinc-950 hover:bg-lime-300"
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            {pendingAttendance ? '처리 중…' : onAttendance ? '출석 처리' : '출석하기'}
+          </Button>
+        ) : null}
+        {onAddMileage ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            onClick={onAddMileage}
+            className="min-h-10 gap-1.5 border-lime-500/40 bg-zinc-950/40 text-lime-100 hover:bg-lime-500/10"
+          >
+            <Timer className="h-4 w-4" />
+            기록 추가
+          </Button>
+        ) : null}
+        {onAddPb ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            onClick={onAddPb}
+            className="min-h-10 gap-1.5 border-amber-400/40 bg-zinc-950/40 text-amber-100 hover:bg-amber-500/10"
+          >
+            <Trophy className="h-4 w-4" />
+            PB 등록
+          </Button>
+        ) : null}
       </div>
 
-      <Dialog open={attendanceOpen} onOpenChange={setAttendanceOpen}>
-        <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950 text-zinc-100 sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>출석할 수업 날짜</DialogTitle>
-            <DialogDescription className="text-zinc-400">
-              훈련 일정 참여 시 출석이 자동으로 반영됩니다. 빠뜨린 날짜가 있으면 여기서
-              보완할 수 있습니다.
-            </DialogDescription>
-          </DialogHeader>
+      {!onAttendance ? (
+        <Dialog open={attendanceOpen} onOpenChange={setAttendanceOpen}>
+          <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950 text-zinc-100 sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>출석할 수업 날짜</DialogTitle>
+              <DialogDescription className="text-zinc-400">
+                훈련 일정 참여 시 출석이 자동으로 반영됩니다. 빠뜨린 날짜가 있으면 여기서
+                보완할 수 있습니다.
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-            {loadingOptions ? (
-              <p className="py-4 text-center text-sm text-zinc-400">불러오는 중…</p>
-            ) : options.length === 0 ? (
-              <p className="py-4 text-center text-sm text-zinc-400">
-                최근 훈련 일정이 없습니다.
-              </p>
-            ) : (
-              options.map((option) => {
-                const isSelected = selectedDate === option.scheduleDate
-                return (
-                  <button
-                    key={option.scheduleDate}
-                    type="button"
-                    disabled={option.checkedIn}
-                    onClick={() => setSelectedDate(option.scheduleDate)}
-                    className={cn(
-                      'flex w-full flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
-                      option.checkedIn
-                        ? 'cursor-not-allowed border-zinc-700/60 bg-zinc-900/40 text-zinc-500'
-                        : isSelected
-                          ? 'border-lime-400/60 bg-lime-500/15 text-lime-50'
-                          : 'border-lime-500/20 bg-black/30 text-zinc-200 hover:border-lime-400/40',
-                    )}
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      {option.label}
-                      {option.signedUp ? (
-                        <span className="rounded border border-lime-500/30 px-1.5 py-0.5 text-[10px] font-normal text-lime-300/80">
-                          신청함
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              {loadingOptions ? (
+                <p className="py-4 text-center text-sm text-zinc-400">불러오는 중…</p>
+              ) : options.length === 0 ? (
+                <p className="py-4 text-center text-sm text-zinc-400">
+                  최근 훈련 일정이 없습니다.
+                </p>
+              ) : (
+                options.map((option) => {
+                  const isSelected = selectedDate === option.scheduleDate
+                  return (
+                    <button
+                      key={option.scheduleDate}
+                      type="button"
+                      disabled={option.checkedIn}
+                      onClick={() => setSelectedDate(option.scheduleDate)}
+                      className={cn(
+                        'flex w-full flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
+                        option.checkedIn
+                          ? 'cursor-not-allowed border-zinc-700/60 bg-zinc-900/40 text-zinc-500'
+                          : isSelected
+                            ? 'border-lime-400/60 bg-lime-500/15 text-lime-50'
+                            : 'border-lime-500/20 bg-black/30 text-zinc-200 hover:border-lime-400/40',
+                      )}
+                    >
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        {option.label}
+                        {option.signedUp ? (
+                          <span className="rounded border border-lime-500/30 px-1.5 py-0.5 text-[10px] font-normal text-lime-300/80">
+                            신청함
+                          </span>
+                        ) : null}
+                      </span>
+                      {option.trainingSummary ? (
+                        <span className="line-clamp-1 text-[11px] text-zinc-400">
+                          {option.trainingSummary.split('\n')[0]}
                         </span>
                       ) : null}
-                    </span>
-                    {option.trainingSummary ? (
-                      <span className="line-clamp-1 text-[11px] text-zinc-400">
-                        {option.trainingSummary.split('\n')[0]}
-                      </span>
-                    ) : null}
-                    {option.checkedIn ? (
-                      <span className="text-[11px] text-zinc-500">출석 완료</span>
-                    ) : null}
-                  </button>
-                )
-              })
-            )}
-          </div>
+                      {option.checkedIn ? (
+                        <span className="text-[11px] text-zinc-500">출석 완료</span>
+                      ) : null}
+                    </button>
+                  )
+                })
+              )}
+            </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setAttendanceOpen(false)}
-              disabled={pendingAttendance}
-            >
-              취소
-            </Button>
-            <Button
-              type="button"
-              disabled={
-                pendingAttendance ||
-                loadingOptions ||
-                !selectedOption ||
-                selectedOption.checkedIn
-              }
-              onClick={handleConfirmAttendance}
-              className="bg-lime-400 text-zinc-950 hover:bg-lime-300"
-            >
-              {pendingAttendance ? '처리 중…' : '출석 완료'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setAttendanceOpen(false)}
+                disabled={pendingAttendance}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                disabled={
+                  pendingAttendance ||
+                  loadingOptions ||
+                  !selectedOption ||
+                  selectedOption.checkedIn
+                }
+                onClick={handleConfirmAttendance}
+                className="bg-lime-400 text-zinc-950 hover:bg-lime-300"
+              >
+                {pendingAttendance ? '처리 중…' : '출석 완료'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       <Dialog open={statusOpen} onOpenChange={setStatusOpen}>
         <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950 text-zinc-100 sm:max-w-md">

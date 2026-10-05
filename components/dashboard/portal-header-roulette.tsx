@@ -215,8 +215,8 @@ export function PortalHeaderRoulette({
           <DialogHeader className="border-b border-lime-500/15 px-5 pb-3 pt-5 text-left">
             <DialogTitle className="text-lg text-lime-100">행운의 룰렛</DialogTitle>
             <DialogDescription className="text-zinc-400">
-              마일리지왕 · 이겨라 · 출석왕 메뉴로 나눠 돌릴 수 있습니다. 마일리지·이겨라는{' '}
-              {MILEAGE_KM_PER_ROULETTE_SLOT}km당 1칸, 출석은 1회당 1칸입니다.
+              마일리지왕 · 이겨라 · 출석왕 메뉴로 나눠 돌릴 수 있습니다. 마일리지는{' '}
+              {MILEAGE_KM_PER_ROULETTE_SLOT}km당 돌림판 1칸씩 추가, 출석은 1회당 1칸입니다.
             </DialogDescription>
           </DialogHeader>
 

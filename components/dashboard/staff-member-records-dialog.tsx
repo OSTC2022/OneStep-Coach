@@ -33,7 +33,10 @@ import {
 } from '@/lib/actions/running-league'
 import { formatPbDistanceLabel } from '@/lib/running-league/pb-distance-labels'
 import { isOfflineClassAttendanceLog } from '@/lib/running-league/attendance-king'
-import type { PortalPbRecordListItem } from '@/lib/running-league/pb-portal-history'
+import {
+  PB_COMPETITION_NAME_MAX_LENGTH,
+  type PortalPbRecordListItem,
+} from '@/lib/running-league/pb-portal-history'
 import type { RunningLeagueDistanceEvent, RunningLeagueMileageLog } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -54,6 +57,7 @@ type EditPbState = {
   record: PortalPbRecordListItem
   timeText: string
   measuredAt: string
+  competitionName: string
 }
 
 function formatLogDate(value: string): string {
@@ -159,6 +163,7 @@ export function StaffMemberRecordsDialog({
         distance_event: editPb.record.distance_event,
         time_text: editPb.timeText,
         measured_at: editPb.measuredAt,
+        competition_name: editPb.competitionName,
         editing_record_id: editPb.record.id,
         editing_is_current: editPb.record.isCurrent,
         forMemberId: memberId,
@@ -305,6 +310,9 @@ export function StaffMemberRecordsDialog({
                     </p>
                     <p className="text-[11px] text-zinc-500">
                       {formatLogDate(record.measured_at)}
+                      {record.competition_name?.trim()
+                        ? ` · ${record.competition_name.trim()}`
+                        : ''}
                     </p>
                   </div>
                   <Button
@@ -318,6 +326,7 @@ export function StaffMemberRecordsDialog({
                         record,
                         timeText: record.time_text,
                         measuredAt: record.measured_at.slice(0, 10),
+                        competitionName: record.competition_name?.trim() ?? '',
                       })
                     }
                     aria-label="PB 수정"
@@ -423,7 +432,7 @@ export function StaffMemberRecordsDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <p className="text-xs text-zinc-400">측정일</p>
+              <p className="text-xs text-zinc-400">달성일</p>
               <Input
                 type="date"
                 value={editPb?.measuredAt ?? ''}
@@ -432,6 +441,22 @@ export function StaffMemberRecordsDialog({
                     current ? { ...current, measuredAt: event.target.value } : current,
                   )
                 }
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">대회명</p>
+              <Input
+                value={editPb?.competitionName ?? ''}
+                maxLength={PB_COMPETITION_NAME_MAX_LENGTH}
+                onChange={(event) =>
+                  setEditPb((current) =>
+                    current
+                      ? { ...current, competitionName: event.target.value }
+                      : current,
+                  )
+                }
+                placeholder="예: 서울마라톤"
                 className="border-lime-500/20 bg-black/40"
               />
             </div>

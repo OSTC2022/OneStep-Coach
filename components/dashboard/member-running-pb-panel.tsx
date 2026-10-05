@@ -8,6 +8,8 @@ import { toast } from 'sonner'
 import { saveMemberRunningPb, deleteMemberRunningPbRecord, fetchMyPortalPbRecords, fetchMyPortalPbRecordListAll } from '@/lib/actions/running-league'
 import type { PortalPbRecordListItem } from '@/lib/running-league/pb-portal-history'
 import {
+  competitionNameFromPbNotes,
+  PB_COMPETITION_NAME_MAX_LENGTH,
   resolvePortalPbRecordListAll,
 } from '@/lib/running-league/pb-portal-history'
 import type {
@@ -120,12 +122,14 @@ function applyPbRecordToForm(
   event: (typeof DISTANCE_EVENTS)[number],
   setTimeText: (value: string) => void,
   setMeasuredAt: (value: string) => void,
+  setCompetitionName: (value: string) => void,
 ) {
   const record = findPortalPbRecord(pbRecords, event)
   setTimeText(record?.time_text?.trim() ?? '')
   setMeasuredAt(
     record?.measured_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
   )
+  setCompetitionName(record ? competitionNameFromPbNotes(record.notes) : '')
 }
 
 
@@ -141,10 +145,12 @@ function CurrentPbDraftCard({
   distance,
   timeText,
   measuredAt,
+  competitionName,
 }: {
   distance: (typeof DISTANCE_EVENTS)[number]
   timeText: string
   measuredAt: string
+  competitionName: string
 }) {
   return (
     <div className="space-y-1.5">
@@ -157,7 +163,10 @@ function CurrentPbDraftCard({
         {timeText.trim() ? (
           <>
             <p className="mt-1 text-2xl font-bold leading-none tabular-nums text-primary">{timeText}</p>
-            <p className="mt-1.5 text-[11px] text-muted-foreground">{formatPbDateTime(measuredAt)} 측정</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              {formatPbDateTime(measuredAt)} 측정
+              {competitionName.trim() ? ` · ${competitionName.trim()}` : ''}
+            </p>
           </>
         ) : (
           <p className="mt-1 text-xs text-muted-foreground">기록을 입력한 뒤 저장하세요.</p>
@@ -220,7 +229,12 @@ function PbHistoryListPanel({
                       ) : null}
                     </p>
                     <p className="mt-1 text-xl font-bold leading-none tabular-nums text-primary">{item.time_text}</p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">{formatPbDateTime(item.measured_at)} 측정</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {formatPbDateTime(item.measured_at)} 측정
+                      {item.competition_name?.trim()
+                        ? ` · ${item.competition_name.trim()}`
+                        : ''}
+                    </p>
                     <div className="mt-2 flex justify-end gap-1">
                       <Button
                         type="button"
@@ -274,6 +288,7 @@ function useMemberRunningPbForm(
   )
   const [timeText, setTimeText] = useState('')
   const [measuredAt, setMeasuredAt] = useState(new Date().toISOString().slice(0, 10))
+  const [competitionName, setCompetitionName] = useState('')
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null)
   const [editingIsCurrent, setEditingIsCurrent] = useState(false)
@@ -282,7 +297,7 @@ function useMemberRunningPbForm(
 
   function setDistance(value: (typeof DISTANCE_EVENTS)[number]) {
     setDistanceState(value)
-    applyPbRecordToForm(pbRecords, value, setTimeText, setMeasuredAt)
+    applyPbRecordToForm(pbRecords, value, setTimeText, setMeasuredAt, setCompetitionName)
     setSelectedRecordId(null)
     setEditingRecordId(null)
     setEditingIsCurrent(false)
@@ -292,7 +307,13 @@ function useMemberRunningPbForm(
     (value: RunningLeagueDistanceEvent, sourceRecords: RunningLeagueRecord[] = pbRecords) => {
       const resolved = resolvePortalDistance(value)
       setDistanceState(resolved)
-      applyPbRecordToForm(sourceRecords, resolved, setTimeText, setMeasuredAt)
+      applyPbRecordToForm(
+        sourceRecords,
+        resolved,
+        setTimeText,
+        setMeasuredAt,
+        setCompetitionName,
+      )
     },
     [pbRecords],
   )
@@ -300,7 +321,13 @@ function useMemberRunningPbForm(
   async function applyRecordsUpdate(records: RunningLeagueRecord[]) {
     onPbRecordsChange?.(records)
     await reloadAllRecordList(records)
-    applyPbRecordToForm(records, distance, setTimeText, setMeasuredAt)
+    applyPbRecordToForm(
+      records,
+      distance,
+      setTimeText,
+      setMeasuredAt,
+      setCompetitionName,
+    )
     setEditingRecordId(null)
     setSelectedRecordId(null)
     setEditingIsCurrent(false)
@@ -311,6 +338,7 @@ function useMemberRunningPbForm(
     setDistanceState(resolved)
     setTimeText(item.time_text)
     setMeasuredAt(item.measured_at.slice(0, 10))
+    setCompetitionName(item.competition_name?.trim() ?? '')
     setEditingRecordId(item.id)
     setEditingIsCurrent(item.isCurrent)
     setSelectedRecordId(item.id)
@@ -322,6 +350,7 @@ function useMemberRunningPbForm(
     setSelectedRecordId(null)
     setTimeText('')
     setMeasuredAt(new Date().toISOString().slice(0, 10))
+    setCompetitionName('')
   }
 
   async function reloadAllRecordList(sourceRecords: RunningLeagueRecord[] = pbRecords) {
@@ -349,6 +378,7 @@ function useMemberRunningPbForm(
         distance_event: distance,
         time_text: timeText.trim(),
         measured_at: measuredAt,
+        competition_name: competitionName.trim(),
         editing_record_id: isEditing ? editingRecordId : undefined,
         editing_is_current: isEditing ? editingIsCurrent : undefined,
       })
@@ -407,6 +437,8 @@ function useMemberRunningPbForm(
     setTimeText,
     measuredAt,
     setMeasuredAt,
+    competitionName,
+    setCompetitionName,
     selectedRecordId,
     setSelectedRecordId,
     editingRecordId,
@@ -432,6 +464,8 @@ function RunningPbFormFields({
   setTimeText,
   measuredAt,
   setMeasuredAt,
+  competitionName,
+  setCompetitionName,
   editingRecordId,
   pending,
   deletePending,
@@ -452,6 +486,8 @@ function RunningPbFormFields({
   setTimeText: (value: string) => void
   measuredAt: string
   setMeasuredAt: (value: string) => void
+  competitionName: string
+  setCompetitionName: (value: string) => void
   editingRecordId: string | null
   pending: boolean
   deletePending: boolean
@@ -497,7 +533,7 @@ function RunningPbFormFields({
       </div>
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <Label className="text-[11px] text-muted-foreground">측정일</Label>
+          <Label className="text-[11px] text-muted-foreground">달성일</Label>
           {editingRecordId ? (
             <Button
               type="button"
@@ -512,7 +548,25 @@ function RunningPbFormFields({
         </div>
         <KoreanDatePicker value={measuredAt} onChange={setMeasuredAt} compact placeholder="날짜 선택" />
       </div>
-      <CurrentPbDraftCard distance={distance} timeText={timeText} measuredAt={measuredAt} />
+      <div className="space-y-1">
+        <Label className="text-[11px] text-muted-foreground">대회명</Label>
+        <Input
+          className="h-9"
+          value={competitionName}
+          maxLength={PB_COMPETITION_NAME_MAX_LENGTH}
+          onChange={(e) => setCompetitionName(e.target.value)}
+          placeholder="예: 서울마라톤, 동아마라톤"
+        />
+        <p className="text-right text-[10px] text-muted-foreground">
+          {competitionName.trim().length}/{PB_COMPETITION_NAME_MAX_LENGTH}
+        </p>
+      </div>
+      <CurrentPbDraftCard
+        distance={distance}
+        timeText={timeText}
+        measuredAt={measuredAt}
+        competitionName={competitionName}
+      />
       <PbHistoryListPanel
         listItems={allRecordList}
         editingRecordId={editingRecordId}

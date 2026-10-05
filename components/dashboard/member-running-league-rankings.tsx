@@ -51,6 +51,7 @@ import {
 import { RankingSelfQuickActions } from '@/components/dashboard/ranking-self-quick-actions'
 import { StaffMemberDayAttendanceDialog } from '@/components/dashboard/staff-member-day-attendance-dialog'
 import { StaffMemberRecordsDialog } from '@/components/dashboard/staff-member-records-dialog'
+import { getKstDateKey } from '@/lib/member-backup/kst-date'
 import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
 import { formatPbDistanceLabel, getPbDistanceAccentClass, getPbDistanceFilterDescription, PB_DISTANCE_LEGEND, PB_RANKING_DISTANCES } from '@/lib/running-league/pb-distance-labels'
@@ -941,6 +942,75 @@ function MemberPortalBrandHeader({
 
 export { MemberPortalBrandHeader }
 
+function RankingMemberQuickActionsSlot({
+  selectedMemberId,
+  highlightMemberId,
+  statusByMemberId,
+  memberNameById,
+  selfActionsDisabled = false,
+  canStaffManageAttendance = false,
+  onAddMileage,
+  onAddPb,
+  onStaffManageRecords,
+  onStaffAttendance,
+}: {
+  selectedMemberId?: string | null
+  highlightMemberId?: string | null
+  statusByMemberId: Map<string, RankingStatusDisplay>
+  memberNameById: Map<string, string>
+  selfActionsDisabled?: boolean
+  canStaffManageAttendance?: boolean
+  onAddMileage?: () => void
+  onAddPb?: () => void
+  onStaffManageRecords?: (memberId: string, memberName: string) => void
+  onStaffAttendance?: (memberId: string, memberName: string) => void
+}) {
+  if (!selectedMemberId) return null
+
+  const isSelf =
+    highlightMemberId != null && selectedMemberId === highlightMemberId
+  const canShowSelf = isSelf && !selfActionsDisabled
+  const canShowStaff = canStaffManageAttendance
+  if (!canShowSelf && !canShowStaff) return null
+
+  const memberName = memberNameById.get(selectedMemberId) ?? '회원'
+  const status = statusByMemberId.get(selectedMemberId)
+  const staffManagingOther = canShowStaff && !isSelf
+
+  return (
+    <RankingSelfQuickActions
+      title={isSelf ? '내 바로가기' : `${memberName} 바로가기`}
+      disabled={Boolean(selfActionsDisabled && isSelf)}
+      initialStatusMessage={status?.message ?? ''}
+      initialStatusColor={status?.color ?? null}
+      statusMemberId={staffManagingOther ? selectedMemberId : null}
+      onAttendance={
+        staffManagingOther && onStaffAttendance
+          ? () => onStaffAttendance(selectedMemberId, memberName)
+          : undefined
+      }
+      onAddMileage={
+        staffManagingOther
+          ? onStaffManageRecords
+            ? () => onStaffManageRecords(selectedMemberId, memberName)
+            : undefined
+          : selfActionsDisabled
+            ? undefined
+            : onAddMileage
+      }
+      onAddPb={
+        staffManagingOther
+          ? onStaffManageRecords
+            ? () => onStaffManageRecords(selectedMemberId, memberName)
+            : undefined
+          : selfActionsDisabled
+            ? undefined
+            : onAddPb
+      }
+    />
+  )
+}
+
 function RankingPreview({
   rankingView,
   pbDistance,
@@ -962,6 +1032,11 @@ function RankingPreview({
   rankingCaption,
   rankingCaptionStyle,
   selfActionsDisabled = false,
+  canStaffManageAttendance = false,
+  onAddMileage,
+  onAddPb,
+  onStaffManageRecords,
+  onStaffAttendance,
 }: {
   rankingView: RankingView
   pbDistance: PbLeaderboardDistance
@@ -983,6 +1058,11 @@ function RankingPreview({
   rankingCaption?: string | null
   rankingCaptionStyle?: PortalTextStyleConfig
   selfActionsDisabled?: boolean
+  canStaffManageAttendance?: boolean
+  onAddMileage?: () => void
+  onAddPb?: () => void
+  onStaffManageRecords?: (memberId: string, memberName: string) => void
+  onStaffAttendance?: (memberId: string, memberName: string) => void
 }) {
   const allRows = usesAttendanceLeaderboard(rankingView)
     ? attendanceLeaderboard
@@ -1111,6 +1191,20 @@ function RankingPreview({
         : new Map<string, RankingStatusDisplay>(),
     [rankingBundle],
   )
+
+  const memberNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of allRows) {
+      map.set(row.memberId, row.memberName)
+    }
+    if (rankingBundle) {
+      for (const participant of rankingBundle.participants) {
+        const name = participant.member?.name?.trim()
+        if (name) map.set(participant.member_id, name)
+      }
+    }
+    return map
+  }, [allRows, rankingBundle])
 
   function resolveRankChangeDelta(memberId: string): RankChangeDelta | null {
     if (!rankingBundle) return null
@@ -1266,17 +1360,18 @@ function RankingPreview({
                 </button>
               ) : null}
             </div>
-            {highlightMemberId && selectedMemberId === highlightMemberId ? (
-              <RankingSelfQuickActions
-                disabled={selfActionsDisabled}
-                initialStatusMessage={
-                  statusByMemberId.get(highlightMemberId)?.message ?? ''
-                }
-                initialStatusColor={
-                  statusByMemberId.get(highlightMemberId)?.color ?? null
-                }
-              />
-            ) : null}
+            <RankingMemberQuickActionsSlot
+              selectedMemberId={selectedMemberId}
+              highlightMemberId={highlightMemberId}
+              statusByMemberId={statusByMemberId}
+              memberNameById={memberNameById}
+              selfActionsDisabled={selfActionsDisabled}
+              canStaffManageAttendance={canStaffManageAttendance}
+              onAddMileage={onAddMileage}
+              onAddPb={onAddPb}
+              onStaffManageRecords={onStaffManageRecords}
+              onStaffAttendance={onStaffAttendance}
+            />
             {canScrollRanks ? (
               <p className="text-center text-[10px] text-zinc-500">
                 1위 고정 · 휠로 순위 이동
@@ -2085,6 +2180,12 @@ function FullRankingDialog({
   genderFilterBlocked,
   unclassifiedCount = 0,
   beatRivalMemberId,
+  selfActionsDisabled = false,
+  canStaffManageAttendance = false,
+  onAddMileage,
+  onAddPb,
+  onStaffManageRecords,
+  onStaffAttendance,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -2104,6 +2205,12 @@ function FullRankingDialog({
   genderFilterBlocked?: boolean
   unclassifiedCount?: number
   beatRivalMemberId?: string | null
+  selfActionsDisabled?: boolean
+  canStaffManageAttendance?: boolean
+  onAddMileage?: () => void
+  onAddPb?: () => void
+  onStaffManageRecords?: (memberId: string, memberName: string) => void
+  onStaffAttendance?: (memberId: string, memberName: string) => void
 }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -2122,6 +2229,19 @@ function FullRankingDialog({
         : new Map<string, RankingStatusDisplay>(),
     [rankingBundle],
   )
+  const memberNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of fullRanked) {
+      map.set(row.memberId, row.memberName)
+    }
+    if (rankingBundle) {
+      for (const participant of rankingBundle.participants) {
+        const name = participant.member?.name?.trim()
+        if (name) map.set(participant.member_id, name)
+      }
+    }
+    return map
+  }, [fullRanked, rankingBundle])
   const searchedRanked = useMemo(
     () => filterRankedBySearch(fullRanked, searchQuery, highlightMemberId),
     [fullRanked, highlightMemberId, searchQuery],
@@ -2311,14 +2431,50 @@ function FullRankingDialog({
               rankingView={rankingView}
             />
           )}
-          {highlightMemberId && selectedMemberId === highlightMemberId ? (
+          {selectedMemberId &&
+          ((highlightMemberId != null &&
+            selectedMemberId === highlightMemberId &&
+            !selfActionsDisabled) ||
+            canStaffManageAttendance) ? (
             <div className="sticky bottom-0 mt-3 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-transparent pt-2 pb-1">
-              <RankingSelfQuickActions
-                initialStatusMessage={
-                  statusByMemberId.get(highlightMemberId)?.message ?? ''
+              <RankingMemberQuickActionsSlot
+                selectedMemberId={selectedMemberId}
+                highlightMemberId={highlightMemberId}
+                statusByMemberId={statusByMemberId}
+                memberNameById={memberNameById}
+                selfActionsDisabled={selfActionsDisabled}
+                canStaffManageAttendance={canStaffManageAttendance}
+                onAddMileage={
+                  onAddMileage
+                    ? () => {
+                        onAddMileage()
+                        onOpenChange(false)
+                      }
+                    : undefined
                 }
-                initialStatusColor={
-                  statusByMemberId.get(highlightMemberId)?.color ?? null
+                onAddPb={
+                  onAddPb
+                    ? () => {
+                        onAddPb()
+                        onOpenChange(false)
+                      }
+                    : undefined
+                }
+                onStaffManageRecords={
+                  onStaffManageRecords
+                    ? (memberId, memberName) => {
+                        onStaffManageRecords(memberId, memberName)
+                        onOpenChange(false)
+                      }
+                    : undefined
+                }
+                onStaffAttendance={
+                  onStaffAttendance
+                    ? (memberId, memberName) => {
+                        onStaffAttendance(memberId, memberName)
+                        onOpenChange(false)
+                      }
+                    : undefined
                 }
               />
             </div>
@@ -2813,6 +2969,25 @@ export function MemberRunningLeagueRankings({
           rankingCaption={portalRankingCaption}
           rankingCaptionStyle={portalRankingCaptionStyle}
           selfActionsDisabled={readOnly}
+          canStaffManageAttendance={canStaffManageAttendance}
+          onAddMileage={canShowRecordActions ? openMileageDialog : undefined}
+          onAddPb={canShowRecordActions ? () => setPbDialogOpen(true) : undefined}
+          onStaffManageRecords={
+            canStaffManageAttendance
+              ? (memberId, memberName) =>
+                  setStaffRecordsTarget({ memberId, memberName })
+              : undefined
+          }
+          onStaffAttendance={
+            canStaffManageAttendance
+              ? (memberId, memberName) =>
+                  setStaffAttendanceTarget({
+                    memberId,
+                    memberName,
+                    date: getKstDateKey(),
+                  })
+              : undefined
+          }
         />
 
         <div ref={graphPanelRef} className="scroll-mt-4">
@@ -2852,6 +3027,26 @@ export function MemberRunningLeagueRankings({
         genderFilterBlocked={genderFilterBlocked}
         unclassifiedCount={unclassifiedCount}
         beatRivalMemberId={beatRivalMemberId}
+        selfActionsDisabled={readOnly}
+        canStaffManageAttendance={canStaffManageAttendance}
+        onAddMileage={canShowRecordActions ? openMileageDialog : undefined}
+        onAddPb={canShowRecordActions ? () => setPbDialogOpen(true) : undefined}
+        onStaffManageRecords={
+          canStaffManageAttendance
+            ? (memberId, memberName) =>
+                setStaffRecordsTarget({ memberId, memberName })
+            : undefined
+        }
+        onStaffAttendance={
+          canStaffManageAttendance
+            ? (memberId, memberName) =>
+                setStaffAttendanceTarget({
+                  memberId,
+                  memberName,
+                  date: getKstDateKey(),
+                })
+            : undefined
+        }
       />
 
       <MemberRunningPbDialog

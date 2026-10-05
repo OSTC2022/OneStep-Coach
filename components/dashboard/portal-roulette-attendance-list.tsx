@@ -45,7 +45,7 @@ export function PortalRouletteParticipantList({
             {title}
           </p>
           <p className="text-[11px] text-zinc-500">
-            {MILEAGE_KM_PER_ROULETTE_SLOT}km = 룰렛 칸 1개
+            마일리지는 {MILEAGE_KM_PER_ROULETTE_SLOT}km당 돌림판 1칸씩 추가
           </p>
         </div>
 

@@ -1,5 +1,8 @@
 import type { RunningLeagueDistanceEvent, RunningLeagueRecord } from '@/lib/types'
-import type { PortalPbRecordListItem } from '@/lib/running-league/pb-portal-history'
+import {
+  competitionNameFromPbNotes,
+  type PortalPbRecordListItem,
+} from '@/lib/running-league/pb-portal-history'
 
 export type PbSnapshotRow = {
   id: string
@@ -40,6 +43,10 @@ export function pbSnapshotsToRecordList(
       return b.created_at.localeCompare(a.created_at)
     })
 
+  const currentCompetition = currentOther
+    ? competitionNameFromPbNotes(currentOther.notes)
+    : ''
+
   if (forDistance.length === 0 && currentOther?.time_text?.trim()) {
     return [
       {
@@ -48,6 +55,7 @@ export function pbSnapshotsToRecordList(
         time_text: currentOther.time_text.trim(),
         measured_at: currentOther.measured_at,
         isCurrent: true,
+        ...(currentCompetition ? { competition_name: currentCompetition } : {}),
       },
     ]
   }
@@ -59,12 +67,16 @@ export function pbSnapshotsToRecordList(
 
   return forDistance.map((row) => {
     const rowKey = `${row.measured_at.slice(0, 10)}|${row.time_text.trim()}`
+    const isCurrent = currentKey ? rowKey === currentKey : row.id === forDistance[0]?.id
     return {
       id: row.id,
       distance_event: distance,
       time_text: row.time_text.trim(),
       measured_at: row.measured_at,
-      isCurrent: currentKey ? rowKey === currentKey : row.id === forDistance[0]?.id,
+      isCurrent,
+      ...(isCurrent && currentCompetition
+        ? { competition_name: currentCompetition }
+        : {}),
     }
   })
 }

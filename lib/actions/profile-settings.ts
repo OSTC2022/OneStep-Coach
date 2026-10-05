@@ -299,7 +299,68 @@ export async function updateMyProfile(input: {
   return { success: true as const }
 }
 
-/** 랭킹 상태메시지만 빠르게 수정 (성인회원·관리자·강사 러닝 포털) */
+async function writeMemberRankingStatusMessage(input: {
+  memberId: string
+  message: string
+  color?: string
+  useServiceRole: boolean
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (input.message.trim().length > RANKING_STATUS_MESSAGE_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `상태 메시지는 ${RANKING_STATUS_MESSAGE_MAX_LENGTH}자 이내로 입력해주세요.`,
+    }
+  }
+
+  const memberId = input.memberId.trim()
+  if (!memberId) return { ok: false, error: '회원 정보가 없습니다.' }
+
+  const message = normalizeRankingStatusMessage(input.message)
+  const color = normalizeRankingStatusMessageColor(input.color)
+
+  let supabase: Awaited<ReturnType<typeof createClient>>
+  try {
+    supabase = input.useServiceRole ? createServiceRoleClient() : await createClient()
+  } catch {
+    supabase = await createClient()
+  }
+
+  const memberPatch: Record<string, string | null> = {
+    ranking_status_message: message,
+    ranking_status_message_color: color,
+  }
+
+  let memberUpdate = await supabase
+    .from('members')
+    .update(memberPatch)
+    .eq('id', memberId)
+
+  if (
+    memberUpdate.error &&
+    memberUpdate.error.code === '42703' &&
+    memberUpdate.error.message?.includes('ranking_status_message_color')
+  ) {
+    memberUpdate = await supabase
+      .from('members')
+      .update({ ranking_status_message: message })
+      .eq('id', memberId)
+  }
+
+  if (memberUpdate.error) {
+    return { ok: false, error: memberUpdate.error.message }
+  }
+
+  revalidatePath('/dashboard/my', 'page')
+  revalidatePath('/dashboard/my/running-league', 'page')
+  revalidatePath('/dashboard/running-portal', 'page')
+  revalidatePath('/dashboard/running-portal/league', 'page')
+  revalidatePath('/dashboard/my/profile', 'page')
+  revalidatePath(`/dashboard/members/${memberId}/running-portal`, 'page')
+  revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG, 'max')
+  return { ok: true }
+}
+
+/** 랭킹 상태메시지만 빠르게 수정 (성인회원·관리자·강사 러닝 포털 — 본인) */
 export async function updateMyRankingStatusMessage(input: {
   message: string
   color?: string
@@ -313,16 +374,6 @@ export async function updateMyRankingStatusMessage(input: {
     return { ok: false, error: '상태메시지를 설정할 권한이 없습니다.' }
   }
 
-  if (input.message.trim().length > RANKING_STATUS_MESSAGE_MAX_LENGTH) {
-    return {
-      ok: false,
-      error: `상태 메시지는 ${RANKING_STATUS_MESSAGE_MAX_LENGTH}자 이내로 입력해주세요.`,
-    }
-  }
-
-  const message = normalizeRankingStatusMessage(input.message)
-  const color = normalizeRankingStatusMessageColor(input.color)
-
   const { getRunningPortalMemberForCurrentUser } = await import(
     '@/lib/actions/staff-running-portal-member'
   )
@@ -331,47 +382,30 @@ export async function updateMyRankingStatusMessage(input: {
     return { ok: false, error: '연결된 회원 프로필을 찾을 수 없습니다.' }
   }
 
-  let supabase: Awaited<ReturnType<typeof createClient>>
-  try {
-    supabase =
-      user.role === 'admin' || user.role === 'instructor'
-        ? createServiceRoleClient()
-        : await createClient()
-  } catch {
-    supabase = await createClient()
+  return writeMemberRankingStatusMessage({
+    memberId: portalMember.id,
+    message: input.message,
+    color: input.color,
+    useServiceRole: user.role === 'admin' || user.role === 'instructor',
+  })
+}
+
+/** 관리자·강사 — 다른 회원 랭킹 상태메시지 수정 */
+export async function updateMemberRankingStatusMessage(input: {
+  memberId: string
+  message: string
+  color?: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireAuth()
+  if (user.role !== 'admin' && user.role !== 'instructor') {
+    return { ok: false, error: '관리자 또는 강사만 다른 회원 상태메시지를 수정할 수 있습니다.' }
   }
 
-  const memberPatch: Record<string, string | null> = {
-    ranking_status_message: message,
-    ranking_status_message_color: color,
-  }
-
-  let memberUpdate = await supabase
-    .from('members')
-    .update(memberPatch)
-    .eq('id', portalMember.id)
-
-  if (
-    memberUpdate.error &&
-    memberUpdate.error.code === '42703' &&
-    memberUpdate.error.message?.includes('ranking_status_message_color')
-  ) {
-    memberUpdate = await supabase
-      .from('members')
-      .update({ ranking_status_message: message })
-      .eq('id', portalMember.id)
-  }
-
-  if (memberUpdate.error) {
-    return { ok: false, error: memberUpdate.error.message }
-  }
-
-  revalidatePath('/dashboard/my', 'page')
-  revalidatePath('/dashboard/my/running-league', 'page')
-  revalidatePath('/dashboard/running-portal', 'page')
-  revalidatePath('/dashboard/running-portal/league', 'page')
-  revalidatePath('/dashboard/my/profile', 'page')
-  revalidateTag(CENTER_PORTAL_RANKINGS_CACHE_TAG, 'max')
-  return { ok: true }
+  return writeMemberRankingStatusMessage({
+    memberId: input.memberId,
+    message: input.message,
+    color: input.color,
+    useServiceRole: true,
+  })
 }
 
