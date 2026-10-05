@@ -350,6 +350,58 @@ function filterSignupsForDay(
     .map((row) => mapSignupRow(row))
 }
 
+/** 목록 표시와 동일 규칙으로 참여 행 찾기 (schedule_date null 레거시 포함) */
+async function findMatchingSignupRows(input: {
+  supabase: Awaited<ReturnType<typeof scheduleClient>>
+  signupsTable: string
+  weekday: number
+  memberId: string
+  scheduleDate: string | null
+}): Promise<
+  | { ok: true; rows: Array<{ id: string }> }
+  | { ok: false; error: string; missingTable?: boolean }
+> {
+  let select = 'id, created_at, schedule_date'
+  let result = await input.supabase
+    .from(input.signupsTable)
+    .select(select)
+    .eq('weekday', input.weekday)
+    .eq('member_id', input.memberId)
+
+  if (isMissingColumnError(result.error, 'schedule_date')) {
+    select = 'id, created_at'
+    result = await input.supabase
+      .from(input.signupsTable)
+      .select(select)
+      .eq('weekday', input.weekday)
+      .eq('member_id', input.memberId)
+  }
+
+  if (isMissingTableError(result.error)) {
+    return { ok: false, error: '러닝 스케줄 기능이 준비되지 않았습니다.', missingTable: true }
+  }
+  if (result.error) {
+    console.error('findMatchingSignupRows', result.error)
+    return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+  }
+
+  const rows = (
+    (result.data ?? []) as Array<{
+      id: string
+      created_at: string
+      schedule_date?: string | null
+    }>
+  ).filter((row) =>
+    trainingSignupMatchesScheduleDate(
+      row.schedule_date,
+      input.scheduleDate,
+      row.created_at,
+    ),
+  )
+
+  return { ok: true, rows: rows.map((row) => ({ id: row.id })) }
+}
+
 function mergeTrainingSignups(
   ...groups: RunningLeagueTrainingScheduleSignup[][]
 ): RunningLeagueTrainingScheduleSignup[] {
@@ -868,31 +920,29 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
   }
 
-  let existingQuery = supabase
-    .from(tables.signupsTable)
-    .select('id')
-    .eq('weekday', weekday)
-    .eq('member_id', member.id)
+  const matched = await findMatchingSignupRows({
+    supabase,
+    signupsTable: tables.signupsTable,
+    weekday,
+    memberId: member.id,
+    scheduleDate,
+  })
 
-  if (scheduleDate) {
-    existingQuery = existingQuery.eq('schedule_date', scheduleDate)
-  } else {
-    existingQuery = existingQuery.is('schedule_date', null)
+  if (!matched.ok) {
+    return { ok: false, error: matched.error }
   }
 
-  const { data: existing, error: existingError } = await existingQuery.maybeSingle()
-
-  if (existingError && !isMissingTableError(existingError)) {
-    console.error('toggleCenterRunningTrainingScheduleSignup.existing', existingError)
-    return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
-  }
+  const existing = matched.rows[0] ?? null
 
   if (existing) {
     // 참여 취소는 마감 후에도 항상 가능
     const { error: deleteError } = await supabase
       .from(tables.signupsTable)
       .delete()
-      .eq('id', existing.id)
+      .in(
+        'id',
+        matched.rows.map((row) => row.id),
+      )
 
     if (deleteError) {
       console.error('toggleCenterRunningTrainingScheduleSignup.delete', deleteError)
@@ -1258,39 +1308,34 @@ export async function staffRemoveCenterRunningTrainingScheduleSignup(
   )
   const scheduleDate = parsed.scheduleDate ?? liveScheduleDate
 
-  let existingQuery = supabase
-    .from(tables.signupsTable)
-    .select('id')
-    .eq('weekday', weekday)
-    .eq('member_id', targetMemberId)
+  const matched = await findMatchingSignupRows({
+    supabase,
+    signupsTable: tables.signupsTable,
+    weekday,
+    memberId: targetMemberId,
+    scheduleDate,
+  })
 
-  if (scheduleDate) {
-    existingQuery = existingQuery.eq('schedule_date', scheduleDate)
-  } else {
-    existingQuery = existingQuery.is('schedule_date', null)
+  if (!matched.ok) {
+    return { ok: false, error: matched.error }
   }
 
-  const { data: existing, error: existingError } = await existingQuery.maybeSingle()
+  if (matched.rows.length > 0) {
+    const { error: deleteError } = await supabase
+      .from(tables.signupsTable)
+      .delete()
+      .in(
+        'id',
+        matched.rows.map((row) => row.id),
+      )
 
-  if (existingError && !isMissingTableError(existingError)) {
-    console.error('staffRemoveCenterRunningTrainingScheduleSignup.existing', existingError)
-    return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+    if (deleteError) {
+      console.error('staffRemoveCenterRunningTrainingScheduleSignup.delete', deleteError)
+      return { ok: false, error: '참여 취소에 실패했습니다.' }
+    }
   }
 
-  if (!existing) {
-    return { ok: false, error: '참여 신청 내역이 없습니다.' }
-  }
-
-  const { error: deleteError } = await supabase
-    .from(tables.signupsTable)
-    .delete()
-    .eq('id', existing.id)
-
-  if (deleteError) {
-    console.error('staffRemoveCenterRunningTrainingScheduleSignup.delete', deleteError)
-    return { ok: false, error: '참여 취소에 실패했습니다.' }
-  }
-
+  // 출석만 남아 목록에 보이는 경우도 함께 제거
   const attendanceResult = await clearCenterTrainingScheduleAttendance({
     memberId: targetMemberId,
     weekday,
@@ -1303,26 +1348,45 @@ export async function staffRemoveCenterRunningTrainingScheduleSignup(
       attendanceResult.error,
     )
   }
-  await clearOfflineClassAttendanceForDate({
-    memberId: targetMemberId,
-    scheduleDate,
-  })
+  if (audience === 'adult_running') {
+    await clearOfflineClassAttendanceForDate({
+      memberId: targetMemberId,
+      scheduleDate,
+    })
+  }
 
-  let countQuery = supabase
+  if (matched.rows.length === 0 && !attendanceResult.ok) {
+    return { ok: false, error: '참여 신청 내역이 없습니다.' }
+  }
+
+  let remainingResult = await supabase
     .from(tables.signupsTable)
-    .select('id', { count: 'exact', head: true })
+    .select('id, created_at, schedule_date')
     .eq('weekday', weekday)
 
-  if (scheduleDate) {
-    countQuery = countQuery.eq('schedule_date', scheduleDate)
-  } else {
-    countQuery = countQuery.is('schedule_date', null)
+  if (isMissingColumnError(remainingResult.error, 'schedule_date')) {
+    remainingResult = await supabase
+      .from(tables.signupsTable)
+      .select('id, created_at')
+      .eq('weekday', weekday)
   }
 
-  const { count, error: countError } = await countQuery
-  if (countError) {
-    console.error('staffRemoveCenterRunningTrainingScheduleSignup.count', countError)
+  if (remainingResult.error && !isMissingTableError(remainingResult.error)) {
+    console.error(
+      'staffRemoveCenterRunningTrainingScheduleSignup.count',
+      remainingResult.error,
+    )
   }
+
+  const signupCount = (
+    (remainingResult.data ?? []) as Array<{
+      id: string
+      created_at: string
+      schedule_date?: string | null
+    }>
+  ).filter((row) =>
+    trainingSignupMatchesScheduleDate(row.schedule_date, scheduleDate, row.created_at),
+  ).length
 
   if (scheduleDate) {
     const weekStart = getMondayDateKeyForDateKey(scheduleDate)
@@ -1332,13 +1396,25 @@ export async function staffRemoveCenterRunningTrainingScheduleSignup(
     )
     const snapshotDays = snapshots.get(weekStart)
     if (snapshotDays && snapshotDays.length > 0) {
-      void saveCenterTrainingScheduleWeekSnapshot(snapshotDays, audience)
+      const updatedDays = snapshotDays.map((day) =>
+        day.weekday === weekday
+          ? {
+              ...day,
+              signups: (day.signups ?? []).filter(
+                (signup) => signup.member_id !== targetMemberId,
+              ),
+            }
+          : day,
+      )
+      void saveCenterTrainingScheduleWeekSnapshot(updatedDays, audience)
     }
   }
 
+  revalidateCenterTrainingSchedulePaths()
+
   return {
     ok: true,
-    signupCount: count ?? 0,
+    signupCount,
   }
 }
 

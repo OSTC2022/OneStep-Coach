@@ -34,7 +34,6 @@ import { parseTrainingScheduleDayId } from '@/lib/training-schedule-audience'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -326,8 +325,9 @@ export function MemberRunningLeagueTrainingSchedule({
   }
 
   function confirmStaffRemoveSignup() {
-    if (!removeTarget) return
-    const { day, signup } = removeTarget
+    const target = removeTarget
+    if (!target || pending) return
+    const { day, signup } = target
     setPendingDayId(day.id)
 
     startTransition(async () => {
@@ -550,16 +550,14 @@ export function MemberRunningLeagueTrainingSchedule({
             >
               아니요
             </AlertDialogCancel>
-            <AlertDialogAction
+            <Button
+              type="button"
               disabled={pending}
               className="bg-lime-500 text-black hover:bg-lime-400"
-              onClick={(event) => {
-                event.preventDefault()
-                confirmStaffRemoveSignup()
-              }}
+              onClick={confirmStaffRemoveSignup}
             >
               {pending ? '처리 중…' : '예'}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
