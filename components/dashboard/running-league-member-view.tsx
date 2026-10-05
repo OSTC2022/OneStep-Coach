@@ -532,7 +532,7 @@ export function RunningLeagueMemberView({
       {!participant ? (
         <Card className="border-dashed">
           <CardContent className="py-6 text-center text-sm text-muted-foreground">
-            아직 이번 리그 참가 등록이 되어 있지 않습니다. 코치에게 참가 등록을 요청해주세요.
+            진행 중인 리그를 불러오는 중이거나, 현재 참여 가능한 시즌이 없습니다.
           </CardContent>
         </Card>
       ) : (

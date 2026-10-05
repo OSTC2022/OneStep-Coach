@@ -411,12 +411,87 @@ async function resolvePortalRankingLeague(
   }
 }
 
-/** 포털 기록 저장 시 리그 참가 행을 자동 확보합니다 (리그 참가 등록과 무관). */
+/**
+ * 지정 리그에 참가 행을 자동 확보합니다.
+ * 성인 육상(러닝) 회원은 코치 참가 등록 없이도 참여할 수 있도록 사용합니다.
+ */
+export async function ensureLeagueParticipantForMember(
+  memberId: string,
+  leagueId: string,
+): Promise<{ ok: true; participant: RunningLeagueParticipant } | { ok: false; error: string }> {
+  const id = memberId.trim()
+  const league = leagueId.trim()
+  if (!id || !league) {
+    return { ok: false, error: '회원 또는 리그 정보가 없습니다.' }
+  }
+
+  const supabase = await leagueClient()
+
+  const { data: existing, error: existingError } = await runParticipantSelectQuery((select) =>
+    supabase
+      .from('running_league_participants')
+      .select(select)
+      .eq('league_id', league)
+      .eq('member_id', id)
+      .maybeSingle(),
+  )
+
+  if (existingError) {
+    if (isMissingTableError(existingError)) {
+      return {
+        ok: false,
+        error: '마일리지 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.',
+      }
+    }
+    return { ok: false, error: existingError.message }
+  }
+
+  if (existing) {
+    return { ok: true, participant: mapParticipant(existing as Record<string, unknown>) }
+  }
+
+  const { data: inserted, error: insertError } = await runParticipantSelectQuery((select) =>
+    supabase
+      .from('running_league_participants')
+      .insert({
+        league_id: league,
+        member_id: id,
+      })
+      .select(select)
+      .single(),
+  )
+
+  if (insertError) {
+    if (insertError.code === '23505') {
+      const { data: retry } = await runParticipantSelectQuery((select) =>
+        supabase
+          .from('running_league_participants')
+          .select(select)
+          .eq('league_id', league)
+          .eq('member_id', id)
+          .maybeSingle(),
+      )
+      if (retry) {
+        return { ok: true, participant: mapParticipant(retry as Record<string, unknown>) }
+      }
+    }
+    console.error('[running-league] ensureLeagueParticipantForMember.insert', insertError)
+    return {
+      ok: false,
+      error:
+        insertError.message ||
+        '리그 참가 등록에 실패했습니다. add-center-portal-member-mileage-rls.sql을 실행했는지 확인해주세요.',
+    }
+  }
+
+  // 페이지 렌더 중(ensure 경로)에는 revalidateTag를 호출하면 안 됨.
+  return { ok: true, participant: mapParticipant(inserted as Record<string, unknown>) }
+}
+
+/** 포털 기록 저장 시 센터 랭킹 리그 참가 행을 자동 확보합니다 (코치 참가 등록과 무관). */
 export async function ensurePortalParticipantForMember(
   memberId: string,
 ): Promise<{ ok: true; participant: RunningLeagueParticipant } | { ok: false; error: string }> {
-  const supabase = await leagueClient()
-
   let league: RunningLeague | null = null
   try {
     league = await ensureCenterPortalRankingLeague()
@@ -445,66 +520,7 @@ export async function ensurePortalParticipantForMember(
     }
   }
 
-  const { data: existing, error: existingError } = await runParticipantSelectQuery((select) =>
-    supabase
-      .from('running_league_participants')
-      .select(select)
-      .eq('league_id', league.id)
-      .eq('member_id', memberId)
-      .maybeSingle(),
-  )
-
-  if (existingError) {
-    if (isMissingTableError(existingError)) {
-      return {
-        ok: false,
-        error: '마일리지 테이블이 없습니다. expand-running-league-schema.sql을 실행해주세요.',
-      }
-    }
-    return { ok: false, error: existingError.message }
-  }
-
-  if (existing) {
-    return { ok: true, participant: mapParticipant(existing as Record<string, unknown>) }
-  }
-
-  const { data: inserted, error: insertError } = await runParticipantSelectQuery((select) =>
-    supabase
-      .from('running_league_participants')
-      .insert({
-        league_id: league.id,
-        member_id: memberId,
-      })
-      .select(select)
-      .single(),
-  )
-
-  if (insertError) {
-    if (insertError.code === '23505') {
-      const { data: retry } = await runParticipantSelectQuery((select) =>
-        supabase
-          .from('running_league_participants')
-          .select(select)
-          .eq('league_id', league.id)
-          .eq('member_id', memberId)
-          .maybeSingle(),
-      )
-      if (retry) {
-        return { ok: true, participant: mapParticipant(retry as Record<string, unknown>) }
-      }
-    }
-    console.error('[running-league] ensurePortalParticipantForMember.insert', insertError)
-    return {
-      ok: false,
-      error:
-        insertError.message ||
-        '랭킹 등록에 실패했습니다. add-center-portal-member-mileage-rls.sql을 실행했는지 확인해주세요.',
-    }
-  }
-
-  // 페이지 렌더 중(ensure 경로)에는 revalidateTag를 호출하면 안 됨.
-  // 참가 행은 이미 이번 응답에 포함되며, 랭킹 캐시는 저장/수정 액션에서 무효화됩니다.
-  return { ok: true, participant: mapParticipant(inserted as Record<string, unknown>) }
+  return ensureLeagueParticipantForMember(memberId, league.id)
 }
 
 export async function getRunningLeaguesForAdmin(status?: RunningLeagueStatus | 'all'): Promise<{
@@ -1123,20 +1139,38 @@ async function fetchMemberRunningLeagueView(memberId: string): Promise<{
     }
   }
 
-  const [myRowResult, allRowsResult] = await Promise.all([
-    runParticipantSelectQuery((select) =>
-      supabase
-        .from('running_league_participants')
-        .select(select)
-        .eq('league_id', league.id)
-        .eq('member_id', memberId)
-        .maybeSingle(),
-    ),
-    runParticipantSelectQuery((select) =>
-      supabase.from('running_league_participants').select(select).eq('league_id', league.id),
-    ),
-  ])
-  const myRow = myRowResult.data
+  const myRowResult = await runParticipantSelectQuery((select) =>
+    supabase
+      .from('running_league_participants')
+      .select(select)
+      .eq('league_id', league.id)
+      .eq('member_id', memberId)
+      .maybeSingle(),
+  )
+
+  let participant = myRowResult.data
+    ? mapParticipant(myRowResult.data as Record<string, unknown>)
+    : null
+
+  // 성인 육상(러닝) 회원이면 코치 참가 등록 없이 자동 참가
+  if (!participant && league.status === 'active') {
+    const adultIds = await resolveAdultRunningMemberIds(supabase, [memberId])
+    if (adultIds.has(memberId)) {
+      const ensured = await ensureLeagueParticipantForMember(memberId, league.id)
+      if (ensured.ok) {
+        participant = ensured.participant
+      } else {
+        console.error(
+          'fetchMemberRunningLeagueView.ensureLeagueParticipant',
+          ensured.error,
+        )
+      }
+    }
+  }
+
+  const allRowsResult = await runParticipantSelectQuery((select) =>
+    supabase.from('running_league_participants').select(select).eq('league_id', league.id),
+  )
   const allRows = allRowsResult.data
 
   const participants = (allRows ?? []).map((row) =>
@@ -1148,7 +1182,6 @@ async function fetchMemberRunningLeagueView(memberId: string): Promise<{
   )
   const adultParticipants = filterParticipantsForAdultRunningLeague(participants, adultMemberIds)
   const leaderboard = buildLeaderboard(adultParticipants)
-  const participant = myRow ? mapParticipant(myRow as Record<string, unknown>) : null
 
   let records: RunningLeagueRecord[] = []
   let dailyRecoveries: RunningLeagueDailyRecovery[] = []

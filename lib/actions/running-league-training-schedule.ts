@@ -1,6 +1,7 @@
 'use server'
 
 import { requireRole } from '@/lib/actions/auth'
+import { ensureLeagueParticipantForMember } from '@/lib/actions/running-league'
 import { getRunningPortalMemberForCurrentUser } from '@/lib/actions/staff-running-portal-member'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
@@ -252,20 +253,11 @@ export async function toggleRunningLeagueTrainingScheduleSignup(
     return { ok: false, error: '휴강 또는 미운영 요일입니다.' }
   }
 
-  const { data: participant, error: participantError } = await supabase
-    .from('running_league_participants')
-    .select('id')
-    .eq('league_id', dayRow.league_id)
-    .eq('member_id', member.id)
-    .maybeSingle()
-
-  if (participantError) {
-    console.error('toggleRunningLeagueTrainingScheduleSignup.participant', participantError)
-    return { ok: false, error: '참가 정보를 확인하지 못했습니다.' }
+  const ensured = await ensureLeagueParticipantForMember(member.id, dayRow.league_id)
+  if (!ensured.ok) {
+    return { ok: false, error: ensured.error || '참가 정보를 확인하지 못했습니다.' }
   }
-  if (!participant) {
-    return { ok: false, error: '리그 참가 후 참여 신청할 수 있습니다.' }
-  }
+  const participant = ensured.participant
 
   const { data: existing, error: existingError } = await supabase
     .from('running_league_training_schedule_signups')
@@ -359,20 +351,11 @@ export async function saveMemberTrainingScheduleVote(
   )
   const targetDayIds = new Set(signedUpDayIds.filter((id) => votableDayIds.has(id)))
 
-  const { data: participant, error: participantError } = await supabase
-    .from('running_league_participants')
-    .select('id')
-    .eq('league_id', leagueId)
-    .eq('member_id', member.id)
-    .maybeSingle()
-
-  if (participantError) {
-    console.error('saveMemberTrainingScheduleVote.participant', participantError)
-    return { ok: false, error: '참가 정보를 확인하지 못했습니다.' }
+  const ensured = await ensureLeagueParticipantForMember(member.id, leagueId)
+  if (!ensured.ok) {
+    return { ok: false, error: ensured.error || '참가 정보를 확인하지 못했습니다.' }
   }
-  if (!participant) {
-    return { ok: false, error: '리그 참가 후 참여 투표할 수 있습니다.' }
-  }
+  const participant = ensured.participant
 
   const { data: existingRows, error: existingError } = await supabase
     .from('running_league_training_schedule_signups')
