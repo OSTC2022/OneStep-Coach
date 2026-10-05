@@ -55,11 +55,11 @@ export function YouthAthleticsPortal({
 }: YouthAthleticsPortalProps) {
   const { member, summary, sessionStatus } = data
   const instructorName = member.primary_instructor?.name ?? '자율배정'
-  const days = centerTrainingSchedule?.days ?? []
-  const previousWeekDays = centerTrainingSchedule?.previousWeekDays ?? []
-  const nextWeekDays = centerTrainingSchedule?.nextWeekDays ?? []
+  const days = centerTrainingSchedule?.days
+  const previousWeekDays = centerTrainingSchedule?.previousWeekDays
+  const nextWeekDays = centerTrainingSchedule?.nextWeekDays
   const tableReady = centerTrainingSchedule?.tableReady ?? true
-  const visibleDays = days.filter((day) => !day.is_hidden)
+  const visibleDays = (days ?? []).filter((day) => !day.is_hidden)
   const schoolLine = [member.school, member.grade].filter((value) => value?.trim()).join(' · ')
   const [primaryEvent1, setPrimaryEvent1] = useState(pbBundle?.primaryEvent1 ?? null)
   const [primaryEvent2, setPrimaryEvent2] = useState(pbBundle?.primaryEvent2 ?? null)

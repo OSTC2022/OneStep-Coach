@@ -49,15 +49,23 @@ export default async function CalendarPage() {
     })
   }
 
-  const [lessons, instructors, currentInstructor, pickerMembers, memoResult, runningSchedule] =
-    await Promise.all([
-      getLessonsForRange(dateFrom, dateTo),
-      getInstructors({ isActive: true, calendar: true, limit: 80 }),
-      getInstructorForCurrentUser(),
-      listMembersForCalendarPicker(),
-      listStaffMemoNotes(),
-      getCenterRunningTrainingScheduleForStaff(),
-    ])
+  const [
+    lessons,
+    instructors,
+    currentInstructor,
+    pickerMembers,
+    memoResult,
+    runningSchedule,
+    youthRunningSchedule,
+  ] = await Promise.all([
+    getLessonsForRange(dateFrom, dateTo),
+    getInstructors({ isActive: true, calendar: true, limit: 80 }),
+    getInstructorForCurrentUser(),
+    listMembersForCalendarPicker(),
+    listStaffMemoNotes(),
+    getCenterRunningTrainingScheduleForStaff('adult_running'),
+    getCenterRunningTrainingScheduleForStaff('youth_athletics'),
+  ])
 
   if (process.env.NODE_ENV === 'development') {
     console.log('[calendar] fetch success', lessons.length)
@@ -76,6 +84,7 @@ export default async function CalendarPage() {
         initialMemoNotes={memoResult.data}
         memoMigrationWarning={memoResult.warning}
         initialRunningSchedule={runningSchedule}
+        initialYouthRunningSchedule={youthRunningSchedule}
       />
     </div>
   )

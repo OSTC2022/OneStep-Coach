@@ -176,6 +176,7 @@ interface LessonCalendarProps {
   initialMemoNotes?: StaffMemoNote[]
   memoMigrationWarning?: string
   initialRunningSchedule?: CenterRunningTrainingScheduleBundle | null
+  initialYouthRunningSchedule?: CenterRunningTrainingScheduleBundle | null
 }
 
 export function LessonCalendar({
@@ -186,6 +187,7 @@ export function LessonCalendar({
   initialMemoNotes = [],
   memoMigrationWarning,
   initialRunningSchedule = null,
+  initialYouthRunningSchedule = null,
 }: LessonCalendarProps) {
   const [view, setView] = useState<CalendarView>('month')
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -1715,6 +1717,7 @@ export function LessonCalendar({
           />
           <RunningScheduleToolbarButton
             initialBundle={initialRunningSchedule}
+            initialYouthBundle={initialYouthRunningSchedule}
             triggerClassName="h-7 text-[11px] md:h-8 md:text-xs"
           />
           <Link href="/dashboard/lesson-status">

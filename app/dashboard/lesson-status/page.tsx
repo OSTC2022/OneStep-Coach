@@ -61,24 +61,26 @@ export default async function LessonStatusPage({
       ? { date: selectedDate }
       : getRangeForView(parseISO(selectedDate), rangeView)
 
-  const [lessons, instructors, memoResult, runningSchedule] = await Promise.all([
-    viewMode === 'day'
-      ? getLessonsForStatusView({
-          date: selectedDate,
-          limit: LESSON_STATUS_LIMIT,
-        })
-      : getLessonsForStatusView({
-          ...lessonsQuery,
-          limit: LESSON_STATUS_LIMIT,
-        }),
-    getInstructors({
-      isActive: true,
-      calendar: true,
-      limit: INSTRUCTOR_PICKER_LIMIT,
-    }),
-    listStaffMemoNotes(),
-    getCenterRunningTrainingScheduleForStaff(),
-  ])
+  const [lessons, instructors, memoResult, runningSchedule, youthRunningSchedule] =
+    await Promise.all([
+      viewMode === 'day'
+        ? getLessonsForStatusView({
+            date: selectedDate,
+            limit: LESSON_STATUS_LIMIT,
+          })
+        : getLessonsForStatusView({
+            ...lessonsQuery,
+            limit: LESSON_STATUS_LIMIT,
+          }),
+      getInstructors({
+        isActive: true,
+        calendar: true,
+        limit: INSTRUCTOR_PICKER_LIMIT,
+      }),
+      listStaffMemoNotes(),
+      getCenterRunningTrainingScheduleForStaff('adult_running'),
+      getCenterRunningTrainingScheduleForStaff('youth_athletics'),
+    ])
 
   const bodyWeightByKey = await getMemberBodyWeightsForLessons(
     lessons
@@ -109,6 +111,7 @@ export default async function LessonStatusPage({
         initialMemoNotes={memoResult.data}
         memoMigrationWarning={memoResult.warning}
         initialRunningSchedule={runningSchedule}
+        initialYouthRunningSchedule={youthRunningSchedule}
       />
     </div>
   )

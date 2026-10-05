@@ -21,6 +21,7 @@ interface CalendarViewProps {
   initialMemoNotes?: StaffMemoNote[]
   memoMigrationWarning?: string
   initialRunningSchedule?: CenterRunningTrainingScheduleBundle | null
+  initialYouthRunningSchedule?: CenterRunningTrainingScheduleBundle | null
 }
 
 export function CalendarView(props: CalendarViewProps) {

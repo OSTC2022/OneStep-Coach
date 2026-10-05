@@ -163,11 +163,10 @@ export function MemberMyPage({
   const profileAside = showRunningPortalSection
     ? null
     : resolveProfileAside(data)
-  const trainingScheduleDays = centerTrainingSchedule?.days ?? []
+  const trainingScheduleDays = centerTrainingSchedule?.days
   const trainingSchedulePreviousWeekDays =
-    centerTrainingSchedule?.previousWeekDays ?? []
-  const trainingScheduleNextWeekDays =
-    centerTrainingSchedule?.nextWeekDays ?? []
+    centerTrainingSchedule?.previousWeekDays
+  const trainingScheduleNextWeekDays = centerTrainingSchedule?.nextWeekDays
   const trainingScheduleReady = centerTrainingSchedule?.tableReady ?? true
   const canStaffProxySignup =
     canStaffManageAttendance ||

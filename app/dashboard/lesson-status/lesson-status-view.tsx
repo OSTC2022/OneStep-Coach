@@ -169,6 +169,7 @@ interface LessonStatusViewProps {
   initialMemoNotes?: StaffMemoNote[]
   memoMigrationWarning?: string
   initialRunningSchedule?: CenterRunningTrainingScheduleBundle | null
+  initialYouthRunningSchedule?: CenterRunningTrainingScheduleBundle | null
 }
 
 const VIEW_MODE_OPTIONS: { value: LessonStatusViewMode; label: string }[] = [
@@ -1311,6 +1312,7 @@ export function LessonStatusView({
   initialMemoNotes = [],
   memoMigrationWarning,
   initialRunningSchedule = null,
+  initialYouthRunningSchedule = null,
 }: LessonStatusViewProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -2354,6 +2356,7 @@ export function LessonStatusView({
           />
           <RunningScheduleToolbarButton
             initialBundle={initialRunningSchedule}
+            initialYouthBundle={initialYouthRunningSchedule}
             triggerClassName="h-8 text-xs"
           />
           <Link href="/dashboard/calendar">

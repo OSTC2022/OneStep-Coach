@@ -44,9 +44,9 @@ export function TrainingScheduleStaffSignupPanel({
       </CardHeader>
       <CardContent>
         <MemberRunningLeagueTrainingSchedule
-          days={bundle?.days ?? []}
-          previousWeekDays={bundle?.previousWeekDays ?? []}
-          nextWeekDays={bundle?.nextWeekDays ?? []}
+          days={bundle?.days}
+          previousWeekDays={bundle?.previousWeekDays}
+          nextWeekDays={bundle?.nextWeekDays}
           tableReady={bundle?.tableReady ?? true}
           canParticipate={false}
           canStaffProxySignup

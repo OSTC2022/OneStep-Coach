@@ -56,10 +56,13 @@ import {
   MEMBER_PORTAL_SHELL_CLASS,
 } from '@/lib/running-league/member-portal-layout'
 
+/** 렌더마다 새 [] 만들지 않도록 — useEffect 의존성 루프 방지 */
+export const EMPTY_SCHEDULE_DAYS: RunningLeagueTrainingScheduleDayView[] = []
+
 type MemberRunningLeagueTrainingScheduleProps = {
-  days: RunningLeagueTrainingScheduleDayView[]
+  days?: RunningLeagueTrainingScheduleDayView[]
   previousWeekDays?: RunningLeagueTrainingScheduleDayView[]
-  /** 다음 주 미리보기 (일요일부터 노출) */
+  /** 다음 주 미리보기 */
   nextWeekDays?: RunningLeagueTrainingScheduleDayView[]
   tableReady: boolean
   canParticipate: boolean
@@ -99,9 +102,9 @@ function daySignupClosed(day: RunningLeagueTrainingScheduleDayView): boolean {
 }
 
 export function MemberRunningLeagueTrainingSchedule({
-  days,
-  previousWeekDays = [],
-  nextWeekDays = [],
+  days = EMPTY_SCHEDULE_DAYS,
+  previousWeekDays = EMPTY_SCHEDULE_DAYS,
+  nextWeekDays = EMPTY_SCHEDULE_DAYS,
   tableReady,
   canParticipate,
   readOnly = false,
@@ -141,12 +144,13 @@ export function MemberRunningLeagueTrainingSchedule({
     )
     setActiveDay((current) => {
       if (!current) return current
-      return (
+      const next =
         days.find((day) => day.id === current.id) ??
         previousWeekDays.find((day) => day.id === current.id) ??
         nextWeekDays.find((day) => day.id === current.id) ??
         null
-      )
+      // 같은 참조면 스킵 — Dialog 열림 중 불필요 setState로 루프 방지
+      return next === current ? current : next
     })
     setOpenWeek((current) => {
       if (current === 'next' && nextWeekDays.length === 0) return 'current'
