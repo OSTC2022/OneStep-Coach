@@ -129,6 +129,7 @@ import {
 import { LessonStatusMemoBoard } from '@/components/lesson-status/lesson-status-memo-board'
 import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
 import { MemberDrinkPreferenceButton } from '@/components/members/member-drink-preference-button'
+import { MemberStaffMemoButton } from '@/components/members/member-staff-memo-button'
 import type { StaffMemoNote } from '@/lib/actions/staff-memo-notes'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 
@@ -268,6 +269,8 @@ interface AthleteTileProps {
   onLessonEdited: (lesson: Lesson) => void
   onLessonDeleted: (lessonIds: string[]) => void
   onMemberDrinkPreferenceChange: (memberId: string, drinkPreference: string | null) => void
+  staffMemoNotesByMemberId: Map<string, StaffMemoNote[]>
+  onMemberStaffMemoNotesChange: (memberId: string, notes: StaffMemoNote[]) => void
 }
 
 function resolveLessonInstructorColor(
@@ -296,6 +299,8 @@ const AthleteTile = memo(function AthleteTile({
   onLessonEdited,
   onLessonDeleted,
   onMemberDrinkPreferenceChange,
+  staffMemoNotesByMemberId,
+  onMemberStaffMemoNotesChange,
 }: AthleteTileProps) {
   const [signatureOpen, setSignatureOpen] = useState(false)
   const [memberLinkOpen, setMemberLinkOpen] = useState(false)
@@ -544,6 +549,15 @@ const AthleteTile = memo(function AthleteTile({
             compact={!expanded}
             onChanged={(next) =>
               onMemberDrinkPreferenceChange(lesson.member_id!, next)
+            }
+          />
+          <MemberStaffMemoButton
+            memberId={lesson.member_id}
+            memberName={lesson.member?.name?.trim() || display.name}
+            initialNotes={staffMemoNotesByMemberId.get(lesson.member_id) ?? []}
+            compact={!expanded}
+            onNotesChange={(notes) =>
+              onMemberStaffMemoNotesChange(lesson.member_id!, notes)
             }
           />
         </div>
@@ -1022,6 +1036,8 @@ interface TimeSlotsPanelProps {
   onLessonEdited: (lesson: Lesson) => void
   onLessonDeleted: (lessonIds: string[]) => void
   onMemberDrinkPreferenceChange: (memberId: string, drinkPreference: string | null) => void
+  staffMemoNotesByMemberId: Map<string, StaffMemoNote[]>
+  onMemberStaffMemoNotesChange: (memberId: string, notes: StaffMemoNote[]) => void
   bodyWeightByKey: Record<string, LessonStatusBodyWeightSnapshot>
   onBodyWeightChange: (
     memberId: string,
@@ -1071,6 +1087,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
   onLessonEdited,
   onLessonDeleted,
   onMemberDrinkPreferenceChange,
+  staffMemoNotesByMemberId,
+  onMemberStaffMemoNotesChange,
   emptyMessage = '등록된 수업이 없습니다.',
   autoScrollToNow = false,
 }: TimeSlotsPanelProps) {
@@ -1210,6 +1228,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         onLessonEdited={onLessonEdited}
                         onLessonDeleted={onLessonDeleted}
                         onMemberDrinkPreferenceChange={onMemberDrinkPreferenceChange}
+                        staffMemoNotesByMemberId={staffMemoNotesByMemberId}
+                        onMemberStaffMemoNotesChange={onMemberStaffMemoNotesChange}
                       />
                     </div>
                   )
@@ -1284,6 +1304,8 @@ const TimeSlotsPanel = memo(function TimeSlotsPanel({
                         onLessonEdited={onLessonEdited}
                         onLessonDeleted={onLessonDeleted}
                         onMemberDrinkPreferenceChange={onMemberDrinkPreferenceChange}
+                        staffMemoNotesByMemberId={staffMemoNotesByMemberId}
+                        onMemberStaffMemoNotesChange={onMemberStaffMemoNotesChange}
                       />
                     ))}
                   </div>
@@ -1337,6 +1359,40 @@ export function LessonStatusView({
   const [bodyWeightByKey, setBodyWeightByKey] = useState(initialBodyWeightByKey)
   const bodyWeightSeedRef = useRef(initialBodyWeightByKey)
   bodyWeightSeedRef.current = initialBodyWeightByKey
+  const [staffMemoNotes, setStaffMemoNotes] = useState(initialMemoNotes)
+
+  useEffect(() => {
+    setStaffMemoNotes(initialMemoNotes)
+  }, [initialMemoNotes])
+
+  const staffMemoNotesByMemberId = useMemo(() => {
+    const map = new Map<string, StaffMemoNote[]>()
+    for (const note of staffMemoNotes) {
+      if (!note.member_id) continue
+      const list = map.get(note.member_id) ?? []
+      list.push(note)
+      map.set(note.member_id, list)
+    }
+    for (const [memberId, list] of map) {
+      map.set(
+        memberId,
+        [...list].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      )
+    }
+    return map
+  }, [staffMemoNotes])
+
+  const handleMemberStaffMemoNotesChange = useCallback(
+    (memberId: string, notes: StaffMemoNote[]) => {
+      setStaffMemoNotes((prev) => {
+        const others = prev.filter((note) => note.member_id !== memberId)
+        return [...notes, ...others].sort((a, b) =>
+          b.updated_at.localeCompare(a.updated_at),
+        )
+      })
+    },
+    [],
+  )
 
   const dateObj = parseISO(currentDate)
   const today = format(new Date(), 'yyyy-MM-dd')
@@ -2070,6 +2126,8 @@ export function LessonStatusView({
     onLessonEdited: handleLessonEdited,
     onLessonDeleted: handleLessonDeleted,
     onMemberDrinkPreferenceChange: handleMemberDrinkPreferenceChange,
+    staffMemoNotesByMemberId,
+    onMemberStaffMemoNotesChange: handleMemberStaffMemoNotesChange,
     autoScrollToNow: viewMode === 'day' && currentDate === today && !isLoadingDate,
   }
 
@@ -2180,6 +2238,8 @@ export function LessonStatusView({
                           onLessonEdited={handleLessonEdited}
                           onLessonDeleted={handleLessonDeleted}
                           onMemberDrinkPreferenceChange={handleMemberDrinkPreferenceChange}
+                          staffMemoNotesByMemberId={staffMemoNotesByMemberId}
+                          onMemberStaffMemoNotesChange={handleMemberStaffMemoNotesChange}
                         />
                       </div>
                     </div>
@@ -2350,9 +2410,10 @@ export function LessonStatusView({
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <LessonStatusMemoBoard
-            initialNotes={initialMemoNotes}
+            initialNotes={staffMemoNotes}
             migrationWarning={memoMigrationWarning}
             triggerClassName="h-8 text-xs"
+            onNotesChange={setStaffMemoNotes}
           />
           <RunningScheduleToolbarButton
             initialBundle={initialRunningSchedule}

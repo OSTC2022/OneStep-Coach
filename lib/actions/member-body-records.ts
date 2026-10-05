@@ -1075,6 +1075,16 @@ export async function getMemberBodyWeightsForLessons(
 
     const weightKg = Number(weightRow.weight_kg)
     const heightCm = weightRow.height_cm
+    // 당일 시속이 없으면 그 날짜 이전 최근 시속을 표시 (키 baseline과 같은 UX)
+    let maxSpeedKmh = weightRow.max_speed_kmh
+    if (maxSpeedKmh == null) {
+      for (const row of memberRecords) {
+        if (row.recorded_at > entry.date) break
+        if (row.max_speed_kmh != null && row.max_speed_kmh > 0) {
+          maxSpeedKmh = row.max_speed_kmh
+        }
+      }
+    }
     map[bodyWeightKey(entry.memberId, entry.date)] = {
       weightKg,
       deltaKg: calculateWeightDeltaKg(memberRecords, entry.date, weightKg),
@@ -1084,7 +1094,7 @@ export async function getMemberBodyWeightsForLessons(
         entry.date,
         heightCm,
       ),
-      maxSpeedKmh: weightRow.max_speed_kmh,
+      maxSpeedKmh,
     }
   }
 

@@ -395,7 +395,14 @@ export function LessonStatusWeightInput({
                 <span className="text-[10px] text-muted-foreground">키 -</span>
               )}
             </span>
-            <span className="min-w-0 truncate text-right text-[9px] leading-tight text-muted-foreground tabular-nums">
+            <span
+              className={cn(
+                'min-w-0 truncate text-right text-[10px] leading-tight tabular-nums',
+                savedMaxSpeed != null
+                  ? 'font-semibold text-foreground'
+                  : 'text-[9px] text-muted-foreground',
+              )}
+            >
               {savedMaxSpeed != null ? `시속 ${savedMaxSpeed}` : '시속 -'}
             </span>
           </span>

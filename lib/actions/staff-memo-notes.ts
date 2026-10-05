@@ -61,6 +61,34 @@ export async function listStaffMemoNotes(): Promise<{
   return { data: (data ?? []) as StaffMemoNote[] }
 }
 
+/** 수업현황 타일 — 특정 회원 알림장 메모 */
+export async function listStaffMemoNotesForMember(memberId: string): Promise<{
+  data: StaffMemoNote[]
+  warning?: string
+}> {
+  await requireRole(['admin', 'instructor'])
+  const id = memberId.trim()
+  if (!id) return { data: [] }
+
+  const supabase = await createStaffDataClient()
+  const { data, error } = await supabase
+    .from('staff_memo_notes')
+    .select(SELECT)
+    .eq('member_id', id)
+    .order('created_at', { ascending: true })
+    .limit(50)
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      return { data: [], warning: MIGRATION_HINT }
+    }
+    console.error('listStaffMemoNotesForMember:', error)
+    return { data: [] }
+  }
+
+  return { data: (data ?? []) as StaffMemoNote[] }
+}
+
 export async function createStaffMemoNote(input: {
   memberId?: string | null
   memberName: string

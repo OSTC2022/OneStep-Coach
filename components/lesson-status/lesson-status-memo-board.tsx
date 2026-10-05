@@ -47,6 +47,7 @@ interface LessonStatusMemoBoardProps {
   initialNotes?: StaffMemoNote[]
   migrationWarning?: string
   triggerClassName?: string
+  onNotesChange?: (notes: StaffMemoNote[]) => void
 }
 
 function formatNoteTime(value: string) {
@@ -61,9 +62,15 @@ export function LessonStatusMemoBoard({
   initialNotes = [],
   migrationWarning,
   triggerClassName,
+  onNotesChange,
 }: LessonStatusMemoBoardProps) {
   const [open, setOpen] = useState(false)
   const [notes, setNotes] = useState<StaffMemoNote[]>(initialNotes)
+
+  function replaceNotes(next: StaffMemoNote[]) {
+    setNotes(next)
+    onNotesChange?.(next)
+  }
   const [search, setSearch] = useState('')
   const [nameInput, setNameInput] = useState('')
   const [bodyInput, setBodyInput] = useState('')
@@ -216,8 +223,8 @@ export function LessonStatusMemoBoard({
           return
         }
         if (result.data) {
-          setNotes((prev) =>
-            prev
+          replaceNotes(
+            notes
               .map((item) => (item.id === result.data!.id ? result.data! : item))
               .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
           )
@@ -234,7 +241,7 @@ export function LessonStatusMemoBoard({
           return
         }
         if (result.data) {
-          setNotes((prev) => [result.data!, ...prev])
+          replaceNotes([result.data, ...notes])
         }
         toast.success('알림장에 추가했습니다.')
       }
@@ -250,7 +257,7 @@ export function LessonStatusMemoBoard({
         toast.error('메모 삭제 실패', { description: result.error })
         return
       }
-      setNotes((prev) => prev.filter((item) => item.id !== id))
+      replaceNotes(notes.filter((item) => item.id !== id))
       if (editingId === id) resetForm()
       toast.success('메모를 삭제했습니다.')
     })
@@ -259,7 +266,7 @@ export function LessonStatusMemoBoard({
   function refreshNotes() {
     startTransition(async () => {
       const result = await listStaffMemoNotes()
-      setNotes(result.data)
+      replaceNotes(result.data)
       if (result.warning) {
         toast.warning('DB 마이그레이션 필요', { description: result.warning })
       }
