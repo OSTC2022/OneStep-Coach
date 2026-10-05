@@ -18,6 +18,7 @@ import {
   getTrainingWeekStartFromDays,
   addDaysToDateKey,
   normalizeTrainingScheduleDate,
+  normalizeTrainingScheduleTime,
   propagateTrainingWeekDatesFromMonday,
   resolveTrainingScheduleMapHref,
   shouldResetCenterTrainingSignups,
@@ -76,6 +77,9 @@ async function fetchMemberSportsById(
 const CENTER_SCHEDULE_DAY_SELECT =
   'weekday, training_summary, location_label, naver_map_url, is_hidden, schedule_date, created_at, updated_at'
 
+const CENTER_SCHEDULE_DAY_SELECT_WITH_TIME =
+  'weekday, training_summary, location_label, naver_map_url, is_hidden, schedule_date, training_time, created_at, updated_at'
+
 const CENTER_SCHEDULE_DAY_SELECT_LEGACY =
   'weekday, training_summary, location_label, naver_map_url, is_hidden, created_at, updated_at'
 
@@ -100,6 +104,7 @@ type CenterScheduleDayUpsertRow = {
   naver_map_url: string | null
   is_hidden: boolean
   schedule_date: string | null
+  training_time?: string | null
   updated_at: string
 }
 
@@ -107,6 +112,12 @@ function stripScheduleDateFromRows(
   rows: CenterScheduleDayUpsertRow[],
 ): Omit<CenterScheduleDayUpsertRow, 'schedule_date'>[] {
   return rows.map(({ schedule_date: _scheduleDate, ...row }) => row)
+}
+
+function stripTrainingTimeFromRows(
+  rows: CenterScheduleDayUpsertRow[],
+): Omit<CenterScheduleDayUpsertRow, 'training_time'>[] {
+  return rows.map(({ training_time: _trainingTime, ...row }) => row)
 }
 
 function formatSaveScheduleError(error: { message?: string }): string {
@@ -128,6 +139,21 @@ async function fetchCenterScheduleDayRows(
   audience: TrainingScheduleAudience = 'adult_running',
 ) {
   const daysTable = trainingScheduleConfig(audience).daysTable
+  const withTime = audience === 'youth_athletics'
+
+  if (withTime) {
+    const timed = await supabase
+      .from(daysTable)
+      .select(CENTER_SCHEDULE_DAY_SELECT_WITH_TIME)
+      .order('weekday', { ascending: true })
+
+    if (!isMissingColumnError(timed.error, 'training_time')) {
+      if (!isMissingColumnError(timed.error, 'schedule_date')) {
+        return timed
+      }
+    }
+  }
+
   const primary = await supabase
     .from(daysTable)
     .select(CENTER_SCHEDULE_DAY_SELECT)
@@ -150,6 +176,7 @@ type CenterScheduleDayRow = {
   naver_map_url: string | null
   is_hidden: boolean
   schedule_date?: string | null
+  training_time?: string | null
 }
 
 type CenterSignupRow = {
@@ -248,6 +275,7 @@ function buildCenterDayView(
       location_label: row.location_label ?? '',
     }),
     is_hidden: Boolean(row.is_hidden),
+    training_time: normalizeTrainingScheduleTime(row.training_time),
     signup_count: signups.length,
     signups,
     is_signed_up:
@@ -271,6 +299,7 @@ function buildCenterDayViewFromInput(
       naver_map_url: day.naver_map_url?.trim() || null,
       is_hidden: day.is_hidden,
       schedule_date: day.schedule_date,
+      training_time: day.training_time,
     },
     signups,
     currentMemberId,
@@ -701,6 +730,7 @@ export async function getCenterRunningTrainingScheduleForAdmin(
       naver_map_url: day.naver_map_url ?? '',
       is_hidden: day.is_hidden,
       schedule_date: day.schedule_date,
+      training_time: day.training_time,
     })),
   }
 }
@@ -711,6 +741,7 @@ export async function saveCenterRunningTrainingSchedule(
 ): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   await requireRole(['admin'])
   const tables = trainingScheduleConfig(audience)
+  const includeTrainingTime = audience === 'youth_athletics'
 
   const normalized: CenterScheduleDayUpsertRow[] = createEmptyTrainingScheduleDays().map(
     (emptyDay) => {
@@ -722,6 +753,9 @@ export async function saveCenterRunningTrainingSchedule(
         naver_map_url: found?.naver_map_url?.trim() || null,
         is_hidden: Boolean(found?.is_hidden),
         schedule_date: found?.schedule_date?.trim().slice(0, 10) || null,
+        ...(includeTrainingTime
+          ? { training_time: normalizeTrainingScheduleTime(found?.training_time) }
+          : {}),
         updated_at: new Date().toISOString(),
       }
     },
@@ -759,6 +793,7 @@ export async function saveCenterRunningTrainingSchedule(
         naver_map_url: row.naver_map_url ?? '',
         is_hidden: Boolean(row.is_hidden),
         schedule_date: normalizeTrainingScheduleDate(row.schedule_date),
+        training_time: normalizeTrainingScheduleTime(row.training_time),
       })),
       audience,
     )
@@ -769,10 +804,26 @@ export async function saveCenterRunningTrainingSchedule(
     .from(tables.daysTable)
     .upsert(normalized, { onConflict: 'weekday' })
 
+  if (isMissingColumnError(result.error, 'training_time') && includeTrainingTime) {
+    const retryWithoutTime = await supabase
+      .from(tables.daysTable)
+      .upsert(stripTrainingTimeFromRows(normalized), { onConflict: 'weekday' })
+    if (!retryWithoutTime.error) {
+      result = retryWithoutTime
+      warning =
+        '시간 컬럼이 DB에 없어 내용만 저장했습니다. Supabase에서 add-youth-athletics-training-schedule-time.sql을 실행해주세요.'
+    } else {
+      result = retryWithoutTime
+    }
+  }
+
   if (isMissingColumnError(result.error)) {
     const retry = await supabase
       .from(tables.daysTable)
-      .upsert(stripScheduleDateFromRows(normalized), { onConflict: 'weekday' })
+      .upsert(
+        stripScheduleDateFromRows(stripTrainingTimeFromRows(normalized)),
+        { onConflict: 'weekday' },
+      )
 
     if (!retry.error) {
       result = retry

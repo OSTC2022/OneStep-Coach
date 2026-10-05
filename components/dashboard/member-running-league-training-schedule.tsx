@@ -832,6 +832,11 @@ function ScheduleDayRow({
           <span className="block text-sm font-medium leading-snug text-zinc-100">
             {day.training_summary}
           </span>
+          {day.training_time ? (
+            <span className="mt-0.5 block text-[11px] tabular-nums text-lime-200/80">
+              {day.training_time}
+            </span>
+          ) : null}
           {day.location_label ? (
             <span className="mt-0.5 flex items-center gap-1 text-[11px] text-zinc-500">
               <MapPin className="h-3 w-3 shrink-0" />

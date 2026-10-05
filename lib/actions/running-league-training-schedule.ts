@@ -81,6 +81,8 @@ function buildDayView(
     league_id: row.league_id,
     weekday,
     weekday_label: trainingWeekdayLabel(weekday),
+    schedule_date: null,
+    schedule_date_label: null,
     training_summary: row.training_summary ?? '',
     location_label: row.location_label ?? '',
     naver_map_url: row.naver_map_url,
@@ -89,6 +91,7 @@ function buildDayView(
       location_label: row.location_label ?? '',
     }),
     is_hidden: Boolean(row.is_hidden),
+    training_time: null,
     signup_count: signups.length,
     signups,
     is_signed_up:

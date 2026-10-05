@@ -231,6 +231,11 @@ export function YouthAthleticsPortal({
               >
                 <p className="text-[11px] font-semibold text-[#AAFF00]">
                   {day.weekday_label}요일
+                  {day.training_time ? (
+                    <span className="ml-1 font-medium tabular-nums text-[#AAFF00]/80">
+                      {day.training_time}
+                    </span>
+                  ) : null}
                 </p>
                 <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-foreground/90">
                   {day.training_summary.trim() || '훈련 미정'}

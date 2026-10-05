@@ -17,6 +17,8 @@ export type RunningLeagueTrainingScheduleDayInput = {
   naver_map_url: string
   is_hidden: boolean
   schedule_date: string | null
+  /** 육상선수반 — 집합/시작 시각 (HH:MM) */
+  training_time?: string | null
   /** 주간 스냅샷에만 저장 — 당시 참여 인원 */
   signups?: RunningLeagueTrainingScheduleSignup[]
 }
@@ -33,9 +35,38 @@ export type RunningLeagueTrainingScheduleDayView = {
   naver_map_url: string | null
   map_href: string | null
   is_hidden: boolean
+  /** 육상선수반 — 집합/시작 시각 (HH:MM) */
+  training_time: string | null
   signup_count: number
   signups: RunningLeagueTrainingScheduleSignup[]
   is_signed_up: boolean
+}
+
+/** HH:MM 또는 HH:MM:SS → HH:MM */
+export function normalizeTrainingScheduleTime(
+  value: string | null | undefined,
+): string | null {
+  const raw = value?.trim() ?? ''
+  if (!raw) return null
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(raw)
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+export function formatTrainingScheduleTimeLabel(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeTrainingScheduleTime(value)
+  if (!normalized) return null
+  const [hourText, minuteText] = normalized.split(':')
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return normalized
+  return `${hour}:${String(minute).padStart(2, '0')}`
 }
 
 export function trainingWeekdayLabel(weekday: number): string {
@@ -86,6 +117,7 @@ export function createEmptyTrainingScheduleDays(): RunningLeagueTrainingSchedule
     naver_map_url: '',
     is_hidden: false,
     schedule_date: null,
+    training_time: null,
   }))
 }
 
@@ -141,6 +173,7 @@ export function buildFullWeekScheduleDays(
       naver_map_url: null,
       map_href: null,
       is_hidden: true,
+      training_time: null,
       signup_count: 0,
       signups: [],
       is_signed_up: false,

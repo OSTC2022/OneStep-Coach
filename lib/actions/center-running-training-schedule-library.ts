@@ -92,6 +92,8 @@ function normalizeSnapshotDays(raw: unknown): RunningLeagueTrainingScheduleDayIn
       const weekday = Number(row.weekday)
       if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return null
       const signups = normalizeSnapshotSignups(row.signups)
+      const trainingTime =
+        typeof row.training_time === 'string' ? row.training_time.trim().slice(0, 5) : null
       return {
         weekday: weekday as RunningLeagueTrainingScheduleDayInput['weekday'],
         training_summary: String(row.training_summary ?? ''),
@@ -100,6 +102,7 @@ function normalizeSnapshotDays(raw: unknown): RunningLeagueTrainingScheduleDayIn
         is_hidden: Boolean(row.is_hidden),
         schedule_date:
           typeof row.schedule_date === 'string' ? row.schedule_date.slice(0, 10) : null,
+        training_time: trainingTime || null,
         ...(signups.length > 0 ? { signups } : {}),
       }
     })
@@ -139,6 +142,7 @@ function serializeSnapshotDays(
     naver_map_url: day.naver_map_url?.trim() ?? '',
     is_hidden: Boolean(day.is_hidden),
     schedule_date: day.schedule_date?.trim().slice(0, 10) || null,
+    training_time: day.training_time?.trim().slice(0, 5) || null,
     ...(day.signups && day.signups.length > 0
       ? {
           signups: day.signups.map((signup) => ({
