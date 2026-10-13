@@ -24,9 +24,12 @@ import {
   type MarathonEventSignup,
   type MarathonEventView,
 } from '@/lib/running-league/marathon-schedule'
+import { fetchLatestMarathonCatalog } from '@/lib/running-league/marathon-catalog-fetch'
 import {
   filterMarathonCatalog,
   listMarathonCatalogYear,
+  MARATHON_CATALOG_2026,
+  mergeMarathonCatalogItems,
   type MarathonCatalogItem,
 } from '@/lib/running-league/marathon-catalog-2026'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
@@ -156,6 +159,18 @@ function revalidateMarathonPaths() {
   revalidatePath('/dashboard/running-portal')
   revalidatePath('/dashboard/settings/marathon-schedule')
   revalidatePath('/dashboard/settings/adult-running-portal')
+}
+
+/** 새로고침으로 받아 온 최신 카탈로그. 같은 서버 프로세스에서 추천 목록·추가에 사용 */
+const liveMarathonCatalogByYear = new Map<number, MarathonCatalogItem[]>()
+
+function catalogItemsForYear(year: number): MarathonCatalogItem[] {
+  const live = liveMarathonCatalogByYear.get(year)
+  if (!live || live.length === 0) return listMarathonCatalogYear(year)
+  return live.filter(
+    (item) =>
+      item.event_date.startsWith(`${year}-`) && isMarathonEventUpcomingOrToday(item.event_date),
+  )
 }
 
 function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
@@ -414,7 +429,7 @@ export async function listMarathonRecommendations(options?: {
 }> {
   await requireRole(['admin'])
   const year = options?.year ?? new Date().getFullYear()
-  const items = filterMarathonCatalog(listMarathonCatalogYear(year), {
+  const items = filterMarathonCatalog(catalogItemsForYear(year), {
     region: options?.region,
     monthKey: options?.monthKey,
     featuredOnly: options?.featuredOnly,
@@ -444,12 +459,192 @@ export async function listMarathonRecommendations(options?: {
   return { items, addedKeys }
 }
 
+export type MarathonCatalogRefreshResult =
+  | {
+      ok: true
+      items: MarathonCatalogItem[]
+      addedKeys: string[]
+      newCount: number
+      updatedCount: number
+      fetchedAt: string
+      message: string
+    }
+  | { ok: false; error: string }
+
+function marathonRefreshMessage(newCount: number, updatedCount: number): string {
+  if (newCount > 0 && updatedCount > 0) {
+    return `최신 정보를 반영했습니다. 추천 목록에 새 대회 ${newCount}건이 올라왔고, 등록된 대회 ${updatedCount}건을 갱신했습니다.`
+  }
+  if (newCount > 0) {
+    return `최신 정보를 반영했습니다. 추천 목록에 새 대회 ${newCount}건이 올라왔습니다. 대회 추가로 일정에 넣을 수 있습니다.`
+  }
+  if (updatedCount > 0) {
+    return `최신 정보를 반영했습니다. 등록된 대회 ${updatedCount}건을 갱신했습니다.`
+  }
+  return '최신 일정을 확인했습니다. 새로 올라온 대회는 없습니다.'
+}
+
+type StoredCatalogEventRow = {
+  id: string
+  catalog_key: string | null
+  title: string | null
+  event_date: string | null
+  location_label: string | null
+  registration_url: string | null
+  notes: string | null
+  region: string | null
+  is_featured: boolean | null
+  registration_open: boolean | null
+}
+
+function catalogEventChanged(row: StoredCatalogEventRow, item: MarathonCatalogItem): boolean {
+  const date = (row.event_date ?? '').slice(0, 10)
+  return (
+    (row.title ?? '').trim() !== item.title ||
+    date !== item.event_date ||
+    (row.location_label ?? '').trim() !== item.location_label ||
+    (row.registration_url ?? '').trim() !== item.registration_url ||
+    (row.notes ?? '').trim() !== item.notes ||
+    (row.region ?? '').trim() !== item.region ||
+    Boolean(row.is_featured) !== item.is_featured ||
+    Boolean(row.registration_open) !== item.registration_open
+  )
+}
+
+/** 마라톤온라인 최신 일정을 받아 추천 목록과 등록된 대회를 갱신한다. */
+export async function refreshMarathonCatalog(
+  year = new Date().getFullYear(),
+): Promise<MarathonCatalogRefreshResult> {
+  await requireRole(['admin'])
+
+  let incoming: MarathonCatalogItem[]
+  try {
+    incoming = await fetchLatestMarathonCatalog(year)
+  } catch (error) {
+    console.error('refreshMarathonCatalog.fetch', error)
+    return {
+      ok: false,
+      error: '마라톤온라인에서 최신 일정을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.',
+    }
+  }
+
+  const base = MARATHON_CATALOG_2026.filter((item) => item.event_date.startsWith(`${year}-`))
+  const merged = mergeMarathonCatalogItems(base, incoming)
+  liveMarathonCatalogByYear.set(year, merged)
+
+  const staticKeys = new Set(base.map((item) => item.key))
+  const freshItems = incoming.filter(
+    (item) => !staticKeys.has(item.key) && isMarathonEventUpcomingOrToday(item.event_date),
+  )
+  const newCount = freshItems.length
+  const byKey = new Map(incoming.map((item) => [item.key, item]))
+  let updatedCount = 0
+
+  try {
+    const supabase = await scheduleClient()
+    const { data, error } = await supabase
+      .from('center_marathon_events')
+      .select(
+        'id, catalog_key, title, event_date, location_label, registration_url, notes, region, is_featured, registration_open',
+      )
+
+    if (isMissingTableError(error)) {
+      return { ok: false, error: marathonMigrationErrorMessage('table') }
+    }
+    if (error) {
+      console.error('refreshMarathonCatalog.select', error)
+      return { ok: false, error: '등록된 마라톤 일정을 확인하지 못했습니다.' }
+    }
+
+    const rows = (data ?? []) as StoredCatalogEventRow[]
+    const now = new Date().toISOString()
+
+    const pendingUpdates = rows.flatMap((row) => {
+      const key = row.catalog_key?.trim()
+      if (!key) return []
+      const item = byKey.get(key)
+      if (!item || !catalogEventChanged(row, item)) return []
+      return [{ id: row.id, item }]
+    })
+
+    const batchSize = 20
+    for (let index = 0; index < pendingUpdates.length; index += batchSize) {
+      const batch = pendingUpdates.slice(index, index + batchSize)
+      const results = await Promise.all(
+        batch.map(async ({ id, item }) => {
+          const { error: updateError } = await supabase
+            .from('center_marathon_events')
+            .update({
+              title: item.title,
+              event_date: item.event_date,
+              location_label: item.location_label,
+              registration_url: item.registration_url || null,
+              notes: item.notes,
+              region: item.region,
+              is_featured: item.is_featured,
+              registration_open: item.registration_open,
+              updated_at: now,
+            })
+            .eq('id', id)
+          if (updateError) {
+            console.error('refreshMarathonCatalog.update', updateError)
+            return false
+          }
+          return true
+        }),
+      )
+      updatedCount += results.filter(Boolean).length
+    }
+  } catch (error) {
+    console.error('refreshMarathonCatalog', error)
+    return { ok: false, error: '최신 일정을 반영하지 못했습니다.' }
+  }
+
+  const items = catalogItemsForYear(year)
+  const addedKeys = await addedCatalogKeys(items.map((item) => item.key))
+  revalidateMarathonPaths()
+
+  return {
+    ok: true,
+    items,
+    addedKeys,
+    newCount,
+    updatedCount,
+    fetchedAt: new Date().toISOString(),
+    message: marathonRefreshMessage(newCount, updatedCount),
+  }
+}
+
+async function addedCatalogKeys(keys: string[]): Promise<string[]> {
+  if (keys.length === 0) return []
+  try {
+    const supabase = await scheduleClient()
+    const added: string[] = []
+    const chunkSize = 100
+    for (let index = 0; index < keys.length; index += chunkSize) {
+      const chunk = keys.slice(index, index + chunkSize)
+      const { data, error } = await supabase
+        .from('center_marathon_events')
+        .select('catalog_key')
+        .in('catalog_key', chunk)
+      if (error || !data) continue
+      for (const row of data as Array<{ catalog_key: string | null }>) {
+        const key = row.catalog_key?.trim()
+        if (key) added.push(key)
+      }
+    }
+    return added
+  } catch {
+    return []
+  }
+}
+
 export async function addMarathonEventFromCatalog(
   catalogKey: string,
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   await requireRole(['admin'])
   const key = catalogKey.trim()
-  const item = listMarathonCatalogYear().find((entry) => entry.key === key)
+  const item = catalogItemsForYear(new Date().getFullYear()).find((entry) => entry.key === key)
   if (!item) return { ok: false, error: '추천 대회를 찾을 수 없습니다.' }
 
   return saveMarathonEvent({

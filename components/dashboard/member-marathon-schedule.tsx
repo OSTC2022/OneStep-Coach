@@ -9,6 +9,7 @@ import {
   Loader2,
   MapPin,
   Pin,
+  RefreshCw,
   Search,
   Settings2,
   Users,
@@ -18,6 +19,7 @@ import {
   toggleMarathonEventSignup,
   toggleMarathonEventPinned,
   getCenterMarathonScheduleForMember,
+  refreshMarathonCatalog,
   type CenterMarathonScheduleBundle,
 } from '@/lib/actions/center-marathon-schedule'
 import {
@@ -91,6 +93,7 @@ export function MemberMarathonSchedule({
   const [distanceFilters, setDistanceFilters] = useState<MarathonDistanceFilter[]>([])
   const [mySignupsOnly, setMySignupsOnly] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(bundle.events.map((event) => [event.id, event.is_signed_up])),
   )
@@ -161,6 +164,45 @@ export function MemberMarathonSchedule({
       return bundle.events.find((event) => event.id === current.id) ?? null
     })
   }, [bundle])
+
+  function applyScheduleBundle(nextBundle: CenterMarathonScheduleBundle) {
+    setEvents(nextBundle.events)
+    setTableReady(nextBundle.tableReady)
+    setSignupDraft(
+      Object.fromEntries(nextBundle.events.map((event) => [event.id, event.is_signed_up])),
+    )
+    setCountDraft(
+      Object.fromEntries(nextBundle.events.map((event) => [event.id, event.signup_count])),
+    )
+    setPinDraft(
+      Object.fromEntries(nextBundle.events.map((event) => [event.id, event.is_pinned])),
+    )
+    setActiveEvent((current) => {
+      if (!current) return current
+      return nextBundle.events.find((event) => event.id === current.id) ?? null
+    })
+  }
+
+  async function handleRefreshSchedule() {
+    setRefreshing(true)
+    try {
+      if (showManageLink) {
+        const result = await refreshMarathonCatalog()
+        if (!result.ok) {
+          toast.error(result.error)
+          return
+        }
+        toast.success(result.message)
+      }
+      const nextBundle = await getCenterMarathonScheduleForMember(selectedMonthRef.current)
+      applyScheduleBundle(nextBundle)
+      if (!showManageLink) toast.success('마라톤 일정을 다시 불러왔습니다.')
+    } catch {
+      toast.error('마라톤 일정을 다시 불러오지 못했습니다.')
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const filteredEvents = useMemo(() => {
     const query = searchQuery.trim()
@@ -351,6 +393,21 @@ export function MemberMarathonSchedule({
             ))}
           </SelectContent>
         </Select>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 border-lime-500/25 bg-black/40 px-2 text-[11px] text-lime-100"
+          disabled={refreshing || pending}
+          onClick={() => void handleRefreshSchedule()}
+        >
+          {refreshing ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-1 h-3.5 w-3.5" />
+          )}
+          새로고침
+        </Button>
         {showManageLink ? (
           <Button
             asChild

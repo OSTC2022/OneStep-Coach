@@ -59,15 +59,44 @@ export const MARATHON_CATALOG_2026 = catalogData as MarathonCatalogItem[]
 
 export const MARATHON_CATALOG_PAGE_SIZE = 10
 
-export function listMarathonCatalogYear(year = new Date().getFullYear()): MarathonCatalogItem[] {
-  return MARATHON_CATALOG_2026.filter(
-    (item) =>
-      item.event_date.startsWith(`${year}-`) &&
-      isMarathonEventUpcomingOrToday(item.event_date),
-  ).sort(
+export function sortMarathonCatalog(items: MarathonCatalogItem[]): MarathonCatalogItem[] {
+  return [...items].sort(
     (a, b) =>
       a.event_date.localeCompare(b.event_date) || a.title.localeCompare(b.title, 'ko'),
   )
+}
+
+export function listMarathonCatalogYear(year = new Date().getFullYear()): MarathonCatalogItem[] {
+  return sortMarathonCatalog(
+    MARATHON_CATALOG_2026.filter(
+      (item) =>
+        item.event_date.startsWith(`${year}-`) &&
+        isMarathonEventUpcomingOrToday(item.event_date),
+    ),
+  )
+}
+
+/** 저장된 목록 위에 최신 수집분을 덮어쓰고, 새로 올라온 대회는 추가한다. */
+export function mergeMarathonCatalogItems(
+  base: MarathonCatalogItem[],
+  incoming: MarathonCatalogItem[],
+): MarathonCatalogItem[] {
+  const map = new Map<string, MarathonCatalogItem>()
+  for (const item of base) map.set(item.key, item)
+  for (const item of incoming) {
+    const prev = map.get(item.key)
+    map.set(
+      item.key,
+      prev
+        ? {
+            ...prev,
+            ...item,
+            registration_end_date: item.registration_end_date ?? prev.registration_end_date ?? null,
+          }
+        : item,
+    )
+  }
+  return sortMarathonCatalog([...map.values()])
 }
 
 export function catalogRegistrationOpenActive(item: MarathonCatalogItem): boolean {

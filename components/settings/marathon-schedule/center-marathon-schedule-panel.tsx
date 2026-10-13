@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, EyeOff, Loader2, Plus, Save, Search, Star, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Search, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  addMarathonEventFromCatalog,
   deleteMarathonEvent,
   getCenterMarathonScheduleForAdmin,
   listMarathonRecommendations,
+  refreshMarathonCatalog,
   removeMarathonEventFromCatalog,
   saveMarathonEvent,
   type CenterMarathonScheduleBundle,
@@ -18,6 +18,7 @@ import {
   MARATHON_CATALOG_SOURCE,
   MARATHON_REGIONS,
   catalogRegistrationOpenActive,
+  filterMarathonCatalog,
   type MarathonCatalogItem,
 } from '@/lib/running-league/marathon-catalog-2026'
 import {
@@ -114,6 +115,8 @@ export function CenterMarathonSchedulePanel() {
   const [catalogSearch, setCatalogSearch] = useState('')
   const [scheduleSearch, setScheduleSearch] = useState('')
   const [catalogItems, setCatalogItems] = useState<MarathonCatalogItem[]>([])
+  const [liveCatalog, setLiveCatalog] = useState<MarathonCatalogItem[] | null>(null)
+  const [catalogUpdatedAt, setCatalogUpdatedAt] = useState<string | null>(null)
   const [addedKeys, setAddedKeys] = useState<string[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [customLabelDraft, setCustomLabelDraft] = useState('')
@@ -144,9 +147,13 @@ export function CenterMarathonSchedulePanel() {
   }, [monthKey])
 
   useEffect(() => {
+    setRecommendPage(1)
+    if (liveCatalog) {
+      setCatalogLoading(false)
+      return
+    }
     let cancelled = false
     setCatalogLoading(true)
-    setRecommendPage(1)
     void listMarathonRecommendations({
       region: recommendRegion,
       monthKey: recommendMonth,
@@ -162,10 +169,27 @@ export function CenterMarathonSchedulePanel() {
     return () => {
       cancelled = true
     }
-  }, [recommendRegion, recommendMonth, featuredOnly, openOnly, year])
+  }, [recommendRegion, recommendMonth, featuredOnly, openOnly, year, liveCatalog])
+
+  const recommendationItems = useMemo(() => {
+    if (!liveCatalog) return catalogItems
+    return filterMarathonCatalog(liveCatalog, {
+      region: recommendRegion,
+      monthKey: recommendMonth,
+      featuredOnly,
+      registrationOpenOnly: openOnly,
+    })
+  }, [
+    catalogItems,
+    liveCatalog,
+    recommendRegion,
+    recommendMonth,
+    featuredOnly,
+    openOnly,
+  ])
 
   const filteredCatalogItems = useMemo(() => {
-    return catalogItems.filter((item) =>
+    return recommendationItems.filter((item) =>
       marathonTextMatchesQuery(catalogSearch, [
         item.title,
         item.region,
@@ -174,7 +198,7 @@ export function CenterMarathonSchedulePanel() {
         item.event_date,
       ]),
     )
-  }, [catalogItems, catalogSearch])
+  }, [recommendationItems, catalogSearch])
 
   const filteredScheduleEvents = useMemo(() => {
     const events = bundle?.events ?? []
@@ -241,8 +265,28 @@ export function CenterMarathonSchedulePanel() {
       }),
     ]).then(([schedule, recommendations]) => {
       setBundle(schedule)
-      setCatalogItems(recommendations.items)
-      setAddedKeys(recommendations.addedKeys)
+      if (!liveCatalog) {
+        setCatalogItems(recommendations.items)
+        setAddedKeys(recommendations.addedKeys)
+      }
+    })
+  }
+
+  function handleRefreshCatalog() {
+    startTransition(async () => {
+      const result = await refreshMarathonCatalog(year)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      setLiveCatalog(result.items)
+      setAddedKeys(result.addedKeys)
+      setCatalogUpdatedAt(result.fetchedAt)
+      setRecommendPage(1)
+      const schedule = await getCenterMarathonScheduleForAdmin(monthKey)
+      setBundle(schedule)
+      toast.success(result.message)
+      router.refresh()
     })
   }
 
@@ -285,13 +329,15 @@ export function CenterMarathonSchedulePanel() {
           return
         }
         toast.success(`「${item.title}」 추가를 취소했습니다.`)
+        setAddedKeys((keys) => keys.filter((key) => key !== item.key))
       } else {
-        const result = await addMarathonEventFromCatalog(item.key)
+        const result = await saveMarathonEvent(catalogToDraft(item))
         if (!result.ok) {
           toast.error(result.error)
           return
         }
         toast.success(`「${item.title}」을(를) 일정에 추가했습니다.`)
+        setAddedKeys((keys) => (keys.includes(item.key) ? keys : [...keys, item.key]))
       }
       await refreshAll()
       router.refresh()
@@ -335,8 +381,17 @@ export function CenterMarathonSchedulePanel() {
               >
                 {MARATHON_CATALOG_SOURCE.label}
               </a>
-              기준으로 날짜·지역별 대회를 보여 줍니다. 「대회 추가」로 아래 일정에 바로
-              등록하고, 인지도·신청가능 라벨은 회원 화면에도 표시됩니다.
+              기준으로 날짜·지역별 대회를 보여 줍니다. 「최신 정보」를 누르면 마라톤온라인의
+              최근 일정을 다시 받아 옵니다. 새로 올라온 대회는 이 목록에 나타나고, 이미
+              등록된 대회의 접수·일정 정보도 갱신됩니다.
+              {catalogUpdatedAt
+                ? ` 마지막 업데이트 ${new Date(catalogUpdatedAt).toLocaleString('ko-KR', {
+                    month: 'numeric',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}.`
+                : ''}
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -381,6 +436,20 @@ export function CenterMarathonSchedulePanel() {
             >
               신청가능
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={handleRefreshCatalog}
+            >
+              {pending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1 h-3.5 w-3.5" />
+              )}
+              최신 정보
+            </Button>
             <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -402,7 +471,7 @@ export function CenterMarathonSchedulePanel() {
               <Loader2 className="h-4 w-4 animate-spin" />
               추천 대회 불러오는 중…
             </div>
-          ) : catalogItems.length === 0 ? (
+          ) : recommendationItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">조건에 맞는 추천 대회가 없습니다.</p>
           ) : filteredCatalogItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">검색 결과가 없습니다.</p>
