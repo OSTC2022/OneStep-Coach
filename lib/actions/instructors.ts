@@ -22,12 +22,17 @@ import {
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import { getGoogleCalendarIdsForInstructor } from '@/lib/google-calendar/calendar-mappings'
 import { getGoogleCalendarSyncRow } from '@/lib/google-calendar/sync'
+import { expandRecurringMastersForRange } from '@/lib/calendar-recurrence/expand-lessons'
+import type { RecurrenceCapableLesson } from '@/lib/calendar-recurrence/types'
+
+const INSTRUCTOR_PAY_RECURRENCE_COLUMNS =
+  'recurrence, recurrence_pattern, recurrence_group_id, recurring_master_id, original_start_time, google_event_id, google_recurring_event_id'
 
 const INSTRUCTOR_PAY_LESSON_SELECT =
-  'id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, content, member_id, session_deducted, special_note, event_status, event_type, created_at, member:members(id, name), lesson_sessions(checked_in_at)'
+  `id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, content, member_id, session_deducted, special_note, event_status, event_type, created_at, ${INSTRUCTOR_PAY_RECURRENCE_COLUMNS}, member:members(id, name), lesson_sessions(checked_in_at)`
 
 const INSTRUCTOR_PAY_LESSON_SELECT_COMPACT =
-  'id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, member_id, session_deducted, special_note, event_status, event_type, created_at, lesson_sessions(checked_in_at)'
+  `id, lesson_date, start_time, end_time, attendance_status, lesson_type, title, member_id, session_deducted, special_note, event_status, event_type, created_at, ${INSTRUCTOR_PAY_RECURRENCE_COLUMNS}, lesson_sessions(checked_in_at)`
 
 async function fetchInstructorPayLessons(
   instructorId: string,
@@ -61,46 +66,142 @@ async function fetchInstructorPayLessons(
       : null,
   ].filter(Boolean) as Array<{ id: string; name: string | null }>
 
-  if (calendars.length === 0) {
-    return direct ?? []
-  }
+  const calendarIds =
+    calendars.length === 0
+      ? []
+      : await getGoogleCalendarIdsForInstructor(
+          createServiceRoleClient(),
+          instructorId,
+          calendars,
+        )
 
-  const calendarIds = await getGoogleCalendarIdsForInstructor(
-    createServiceRoleClient(),
-    instructorId,
-    calendars,
-  )
+  let orphans: NonNullable<typeof direct> = []
+  if (calendarIds.length > 0) {
+    const { data, error: orphanError } = await supabase
+      .from('lessons')
+      .select(select)
+      .is('instructor_id', null)
+      .in('google_calendar_id', calendarIds)
+      .neq('event_type', 'recurring_master')
+      .gte('lesson_date', dateFrom)
+      .lte('lesson_date', dateTo)
+      .order('lesson_date', { ascending: true })
+      .order('start_time', { ascending: true, nullsFirst: false })
 
-  if (calendarIds.length === 0) {
-    return direct ?? []
-  }
-
-  const { data: orphans, error: orphanError } = await supabase
-    .from('lessons')
-    .select(select)
-    .is('instructor_id', null)
-    .in('google_calendar_id', calendarIds)
-    .neq('event_type', 'recurring_master')
-    .gte('lesson_date', dateFrom)
-    .lte('lesson_date', dateTo)
-    .order('lesson_date', { ascending: true })
-    .order('start_time', { ascending: true, nullsFirst: false })
-
-  if (orphanError) {
-    console.error('Error fetching google-calendar pay lessons:', orphanError)
-    return direct ?? []
+    if (orphanError) {
+      console.error('Error fetching google-calendar pay lessons:', orphanError)
+    } else {
+      orphans = data ?? []
+    }
   }
 
   const byId = new Map<string, NonNullable<typeof direct>[number]>()
-  for (const lesson of [...(direct ?? []), ...(orphans ?? [])]) {
+  for (const lesson of [...(direct ?? []), ...orphans]) {
     byId.set(lesson.id, lesson)
   }
 
-  return [...byId.values()].sort((a, b) => {
+  const stored = [...byId.values()]
+  const expanded = await appendExpandedRecurringPayLessons(
+    supabase,
+    instructorId,
+    dateFrom,
+    dateTo,
+    select,
+    stored,
+    calendarIds,
+  )
+
+  return expanded.sort((a, b) => {
     const dateCmp = a.lesson_date.localeCompare(b.lesson_date)
     if (dateCmp !== 0) return dateCmp
     return (a.start_time ?? '').localeCompare(b.start_time ?? '')
   })
+}
+
+type InstructorPayLessonRow = {
+  id: string
+  lesson_date: string
+  start_time?: string | null
+  event_type?: string | null
+  recurring_master_id?: string | null
+}
+
+/**
+ * 월정액 반복 수업은 회차 차감이 없어 날짜별 행이 생기지 않는다.
+ * 캘린더와 같이 반복 원본을 해당 월 날짜로 펼쳐 강사료 자세히 보기에 넣는다.
+ */
+async function appendExpandedRecurringPayLessons<T extends InstructorPayLessonRow>(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  instructorId: string,
+  dateFrom: string,
+  dateTo: string,
+  select: string,
+  stored: T[],
+  calendarIds: string[],
+): Promise<T[]> {
+  const { data: directMasters, error: masterError } = await supabase
+    .from('lessons')
+    .select(select)
+    .eq('instructor_id', instructorId)
+    .eq('event_type', 'recurring_master')
+    .lte('lesson_date', dateTo)
+
+  if (masterError) {
+    console.error('Error fetching instructor recurring pay lessons:', masterError)
+    return stored
+  }
+
+  let masters = (directMasters ?? []) as RecurrenceCapableLesson[]
+
+  if (calendarIds.length > 0) {
+    const { data: orphanMasters, error: orphanMasterError } = await supabase
+      .from('lessons')
+      .select(select)
+      .is('instructor_id', null)
+      .in('google_calendar_id', calendarIds)
+      .eq('event_type', 'recurring_master')
+      .lte('lesson_date', dateTo)
+
+    if (orphanMasterError) {
+      console.error('Error fetching google recurring pay lessons:', orphanMasterError)
+    } else {
+      const seen = new Set(masters.map((row) => row.id))
+      for (const row of (orphanMasters ?? []) as RecurrenceCapableLesson[]) {
+        if (!seen.has(row.id)) masters.push(row)
+      }
+    }
+  }
+
+  if (masters.length === 0) return stored
+
+  const occupiedDatesByMaster = new Map<string, Set<string>>()
+  for (const row of stored) {
+    if (!row.recurring_master_id) continue
+    const dates = occupiedDatesByMaster.get(row.recurring_master_id) ?? new Set<string>()
+    dates.add(row.lesson_date)
+    occupiedDatesByMaster.set(row.recurring_master_id, dates)
+  }
+
+  const exceptions = stored.filter(
+    (row) => row.event_type === 'exception',
+  ) as unknown as RecurrenceCapableLesson[]
+
+  const virtual = expandRecurringMastersForRange(
+    masters,
+    exceptions,
+    dateFrom,
+    dateTo,
+    occupiedDatesByMaster,
+  )
+
+  const merged = [...stored]
+  const ids = new Set(stored.map((row) => row.id))
+  for (const lesson of virtual) {
+    if (ids.has(lesson.id)) continue
+    ids.add(lesson.id)
+    merged.push(lesson as T)
+  }
+  return merged
 }
 
 type InstructorMutationResult = {
