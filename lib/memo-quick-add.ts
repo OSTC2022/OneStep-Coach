@@ -1,9 +1,64 @@
 import { filterSortMembersForPicker } from '@/lib/korean-search'
 
+/** 일정 문장 앞·뒤의 강사 지정 숫자. 1 이교직, 2 장지용 */
+export type MemoInstructorQuickCode = '1' | '2'
+
+const INSTRUCTOR_QUICK_CODE_NAMES: Record<MemoInstructorQuickCode, string> = {
+  '1': '이교직',
+  '2': '장지용',
+}
+
 export type MemoQuickAddParseResult = {
   memberQuery: string
   startTime: string | null
   endTime: string | null
+  instructorCode: MemoInstructorQuickCode | null
+}
+
+export function instructorNameForQuickCode(
+  code: MemoInstructorQuickCode | null | undefined,
+): string | null {
+  if (!code) return null
+  return INSTRUCTOR_QUICK_CODE_NAMES[code] ?? null
+}
+
+export function resolveInstructorByQuickCode<T extends { id: string; name: string }>(
+  instructors: T[],
+  code: MemoInstructorQuickCode | null | undefined,
+): T | null {
+  const name = instructorNameForQuickCode(code)
+  if (!name) return null
+  const exact = instructors.find((instructor) => instructor.name.trim() === name)
+  if (exact) return exact
+  return (
+    instructors.find((instructor) => instructor.name.replace(/\s+/g, '').includes(name)) ?? null
+  )
+}
+
+/**
+ * 맨 앞 또는 맨 뒤의 1·2만 강사 코드로 본다.
+ * 이름·시간과는 한 칸 이상 띄어야 하며, 18:00 같은 시각 숫자는 건드리지 않는다.
+ */
+function extractInstructorQuickCode(text: string): {
+  code: MemoInstructorQuickCode | null
+  remainder: string
+} {
+  let remainder = text.trim()
+  let code: MemoInstructorQuickCode | null = null
+
+  const prefix = remainder.match(/^([12])\s+([\s\S]+)$/)
+  if (prefix) {
+    code = prefix[1] as MemoInstructorQuickCode
+    remainder = prefix[2].trim()
+  }
+
+  const suffix = remainder.match(/^([\s\S]+?)\s+([12])$/)
+  if (suffix) {
+    if (!code) code = suffix[2] as MemoInstructorQuickCode
+    remainder = suffix[1].trim()
+  }
+
+  return { code, remainder }
 }
 
 function padTime(hour: number, minute: number): string {
@@ -61,22 +116,16 @@ function extractTimeFromMemo(text: string): {
 export function parseMemoQuickAdd(text: string): MemoQuickAddParseResult {
   const trimmed = text.trim()
   if (!trimmed) {
-    return { memberQuery: '', startTime: null, endTime: null }
+    return { memberQuery: '', startTime: null, endTime: null, instructorCode: null }
   }
 
   const time = extractTimeFromMemo(trimmed)
-  if (time) {
-    return {
-      memberQuery: time.remainder.trim(),
-      startTime: time.startTime,
-      endTime: time.endTime,
-    }
-  }
-
+  const instructor = extractInstructorQuickCode(time ? time.remainder : trimmed)
   return {
-    memberQuery: trimmed,
-    startTime: null,
-    endTime: null,
+    memberQuery: instructor.remainder.trim(),
+    startTime: time?.startTime ?? null,
+    endTime: time?.endTime ?? null,
+    instructorCode: instructor.code,
   }
 }
 

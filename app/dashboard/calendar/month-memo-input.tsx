@@ -17,9 +17,11 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   getMemoMemberSuggestions,
+  instructorNameForQuickCode,
   parseMemoQuickAdd,
   resolveMemoMember,
   stripMemberDisplayMeta,
+  type MemoInstructorQuickCode,
 } from '@/lib/memo-quick-add'
 import { searchMembersForPickerCached } from '@/lib/actions/members'
 import { getInstructorCalendarColor } from '@/lib/instructor-colors'
@@ -31,6 +33,8 @@ export type MemoQuickAddPayload = {
   title: string | null
   startTime: string
   endTime: string
+  /** 문장 앞·뒤 1=이교직, 2=장지용. 없으면 기본 강사 */
+  instructorCode: MemoInstructorQuickCode | null
 }
 
 interface MemoMember {
@@ -250,12 +254,13 @@ export function MonthMemoInput({
     setIsSearching(false)
     const label = formatMemberCalendarLabel(member)
     const current = parseMemoQuickAdd(memo)
+    const codePrefix = current.instructorCode ? `${current.instructorCode} ` : ''
     if (current.startTime) {
       const [hour, minute] = current.startTime.split(':').map(Number)
       const timePart = minute > 0 ? `${hour}시 ${minute}분` : `${hour}시`
-      setMemo(`${timePart} ${label}`)
+      setMemo(`${codePrefix}${timePart} ${label}`)
     } else {
-      setMemo(`${label} `)
+      setMemo(`${codePrefix}${label} `)
     }
     inputRef.current?.focus()
   }
@@ -295,6 +300,7 @@ export function MonthMemoInput({
         title: resolved ? null : current.memberQuery,
         startTime,
         endTime,
+        instructorCode: current.instructorCode,
       }),
     )
       .then((result) => {
@@ -374,6 +380,7 @@ export function MonthMemoInput({
     parsed.startTime && parsed.endTime
       ? `${parsed.startTime} – ${parsed.endTime}`
       : null
+  const instructorHint = instructorNameForQuickCode(parsed.instructorCode)
 
   const suggestionList =
     mounted && showSuggestions && anchorRect
@@ -468,7 +475,7 @@ export function MonthMemoInput({
             }
           }}
           onKeyDown={handleKeyDown}
-          placeholder={`${dateHint} 메모 · 시간 이름`}
+          placeholder={`${dateHint} · 1 이름 18:00`}
           className="h-11 border-dashed bg-muted/30 pr-10 text-sm"
           autoComplete="off"
           autoCorrect="off"
@@ -477,9 +484,10 @@ export function MonthMemoInput({
         />
       </div>
 
-      {timeHint && (
+      {(timeHint || instructorHint) && (
         <p className="mt-1.5 text-xs text-muted-foreground">
-          시간: {timeHint}
+          {timeHint ? `시간: ${timeHint}` : null}
+          {instructorHint ? `${timeHint ? ' · ' : ''}${instructorHint} 강사` : null}
           {selectedMember
             ? ` · ${formatMemberCalendarLabel(selectedMember)}`
             : parsed.memberQuery
@@ -494,8 +502,8 @@ export function MonthMemoInput({
         <p className="mt-1.5 text-[11px] text-muted-foreground">
           Enter로
           {parsed.startTime
-            ? ` ${parsed.memberQuery} ${parsed.startTime} 일정 추가`
-            : ` "${parsed.memberQuery}" 일정 추가 (시간 없으면 09:00–10:00)`}
+            ? ` ${parsed.memberQuery} ${parsed.startTime}${instructorHint ? ` ${instructorHint}` : ''} 일정 추가`
+            : ` "${parsed.memberQuery}"${instructorHint ? ` ${instructorHint}` : ''} 일정 추가 (시간 없으면 09:00–10:00)`}
           {' · '}일치하는 회원이 없으면 메모로 등록됩니다.
         </p>
       )}

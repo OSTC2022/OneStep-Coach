@@ -25,7 +25,11 @@ import { useCalendarSelection } from '@/components/dashboard/calendar-selection-
 import { useCalendarLessonHistory } from '@/lib/calendar-lesson-history'
 import { enrichLessonWithInstructorCatalog } from '@/lib/instructor-colors'
 import { normalizePrimaryInstructorId } from '@/lib/member-utils'
-import { parseMemoQuickAdd } from '@/lib/memo-quick-add'
+import {
+  instructorNameForQuickCode,
+  parseMemoQuickAdd,
+  resolveInstructorByQuickCode,
+} from '@/lib/memo-quick-add'
 import type { MemoQuickAddPayload } from './month-memo-input'
 import {
   getViewTitle,
@@ -1249,10 +1253,22 @@ export function LessonCalendar({
   }, [registerLessonSaved])
 
   async function handleMemoSubmit(payload: MemoQuickAddPayload) {
+    const codedInstructor = resolveInstructorByQuickCode(
+      instructors,
+      payload.instructorCode,
+    )
+    if (payload.instructorCode && !codedInstructor) {
+      const name = instructorNameForQuickCode(payload.instructorCode) ?? '강사'
+      return { error: `${name} 강사를 찾지 못했습니다.` }
+    }
+
     const tempId = createOptimisticLessonId()
-    const instructorId = normalizePrimaryInstructorId(defaultInstructorId) || null
+    const instructorId =
+      codedInstructor?.id ||
+      normalizePrimaryInstructorId(defaultInstructorId) ||
+      null
     const instructor = instructorId
-      ? instructors.find((item) => item.id === instructorId) ?? undefined
+      ? instructors.find((item) => item.id === instructorId) ?? codedInstructor ?? undefined
       : undefined
     const memberOption = payload.memberId
       ? members.find((item) => item.id === payload.memberId)
@@ -1498,6 +1514,15 @@ export function LessonCalendar({
     const autoLabel = getDefaultLessonCalendarLabel(persisted.member ?? null)
     const parsed = parseMemoQuickAdd(trimmed)
     const labelPart = parsed.memberQuery.trim()
+    const codedInstructor = resolveInstructorByQuickCode(
+      instructors,
+      parsed.instructorCode,
+    )
+    if (parsed.instructorCode && !codedInstructor) {
+      const name = instructorNameForQuickCode(parsed.instructorCode) ?? '강사'
+      toast.error(`${name} 강사를 찾지 못했습니다.`)
+      return
+    }
 
     if (!memberId && !labelPart) {
       toast.error('이름을 입력해주세요.')
@@ -1535,6 +1560,9 @@ export function LessonCalendar({
         title,
         start_time: startTime ?? persisted.start_time,
         end_time: endTime ?? persisted.end_time,
+        ...(codedInstructor
+          ? { instructor_id: codedInstructor.id, instructor: codedInstructor }
+          : {}),
       },
       instructors,
     )
@@ -1559,6 +1587,7 @@ export function LessonCalendar({
       title,
       start_time: startTime,
       end_time: endTime,
+      ...(codedInstructor ? { instructor_id: codedInstructor.id } : {}),
     })
 
     if (result.error) {
