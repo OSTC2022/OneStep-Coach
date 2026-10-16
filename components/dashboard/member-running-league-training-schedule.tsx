@@ -212,14 +212,14 @@ export function MemberRunningLeagueTrainingSchedule({
       isVotableDay(day) ||
       day.is_hidden ||
       Boolean(day.schedule_date) ||
-      Boolean(day.training_summary.trim()),
+      Boolean(day.training_summary?.trim()),
   )
   const hasNextWeekSchedule = fullNextWeekDays.some(
     (day) =>
       isVotableDay(day) ||
       day.is_hidden ||
       Boolean(day.schedule_date) ||
-      Boolean(day.training_summary.trim()),
+      Boolean(day.training_summary?.trim()),
   )
   const signedUpCount = visibleDays.filter((day) => signupDraft[day.id] ?? day.is_signed_up).length
 
@@ -530,7 +530,7 @@ export function MemberRunningLeagueTrainingSchedule({
         isVotableDay(day) ||
         day.is_hidden ||
         Boolean(day.schedule_date) ||
-        Boolean(day.training_summary.trim()),
+        Boolean(day.training_summary?.trim()),
     )
     if (!hasSchedule) {
       return (
@@ -1004,7 +1004,7 @@ function signupChoicesByTime(
     const at = a.signup_time ?? '99:99'
     const bt = b.signup_time ?? '99:99'
     if (at !== bt) return at.localeCompare(bt)
-    return a.member_name.localeCompare(b.member_name, 'ko')
+    return (a.member_name || '').localeCompare(b.member_name || '', 'ko')
   })
   for (const signup of sorted) {
     if (!signup.signup_time) {
@@ -1121,7 +1121,7 @@ function ScheduleDayRow({
               <Users className="h-3 w-3" />
               {day.signup_count}명 참여
             </span>
-            {day.signups.length > 0 ? (
+            {(day.signups?.length ?? 0) > 0 ? (
               <span className="flex w-full flex-col gap-0.5 pt-0.5">
                 {signupChoicesByTime(day.signups).map((group) => (
                   <span
@@ -1459,18 +1459,18 @@ function ParticipantsDialog({
             ) : null}
 
             <div className="space-y-2">
-              {day.signups.length === 0 ? (
+              {(day.signups?.length ?? 0) === 0 ? (
                 <p className="py-4 text-center text-sm text-zinc-500">
                   아직 참여 신청한 회원이 없습니다.
                 </p>
               ) : (
                 <ul className="max-h-56 space-y-1 overflow-y-auto">
-                  {[...day.signups]
+                  {[...(day.signups ?? [])]
                     .sort((a, b) => {
-                      const at = a.signup_time ?? '99:99'
-                      const bt = b.signup_time ?? '99:99'
+                      const at = a.signup_time || '99:99'
+                      const bt = b.signup_time || '99:99'
                       if (at !== bt) return at.localeCompare(bt)
-                      return a.signed_at.localeCompare(b.signed_at)
+                      return (a.signed_at || '').localeCompare(b.signed_at || '')
                     })
                     .map((signup) => (
                     <li

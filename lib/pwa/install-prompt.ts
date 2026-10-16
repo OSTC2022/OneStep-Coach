@@ -65,7 +65,7 @@ export async function registerPwaServiceWorker(): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
   try {
-    await navigator.serviceWorker.register('/sw.js?v=onestep-v3', { scope: '/' })
+    await navigator.serviceWorker.register('/sw.js?v=onestep-v4', { scope: '/' })
     await navigator.serviceWorker.ready
   } catch {
     /* installability may still work on some browsers */

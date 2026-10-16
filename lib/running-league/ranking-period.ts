@@ -98,6 +98,9 @@ export function rankingPeriodFromMonthKey(monthKey: string): RankingPeriod {
 export function rankingPeriodFromDayKey(dateKey: string): RankingPeriod {
   const normalized = dateKey.slice(0, 10)
   const reference = parseISO(normalized)
+  if (Number.isNaN(reference.getTime())) {
+    return rankingPeriodFromMonthKey(format(new Date(), 'yyyy-MM'))
+  }
   const { start } = currentMonthDateRange(reference)
   const monthKey = format(reference, 'yyyy-MM')
   return {

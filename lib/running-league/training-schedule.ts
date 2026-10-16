@@ -63,7 +63,7 @@ export function normalizeTrainingScheduleTime(
 export function parseTrainingScheduleTimeList(
   value: string | null | undefined,
 ): string[] {
-  const raw = value?.trim() ?? ''
+  const raw = typeof value === 'string' ? value.trim() : ''
   if (!raw) return []
   const seen = new Set<string>()
   const times: string[] = []
@@ -214,13 +214,15 @@ export function buildFullWeekScheduleDays(
 }
 
 export function isVotableTrainingScheduleDay(day: RunningLeagueTrainingScheduleDayView): boolean {
-  return !day.is_hidden && day.training_summary.trim().length > 0
+  const summary = day.training_summary
+  return !day.is_hidden && typeof summary === 'string' && summary.trim().length > 0
 }
 
 export function normalizeTrainingScheduleDate(
   value: string | null | undefined,
 ): string | null {
-  const raw = value?.trim().slice(0, 10)
+  if (typeof value !== 'string') return null
+  const raw = value.trim().slice(0, 10)
   return raw || null
 }
 

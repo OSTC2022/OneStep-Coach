@@ -457,10 +457,10 @@ function mergeTrainingSignups(
     }
   }
   return Array.from(byMember.values()).sort((a, b) => {
-    const at = a.signup_time ?? '99:99'
-    const bt = b.signup_time ?? '99:99'
+    const at = a.signup_time || '99:99'
+    const bt = b.signup_time || '99:99'
     if (at !== bt) return at.localeCompare(bt)
-    return a.signed_at.localeCompare(b.signed_at)
+    return (a.signed_at || '').localeCompare(b.signed_at || '')
   })
 }
 
@@ -520,7 +520,7 @@ async function fetchTrainingSignupsFromAttendance(
   return result
 }
 
-export async function fetchCenterRunningTrainingSchedule(
+async function fetchCenterRunningTrainingScheduleUncached(
   currentMemberId: string | null = null,
   options: {
     includeHidden?: boolean
@@ -725,6 +725,22 @@ export async function fetchCenterRunningTrainingSchedule(
       : previousMonday,
     nextWeekStartDate: nextWeekDays.length ? nextMonday : null,
     tableReady: true,
+  }
+}
+
+export async function fetchCenterRunningTrainingSchedule(
+  currentMemberId: string | null = null,
+  options: {
+    includeHidden?: boolean
+    portalWeeks?: boolean
+    audience?: TrainingScheduleAudience
+  } = {},
+): Promise<CenterRunningTrainingScheduleBundle> {
+  try {
+    return await fetchCenterRunningTrainingScheduleUncached(currentMemberId, options)
+  } catch (error) {
+    console.error('fetchCenterRunningTrainingSchedule', error)
+    return emptyPortalBundle(true)
   }
 }
 

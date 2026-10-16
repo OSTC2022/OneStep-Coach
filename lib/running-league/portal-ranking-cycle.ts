@@ -22,24 +22,45 @@ export function portalRankingDateRange(cycleStartDate: string | null | undefined
 }
 
 export function formatRankingCycleLabel(start: string, end: string): string {
-  const startDate = parseISO(start.slice(0, 10))
-  const endDate = parseISO(end.slice(0, 10))
-  if (start.slice(0, 10) === end.slice(0, 10)) {
-    return format(startDate, 'yyyy년 M월 d일', { locale: ko })
+  try {
+    const startDate = parseISO(start.slice(0, 10))
+    const endDate = parseISO(end.slice(0, 10))
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return `${start} ~ ${end}`
+    }
+    if (start.slice(0, 10) === end.slice(0, 10)) {
+      return format(startDate, 'yyyy년 M월 d일', { locale: ko })
+    }
+    return `${format(startDate, 'yyyy.M.d', { locale: ko })} ~ ${format(endDate, 'M.d', { locale: ko })}`
+  } catch {
+    return `${start} ~ ${end}`
   }
-  return `${format(startDate, 'yyyy.M.d', { locale: ko })} ~ ${format(endDate, 'M.d', { locale: ko })}`
 }
 
 export function rankingPeriodFromCycleStart(cycleStartDate: string): RankingPeriod {
-  const start = cycleStartDate.slice(0, 10)
   const end = format(new Date(), 'yyyy-MM-dd')
-  const monthKey = format(parseISO(start), 'yyyy-MM')
-  return {
-    start,
-    end,
-    label: formatRankingCycleLabel(start, end),
-    monthKey,
-    mode: 'cycle',
-    asOfDate: end,
+  try {
+    const start = cycleStartDate.slice(0, 10)
+    const parsed = parseISO(start)
+    if (Number.isNaN(parsed.getTime())) throw new Error('invalid cycle start')
+    const monthKey = format(parsed, 'yyyy-MM')
+    return {
+      start,
+      end,
+      label: formatRankingCycleLabel(start, end),
+      monthKey,
+      mode: 'cycle',
+      asOfDate: end,
+    }
+  } catch {
+    const monthKey = end.slice(0, 7)
+    return {
+      start: `${monthKey}-01`,
+      end,
+      label: formatRankingCycleLabel(`${monthKey}-01`, end),
+      monthKey,
+      mode: 'cycle',
+      asOfDate: end,
+    }
   }
 }

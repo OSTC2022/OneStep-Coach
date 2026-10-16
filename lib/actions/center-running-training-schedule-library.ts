@@ -326,7 +326,7 @@ async function attachSignupsToSnapshotDays(
       byMember.set(signup.member_id, signup)
     }
     const signups = Array.from(byMember.values()).sort((a, b) =>
-      a.signed_at.localeCompare(b.signed_at),
+      (a.signed_at || '').localeCompare(b.signed_at || ''),
     )
 
     if (signups.length === 0) {

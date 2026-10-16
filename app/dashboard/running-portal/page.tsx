@@ -17,19 +17,52 @@ export default async function StaffRunningPortalPage() {
     redirect('/dashboard')
   }
 
-  const member = await getRunningPortalMemberForCurrentUser()
+  const member = await getRunningPortalMemberForCurrentUser().catch((error) => {
+    console.error('StaffRunningPortalPage.member', error)
+    return null
+  })
   if (!member) {
-    redirect('/dashboard')
+    return (
+      <div className="mx-auto max-w-lg space-y-2 px-4 py-10">
+        <h1 className="text-xl font-bold">러닝 포털을 열지 못했습니다</h1>
+        <p className="text-sm text-muted-foreground">
+          연결된 회원 프로필이 없습니다. 잠시 후 다시 열어 주세요.
+        </p>
+      </div>
+    )
   }
 
   const [data, runningLeagueHome, centerTrainingSchedule, marathonSchedule, portalDisplay] =
     await Promise.all([
-      loadMemberPortalData(member),
+      loadMemberPortalData(member).catch((error) => {
+        console.error('StaffRunningPortalPage.portalData', error)
+        return null
+      }),
       getMemberRunningLeagueHome(member.id),
-      getCenterRunningTrainingScheduleForMember(),
-      getCenterMarathonScheduleForMember(),
-      getAdultRunningPortalDisplaySettings(),
+      getCenterRunningTrainingScheduleForMember('adult_running').catch((error) => {
+        console.error('StaffRunningPortalPage.schedule', error)
+        return null
+      }),
+      getCenterMarathonScheduleForMember().catch((error) => {
+        console.error('StaffRunningPortalPage.marathon', error)
+        return null
+      }),
+      getAdultRunningPortalDisplaySettings().catch((error) => {
+        console.error('StaffRunningPortalPage.display', error)
+        return null
+      }),
     ])
+
+  if (!data) {
+    return (
+      <div className="mx-auto max-w-lg space-y-2 px-4 py-10">
+        <h1 className="text-xl font-bold">러닝 포털을 열지 못했습니다</h1>
+        <p className="text-sm text-muted-foreground">
+          회원 정보를 불러오지 못했습니다. 잠시 후 다시 열어 주세요.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <MemberMyPage

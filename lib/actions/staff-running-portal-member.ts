@@ -20,10 +20,13 @@ async function fetchMemberByAuthUserId(
     .from('members')
     .select('*')
     .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
-    .maybeSingle()
+    .limit(10)
 
-  if (error || !data) return null
-  return data as Member
+  if (error || !data?.length) return null
+  const matches = data as Member[]
+  return (
+    matches.find((row) => !row.memo?.includes('스태프 러닝 포털')) ?? matches[0]
+  )
 }
 
 async function createStaffRunningPortalMember(user: User): Promise<Member | null> {

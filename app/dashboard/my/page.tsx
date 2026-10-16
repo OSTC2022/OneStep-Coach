@@ -45,7 +45,10 @@ export default async function MyDashboardPage() {
       youthAthletics || useAdultRunningPortal
         ? getCenterRunningTrainingScheduleForMember(
             youthAthletics ? 'youth_athletics' : 'adult_running',
-          )
+          ).catch((error) => {
+            console.error('MyDashboardPage.schedule', error)
+            return null
+          })
         : Promise.resolve(null),
       useAdultRunningPortal
         ? getCenterMarathonScheduleForMember()

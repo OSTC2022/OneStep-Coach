@@ -318,20 +318,23 @@ async function fetchLinkedMemberRow(
   supabase: Awaited<ReturnType<typeof createClient>>,
   authUserId: string,
 ): Promise<Member | null> {
-  const { data: basic, error: basicError } = await supabase
+  const { data: rows, error: basicError } = await supabase
     .from('members')
     .select('*')
     .or(`auth_user_id.eq.${authUserId},user_id.eq.${authUserId}`)
-    .maybeSingle()
+    .limit(10)
 
   if (basicError) {
     console.error('getMemberForCurrentUser:', basicError.message)
     return null
   }
 
-  if (!basic) return null
+  const matches = (rows ?? []) as Member[]
+  if (matches.length === 0) return null
 
-  const member = basic as Member
+  // 같은 계정에 회원 행이 여러 개면 maybeSingle 이 실패해 포털이 대시보드로 튕긴다.
+  const member =
+    matches.find((row) => !row.memo?.includes('스태프 러닝 포털')) ?? matches[0]
   if (!member.primary_instructor_id) {
     return member
   }

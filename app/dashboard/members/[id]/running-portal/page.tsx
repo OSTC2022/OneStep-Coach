@@ -25,7 +25,7 @@ export default async function MemberRunningPortalPreviewPage({
   const [data, runningLeagueHome, centerTrainingSchedule, marathonSchedule] = await Promise.all([
     getMemberPortalDataForStaff(id),
     getMemberRunningLeagueHomeForStaff(id),
-    getCenterRunningTrainingScheduleForMember(),
+    getCenterRunningTrainingScheduleForMember('adult_running'),
     getCenterMarathonScheduleForMember(),
   ])
 

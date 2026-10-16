@@ -9,7 +9,6 @@ import {
 } from 'react'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
-import { ko } from 'date-fns/locale'
 import {
   Activity,
   CalendarDays,
@@ -138,6 +137,17 @@ function resolveProfileAside(data: MemberPortalData) {
   }
 }
 
+function formatPortalDay(value: string | null | undefined): string {
+  if (!value) return '기록 없음'
+  try {
+    const date = parseISO(value.slice(0, 10))
+    if (Number.isNaN(date.getTime())) return '기록 없음'
+    return format(date, 'M/d')
+  } catch {
+    return '기록 없음'
+  }
+}
+
 export function MemberMyPage({
   data,
   role,
@@ -156,8 +166,9 @@ export function MemberMyPage({
 }: MemberMyPageProps) {
   const { member, summary, sessionStatus } = data
   const isAdultMember =
-    (role === 'adult_member' || isAdultRunningSport(member.sport)) &&
-    !isYouthAthleticsClassSport(member.sport)
+    showRunningPortal ||
+    ((role === 'adult_member' || isAdultRunningSport(member.sport)) &&
+      !isYouthAthleticsClassSport(member.sport))
   const showRunningPortalSection = showRunningPortal || isAdultMember
   const instructorName = member.primary_instructor?.name ?? '자율배정'
   const sportProfile = formatSportProfile(member)
@@ -326,9 +337,7 @@ export function MemberMyPage({
               title="최근 출석일"
               icon={<CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-70" />}
               value={
-                summary.recentAttendanceDate
-                  ? format(parseISO(summary.recentAttendanceDate), 'M/d')
-                  : '기록 없음'
+                formatPortalDay(summary.recentAttendanceDate)
               }
               hint="센터 출석 기준"
               compact
@@ -459,9 +468,7 @@ export function MemberMyPage({
               title="최근 출석일"
               icon={<CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-70" />}
               value={
-                summary.recentAttendanceDate
-                  ? format(parseISO(summary.recentAttendanceDate), 'M/d')
-                  : '기록 없음'
+                formatPortalDay(summary.recentAttendanceDate)
               }
               hint="센터 출석 기준"
             />
