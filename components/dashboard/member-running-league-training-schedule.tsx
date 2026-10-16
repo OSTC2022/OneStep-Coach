@@ -267,7 +267,7 @@ export function MemberRunningLeagueTrainingSchedule({
               location_label: update.location_label.trim(),
               naver_map_url: update.naver_map_url.trim() || null,
               map_href: mapHref,
-              training_time: update.training_time,
+              training_time: serializeTrainingScheduleTimes(update.training_time),
               is_hidden: update.is_hidden,
             }
           : day,
@@ -286,7 +286,7 @@ export function MemberRunningLeagueTrainingSchedule({
             location_label: update.location_label.trim(),
             naver_map_url: update.naver_map_url.trim() || null,
             map_href: mapHref,
-            training_time: update.training_time,
+            training_time: serializeTrainingScheduleTimes(update.training_time),
             is_hidden: update.is_hidden,
           }
         : current,
@@ -1354,7 +1354,14 @@ function ParticipantsDialog({
                 </p>
               ) : (
                 <ul className="max-h-56 space-y-1 overflow-y-auto">
-                  {day.signups.map((signup) => (
+                  {[...day.signups]
+                    .sort((a, b) => {
+                      const at = a.signup_time ?? '99:99'
+                      const bt = b.signup_time ?? '99:99'
+                      if (at !== bt) return at.localeCompare(bt)
+                      return a.signed_at.localeCompare(b.signed_at)
+                    })
+                    .map((signup) => (
                     <li
                       key={`${signup.member_id}-${signup.signed_at}`}
                       className="flex items-center gap-2 rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"

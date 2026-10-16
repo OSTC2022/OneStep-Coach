@@ -73,7 +73,7 @@ export function parseTrainingScheduleTimeList(
     seen.add(normalized)
     times.push(normalized)
   }
-  return times
+  return times.sort((a, b) => a.localeCompare(b))
 }
 
 export function serializeTrainingScheduleTimes(

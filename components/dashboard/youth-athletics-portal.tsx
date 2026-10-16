@@ -36,6 +36,7 @@ import {
   formatYouthAthleticsPrimaryEventsLabel,
   formatYouthAthleticsRemainingDday,
 } from '@/lib/youth-athletics-events'
+import { formatTrainingScheduleTimeListLabel } from '@/lib/running-league/training-schedule'
 import { cn } from '@/lib/utils'
 
 type YouthAthleticsPortalProps = {
@@ -235,9 +236,9 @@ export function YouthAthleticsPortal({
               >
                 <p className="text-[11px] font-semibold text-[#AAFF00]">
                   {day.weekday_label}요일
-                  {day.training_time ? (
+                  {formatTrainingScheduleTimeListLabel(day.training_time) ? (
                     <span className="ml-1 font-medium tabular-nums text-[#AAFF00]/80">
-                      {day.training_time}
+                      {formatTrainingScheduleTimeListLabel(day.training_time)}
                     </span>
                   ) : null}
                 </p>
