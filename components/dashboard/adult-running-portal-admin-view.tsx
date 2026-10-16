@@ -112,6 +112,8 @@ export function AdultRunningPortalAdminView({
               tableReady={trainingScheduleReady}
               canParticipate={false}
               canStaffProxySignup
+              canEditDays
+              scheduleAudience="adult_running"
               embedded
               contentOnly
             />

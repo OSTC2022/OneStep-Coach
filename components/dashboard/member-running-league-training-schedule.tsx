@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChevronDown,
   ExternalLink,
+  FolderOpen,
   Loader2,
   MapPin,
   Pencil,
@@ -22,6 +23,11 @@ import {
   type TrainingScheduleDayContentUpdate,
 } from '@/lib/actions/center-running-training-schedule'
 import { YouthScheduleDayEditDialog } from '@/components/settings/running-schedule/youth-schedule-day-edit-dialog'
+import {
+  listCenterTrainingScheduleLocationPresets,
+  type CenterTrainingScheduleLocationPreset,
+} from '@/lib/actions/center-running-training-schedule-library'
+import { parseSingleTimeToken } from '@/lib/time-input-parse'
 import type { MemberPickerOption } from '@/lib/actions/members'
 import type {
   RunningLeagueTrainingScheduleDayView,
@@ -39,6 +45,7 @@ import {
 import {
   parseTrainingScheduleDayId,
   trainingScheduleDayId,
+  type TrainingScheduleAudience,
 } from '@/lib/training-schedule-audience'
 import { Button } from '@/components/ui/button'
 import {
@@ -78,8 +85,10 @@ type MemberRunningLeagueTrainingScheduleProps = {
   readOnly?: boolean
   /** 마감 후 관리자·강사 대리 참여 (회원 선택) */
   canStaffProxySignup?: boolean
-  /** 육상선수반 — 날짜만 골라 수정, 참여자 추가·삭제 */
+  /** 관리자·강사 — 날짜만 골라 수정, 참여자 추가·삭제 */
   canEditDays?: boolean
+  /** 수정이 반영될 스케줄. 회원 화면에서는 쓰이지 않는다. */
+  scheduleAudience?: TrainingScheduleAudience
   embedded?: boolean
   /** 카드 헤더 없이 본문만 (툴바 팝업용) */
   contentOnly?: boolean
@@ -121,6 +130,7 @@ export function MemberRunningLeagueTrainingSchedule({
   readOnly = false,
   canStaffProxySignup = false,
   canEditDays = false,
+  scheduleAudience = 'adult_running',
   embedded = false,
   contentOnly = false,
   title = '훈련 일정',
@@ -300,7 +310,7 @@ export function MemberRunningLeagueTrainingSchedule({
     setProxyMembers(null)
 
     const audience = canEditDays
-      ? 'youth_athletics'
+      ? scheduleAudience
       : (parseTrainingScheduleDayId(day.id)?.audience ?? 'adult_running')
 
     void listMembersForTrainingScheduleStaffSignup(audience)
@@ -414,7 +424,7 @@ export function MemberRunningLeagueTrainingSchedule({
     startTransition(async () => {
       const result = await staffRemoveCenterRunningTrainingScheduleSignup(
         canEditDays && day.schedule_date
-          ? trainingScheduleDayId('youth_athletics', day.weekday, day.schedule_date)
+          ? trainingScheduleDayId(scheduleAudience, day.weekday, day.schedule_date)
           : day.id,
         signup.member_id,
       )
@@ -446,7 +456,7 @@ export function MemberRunningLeagueTrainingSchedule({
     startTransition(async () => {
       const result = await staffAddCenterRunningTrainingScheduleSignup(
         canEditDays && day.schedule_date
-          ? trainingScheduleDayId('youth_athletics', day.weekday, day.schedule_date)
+          ? trainingScheduleDayId(scheduleAudience, day.weekday, day.schedule_date)
           : day.id,
         member.id,
       )
@@ -607,7 +617,7 @@ export function MemberRunningLeagueTrainingSchedule({
             수정
           </Button>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            날짜만 골라 훈련 내용과 참여자를 수정하면 육상 포털에 바로 반영됩니다.
+            날짜만 골라 훈련 내용과 참여자를 수정하면 포털에 바로 반영됩니다.
           </p>
         </div>
       ) : null}
@@ -635,6 +645,7 @@ export function MemberRunningLeagueTrainingSchedule({
         staffSignupAnytime={canEditDays && canStaffProxySignup}
         signupClosed={activeDay ? daySignupClosed(activeDay) : false}
         canEditContent={canEditDays}
+        scheduleAudience={scheduleAudience}
         onContentSaved={(update) => {
           patchDayContent(update)
           router.refresh()
@@ -765,6 +776,7 @@ export function MemberRunningLeagueTrainingSchedule({
         <YouthScheduleDayEditDialog
           open={dayEditOpen}
           onOpenChange={setDayEditOpen}
+          audience={scheduleAudience}
           pastDays={fullPastWeekDays}
           currentDays={fullWeekDays}
           nextDays={fullNextWeekDays}
@@ -1032,24 +1044,67 @@ function ScheduleDayRow({
   )
 }
 
+function isCompleteClockDraft(raw: string): boolean {
+  const trimmed = raw.trim()
+  return /^\d{1,2}:\d{2}$/.test(trimmed) || /^\d{4}$/.test(trimmed)
+}
+
+function normalizeScheduleClock(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  return parseSingleTimeToken(trimmed)
+}
+
 function DayContentQuickEdit({
   day,
+  audience,
   onSaved,
 }: {
   day: RunningLeagueTrainingScheduleDayView
+  audience: TrainingScheduleAudience
   onSaved?: (update: TrainingScheduleDayContentUpdate) => void
 }) {
   const [summary, setSummary] = useState(day.training_summary)
+  const [trainingTime, setTrainingTime] = useState(day.training_time ?? '')
+  const [locationLabel, setLocationLabel] = useState(day.location_label)
+  const [mapUrl, setMapUrl] = useState(day.naver_map_url ?? '')
+  const [locationPresets, setLocationPresets] = useState<CenterTrainingScheduleLocationPreset[]>(
+    [],
+  )
+  const [placesOpen, setPlacesOpen] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setSummary(day.training_summary)
-  }, [day.id, day.training_summary])
+    setTrainingTime(normalizeScheduleClock(day.training_time ?? '') || (day.training_time ?? ''))
+    setLocationLabel(day.location_label)
+    setMapUrl(day.naver_map_url ?? '')
+    setPlacesOpen(false)
+  }, [day.id, day.training_summary, day.training_time, day.location_label, day.naver_map_url])
+
+  useEffect(() => {
+    let cancelled = false
+    void listCenterTrainingScheduleLocationPresets(audience)
+      .then((rows) => {
+        if (!cancelled) setLocationPresets(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setLocationPresets([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [audience])
 
   async function save() {
     const date = day.schedule_date?.slice(0, 10)
     if (!date) {
       toast.error('날짜가 있는 일정만 수정할 수 있습니다.')
+      return
+    }
+    const time = normalizeScheduleClock(trainingTime)
+    if (time == null) {
+      toast.error('시간은 20:00처럼 입력해주세요.')
       return
     }
     setSaving(true)
@@ -1058,18 +1113,22 @@ function DayContentQuickEdit({
         schedule_date: date,
         weekday: day.weekday,
         training_summary: summary,
-        location_label: day.location_label,
-        naver_map_url: day.naver_map_url ?? '',
-        training_time: day.training_time,
+        location_label: locationLabel,
+        naver_map_url: mapUrl,
+        training_time: time || null,
         is_hidden: day.is_hidden,
       }
-      const result = await updateSelectedTrainingScheduleDays([update], 'youth_athletics')
+      const result = await updateSelectedTrainingScheduleDays([update], audience)
       if (!result.ok) {
         toast.error(result.error)
         return
       }
       onSaved?.(update)
-      toast.success('수업 내용을 수정했습니다.')
+      toast.success(
+        audience === 'youth_athletics'
+          ? '이 날짜 스케줄을 수정했습니다. 육상 포털에 반영됩니다.'
+          : '이 날짜 스케줄을 수정했습니다. 러닝 포털에 반영됩니다.',
+      )
     } finally {
       setSaving(false)
     }
@@ -1085,6 +1144,84 @@ function DayContentQuickEdit({
         disabled={saving}
         className="min-h-[72px] border-lime-500/20 bg-black/40 text-sm text-zinc-100"
       />
+      <label className="text-xs font-medium text-zinc-400">시간</label>
+      <Input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="20:00"
+        value={trainingTime}
+        disabled={saving}
+        onChange={(event) => {
+          const next = event.target.value
+          if (!isCompleteClockDraft(next)) {
+            setTrainingTime(next)
+            return
+          }
+          setTrainingTime(normalizeScheduleClock(next) ?? next)
+        }}
+        onBlur={() => {
+          const normalized = normalizeScheduleClock(trainingTime)
+          if (normalized != null) setTrainingTime(normalized)
+        }}
+        className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+      />
+      <label className="text-xs font-medium text-zinc-400">장소</label>
+      <Input
+        value={locationLabel}
+        disabled={saving}
+        onChange={(event) => setLocationLabel(event.target.value)}
+        placeholder="장소"
+        className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+      />
+      <Input
+        value={mapUrl}
+        disabled={saving}
+        onChange={(event) => setMapUrl(event.target.value)}
+        placeholder="네이버 지도 URL"
+        className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+      />
+      <div className="space-y-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 border-lime-500/25"
+          disabled={saving || locationPresets.length === 0}
+          onClick={() => setPlacesOpen((value) => !value)}
+        >
+          <FolderOpen className="mr-1 h-3.5 w-3.5" />
+          {locationPresets.length === 0 ? '저장된 장소 없음' : '장소 불러오기'}
+          {locationPresets.length > 0 ? (
+            <ChevronDown className={cn('ml-1 h-3.5 w-3.5', placesOpen && 'rotate-180')} />
+          ) : null}
+        </Button>
+        {placesOpen && locationPresets.length > 0 ? (
+          <ul className="max-h-36 overflow-y-auto rounded-md border border-lime-500/20">
+            {locationPresets.map((preset) => (
+              <li key={preset.id} className="border-b border-lime-500/15 last:border-b-0">
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-start gap-0.5 px-2.5 py-2 text-left hover:bg-lime-500/10"
+                  onClick={() => {
+                    setLocationLabel(preset.location_label)
+                    setMapUrl(preset.naver_map_url)
+                    setPlacesOpen(false)
+                    toast.success(`${preset.location_label} 장소를 불러왔습니다.`)
+                  }}
+                >
+                  <span className="text-sm font-medium text-zinc-100">{preset.location_label}</span>
+                  {preset.naver_map_url ? (
+                    <span className="max-w-full truncate text-[11px] text-zinc-500">
+                      {preset.naver_map_url}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       <Button
         type="button"
         size="sm"
@@ -1093,7 +1230,7 @@ function DayContentQuickEdit({
         onClick={() => void save()}
       >
         {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-        내용 저장
+        저장
       </Button>
     </div>
   )
@@ -1112,6 +1249,7 @@ function ParticipantsDialog({
   staffSignupAnytime = false,
   signupClosed,
   canEditContent = false,
+  scheduleAudience = 'adult_running',
   onContentSaved,
   onRequestRemoveSignup,
 }: {
@@ -1127,6 +1265,7 @@ function ParticipantsDialog({
   staffSignupAnytime?: boolean
   signupClosed: boolean
   canEditContent?: boolean
+  scheduleAudience?: TrainingScheduleAudience
   onContentSaved?: (update: TrainingScheduleDayContentUpdate) => void
   onRequestRemoveSignup: (signup: RunningLeagueTrainingScheduleSignup) => void
 }) {
@@ -1146,7 +1285,7 @@ function ParticipantsDialog({
               </DialogTitle>
               {canEditContent ? (
                 <DialogDescription className="text-left text-zinc-400">
-                  이 날짜의 수업 내용을 바로 수정합니다.
+                  이 날짜의 수업 내용, 시간, 장소를 바로 수정합니다.
                 </DialogDescription>
               ) : (
                 <DialogDescription className="text-left text-zinc-400">
@@ -1156,7 +1295,11 @@ function ParticipantsDialog({
             </DialogHeader>
 
             {canEditContent ? (
-              <DayContentQuickEdit day={day} onSaved={onContentSaved} />
+              <DayContentQuickEdit
+                day={day}
+                audience={scheduleAudience}
+                onSaved={onContentSaved}
+              />
             ) : null}
 
             <div className="space-y-2">

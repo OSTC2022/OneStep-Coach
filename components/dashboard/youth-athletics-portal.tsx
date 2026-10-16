@@ -268,6 +268,7 @@ export function YouthAthleticsPortal({
             readOnly={adminPreview && !canStaffProxySignup}
             canStaffProxySignup={canStaffProxySignup}
             canEditDays={canStaffProxySignup}
+            scheduleAudience="youth_athletics"
             embedded
             contentOnly
             title="육상선수반 스케줄"

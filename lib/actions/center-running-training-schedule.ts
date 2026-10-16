@@ -139,9 +139,8 @@ async function fetchCenterScheduleDayRows(
   audience: TrainingScheduleAudience = 'adult_running',
 ) {
   const daysTable = trainingScheduleConfig(audience).daysTable
-  const withTime = audience === 'youth_athletics'
 
-  if (withTime) {
+  {
     const timed = await supabase
       .from(daysTable)
       .select(CENTER_SCHEDULE_DAY_SELECT_WITH_TIME)
@@ -241,6 +240,7 @@ function revalidateCenterTrainingSchedulePaths() {
   revalidatePath('/dashboard/settings/running-schedule')
   revalidatePath('/dashboard/settings/youth-athletics-schedule')
   revalidatePath('/dashboard/youth-athletics-portal')
+  revalidatePath('/dashboard/running-portal')
   revalidatePath('/dashboard/members', 'layout')
 }
 
@@ -743,7 +743,7 @@ export async function saveCenterRunningTrainingSchedule(
 ): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   await requireRole(['admin'])
   const tables = trainingScheduleConfig(audience)
-  const includeTrainingTime = audience === 'youth_athletics'
+  const includeTrainingTime = true
 
   const normalized: CenterScheduleDayUpsertRow[] = createEmptyTrainingScheduleDays().map(
     (emptyDay) => {
@@ -813,7 +813,9 @@ export async function saveCenterRunningTrainingSchedule(
     if (!retryWithoutTime.error) {
       result = retryWithoutTime
       warning =
-        '시간 컬럼이 DB에 없어 내용만 저장했습니다. Supabase에서 add-youth-athletics-training-schedule-time.sql을 실행해주세요.'
+        audience === 'youth_athletics'
+          ? '시간 컬럼이 DB에 없어 내용만 저장했습니다. Supabase에서 add-youth-athletics-training-schedule-time.sql을 실행해주세요.'
+          : '시간 컬럼이 DB에 없어 내용만 저장했습니다. Supabase에서 add-center-running-training-schedule-time.sql을 실행해주세요.'
     } else {
       result = retryWithoutTime
     }
@@ -1007,7 +1009,7 @@ export async function updateSelectedTrainingScheduleDays(
     )
   }
 
-  const includeTrainingTime = audience === 'youth_athletics'
+  const includeTrainingTime = true
   for (const patch of patches) {
     const patchWeek = getMondayDateKeyForDateKey(patch.schedule_date)
     if (liveWeekStart !== patchWeek) continue

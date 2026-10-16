@@ -20,7 +20,10 @@ import type {
   RunningLeagueTrainingScheduleSignup,
 } from '@/lib/running-league/training-schedule'
 import { TRAINING_WEEKDAY_LABELS } from '@/lib/running-league/training-schedule'
-import { trainingScheduleDayId } from '@/lib/training-schedule-audience'
+import {
+  trainingScheduleDayId,
+  type TrainingScheduleAudience,
+} from '@/lib/training-schedule-audience'
 import { parseSingleTimeToken } from '@/lib/time-input-parse'
 import { Button } from '@/components/ui/button'
 import {
@@ -77,9 +80,12 @@ function draftFromDay(day: RunningLeagueTrainingScheduleDayView): DayDraft {
   }
 }
 
-function signupDayId(day: RunningLeagueTrainingScheduleDayView): string {
+function signupDayId(
+  day: RunningLeagueTrainingScheduleDayView,
+  audience: TrainingScheduleAudience,
+): string {
   if (day.schedule_date) {
-    return trainingScheduleDayId('youth_athletics', day.weekday, day.schedule_date)
+    return trainingScheduleDayId(audience, day.weekday, day.schedule_date)
   }
   return day.id
 }
@@ -90,6 +96,7 @@ export function YouthScheduleDayEditDialog({
   pastDays,
   currentDays,
   nextDays,
+  audience = 'youth_athletics',
   onApplied,
   onSignupsChanged,
 }: {
@@ -98,6 +105,7 @@ export function YouthScheduleDayEditDialog({
   pastDays: RunningLeagueTrainingScheduleDayView[]
   currentDays: RunningLeagueTrainingScheduleDayView[]
   nextDays: RunningLeagueTrainingScheduleDayView[]
+  audience?: TrainingScheduleAudience
   onApplied: (updates: TrainingScheduleDayContentUpdate[]) => void
   onSignupsChanged: (
     day: RunningLeagueTrainingScheduleDayView,
@@ -120,7 +128,7 @@ export function YouthScheduleDayEditDialog({
     setDrafts({})
     setSignupOverride({})
     let cancelled = false
-    void listCenterTrainingScheduleLocationPresets('youth_athletics')
+    void listCenterTrainingScheduleLocationPresets(audience)
       .then((rows) => {
         if (!cancelled) setLocationPresets(rows)
       })
@@ -130,7 +138,7 @@ export function YouthScheduleDayEditDialog({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, audience])
 
   const weeks = useMemo<WeekGroup[]>(() => {
     const groups: WeekGroup[] = [
@@ -216,13 +224,17 @@ export function YouthScheduleDayEditDialog({
     }
 
     startTransition(async () => {
-      const result = await updateSelectedTrainingScheduleDays(updates, 'youth_athletics')
+      const result = await updateSelectedTrainingScheduleDays(updates, audience)
       if (!result.ok) {
         toast.error(result.error)
         return
       }
       onApplied(updates)
-      toast.success('선택한 날짜를 수정했습니다. 육상 포털에 반영됩니다.')
+      toast.success(
+        audience === 'youth_athletics'
+          ? '선택한 날짜를 수정했습니다. 육상 포털에 반영됩니다.'
+          : '선택한 날짜를 수정했습니다. 러닝 포털에 반영됩니다.',
+      )
       onOpenChange(false)
     })
   }
@@ -233,7 +245,7 @@ export function YouthScheduleDayEditDialog({
         <DialogHeader className="shrink-0 border-b px-4 py-3 text-left">
           <DialogTitle>날짜별 스케줄 수정</DialogTitle>
           <DialogDescription>
-            고른 날짜만 바꿉니다. 저장하면 육상 포털에 바로 반영되고, 참여자는 관리자·강사가
+            고른 날짜만 바꿉니다. 저장하면 포털에 바로 반영되고, 참여자는 관리자·강사가
             넣거나 뺄 수 있습니다.
           </DialogDescription>
         </DialogHeader>
@@ -286,6 +298,7 @@ export function YouthScheduleDayEditDialog({
                 signups={signupsFor(day)}
                 pending={pending}
                 locationPresets={locationPresets}
+                audience={audience}
                 onChange={(patch) => updateDraft(key, patch)}
                 onSignupsChange={(signups) => setSignups(day, signups)}
               />
@@ -310,6 +323,7 @@ function DayEditor({
   signups,
   pending,
   locationPresets,
+  audience,
   onChange,
   onSignupsChange,
 }: {
@@ -318,6 +332,7 @@ function DayEditor({
   signups: RunningLeagueTrainingScheduleSignup[]
   pending: boolean
   locationPresets: CenterTrainingScheduleLocationPreset[]
+  audience: TrainingScheduleAudience
   onChange: (patch: Partial<DayDraft>) => void
   onSignupsChange: (signups: RunningLeagueTrainingScheduleSignup[]) => void
 }) {
@@ -330,7 +345,7 @@ function DayEditor({
   useEffect(() => {
     if (!membersOpen || members) return
     let cancelled = false
-    void listMembersForTrainingScheduleStaffSignup('youth_athletics')
+    void listMembersForTrainingScheduleStaffSignup(audience)
       .then((rows) => {
         if (!cancelled) setMembers(rows)
       })
@@ -340,7 +355,7 @@ function DayEditor({
     return () => {
       cancelled = true
     }
-  }, [membersOpen, members])
+  }, [membersOpen, members, audience])
 
   const savedVotable = !day.is_hidden && day.training_summary.trim().length > 0
 
@@ -354,7 +369,7 @@ function DayEditor({
   function addMember(member: MemberPickerOption) {
     if (memberPending) return
     setMemberPending(true)
-    void staffAddCenterRunningTrainingScheduleSignup(signupDayId(day), member.id)
+    void staffAddCenterRunningTrainingScheduleSignup(signupDayId(day, audience), member.id)
       .then((result) => {
         if (!result.ok) {
           toast.error(result.error)
@@ -375,7 +390,7 @@ function DayEditor({
   function removeMember(signup: RunningLeagueTrainingScheduleSignup) {
     if (memberPending) return
     setMemberPending(true)
-    void staffRemoveCenterRunningTrainingScheduleSignup(signupDayId(day), signup.member_id)
+    void staffRemoveCenterRunningTrainingScheduleSignup(signupDayId(day, audience), signup.member_id)
       .then((result) => {
         if (!result.ok) {
           toast.error(result.error)

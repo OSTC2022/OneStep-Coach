@@ -229,6 +229,8 @@ export function MemberMyPage({
                 canParticipate={!adminPreview}
                 readOnly={adminPreview && !canStaffProxySignup}
                 canStaffProxySignup={canStaffProxySignup}
+                canEditDays={canStaffProxySignup}
+                scheduleAudience="adult_running"
                 embedded
                 contentOnly
               />

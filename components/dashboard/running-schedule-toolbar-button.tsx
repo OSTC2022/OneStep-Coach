@@ -161,7 +161,8 @@ export function RunningScheduleToolbarButton({
             tableReady={activeBundle?.tableReady ?? true}
             canParticipate={false}
             canStaffProxySignup
-            canEditDays={category === 'youth'}
+            canEditDays
+            scheduleAudience={category === 'youth' ? 'youth_athletics' : 'adult_running'}
             contentOnly
           />
         </div>

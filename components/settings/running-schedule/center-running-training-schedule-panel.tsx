@@ -34,6 +34,7 @@ import {
   propagateTrainingWeekDatesFromMonday,
   type RunningLeagueTrainingScheduleDayInput,
 } from '@/lib/running-league/training-schedule'
+import { parseSingleTimeToken } from '@/lib/time-input-parse'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -447,21 +448,37 @@ export function CenterRunningTrainingSchedulePanel({
                 rows={2}
                 className="min-h-[60px] resize-y text-sm"
               />
-              {isYouth ? (
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">시간</Label>
-                  <Input
-                    type="time"
-                    value={day.training_time ?? ''}
-                    onChange={(event) =>
-                      updateDay(day.weekday, {
-                        training_time: event.target.value || null,
-                      })
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">시간</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="20:00"
+                  value={day.training_time ?? ''}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    const trimmed = next.trim()
+                    const complete =
+                      /^\d{1,2}:\d{2}$/.test(trimmed) || /^\d{4}$/.test(trimmed)
+                    updateDay(day.weekday, {
+                      training_time: complete
+                        ? (parseSingleTimeToken(trimmed) ?? next)
+                        : next || null,
+                    })
+                  }}
+                  onBlur={(event) => {
+                    const trimmed = event.target.value.trim()
+                    if (!trimmed) {
+                      updateDay(day.weekday, { training_time: null })
+                      return
                     }
-                    className="w-full text-sm sm:max-w-[10rem]"
-                  />
-                </div>
-              ) : null}
+                    const normalized = parseSingleTimeToken(trimmed)
+                    if (normalized) updateDay(day.weekday, { training_time: normalized })
+                  }}
+                  className="w-full text-sm sm:max-w-[10rem]"
+                />
+              </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="relative">
                   <MapPin className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
