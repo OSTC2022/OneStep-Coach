@@ -19,6 +19,7 @@ import {
   Trophy,
   User,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ExtendMonthlyPlanButton } from '@/components/sessions/extend-monthly-plan-button'
 import { MemberRunningLeagueRankings, MemberPortalBrandHeader } from '@/components/dashboard/member-running-league-rankings'
