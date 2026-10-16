@@ -20,7 +20,7 @@ export default async function MemberYouthAthleticsPortalPreviewPage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  await requireMemberViewer()
+  const viewer = await requireMemberViewer()
   const { id } = await params
 
   const [data, centerTrainingSchedule, pbBundle] = await Promise.all([
@@ -60,6 +60,7 @@ export default async function MemberYouthAthleticsPortalPreviewPage({
         pbBundle={pbBundle}
         adminPreview
         canStaffProxySignup
+        canExtendMonthlyPlan={viewer.role === 'admin'}
       />
     </div>
   )

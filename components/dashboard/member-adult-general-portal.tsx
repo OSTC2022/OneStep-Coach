@@ -38,6 +38,7 @@ import {
 } from '@/components/members/member-body-record-fields'
 import { AdultGeneralAttendanceRankingDialog } from '@/components/dashboard/adult-general-attendance-ranking-dialog'
 import { Button } from '@/components/ui/button'
+import { ExtendMonthlyPlanButton } from '@/components/sessions/extend-monthly-plan-button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
@@ -147,9 +148,11 @@ function MetricTile({
 export function MemberAdultGeneralPortal({
   data,
   adminPreview = false,
+  canExtendMonthlyPlan = false,
 }: {
   data: AdultGeneralPortalData
   adminPreview?: boolean
+  canExtendMonthlyPlan?: boolean
 }) {
   const { portal, bodyRecords, proteinSettings, attendanceRanking, attendancePeriodLabel } =
     data
@@ -401,6 +404,14 @@ export function MemberAdultGeneralPortal({
                 <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                   ({remainingHint})
                 </span>
+              ) : null}
+              {canExtendMonthlyPlan &&
+              sessionStatus.kind === 'monthly' &&
+              sessionStatus.packageId ? (
+                <ExtendMonthlyPlanButton
+                  packageId={sessionStatus.packageId}
+                  className="ml-2 align-middle"
+                />
               ) : null}
             </dd>
           </div>

@@ -16,6 +16,7 @@ import {
 import { LIST_PAGE_SIZE } from '@/lib/list-pagination'
 import {
   addDaysToDate,
+  addMonthsToDate,
   diffCalendarDays,
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
@@ -24,6 +25,7 @@ import {
   calculateMonthlyPlanExpiryDate,
   calculateMonthlyRecurringExpiryDate,
   isMonthlyRecurringPlan,
+  resolvePackagePeriodExpiryDate,
 } from '@/lib/session-package-utils'
 import {
   pickSessionPackageIdForDeduction,
@@ -1205,6 +1207,77 @@ export async function resumeSessionPackage(
   revalidatePath(`/dashboard/members/${pkg.member_id}`)
   revalidatePath('/dashboard/sessions')
   return { data: data as SessionPackage, extendedDays: pausedDays }
+}
+
+function bumpMonthlyPlanNoteMonths(note: string | null | undefined): string | null {
+  if (!note) return note ?? null
+  const months = parseMonthlyPlanMonthsFromNote(note)
+  if (months == null) return note
+  return note.replace(/월정액\s*\d+개월/, `월정액 ${months + 1}개월`)
+}
+
+/** 월정액 만료일을 기존 기간 끝에 1개월 이어 붙인다. 버튼 누른 날은 쓰지 않는다. 관리자만. */
+export async function extendMonthlyPlanByOneMonth(
+  id: string,
+): Promise<{ data?: SessionPackage; error?: string; expiresAt?: string }> {
+  await requireRole(['admin'])
+  const packageId = id.trim()
+  if (!packageId) return { error: '수업권을 찾을 수 없습니다.' }
+
+  const supabase = await sessionWriteClient()
+  const { data: pkg, error: fetchError } = await supabase
+    .from('session_packages')
+    .select('id, member_id, note, is_active, expires_at, paid_at, created_at, deleted_at')
+    .eq('id', packageId)
+    .maybeSingle()
+
+  if (fetchError || !pkg || pkg.deleted_at) {
+    return { error: '수업권을 찾을 수 없습니다.' }
+  }
+
+  if (!isMonthlyPlanPackage(pkg.note)) {
+    return { error: '1개월 추가는 월정액 수업권만 가능합니다.' }
+  }
+
+  const startDate =
+    pkg.paid_at?.split('T')[0] || pkg.created_at?.split('T')[0] || null
+  const currentExpiry = resolvePackagePeriodExpiryDate({
+    note: pkg.note,
+    expires_at: pkg.expires_at,
+    paid_at: startDate,
+  })
+  if (!currentExpiry) {
+    return {
+      error: '시작일이나 만료일이 없어 연장할 수 없습니다. 결제일을 먼저 설정해주세요.',
+    }
+  }
+  const nextExpiry = addMonthsToDate(currentExpiry, 1)
+  const nextNote = bumpMonthlyPlanNoteMonths(pkg.note)
+
+  const { data, error } = await supabase
+    .from('session_packages')
+    .update({
+      expires_at: nextExpiry,
+      note: nextNote,
+      is_active: true,
+    })
+    .eq('id', packageId)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('extendMonthlyPlanByOneMonth', error)
+    return { error: mapSessionPackageError(error.message) }
+  }
+
+  revalidatePath('/dashboard/members')
+  revalidatePath(`/dashboard/members/${pkg.member_id}`)
+  revalidatePath(`/dashboard/members/${pkg.member_id}/running-portal`)
+  revalidatePath(`/dashboard/members/${pkg.member_id}/weight-portal`)
+  revalidatePath(`/dashboard/members/${pkg.member_id}/youth-athletics-portal`)
+  revalidatePath('/dashboard/my')
+  revalidatePath('/dashboard/sessions')
+  return { data: data as SessionPackage, expiresAt: nextExpiry }
 }
 
 /** 휴지통에서 복구 */

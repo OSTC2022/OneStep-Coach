@@ -13,7 +13,7 @@ export default async function MemberWeightPortalPreviewPage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  await requireMemberViewer()
+  const viewer = await requireMemberViewer()
   const { id } = await params
   const data = await getAdultGeneralPortalDataForStaff(id)
   if (!data) notFound()
@@ -40,7 +40,11 @@ export default async function MemberWeightPortalPreviewPage({
           </Button>
         </div>
       </div>
-      <MemberAdultGeneralPortal data={data} adminPreview />
+      <MemberAdultGeneralPortal
+        data={data}
+        adminPreview
+        canExtendMonthlyPlan={viewer.role === 'admin'}
+      />
     </div>
   )
 }

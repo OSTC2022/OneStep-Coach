@@ -20,6 +20,7 @@ import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal
 import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/member-running-league-training-schedule'
 import { YouthAthleticsPbPanel } from '@/components/dashboard/youth-athletics-pb-panel'
 import { Button } from '@/components/ui/button'
+import { ExtendMonthlyPlanButton } from '@/components/sessions/extend-monthly-plan-button'
 import { Card, CardContent } from '@/components/ui/card'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 import type { YouthAthleticsPbBundle } from '@/lib/actions/youth-athletics-pb'
@@ -44,6 +45,8 @@ type YouthAthleticsPortalProps = {
   adminPreview?: boolean
   /** 관리자·강사 — 마감 후 대리 참여 */
   canStaffProxySignup?: boolean
+  /** 관리자만 — 월정액 1개월 추가 */
+  canExtendMonthlyPlan?: boolean
 }
 
 export function YouthAthleticsPortal({
@@ -52,6 +55,7 @@ export function YouthAthleticsPortal({
   pbBundle = null,
   adminPreview = false,
   canStaffProxySignup = false,
+  canExtendMonthlyPlan = false,
 }: YouthAthleticsPortalProps) {
   const { member, summary, sessionStatus } = data
   const instructorName = member.primary_instructor?.name ?? '자율배정'
@@ -287,6 +291,16 @@ export function YouthAthleticsPortal({
           label="디데이"
           value={remainingLabel}
           hint={remainingHint}
+          footer={
+            canExtendMonthlyPlan &&
+            sessionStatus.kind === 'monthly' &&
+            sessionStatus.packageId ? (
+              <ExtendMonthlyPlanButton
+                packageId={sessionStatus.packageId}
+                className="mt-1 border-[#AAFF00]/40 text-[#AAFF00] hover:bg-[#AAFF00]/10 hover:text-[#AAFF00]"
+              />
+            ) : null
+          }
           tone={
             daysUntilExpiry != null && daysUntilExpiry <= 7
               ? 'warn'
@@ -363,6 +377,7 @@ function StatTile({
   hint,
   tone,
   className,
+  footer,
 }: {
   icon: ReactNode
   label: string
@@ -370,6 +385,7 @@ function StatTile({
   hint: string
   tone?: 'ok' | 'warn'
   className?: string
+  footer?: ReactNode
 }) {
   return (
     <Card className="border-[#AAFF00]/20 bg-[#0a0c0a]/90">
@@ -389,6 +405,7 @@ function StatTile({
           {value}
         </p>
         <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>
+        {footer}
       </CardContent>
     </Card>
   )

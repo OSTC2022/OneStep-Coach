@@ -21,7 +21,7 @@ import {
   User,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { ExtendMonthlyPlanButton } from '@/components/sessions/extend-monthly-plan-button'
 import { MemberRunningLeagueRankings, MemberPortalBrandHeader } from '@/components/dashboard/member-running-league-rankings'
 import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
 import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal-accordion-menus'
@@ -62,6 +62,8 @@ interface MemberMyPageProps {
   showMarathonManageLink?: boolean
   /** 관리자·강사 — 대회 상단 고정 */
   canPinMarathonEvents?: boolean
+  /** 관리자만 — 회원 포털에서 월정액 1개월 추가 */
+  canExtendMonthlyPlan?: boolean
 }
 
 function formatSportProfile(member: Member): string | null {
@@ -150,6 +152,7 @@ export function MemberMyPage({
   canStaffManageAttendance = false,
   showMarathonManageLink = false,
   canPinMarathonEvents = false,
+  canExtendMonthlyPlan = false,
 }: MemberMyPageProps) {
   const { member, summary, sessionStatus } = data
   const isAdultMember =
@@ -172,6 +175,12 @@ export function MemberMyPage({
     canStaffManageAttendance ||
     role === 'admin' ||
     role === 'instructor'
+  const monthlyExtendButton =
+    canExtendMonthlyPlan &&
+    sessionStatus.kind === 'monthly' &&
+    sessionStatus.packageId ? (
+      <ExtendMonthlyPlanButton packageId={sessionStatus.packageId} className="mt-2" />
+    ) : null
 
   return (
     <div className="mx-auto w-full max-w-[1120px] space-y-4 sm:space-y-6">
@@ -307,6 +316,7 @@ export function MemberMyPage({
                     : undefined
               }
               hint={formatRemainingSessionsHint(sessionStatus)}
+              footer={monthlyExtendButton}
               compact
               className="w-[min(46vw,180px)] shrink-0 snap-start lg:w-auto lg:min-w-0"
             />
@@ -403,6 +413,7 @@ export function MemberMyPage({
                         {profileAside.value}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">{profileAside.hint}</p>
+                      {sessionStatus.kind === 'monthly' ? monthlyExtendButton : null}
                       {!sessionStatus.isUsable ? (
                         <Button
                           asChild
@@ -440,6 +451,7 @@ export function MemberMyPage({
                     : undefined
               }
               hint={formatRemainingSessionsHint(sessionStatus)}
+              footer={monthlyExtendButton}
             />
             <SummaryCard
               title="최근 출석일"
@@ -719,6 +731,7 @@ function SummaryCard({
   actionEmphasis = false,
   compact = false,
   className,
+  footer,
 }: {
   title: string
   icon: ReactNode
@@ -730,8 +743,10 @@ function SummaryCard({
   actionEmphasis?: boolean
   compact?: boolean
   className?: string
+  footer?: ReactNode
 }) {
   const hasAction = Boolean(actionHref && actionLabel)
+  const hasFooter = Boolean(footer)
 
   return (
     <Card
@@ -746,13 +761,13 @@ function SummaryCard({
           compact
             ? cn(
                 'min-h-[108px] px-3 py-3',
-                hasAction
+                hasAction || hasFooter
                   ? 'grid-rows-[auto_1fr_auto_auto] gap-y-1.5'
                   : 'grid-rows-[auto_1fr_auto]',
               )
             : cn(
                 'min-h-[132px] px-3.5 py-3.5 sm:px-4 sm:py-4 md:min-h-0',
-                hasAction
+                hasAction || hasFooter
                   ? 'grid-rows-[auto_1fr_auto_auto] gap-y-1.5'
                   : 'grid-rows-[auto_1fr_auto]',
               ),
@@ -774,6 +789,7 @@ function SummaryCard({
         <p className="text-xs leading-snug text-muted-foreground md:text-[13px]">
           {hint}
         </p>
+        {footer}
         {hasAction ? (
           <Button
             asChild

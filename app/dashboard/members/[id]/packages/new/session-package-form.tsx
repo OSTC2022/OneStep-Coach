@@ -213,11 +213,34 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     applyMonthlyPeriod(months)
   }
 
+  /**
+   * 새 등록은 결제일(등록한 날)부터.
+   * 이미 있는 수업권은 저장된 만료일, 없으면 시작일+개월의 끝에 잇는다.
+   */
+  function resolveExtensionBase(data: {
+    expires_at: string
+    paid_at: string
+    note: string
+  }): string {
+    if (!isEditing) {
+      return data.expires_at || data.paid_at || new Date().toISOString().split('T')[0]
+    }
+
+    if (data.expires_at) return data.expires_at
+
+    const start = data.paid_at || toDateInputValue(sessionPackage?.created_at)
+    const months = periodMonths ?? parseMonthlyPlanMonthsFromNote(data.note)
+    if (start && months != null) return calculateMonthlyPlanExpiryDate(start, months)
+    if (start && (isMonthlyRecurring || isMonthlyRecurringPlan(data.note))) {
+      return calculateMonthlyRecurringExpiryDate(start)
+    }
+    return start
+  }
+
   /** 만료일·잔여·총회차를 일수만큼 중첩(+) 연장 */
   function applyStackedExtension(days: number, options?: { addPeriodMonths?: number }) {
     if (!Number.isFinite(days) || days <= 0) return
 
-    const today = new Date().toISOString().split('T')[0]
     setExpiresAtManual(false)
 
     const bumpPeriod =
@@ -234,7 +257,8 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
       setActiveMonthlyMonths(presetMatch ? presetMatch.months : null)
       setIsMonthlyRecurring(false)
       setFormData((prev) => {
-        const base = prev.expires_at || prev.paid_at || today
+        const base = resolveExtensionBase(prev)
+        if (!base) return prev
         const nextExpiry = addDaysToDate(base, days)
         const nextRemaining = Math.max(0, prev.remaining_sessions) + days
         const nextTotal =
@@ -253,7 +277,8 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
     }
 
     setFormData((prev) => {
-      const base = prev.expires_at || prev.paid_at || today
+      const base = resolveExtensionBase(prev)
+      if (!base) return prev
       const nextExpiry = addDaysToDate(base, days)
       const nextRemaining = Math.max(0, prev.remaining_sessions) + days
       const nextTotal =
@@ -272,8 +297,11 @@ export function SessionPackageForm({ member, sessionPackage }: SessionPackageFor
   }
 
   function handleExtendByOneMonth() {
-    const today = new Date().toISOString().split('T')[0]
-    const base = formData.expires_at || formData.paid_at || today
+    const base = resolveExtensionBase(formData)
+    if (!base) {
+      toast.error('시작일이나 만료일이 없어 연장할 수 없습니다.')
+      return
+    }
     const nextExpiry = addMonthsToDate(base, 1)
     const days = diffCalendarDays(base, nextExpiry) ?? 30
     applyStackedExtension(days, { addPeriodMonths: 1 })

@@ -22,6 +22,7 @@ export type MemberPortalSessionStatus =
       expiresAt: string | null
       planLabel: string
       daysUntilExpiry: number | null
+      packageId: string
     }
   | {
       kind: 'count'

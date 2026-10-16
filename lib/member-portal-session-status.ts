@@ -20,10 +20,11 @@ function buildPeriodSessionStatus(pkg: SessionPackage): MemberPortalSessionStatu
   return {
     kind: 'monthly',
     isUsable,
-    remainingPeriodLabel: formatMonthlyPlanRemainingPeriod(expiresAt),
-    expiresAt,
-    planLabel: formatPackagePlanLabel(pkg.total_sessions, pkg.note),
-    daysUntilExpiry: getDaysUntilExpiry(expiresAt),
+      remainingPeriodLabel: formatMonthlyPlanRemainingPeriod(expiresAt),
+      expiresAt,
+      planLabel: formatPackagePlanLabel(pkg.total_sessions, pkg.note),
+      daysUntilExpiry: getDaysUntilExpiry(expiresAt),
+      packageId: pkg.id,
   }
 }
 

@@ -57,6 +57,7 @@ import { MemberContactEditor } from '@/components/members/member-contact-editor'
 import type { VisibleSnsAccount } from '@/lib/sns-account'
 import { MemberAccountLink } from '@/components/members/member-account-link'
 import { SessionPackageTrashSheet } from './session-package-trash-sheet'
+import { ExtendMonthlyPlanButton } from '@/components/sessions/extend-monthly-plan-button'
 import {
   LessonRecordDetailDialog,
   type MemberLessonRecord,
@@ -652,7 +653,7 @@ export function MemberDetail({
                   return (
                   <li
                     key={pkg.id}
-                    className="flex min-w-0 items-center gap-2 px-0.5 py-2.5 text-sm"
+                    className="flex min-w-0 flex-wrap items-center gap-2 px-0.5 py-2.5 text-sm"
                   >
                     <span className="min-w-[7rem] shrink-0 whitespace-nowrap font-medium">
                       {formatPackagePlanLabel(pkg.total_sessions, pkg.note)}
@@ -743,6 +744,18 @@ export function MemberDetail({
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
+                    ) : null}
+                    {canManage && isMonthlyPlanPackage(pkg.note) ? (
+                      <ExtendMonthlyPlanButton
+                        packageId={pkg.id}
+                        onExtended={(updated) => {
+                          setSessionPackages((prev) =>
+                            prev.map((item) =>
+                              item.id === updated.id ? { ...item, ...updated } : item,
+                            ),
+                          )
+                        }}
+                      />
                     ) : null}
                   </li>
                   )
