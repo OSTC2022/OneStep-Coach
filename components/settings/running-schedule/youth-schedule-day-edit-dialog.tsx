@@ -19,12 +19,16 @@ import type {
   RunningLeagueTrainingScheduleDayView,
   RunningLeagueTrainingScheduleSignup,
 } from '@/lib/running-league/training-schedule'
-import { TRAINING_WEEKDAY_LABELS } from '@/lib/running-league/training-schedule'
+import {
+  TRAINING_WEEKDAY_LABELS,
+  parseTrainingScheduleTimeList,
+  serializeTrainingScheduleTimes,
+} from '@/lib/running-league/training-schedule'
 import {
   trainingScheduleDayId,
   type TrainingScheduleAudience,
 } from '@/lib/training-schedule-audience'
-import { parseSingleTimeToken } from '@/lib/time-input-parse'
+import { ScheduleTimeListEditor } from '@/components/settings/running-schedule/schedule-time-list-editor'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -58,24 +62,12 @@ function daySelectionKey(day: RunningLeagueTrainingScheduleDayView): string | nu
   return `${date}:${day.weekday}`
 }
 
-function isCompleteClockDraft(raw: string): boolean {
-  const trimmed = raw.trim()
-  return /^\d{1,2}:\d{2}$/.test(trimmed) || /^\d{4}$/.test(trimmed)
-}
-
-function normalizeScheduleClock(raw: string): string | null {
-  const trimmed = raw.trim()
-  if (!trimmed) return ''
-  return parseSingleTimeToken(trimmed)
-}
-
 function draftFromDay(day: RunningLeagueTrainingScheduleDayView): DayDraft {
-  const stored = (day.training_time ?? '').slice(0, 5)
   return {
     training_summary: day.training_summary ?? '',
     location_label: day.location_label ?? '',
     naver_map_url: day.naver_map_url ?? '',
-    training_time: normalizeScheduleClock(stored) || stored,
+    training_time: serializeTrainingScheduleTimes(day.training_time) ?? '',
     is_hidden: day.is_hidden,
   }
 }
@@ -203,11 +195,7 @@ export function YouthScheduleDayEditDialog({
       const day = dayByKey.get(key)
       const draft = drafts[key]
       if (!day?.schedule_date || !draft) continue
-      const trainingTime = normalizeScheduleClock(draft.training_time)
-      if (trainingTime == null) {
-        toast.error('시간은 20:00처럼 입력해주세요.')
-        return
-      }
+      const trainingTime = serializeTrainingScheduleTimes(draft.training_time)
       updates.push({
         schedule_date: day.schedule_date,
         weekday: day.weekday,
@@ -341,6 +329,10 @@ function DayEditor({
   const [membersOpen, setMembersOpen] = useState(false)
   const [memberPending, setMemberPending] = useState(false)
   const [placesOpen, setPlacesOpen] = useState(false)
+  const savedTimes = parseTrainingScheduleTimeList(day.training_time)
+  const [memberTime, setMemberTime] = useState<string | null>(
+    savedTimes.length === 1 ? savedTimes[0] : null,
+  )
 
   useEffect(() => {
     if (!membersOpen || members) return
@@ -368,8 +360,18 @@ function DayEditor({
 
   function addMember(member: MemberPickerOption) {
     if (memberPending) return
+    const times = parseTrainingScheduleTimeList(day.training_time)
+    const signupTime = times.length === 1 ? times[0] : memberTime
+    if (times.length > 1 && !signupTime) {
+      toast.error('넣을 시간을 먼저 선택해주세요.')
+      return
+    }
     setMemberPending(true)
-    void staffAddCenterRunningTrainingScheduleSignup(signupDayId(day, audience), member.id)
+    void staffAddCenterRunningTrainingScheduleSignup(
+      signupDayId(day, audience),
+      member.id,
+      signupTime,
+    )
       .then((result) => {
         if (!result.ok) {
           toast.error(result.error)
@@ -420,24 +422,10 @@ function DayEditor({
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground">시간</Label>
-          <Input
-            type="text"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="20:00"
+          <ScheduleTimeListEditor
             value={draft.training_time}
-            onChange={(event) => {
-              const next = event.target.value
-              if (!isCompleteClockDraft(next)) {
-                onChange({ training_time: next })
-                return
-              }
-              onChange({ training_time: normalizeScheduleClock(next) ?? next })
-            }}
-            onBlur={() => {
-              const normalized = normalizeScheduleClock(draft.training_time)
-              if (normalized != null) onChange({ training_time: normalized })
-            }}
+            disabled={pending}
+            onChange={(training_time) => onChange({ training_time })}
           />
         </div>
         <div className="space-y-1">
@@ -507,6 +495,25 @@ function DayEditor({
       </label>
 
       <div className="space-y-1.5 border-t pt-2">
+        {savedTimes.length > 1 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {savedTimes.map((time) => (
+              <button
+                key={time}
+                type="button"
+                onClick={() => setMemberTime(time)}
+                className={cn(
+                  'rounded-full border px-2 py-0.5 text-xs tabular-nums',
+                  memberTime === time
+                    ? 'border-primary bg-primary/15 text-foreground'
+                    : 'border-border text-muted-foreground',
+                )}
+              >
+                {time}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-medium text-muted-foreground">참여자 {signups.length}명</p>
           <Button
@@ -535,7 +542,14 @@ function DayEditor({
                 key={signup.member_id}
                 className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
               >
-                <span className="min-w-0 flex-1 truncate">{signup.member_name}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {signup.member_name}
+                  {signup.signup_time ? (
+                    <span className="ml-1.5 tabular-nums text-[11px] text-muted-foreground">
+                      {signup.signup_time}
+                    </span>
+                  ) : null}
+                </span>
                 <button
                   type="button"
                   aria-label={`${signup.member_name} 빼기`}

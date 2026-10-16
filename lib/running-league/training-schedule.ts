@@ -8,6 +8,8 @@ export type RunningLeagueTrainingScheduleSignup = {
   member_id: string
   member_name: string
   signed_at: string
+  /** 참여할 때 고른 시각 (HH:MM) */
+  signup_time?: string | null
 }
 
 export type RunningLeagueTrainingScheduleDayInput = {
@@ -55,6 +57,36 @@ export function normalizeTrainingScheduleTime(
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+/** "18:00,20:00" 처럼 저장된 시각 목록 */
+export function parseTrainingScheduleTimeList(
+  value: string | null | undefined,
+): string[] {
+  const raw = value?.trim() ?? ''
+  if (!raw) return []
+  const seen = new Set<string>()
+  const times: string[] = []
+  for (const part of raw.split(/[,，\n/|·]+/)) {
+    const normalized = normalizeTrainingScheduleTime(part)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    times.push(normalized)
+  }
+  return times
+}
+
+export function serializeTrainingScheduleTimes(
+  value: string | null | undefined,
+): string | null {
+  const times = parseTrainingScheduleTimeList(value)
+  return times.length > 0 ? times.join(',') : null
+}
+
+export function formatTrainingScheduleTimeListLabel(
+  value: string | null | undefined,
+): string {
+  return parseTrainingScheduleTimeList(value).join(' · ')
 }
 
 export function formatTrainingScheduleTimeLabel(

@@ -22,12 +22,12 @@ import {
   updateSelectedTrainingScheduleDays,
   type TrainingScheduleDayContentUpdate,
 } from '@/lib/actions/center-running-training-schedule'
+import { ScheduleTimeListEditor } from '@/components/settings/running-schedule/schedule-time-list-editor'
 import { YouthScheduleDayEditDialog } from '@/components/settings/running-schedule/youth-schedule-day-edit-dialog'
 import {
   listCenterTrainingScheduleLocationPresets,
   type CenterTrainingScheduleLocationPreset,
 } from '@/lib/actions/center-running-training-schedule-library'
-import { parseSingleTimeToken } from '@/lib/time-input-parse'
 import type { MemberPickerOption } from '@/lib/actions/members'
 import type {
   RunningLeagueTrainingScheduleDayView,
@@ -35,8 +35,11 @@ import type {
 } from '@/lib/running-league/training-schedule'
 import {
   buildFullWeekScheduleDays,
+  formatTrainingScheduleTimeListLabel,
   isVotableTrainingScheduleDay,
+  parseTrainingScheduleTimeList,
   resolveTrainingScheduleMapHref,
+  serializeTrainingScheduleTimes,
 } from '@/lib/running-league/training-schedule'
 import {
   isTrainingScheduleSignupClosed,
@@ -150,6 +153,11 @@ export function MemberRunningLeagueTrainingSchedule({
   const [signupDraft, setSignupDraft] = useState<Record<string, boolean>>(() =>
     buildSignupDraft([...days, ...previousWeekDays, ...nextWeekDays]),
   )
+  const [timePicker, setTimePicker] = useState<{
+    day: RunningLeagueTrainingScheduleDayView
+    times: string[]
+  } | null>(null)
+  const [proxySignupTime, setProxySignupTime] = useState<string | null>(null)
   const [proxyDay, setProxyDay] = useState<RunningLeagueTrainingScheduleDayView | null>(null)
   const [proxyMembers, setProxyMembers] = useState<MemberPickerOption[] | null>(null)
   const [proxyQuery, setProxyQuery] = useState('')
@@ -325,12 +333,27 @@ export function MemberRunningLeagueTrainingSchedule({
   }
 
   function handleParticipate(day: RunningLeagueTrainingScheduleDayView) {
-    const closed = daySignupClosed(day)
     const isSignedUp = signupDraft[day.id] ?? day.is_signed_up
     if (isSignedUp) return
 
-    // 육상 스케줄은 관리자·강사가 마감 전에도 참여자를 넣는다
+    const times = parseTrainingScheduleTimeList(day.training_time)
+    if (times.length > 1) {
+      setTimePicker({ day, times })
+      return
+    }
+    continueParticipate(day, times[0] ?? null)
+  }
+
+  function continueParticipate(
+    day: RunningLeagueTrainingScheduleDayView,
+    signupTime: string | null,
+  ) {
+    setTimePicker(null)
+    const closed = daySignupClosed(day)
+
+    // 관리자·강사는 마감 전에도 참여자를 넣는다
     if (canEditDays && canStaffProxySignup) {
+      setProxySignupTime(signupTime)
       openStaffProxyPicker(day)
       return
     }
@@ -338,6 +361,7 @@ export function MemberRunningLeagueTrainingSchedule({
     // 마감 후: 관리자·강사만 회원 선택 참여
     if (closed) {
       if (canStaffProxySignup) {
+        setProxySignupTime(signupTime)
         openStaffProxyPicker(day)
         return
       }
@@ -351,7 +375,7 @@ export function MemberRunningLeagueTrainingSchedule({
       return
     }
 
-    runSelfToggle(day, true)
+    runSelfToggle(day, true, signupTime)
   }
 
   function handleCancel(day: RunningLeagueTrainingScheduleDayView) {
@@ -373,6 +397,7 @@ export function MemberRunningLeagueTrainingSchedule({
   function runSelfToggle(
     day: RunningLeagueTrainingScheduleDayView,
     expectSignup: boolean,
+    signupTime: string | null = null,
   ) {
     const previous = signupDraft[day.id] ?? day.is_signed_up
     if (previous === expectSignup) return
@@ -385,7 +410,10 @@ export function MemberRunningLeagueTrainingSchedule({
     setPendingDayId(day.id)
 
     startTransition(async () => {
-      const result = await toggleCenterRunningTrainingScheduleSignup(day.id)
+      const result = await toggleCenterRunningTrainingScheduleSignup(
+        day.id,
+        expectSignup ? signupTime : null,
+      )
       setPendingDayId(null)
 
       if (!result.ok) {
@@ -402,7 +430,13 @@ export function MemberRunningLeagueTrainingSchedule({
         [day.id]: result.signedUp,
       }))
       patchDaySignup(day.id, { signup_count: result.signupCount })
-      toast.success(result.signedUp ? '참여 신청했습니다.' : '참여를 취소했습니다.')
+      toast.success(
+        result.signedUp
+          ? signupTime
+            ? `${signupTime}으로 참여 신청했습니다.`
+            : '참여 신청했습니다.'
+          : '참여를 취소했습니다.',
+      )
     })
   }
 
@@ -459,6 +493,7 @@ export function MemberRunningLeagueTrainingSchedule({
           ? trainingScheduleDayId(scheduleAudience, day.weekday, day.schedule_date)
           : day.id,
         member.id,
+        proxySignupTime,
       )
       setPendingDayId(null)
 
@@ -648,6 +683,7 @@ export function MemberRunningLeagueTrainingSchedule({
         scheduleAudience={scheduleAudience}
         onContentSaved={(update) => {
           patchDayContent(update)
+          setActiveDay(null)
           router.refresh()
         }}
         onRequestRemoveSignup={(signup) => {
@@ -691,9 +727,49 @@ export function MemberRunningLeagueTrainingSchedule({
       </AlertDialog>
 
       <Dialog
+        open={timePicker != null}
+        onOpenChange={(open) => {
+          if (!open) setTimePicker(null)
+        }}
+      >
+        <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950">
+          {timePicker ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-lime-100">시간 선택</DialogTitle>
+                <DialogDescription className="text-left text-zinc-400">
+                  {timePicker.day.weekday_label}요일
+                  {timePicker.day.schedule_date_label
+                    ? ` ${timePicker.day.schedule_date_label}`
+                    : ''}{' '}
+                  참여 시간을 골라 주세요.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-2">
+                {timePicker.times.map((time) => (
+                  <Button
+                    key={time}
+                    type="button"
+                    variant="outline"
+                    className="h-10 border-lime-500/30 tabular-nums text-lime-100"
+                    onClick={() => continueParticipate(timePicker.day, time)}
+                  >
+                    {time}
+                  </Button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={proxyDay != null}
         onOpenChange={(open) => {
-          if (!open) setProxyDay(null)
+          if (!open) {
+            setProxyDay(null)
+            setProxySignupTime(null)
+          }
         }}
       >
         <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950">
@@ -705,8 +781,8 @@ export function MemberRunningLeagueTrainingSchedule({
                   {proxyDay.weekday_label}요일
                   {proxyDay.schedule_date_label
                     ? ` ${proxyDay.schedule_date_label}`
-                    : ''}{' '}
-                  · {proxyDay.training_summary}
+                    : ''}
+                  {proxySignupTime ? ` · ${proxySignupTime}` : ''} · {proxyDay.training_summary}
                 </DialogDescription>
               </DialogHeader>
 
@@ -983,9 +1059,9 @@ function ScheduleDayRow({
           <span className="block text-sm font-medium leading-snug text-zinc-100">
             {day.training_summary}
           </span>
-          {day.training_time ? (
+          {formatTrainingScheduleTimeListLabel(day.training_time) ? (
             <span className="mt-0.5 block text-[11px] tabular-nums text-lime-200/80">
-              {day.training_time}
+              {formatTrainingScheduleTimeListLabel(day.training_time)}
             </span>
           ) : null}
           {day.location_label ? (
@@ -1044,17 +1120,6 @@ function ScheduleDayRow({
   )
 }
 
-function isCompleteClockDraft(raw: string): boolean {
-  const trimmed = raw.trim()
-  return /^\d{1,2}:\d{2}$/.test(trimmed) || /^\d{4}$/.test(trimmed)
-}
-
-function normalizeScheduleClock(raw: string): string | null {
-  const trimmed = raw.trim()
-  if (!trimmed) return ''
-  return parseSingleTimeToken(trimmed)
-}
-
 function DayContentQuickEdit({
   day,
   audience,
@@ -1076,7 +1141,7 @@ function DayContentQuickEdit({
 
   useEffect(() => {
     setSummary(day.training_summary)
-    setTrainingTime(normalizeScheduleClock(day.training_time ?? '') || (day.training_time ?? ''))
+    setTrainingTime(serializeTrainingScheduleTimes(day.training_time) ?? '')
     setLocationLabel(day.location_label)
     setMapUrl(day.naver_map_url ?? '')
     setPlacesOpen(false)
@@ -1102,11 +1167,7 @@ function DayContentQuickEdit({
       toast.error('날짜가 있는 일정만 수정할 수 있습니다.')
       return
     }
-    const time = normalizeScheduleClock(trainingTime)
-    if (time == null) {
-      toast.error('시간은 20:00처럼 입력해주세요.')
-      return
-    }
+    const time = serializeTrainingScheduleTimes(trainingTime)
     setSaving(true)
     try {
       const update: TrainingScheduleDayContentUpdate = {
@@ -1145,26 +1206,10 @@ function DayContentQuickEdit({
         className="min-h-[72px] border-lime-500/20 bg-black/40 text-sm text-zinc-100"
       />
       <label className="text-xs font-medium text-zinc-400">시간</label>
-      <Input
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        placeholder="20:00"
+      <ScheduleTimeListEditor
         value={trainingTime}
         disabled={saving}
-        onChange={(event) => {
-          const next = event.target.value
-          if (!isCompleteClockDraft(next)) {
-            setTrainingTime(next)
-            return
-          }
-          setTrainingTime(normalizeScheduleClock(next) ?? next)
-        }}
-        onBlur={() => {
-          const normalized = normalizeScheduleClock(trainingTime)
-          if (normalized != null) setTrainingTime(normalized)
-        }}
-        className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+        onChange={setTrainingTime}
       />
       <label className="text-xs font-medium text-zinc-400">장소</label>
       <Input
@@ -1314,7 +1359,14 @@ function ParticipantsDialog({
                       key={`${signup.member_id}-${signup.signed_at}`}
                       className="flex items-center gap-2 rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
                     >
-                      <span className="min-w-0 flex-1 truncate">{signup.member_name}</span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {signup.member_name}
+                        {signup.signup_time ? (
+                          <span className="ml-1.5 tabular-nums text-[11px] text-lime-200/80">
+                            {signup.signup_time}
+                          </span>
+                        ) : null}
+                      </span>
                       {canStaffRemoveSignup ? (
                         <button
                           type="button"

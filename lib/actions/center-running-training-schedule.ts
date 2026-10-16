@@ -18,7 +18,8 @@ import {
   getTrainingWeekStartFromDays,
   addDaysToDateKey,
   normalizeTrainingScheduleDate,
-  normalizeTrainingScheduleTime,
+  parseTrainingScheduleTimeList,
+  serializeTrainingScheduleTimes,
   propagateTrainingWeekDatesFromMonday,
   resolveTrainingScheduleMapHref,
   shouldResetCenterTrainingSignups,
@@ -184,6 +185,7 @@ type CenterSignupRow = {
   member_id: string
   created_at: string
   schedule_date?: string | null
+  signup_time?: string | null
   member: { name: string } | { name: string }[] | null
 }
 
@@ -251,6 +253,7 @@ function mapSignupRow(row: CenterSignupRow): RunningLeagueTrainingScheduleSignup
     member_id: row.member_id,
     member_name: memberName?.trim() || '회원',
     signed_at: row.created_at,
+    signup_time: serializeTrainingScheduleTimes(row.signup_time),
   }
 }
 
@@ -277,7 +280,7 @@ function buildCenterDayView(
       location_label: row.location_label ?? '',
     }),
     is_hidden: Boolean(row.is_hidden),
-    training_time: normalizeTrainingScheduleTime(row.training_time),
+    training_time: serializeTrainingScheduleTimes(row.training_time),
     signup_count: signups.length,
     signups,
     is_signed_up:
@@ -538,12 +541,22 @@ export async function fetchCenterRunningTrainingSchedule(
 
   const weekdays = liveRows.map((day) => day.weekday)
   let signupSelect =
-    'id, weekday, member_id, created_at, schedule_date, member:members(name, sport)'
+    'id, weekday, member_id, created_at, schedule_date, signup_time, member:members(name, sport)'
   let signupResult = await supabase
     .from(tables.signupsTable)
     .select(signupSelect)
     .in('weekday', weekdays)
     .order('created_at', { ascending: true })
+
+  if (isMissingColumnError(signupResult.error, 'signup_time')) {
+    signupSelect =
+      'id, weekday, member_id, created_at, schedule_date, member:members(name, sport)'
+    signupResult = await supabase
+      .from(tables.signupsTable)
+      .select(signupSelect)
+      .in('weekday', weekdays)
+      .order('created_at', { ascending: true })
+  }
 
   if (isMissingColumnError(signupResult.error, 'schedule_date')) {
     signupSelect = 'id, weekday, member_id, created_at, member:members(name, sport)'
@@ -756,7 +769,7 @@ export async function saveCenterRunningTrainingSchedule(
         is_hidden: Boolean(found?.is_hidden),
         schedule_date: found?.schedule_date?.trim().slice(0, 10) || null,
         ...(includeTrainingTime
-          ? { training_time: normalizeTrainingScheduleTime(found?.training_time) }
+          ? { training_time: serializeTrainingScheduleTimes(found?.training_time) }
           : {}),
         updated_at: new Date().toISOString(),
       }
@@ -795,7 +808,7 @@ export async function saveCenterRunningTrainingSchedule(
         naver_map_url: row.naver_map_url ?? '',
         is_hidden: Boolean(row.is_hidden),
         schedule_date: normalizeTrainingScheduleDate(row.schedule_date),
-        training_time: normalizeTrainingScheduleTime(row.training_time),
+        training_time: serializeTrainingScheduleTimes(row.training_time),
       })),
       audience,
     )
@@ -906,7 +919,7 @@ function liveRowsToScheduleInputs(
     naver_map_url: row.naver_map_url ?? '',
     is_hidden: Boolean(row.is_hidden),
     schedule_date: normalizeTrainingScheduleDate(row.schedule_date),
-    training_time: normalizeTrainingScheduleTime(row.training_time),
+    training_time: serializeTrainingScheduleTimes(row.training_time),
   }))
 }
 
@@ -923,7 +936,7 @@ function applyScheduleDayContentPatches(
       naver_map_url: patch.naver_map_url.trim(),
       is_hidden: patch.is_hidden,
       schedule_date: patch.schedule_date,
-      training_time: normalizeTrainingScheduleTime(patch.training_time),
+      training_time: serializeTrainingScheduleTimes(patch.training_time),
     }
     const index = next.findIndex((day) => day.weekday === patch.weekday)
     if (index >= 0) {
@@ -954,7 +967,7 @@ export async function updateSelectedTrainingScheduleDays(
       training_summary: update.training_summary ?? '',
       location_label: update.location_label ?? '',
       naver_map_url: update.naver_map_url ?? '',
-      training_time: normalizeTrainingScheduleTime(update.training_time),
+      training_time: serializeTrainingScheduleTimes(update.training_time),
       is_hidden: Boolean(update.is_hidden),
     })
   }
@@ -1087,8 +1100,58 @@ export async function getCenterRunningTrainingScheduleForStaff(
   return fetchCenterRunningTrainingSchedule(null, { includeHidden: true, audience })
 }
 
+function chooseSignupTime(
+  availableRaw: string | null | undefined,
+  requested: string | null | undefined,
+): { ok: true; time: string | null } | { ok: false; error: string } {
+  const available = parseTrainingScheduleTimeList(availableRaw)
+  const picked = parseTrainingScheduleTimeList(requested)[0] ?? null
+  if (available.length === 0) return { ok: true, time: null }
+  if (available.length === 1) return { ok: true, time: available[0] }
+  if (!picked) return { ok: false, error: '시간을 선택해주세요.' }
+  if (!available.includes(picked)) {
+    return { ok: false, error: '선택할 수 없는 시간입니다.' }
+  }
+  return { ok: true, time: picked }
+}
+
+async function loadDayTrainingTimeRaw(
+  supabase: Awaited<ReturnType<typeof scheduleClient>>,
+  audience: TrainingScheduleAudience,
+  weekday: number,
+  scheduleDate: string | null,
+  liveScheduleDate: string | null,
+): Promise<string | null> {
+  const daysTable = trainingScheduleConfig(audience).daysTable
+  const timed = await supabase
+    .from(daysTable)
+    .select('training_time, schedule_date')
+    .eq('weekday', weekday)
+    .maybeSingle()
+
+  if (isMissingColumnError(timed.error, 'training_time')) return null
+
+  let raw =
+    (timed.data as { training_time?: string | null } | null)?.training_time ?? null
+
+  if (scheduleDate && liveScheduleDate && scheduleDate !== liveScheduleDate) {
+    const weekStart = getMondayDateKeyForDateKey(scheduleDate)
+    const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(
+      [weekStart],
+      audience,
+    )
+    const snapshotDay = snapshots
+      .get(weekStart)
+      ?.find((day) => day.weekday === weekday)
+    if (snapshotDay) raw = snapshotDay.training_time ?? null
+  }
+
+  return raw
+}
+
 export async function toggleCenterRunningTrainingScheduleSignup(
   scheduleDayId: string,
+  requestedTime?: string | null,
 ): Promise<
   | { ok: true; signedUp: boolean; signupCount: number }
   | { ok: false; error: string }
@@ -1222,10 +1285,21 @@ export async function toggleCenterRunningTrainingScheduleSignup(
       }
     }
 
+    const availableTimes = await loadDayTrainingTimeRaw(
+      supabase,
+      audience,
+      weekday,
+      scheduleDate,
+      liveScheduleDate,
+    )
+    const chosen = chooseSignupTime(availableTimes, requestedTime)
+    if (!chosen.ok) return chosen
+
     const insertPayload: {
       weekday: number
       member_id: string
       schedule_date?: string | null
+      signup_time?: string | null
     } = {
       weekday,
       member_id: member.id,
@@ -1233,10 +1307,16 @@ export async function toggleCenterRunningTrainingScheduleSignup(
     if (scheduleDate) {
       insertPayload.schedule_date = scheduleDate
     }
+    if (chosen.time) insertPayload.signup_time = chosen.time
 
     let insertResult = await supabase
       .from(tables.signupsTable)
       .insert(insertPayload)
+
+    if (isMissingColumnError(insertResult.error, 'signup_time')) {
+      const { signup_time: _signupTime, ...withoutTime } = insertPayload
+      insertResult = await supabase.from(tables.signupsTable).insert(withoutTime)
+    }
 
     if (isMissingColumnError(insertResult.error, 'schedule_date')) {
       insertResult = await supabase
@@ -1312,6 +1392,7 @@ export async function toggleCenterRunningTrainingScheduleSignup(
 export async function staffAddCenterRunningTrainingScheduleSignup(
   scheduleDayId: string,
   memberId: string,
+  requestedTime?: string | null,
 ): Promise<
   | {
       ok: true
@@ -1420,11 +1501,22 @@ export async function staffAddCenterRunningTrainingScheduleSignup(
     return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
   }
 
+  const availableTimes = await loadDayTrainingTimeRaw(
+    supabase,
+    audience,
+    weekday,
+    scheduleDate,
+    liveScheduleDate,
+  )
+  const chosen = chooseSignupTime(availableTimes, requestedTime)
+  if (!chosen.ok) return chosen
+
   if (!existing) {
     const insertPayload: {
       weekday: number
       member_id: string
       schedule_date?: string | null
+      signup_time?: string | null
     } = {
       weekday,
       member_id: targetMemberId,
@@ -1432,8 +1524,14 @@ export async function staffAddCenterRunningTrainingScheduleSignup(
     if (scheduleDate) {
       insertPayload.schedule_date = scheduleDate
     }
+    if (chosen.time) insertPayload.signup_time = chosen.time
 
     let insertResult = await supabase.from(tables.signupsTable).insert(insertPayload)
+
+    if (isMissingColumnError(insertResult.error, 'signup_time')) {
+      const { signup_time: _signupTime, ...withoutTime } = insertPayload
+      insertResult = await supabase.from(tables.signupsTable).insert(withoutTime)
+    }
 
     if (isMissingColumnError(insertResult.error, 'schedule_date')) {
       insertResult = await supabase.from(tables.signupsTable).insert({
@@ -1503,6 +1601,7 @@ export async function staffAddCenterRunningTrainingScheduleSignup(
       member_id: targetMemberId,
       member_name: (memberRow.name as string)?.trim() || '회원',
       signed_at: existing?.created_at ?? new Date().toISOString(),
+      signup_time: chosen.time,
     },
   }
 }

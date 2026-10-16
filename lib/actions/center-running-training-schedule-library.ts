@@ -10,6 +10,7 @@ import { memberMatchesTrainingScheduleAudience } from '@/lib/running-league/trai
 import {
   formatTrainingScheduleDateLabel,
   normalizeTrainingScheduleDate,
+  serializeTrainingScheduleTimes,
   trainingSignupMatchesScheduleDate,
   type RunningLeagueTrainingScheduleDayInput,
   type RunningLeagueTrainingScheduleSignup,
@@ -78,6 +79,9 @@ function normalizeSnapshotSignups(raw: unknown): RunningLeagueTrainingScheduleSi
           typeof row.signed_at === 'string' && row.signed_at
             ? row.signed_at
             : new Date(0).toISOString(),
+        signup_time: serializeTrainingScheduleTimes(
+          typeof row.signup_time === 'string' ? row.signup_time : null,
+        ),
       }
     })
     .filter((item): item is RunningLeagueTrainingScheduleSignup => item != null)
@@ -92,8 +96,9 @@ function normalizeSnapshotDays(raw: unknown): RunningLeagueTrainingScheduleDayIn
       const weekday = Number(row.weekday)
       if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return null
       const signups = normalizeSnapshotSignups(row.signups)
-      const trainingTime =
-        typeof row.training_time === 'string' ? row.training_time.trim().slice(0, 5) : null
+      const trainingTime = serializeTrainingScheduleTimes(
+        typeof row.training_time === 'string' ? row.training_time : null,
+      )
       return {
         weekday: weekday as RunningLeagueTrainingScheduleDayInput['weekday'],
         training_summary: String(row.training_summary ?? ''),
@@ -142,13 +147,14 @@ function serializeSnapshotDays(
     naver_map_url: day.naver_map_url?.trim() ?? '',
     is_hidden: Boolean(day.is_hidden),
     schedule_date: day.schedule_date?.trim().slice(0, 10) || null,
-    training_time: day.training_time?.trim().slice(0, 5) || null,
+    training_time: serializeTrainingScheduleTimes(day.training_time),
     ...(day.signups && day.signups.length > 0
       ? {
           signups: day.signups.map((signup) => ({
             member_id: signup.member_id,
             member_name: signup.member_name,
             signed_at: signup.signed_at,
+            signup_time: serializeTrainingScheduleTimes(signup.signup_time),
           })),
         }
       : {}),
@@ -172,12 +178,25 @@ async function attachSignupsToSnapshotDays(
   const weekdays = days.map((day) => day.weekday)
 
   let signupSelect =
-    'id, weekday, member_id, created_at, schedule_date, member:members(name)'
+    'id, weekday, member_id, created_at, schedule_date, signup_time, member:members(name)'
   let signupResult = await supabase
     .from(trainingScheduleConfig(audience).signupsTable)
     .select(signupSelect)
     .in('weekday', weekdays)
     .order('created_at', { ascending: true })
+
+  if (
+    signupResult.error &&
+    signupResult.error.message?.toLowerCase().includes('signup_time')
+  ) {
+    signupSelect =
+      'id, weekday, member_id, created_at, schedule_date, member:members(name)'
+    signupResult = await supabase
+      .from(trainingScheduleConfig(audience).signupsTable)
+      .select(signupSelect)
+      .in('weekday', weekdays)
+      .order('created_at', { ascending: true })
+  }
 
   if (
     signupResult.error &&
@@ -201,6 +220,7 @@ async function attachSignupsToSnapshotDays(
     member_id: string
     created_at: string
     schedule_date?: string | null
+    signup_time?: string | null
     member: { name: string } | { name: string }[] | null
   }
 
@@ -285,6 +305,7 @@ async function attachSignupsToSnapshotDays(
         member_id: row.member_id,
         member_name: memberName?.trim() || '회원',
         signed_at: row.created_at,
+        signup_time: serializeTrainingScheduleTimes(row.signup_time),
       }
     })
 

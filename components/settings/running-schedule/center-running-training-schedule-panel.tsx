@@ -34,7 +34,7 @@ import {
   propagateTrainingWeekDatesFromMonday,
   type RunningLeagueTrainingScheduleDayInput,
 } from '@/lib/running-league/training-schedule'
-import { parseSingleTimeToken } from '@/lib/time-input-parse'
+import { ScheduleTimeListEditor } from '@/components/settings/running-schedule/schedule-time-list-editor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -450,33 +450,12 @@ export function CenterRunningTrainingSchedulePanel({
               />
               <div className="space-y-1">
                 <Label className="text-[11px] text-muted-foreground">시간</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  placeholder="20:00"
+                <ScheduleTimeListEditor
                   value={day.training_time ?? ''}
-                  onChange={(event) => {
-                    const next = event.target.value
-                    const trimmed = next.trim()
-                    const complete =
-                      /^\d{1,2}:\d{2}$/.test(trimmed) || /^\d{4}$/.test(trimmed)
-                    updateDay(day.weekday, {
-                      training_time: complete
-                        ? (parseSingleTimeToken(trimmed) ?? next)
-                        : next || null,
-                    })
-                  }}
-                  onBlur={(event) => {
-                    const trimmed = event.target.value.trim()
-                    if (!trimmed) {
-                      updateDay(day.weekday, { training_time: null })
-                      return
-                    }
-                    const normalized = parseSingleTimeToken(trimmed)
-                    if (normalized) updateDay(day.weekday, { training_time: normalized })
-                  }}
-                  className="w-full text-sm sm:max-w-[10rem]"
+                  onChange={(training_time) =>
+                    updateDay(day.weekday, { training_time: training_time || null })
+                  }
+                  className="sm:max-w-xs"
                 />
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
