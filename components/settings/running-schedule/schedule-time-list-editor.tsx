@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,15 +20,23 @@ export function ScheduleTimeListEditor({
   value,
   onChange,
   disabled = false,
+  autoFocus = false,
   className,
 }: {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
+  autoFocus?: boolean
   className?: string
 }) {
   const times = parseTrainingScheduleTimeList(value)
   const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!autoFocus) return
+    inputRef.current?.focus()
+  }, [autoFocus])
 
   function writeTimes(next: string[]) {
     onChange(serializeTrainingScheduleTimes(next.join(',')) ?? '')
@@ -67,6 +75,7 @@ export function ScheduleTimeListEditor({
       ) : null}
       <div className="flex gap-1.5">
         <Input
+          ref={inputRef}
           type="text"
           inputMode="numeric"
           autoComplete="off"

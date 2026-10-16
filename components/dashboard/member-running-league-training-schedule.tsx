@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
@@ -1182,6 +1182,12 @@ function DayContentQuickEdit({
   )
   const [placesOpen, setPlacesOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [activeField, setActiveField] = useState<
+    'summary' | 'time' | 'location' | 'map' | null
+  >(null)
+  const summaryRef = useRef<HTMLTextAreaElement>(null)
+  const locationRef = useRef<HTMLInputElement>(null)
+  const mapRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setSummary(day.training_summary)
@@ -1189,7 +1195,14 @@ function DayContentQuickEdit({
     setLocationLabel(day.location_label)
     setMapUrl(day.naver_map_url ?? '')
     setPlacesOpen(false)
+    setActiveField(null)
   }, [day.id, day.training_summary, day.training_time, day.location_label, day.naver_map_url])
+
+  useEffect(() => {
+    if (activeField === 'summary') summaryRef.current?.focus()
+    if (activeField === 'location') locationRef.current?.focus()
+    if (activeField === 'map') mapRef.current?.focus()
+  }, [activeField])
 
   useEffect(() => {
     let cancelled = false
@@ -1239,37 +1252,88 @@ function DayContentQuickEdit({
     }
   }
 
+  const previewClass =
+    'w-full rounded-md border border-lime-500/20 bg-black/40 px-3 py-2 text-left text-sm text-zinc-100'
+
   return (
     <div className="space-y-2">
       <label className="text-xs font-medium text-zinc-400">수업 내용</label>
-      <Textarea
-        value={summary}
-        onChange={(event) => setSummary(event.target.value)}
-        rows={3}
-        disabled={saving}
-        className="min-h-[72px] border-lime-500/20 bg-black/40 text-sm text-zinc-100"
-      />
+      {activeField === 'summary' ? (
+        <Textarea
+          ref={summaryRef}
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          rows={3}
+          disabled={saving}
+          className="min-h-[72px] border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => setActiveField('summary')}
+          className={cn(previewClass, !summary && 'text-zinc-500')}
+        >
+          {summary || '눌러서 수업 내용 수정'}
+        </button>
+      )}
       <label className="text-xs font-medium text-zinc-400">시간</label>
-      <ScheduleTimeListEditor
-        value={trainingTime}
-        disabled={saving}
-        onChange={setTrainingTime}
-      />
+      {activeField === 'time' ? (
+        <ScheduleTimeListEditor
+          value={trainingTime}
+          disabled={saving}
+          autoFocus
+          onChange={setTrainingTime}
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => setActiveField('time')}
+          className={cn(previewClass, 'tabular-nums', !trainingTime && 'text-zinc-500')}
+        >
+          {formatTrainingScheduleTimeListLabel(trainingTime) || '눌러서 시간 추가'}
+        </button>
+      )}
       <label className="text-xs font-medium text-zinc-400">장소</label>
-      <Input
-        value={locationLabel}
-        disabled={saving}
-        onChange={(event) => setLocationLabel(event.target.value)}
-        placeholder="장소"
-        className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
-      />
-      <Input
-        value={mapUrl}
-        disabled={saving}
-        onChange={(event) => setMapUrl(event.target.value)}
-        placeholder="네이버 지도 URL"
-        className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
-      />
+      {activeField === 'location' ? (
+        <Input
+          ref={locationRef}
+          value={locationLabel}
+          disabled={saving}
+          onChange={(event) => setLocationLabel(event.target.value)}
+          placeholder="장소"
+          className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => setActiveField('location')}
+          className={cn(previewClass, !locationLabel && 'text-zinc-500')}
+        >
+          {locationLabel || '눌러서 장소 수정'}
+        </button>
+      )}
+      {activeField === 'map' ? (
+        <Input
+          ref={mapRef}
+          value={mapUrl}
+          disabled={saving}
+          onChange={(event) => setMapUrl(event.target.value)}
+          placeholder="네이버 지도 URL"
+          className="h-8 border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => setActiveField('map')}
+          className={cn(previewClass, 'truncate', !mapUrl && 'text-zinc-500')}
+        >
+          {mapUrl || '눌러서 지도 링크 수정'}
+        </button>
+      )}
       <div className="space-y-1.5">
         <Button
           type="button"
@@ -1360,7 +1424,10 @@ function ParticipantsDialog({
 }) {
   return (
     <Dialog open={day != null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(90vh,720px)] max-w-sm overflow-y-auto border-lime-500/25 bg-zinc-950">
+      <DialogContent
+        className="max-h-[min(90vh,720px)] max-w-sm overflow-y-auto border-lime-500/25 bg-zinc-950"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         {day ? (
           <>
             <DialogHeader>
@@ -1374,7 +1441,7 @@ function ParticipantsDialog({
               </DialogTitle>
               {canEditContent ? (
                 <DialogDescription className="text-left text-zinc-400">
-                  이 날짜의 수업 내용, 시간, 장소를 바로 수정합니다.
+                  수정할 칸을 누르면 입력할 수 있습니다.
                 </DialogDescription>
               ) : (
                 <DialogDescription className="text-left text-zinc-400">
