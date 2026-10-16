@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Eye } from 'lucide-react'
-import { getMemberPortalDataForStaff } from '@/lib/actions/member-portal'
+import { getMember } from '@/lib/actions/members'
+import { loadMemberPortalData } from '@/lib/member-portal-data'
 import { getCenterRunningTrainingScheduleForMember } from '@/lib/actions/center-running-training-schedule'
 import { getYouthAthleticsPbBundle } from '@/lib/actions/youth-athletics-pb'
 import { requireMemberViewer } from '@/lib/auth/member-access'
@@ -22,16 +23,17 @@ export default async function MemberYouthAthleticsPortalPreviewPage({
 }) {
   const viewer = await requireMemberViewer()
   const { id } = await params
+  const member = await getMember(id)
 
-  const [data, centerTrainingSchedule, pbBundle] = await Promise.all([
-    getMemberPortalDataForStaff(id),
-    getCenterRunningTrainingScheduleForMember('youth_athletics'),
-    getYouthAthleticsPbBundle(id),
-  ])
-
-  if (!data || !isYouthAthleticsClassSport(data.member.sport)) {
+  if (!member || !isYouthAthleticsClassSport(member.sport)) {
     notFound()
   }
+
+  const [data, centerTrainingSchedule, pbBundle] = await Promise.all([
+    loadMemberPortalData(member),
+    getCenterRunningTrainingScheduleForMember('youth_athletics'),
+    getYouthAthleticsPbBundle(member.id),
+  ])
 
   return (
     <div className="space-y-4">

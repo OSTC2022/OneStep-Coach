@@ -242,9 +242,9 @@ export function YouthAthleticsPortal({
                   ) : null}
                 </p>
                 <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-foreground/90">
-                  {day.training_summary.trim() || '훈련 미정'}
+                  {day.training_summary?.trim() || '훈련 미정'}
                 </p>
-                {day.location_label.trim() ? (
+                {day.location_label?.trim() ? (
                   <p className="mt-1 flex items-center gap-1 truncate text-[10px] text-muted-foreground">
                     <MapPin className="h-2.5 w-2.5 shrink-0" />
                     {day.location_label}

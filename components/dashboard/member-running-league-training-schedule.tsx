@@ -739,7 +739,7 @@ export function MemberRunningLeagueTrainingSchedule({
         </DialogContent>
       </Dialog>
 
-      {canEditDays ? (
+      {canEditDays && dayEditOpen ? (
         <YouthScheduleDayEditDialog
           open={dayEditOpen}
           onOpenChange={setDayEditOpen}
