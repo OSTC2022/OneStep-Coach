@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { Loader2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
-import { updateLessonRecord } from '@/lib/actions/lesson-sessions'
+import { updateLessonRecord, getLessonRecordSignature } from '@/lib/actions/lesson-sessions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -95,6 +95,7 @@ export function LessonRecordDetailDialog({
   const [instructorId, setInstructorId] = useState(AUTO_INSTRUCTOR_ID)
   const [lessonType, setLessonType] = useState('개인레슨')
   const [sessionPackageId, setSessionPackageId] = useState('')
+  const [loadedSignature, setLoadedSignature] = useState<string | null>(null)
   const prevInstructorRef = useRef('')
 
   useEffect(() => {
@@ -109,6 +110,32 @@ export function LessonRecordDetailDialog({
     setLessonType(normalizeLessonType(lesson.lesson_type))
     setSessionPackageId(lesson.session_package_id ?? '')
     prevInstructorRef.current = nextInstructorId
+  }, [open, lesson])
+
+  useEffect(() => {
+    if (!open || !lesson) {
+      setLoadedSignature(null)
+      return
+    }
+    const existing = resolveSignatureData(lesson)
+    if (existing) {
+      setLoadedSignature(existing)
+      return
+    }
+
+    let cancelled = false
+    setLoadedSignature(null)
+    void getLessonRecordSignature(lesson.id)
+      .then((result) => {
+        if (!cancelled) setLoadedSignature(result.signatureData)
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedSignature(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [open, lesson])
 
   useEffect(() => {
@@ -137,7 +164,7 @@ export function LessonRecordDetailDialog({
   const signedAt = lesson.signature?.signed_at
     ? formatSignedAtTime(lesson.signature.signed_at)
     : null
-  const signatureData = resolveSignatureData(lesson)
+  const signatureData = loadedSignature || resolveSignatureData(lesson)
   const displayPackageId = lesson.session_package_id ?? sessionPackageId
   const selectedPackage = sessionPackages.find((pkg) => pkg.id === displayPackageId)
 

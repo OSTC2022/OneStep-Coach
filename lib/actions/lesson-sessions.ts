@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { requireMemberViewer } from '@/lib/auth/member-access'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { createStaffDataClient } from '@/lib/supabase/staff-data-client'
@@ -2238,4 +2238,41 @@ export async function getNextLessonForMember(memberId: string): Promise<Lesson |
   }
 
   return (data as Lesson | null) ?? null
+}
+
+/** 회원 상세의 수업 목록에는 서명 이미지를 넣지 않고, 상세를 열 때만 한 건 불러온다. */
+export async function getLessonRecordSignature(
+  lessonId: string,
+): Promise<{ signatureData: string | null }> {
+  await requireMemberViewer()
+  const id = lessonId.trim()
+  if (!id) return { signatureData: null }
+
+  const supabase = await createStaffDataClient()
+  const { data: sessions } = await supabase
+    .from('lesson_sessions')
+    .select('signature_data')
+    .eq('lesson_id', id)
+    .not('signature_data', 'is', null)
+    .limit(1)
+
+  const fromSession = sessions?.[0]?.signature_data
+  if (typeof fromSession === 'string' && fromSession.trim()) {
+    return { signatureData: fromSession }
+  }
+
+  const { data: signature } = await supabase
+    .from('signatures')
+    .select('signature_data')
+    .eq('lesson_id', id)
+    .order('signed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const fromSignature = signature?.signature_data
+  if (typeof fromSignature === 'string' && fromSignature.trim()) {
+    return { signatureData: fromSignature }
+  }
+
+  return { signatureData: null }
 }

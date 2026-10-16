@@ -72,7 +72,7 @@ export default async function MemberDetailPage({
     special_note,
     created_at,
     instructor:instructors(id, name),
-    lesson_sessions(checked_in_at, signature_data)
+    lesson_sessions(checked_in_at)
   `
 
   const lessonQuery = await supabase
