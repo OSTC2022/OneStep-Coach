@@ -443,12 +443,25 @@ function mergeTrainingSignups(
   for (const group of groups) {
     for (const signup of group) {
       if (!signup.member_id) continue
-      byMember.set(signup.member_id, signup)
+      const prev = byMember.get(signup.member_id)
+      if (!prev) {
+        byMember.set(signup.member_id, signup)
+        continue
+      }
+      byMember.set(signup.member_id, {
+        ...prev,
+        ...signup,
+        member_name: signup.member_name || prev.member_name,
+        signup_time: signup.signup_time || prev.signup_time || null,
+      })
     }
   }
-  return Array.from(byMember.values()).sort((a, b) =>
-    a.signed_at.localeCompare(b.signed_at),
-  )
+  return Array.from(byMember.values()).sort((a, b) => {
+    const at = a.signup_time ?? '99:99'
+    const bt = b.signup_time ?? '99:99'
+    if (at !== bt) return at.localeCompare(bt)
+    return a.signed_at.localeCompare(b.signed_at)
+  })
 }
 
 function weekDatesFromMonday(weekStart: string | null): string[] {

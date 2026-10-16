@@ -995,6 +995,33 @@ function ScheduleRestDayRow({ day }: { day: RunningLeagueTrainingScheduleDayView
   )
 }
 
+function signupChoicesByTime(
+  signups: RunningLeagueTrainingScheduleSignup[],
+): Array<{ time: string | null; names: string[] }> {
+  const groups = new Map<string, string[]>()
+  const untimed: string[] = []
+  const sorted = [...signups].sort((a, b) => {
+    const at = a.signup_time ?? '99:99'
+    const bt = b.signup_time ?? '99:99'
+    if (at !== bt) return at.localeCompare(bt)
+    return a.member_name.localeCompare(b.member_name, 'ko')
+  })
+  for (const signup of sorted) {
+    if (!signup.signup_time) {
+      untimed.push(signup.member_name)
+      continue
+    }
+    const names = groups.get(signup.signup_time) ?? []
+    names.push(signup.member_name)
+    groups.set(signup.signup_time, names)
+  }
+  const rows = [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([time, names]) => ({ time, names }))
+  if (untimed.length > 0) rows.push({ time: null, names: untimed })
+  return rows
+}
+
 function toggleDisabled({
   isSignedUp,
   canSelfSignup,
@@ -1094,6 +1121,23 @@ function ScheduleDayRow({
               <Users className="h-3 w-3" />
               {day.signup_count}명 참여
             </span>
+            {day.signups.length > 0 ? (
+              <span className="flex w-full flex-col gap-0.5 pt-0.5">
+                {signupChoicesByTime(day.signups).map((group) => (
+                  <span
+                    key={group.time || 'none'}
+                    className="text-[11px] leading-snug text-zinc-300"
+                  >
+                    {group.time ? (
+                      <span className="mr-1 font-semibold tabular-nums text-lime-200">
+                        {group.time}
+                      </span>
+                    ) : null}
+                    {group.names.join(', ')}
+                  </span>
+                ))}
+              </span>
+            ) : null}
             {isSignedUp ? (
               <span className="inline-flex items-center rounded-full border border-lime-500/35 bg-lime-500/10 px-2 py-0.5 text-[10px] font-medium text-lime-200">
                 내 참여
@@ -1366,14 +1410,12 @@ function ParticipantsDialog({
                       key={`${signup.member_id}-${signup.signed_at}`}
                       className="flex items-center gap-2 rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
                     >
-                      <span className="min-w-0 flex-1 truncate">
-                        {signup.member_name}
-                        {signup.signup_time ? (
-                          <span className="ml-1.5 tabular-nums text-[11px] text-lime-200/80">
-                            {signup.signup_time}
-                          </span>
-                        ) : null}
-                      </span>
+                      <span className="min-w-0 flex-1 truncate">{signup.member_name}</span>
+                      {signup.signup_time ? (
+                        <span className="shrink-0 rounded-full border border-lime-500/40 bg-lime-500/10 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-lime-200">
+                          {signup.signup_time}
+                        </span>
+                      ) : null}
                       {canStaffRemoveSignup ? (
                         <button
                           type="button"

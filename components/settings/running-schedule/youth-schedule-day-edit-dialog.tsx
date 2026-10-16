@@ -542,14 +542,12 @@ function DayEditor({
                 key={signup.member_id}
                 className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm"
               >
-                <span className="min-w-0 flex-1 truncate">
-                  {signup.member_name}
-                  {signup.signup_time ? (
-                    <span className="ml-1.5 tabular-nums text-[11px] text-muted-foreground">
-                      {signup.signup_time}
-                    </span>
-                  ) : null}
-                </span>
+                <span className="min-w-0 flex-1 truncate">{signup.member_name}</span>
+                {signup.signup_time ? (
+                  <span className="shrink-0 rounded-full border border-primary/40 px-2 py-0.5 text-[11px] font-semibold tabular-nums">
+                    {signup.signup_time}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   aria-label={`${signup.member_name} 빼기`}
