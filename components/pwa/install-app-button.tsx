@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
   getDeferredInstallPrompt,
+  installGuideMessage,
   isStandaloneDisplay,
   triggerPwaInstall,
 } from '@/lib/pwa/install-prompt'
@@ -41,10 +42,12 @@ export function InstallAppButton({
 
     syncPrompt()
     window.addEventListener('beforeinstallprompt', syncPrompt)
+    window.addEventListener('onestep-install-available', syncPrompt)
     window.addEventListener('appinstalled', () => setHidden(true))
 
     return () => {
       window.removeEventListener('beforeinstallprompt', syncPrompt)
+      window.removeEventListener('onestep-install-available', syncPrompt)
     }
   }, [])
 
@@ -60,7 +63,7 @@ export function InstallAppButton({
         return
       }
       if (outcome === 'dismissed') return
-      toast.error('지금은 자동 설치를 사용할 수 없습니다.')
+      toast.error(installGuideMessage())
     } finally {
       setInstalling(false)
       setCanPrompt(Boolean(getDeferredInstallPrompt()))
