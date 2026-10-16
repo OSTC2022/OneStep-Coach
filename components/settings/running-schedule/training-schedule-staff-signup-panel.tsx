@@ -37,9 +37,18 @@ export function TrainingScheduleStaffSignupPanel({
       <CardHeader className="pb-2">
         <CardTitle className="text-base">참여 현황 · 대리 신청</CardTitle>
         <p className="text-xs text-muted-foreground">
-          평일 18시 / 주말 16시(KST) 이후에는 회원 직접 신청이 마감됩니다. 마감 후{' '}
-          <strong>참여</strong>를 누르면 회원(강사 포함)을 선택해 대리 등록할 수 있습니다. 취소는
-          해당 회원이 언제든 가능합니다.
+          {audience === 'youth_athletics' ? (
+            <>
+              하단 <strong>수정</strong>에서 날짜만 골라 훈련 내용을 바꿀 수 있습니다. 저장하면
+              육상 포털에 바로 반영됩니다. 참여자는 관리자·강사가 넣거나 뺄 수 있습니다.
+            </>
+          ) : (
+            <>
+              평일 18시 / 주말 16시(KST) 이후에는 회원 직접 신청이 마감됩니다. 마감 후{' '}
+              <strong>참여</strong>를 누르면 회원(강사 포함)을 선택해 대리 등록할 수 있습니다.
+              취소는 해당 회원이 언제든 가능합니다.
+            </>
+          )}
         </p>
       </CardHeader>
       <CardContent>
@@ -50,6 +59,7 @@ export function TrainingScheduleStaffSignupPanel({
           tableReady={bundle?.tableReady ?? true}
           canParticipate={false}
           canStaffProxySignup
+          canEditDays={audience === 'youth_athletics'}
           embedded
           contentOnly
         />

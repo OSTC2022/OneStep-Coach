@@ -267,6 +267,7 @@ export function YouthAthleticsPortal({
             canParticipate={!adminPreview}
             readOnly={adminPreview && !canStaffProxySignup}
             canStaffProxySignup={canStaffProxySignup}
+            canEditDays={canStaffProxySignup}
             embedded
             contentOnly
             title="육상선수반 스케줄"

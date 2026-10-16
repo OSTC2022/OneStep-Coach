@@ -240,6 +240,8 @@ function revalidateCenterTrainingSchedulePaths() {
   revalidatePath('/dashboard/my/running-league')
   revalidatePath('/dashboard/settings/running-schedule')
   revalidatePath('/dashboard/settings/youth-athletics-schedule')
+  revalidatePath('/dashboard/youth-athletics-portal')
+  revalidatePath('/dashboard/members', 'layout')
 }
 
 function mapSignupRow(row: CenterSignupRow): RunningLeagueTrainingScheduleSignup {
@@ -868,6 +870,193 @@ export async function saveCenterRunningTrainingSchedule(
   revalidatePath(tables.settingsPath)
   await saveCenterTrainingScheduleWeekSnapshot(days, audience)
   return warning ? { ok: true, warning } : { ok: true }
+}
+
+export type TrainingScheduleDayContentUpdate = {
+  schedule_date: string
+  weekday: TrainingWeekday
+  training_summary: string
+  location_label: string
+  naver_map_url: string
+  training_time: string | null
+  is_hidden: boolean
+}
+
+function weekdayIndexForDateKey(dateKey: string): TrainingWeekday | null {
+  const monday = getMondayDateKeyForDateKey(dateKey)
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const [mondayYear, mondayMonth, mondayDay] = monday.split('-').map(Number)
+  const diff = Math.round(
+    (Date.UTC(year, month - 1, day) - Date.UTC(mondayYear, mondayMonth - 1, mondayDay)) /
+      86400000,
+  )
+  if (diff < 0 || diff > 6) return null
+  return diff as TrainingWeekday
+}
+
+function liveRowsToScheduleInputs(
+  rows: CenterScheduleDayRow[],
+): RunningLeagueTrainingScheduleDayInput[] {
+  return rows.map((row) => ({
+    weekday: row.weekday as TrainingWeekday,
+    training_summary: row.training_summary ?? '',
+    location_label: row.location_label ?? '',
+    naver_map_url: row.naver_map_url ?? '',
+    is_hidden: Boolean(row.is_hidden),
+    schedule_date: normalizeTrainingScheduleDate(row.schedule_date),
+    training_time: normalizeTrainingScheduleTime(row.training_time),
+  }))
+}
+
+function applyScheduleDayContentPatches(
+  days: RunningLeagueTrainingScheduleDayInput[],
+  patches: TrainingScheduleDayContentUpdate[],
+): RunningLeagueTrainingScheduleDayInput[] {
+  const next = days.map((day) => ({ ...day }))
+  for (const patch of patches) {
+    const updated: RunningLeagueTrainingScheduleDayInput = {
+      weekday: patch.weekday,
+      training_summary: patch.training_summary.trim(),
+      location_label: patch.location_label.trim(),
+      naver_map_url: patch.naver_map_url.trim(),
+      is_hidden: patch.is_hidden,
+      schedule_date: patch.schedule_date,
+      training_time: normalizeTrainingScheduleTime(patch.training_time),
+    }
+    const index = next.findIndex((day) => day.weekday === patch.weekday)
+    if (index >= 0) {
+      next[index] = { ...next[index], ...updated, signups: next[index].signups }
+    } else {
+      next.push(updated)
+    }
+  }
+  return next.sort((a, b) => a.weekday - b.weekday)
+}
+
+/** 고른 날짜의 훈련 내용만 수정. 참여 인원은 유지하고 포털에 바로 반영한다. */
+export async function updateSelectedTrainingScheduleDays(
+  updates: TrainingScheduleDayContentUpdate[],
+  audience: TrainingScheduleAudience = 'youth_athletics',
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireRole(['admin', 'instructor'])
+
+  const patches: TrainingScheduleDayContentUpdate[] = []
+  for (const update of updates) {
+    const scheduleDate = normalizeTrainingScheduleDate(update.schedule_date)
+    if (!scheduleDate) continue
+    const weekday = weekdayIndexForDateKey(scheduleDate)
+    if (weekday == null) continue
+    patches.push({
+      schedule_date: scheduleDate,
+      weekday,
+      training_summary: update.training_summary ?? '',
+      location_label: update.location_label ?? '',
+      naver_map_url: update.naver_map_url ?? '',
+      training_time: normalizeTrainingScheduleTime(update.training_time),
+      is_hidden: Boolean(update.is_hidden),
+    })
+  }
+
+  if (patches.length === 0) {
+    return { ok: false, error: '수정할 날짜를 선택해주세요.' }
+  }
+
+  const tables = trainingScheduleConfig(audience)
+  const supabase = await scheduleClient()
+  const { data: existingDayRows, error: existingDayError } =
+    await fetchCenterScheduleDayRows(supabase, audience)
+
+  if (isMissingTableError(existingDayError)) {
+    return {
+      ok: false,
+      error: `스케줄 테이블이 없습니다. ${tables.missingSql} 을 실행해주세요.`,
+    }
+  }
+  if (existingDayError) {
+    console.error('updateSelectedTrainingScheduleDays.existing', existingDayError)
+    return { ok: false, error: '스케줄을 불러오지 못했습니다.' }
+  }
+
+  const liveRows = (existingDayRows ?? []) as CenterScheduleDayRow[]
+  const liveWeekStart = getTrainingWeekStartFromDays(liveRows)
+  const byWeek = new Map<string, TrainingScheduleDayContentUpdate[]>()
+  for (const patch of patches) {
+    const weekStart = getMondayDateKeyForDateKey(patch.schedule_date)
+    const list = byWeek.get(weekStart) ?? []
+    list.push(patch)
+    byWeek.set(weekStart, list)
+  }
+
+  const weekStarts = [...byWeek.keys()]
+  const snapshots = await fetchCenterTrainingScheduleWeekSnapshotsByStarts(
+    weekStarts,
+    audience,
+  )
+
+  for (const [weekStart, weekPatches] of byWeek) {
+    const snapshotDays = snapshots.get(weekStart)
+    const baseDays =
+      snapshotDays && snapshotDays.length > 0
+        ? snapshotDays
+        : liveWeekStart === weekStart
+          ? liveRowsToScheduleInputs(liveRows)
+          : propagateTrainingWeekDatesFromMonday(createEmptyTrainingScheduleDays(), weekStart)
+    await saveCenterTrainingScheduleWeekSnapshot(
+      applyScheduleDayContentPatches(baseDays, weekPatches),
+      audience,
+    )
+  }
+
+  const includeTrainingTime = audience === 'youth_athletics'
+  for (const patch of patches) {
+    const patchWeek = getMondayDateKeyForDateKey(patch.schedule_date)
+    if (liveWeekStart !== patchWeek) continue
+    const liveRow = liveRows.find((row) => row.weekday === patch.weekday)
+    const liveDate = normalizeTrainingScheduleDate(liveRow?.schedule_date)
+    if (liveDate && liveDate !== patch.schedule_date) continue
+
+    const payload: {
+      training_summary: string
+      location_label: string
+      naver_map_url: string | null
+      is_hidden: boolean
+      schedule_date: string
+      updated_at: string
+      training_time?: string | null
+    } = {
+      training_summary: patch.training_summary.trim(),
+      location_label: patch.location_label.trim(),
+      naver_map_url: patch.naver_map_url.trim() || null,
+      is_hidden: patch.is_hidden,
+      schedule_date: patch.schedule_date,
+      updated_at: new Date().toISOString(),
+    }
+    if (includeTrainingTime) {
+      payload.training_time = patch.training_time
+    }
+
+    let result = await supabase
+      .from(tables.daysTable)
+      .update(payload)
+      .eq('weekday', patch.weekday)
+
+    if (isMissingColumnError(result.error, 'training_time') && includeTrainingTime) {
+      const { training_time: _time, ...withoutTime } = payload
+      result = await supabase
+        .from(tables.daysTable)
+        .update(withoutTime)
+        .eq('weekday', patch.weekday)
+    }
+
+    if (result.error) {
+      console.error('updateSelectedTrainingScheduleDays.update', result.error)
+      return { ok: false, error: formatSaveScheduleError(result.error) }
+    }
+  }
+
+  revalidateCenterTrainingSchedulePaths()
+  revalidatePath(tables.settingsPath)
+  return { ok: true }
 }
 
 export async function getCenterRunningTrainingScheduleForMember(

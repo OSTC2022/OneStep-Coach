@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
   ChevronDown,
   ExternalLink,
   Loader2,
   MapPin,
+  Pencil,
   Users,
   X,
 } from 'lucide-react'
@@ -16,7 +18,9 @@ import {
   staffAddCenterRunningTrainingScheduleSignup,
   staffRemoveCenterRunningTrainingScheduleSignup,
   toggleCenterRunningTrainingScheduleSignup,
+  type TrainingScheduleDayContentUpdate,
 } from '@/lib/actions/center-running-training-schedule'
+import { YouthScheduleDayEditDialog } from '@/components/settings/running-schedule/youth-schedule-day-edit-dialog'
 import type { MemberPickerOption } from '@/lib/actions/members'
 import type {
   RunningLeagueTrainingScheduleDayView,
@@ -25,12 +29,16 @@ import type {
 import {
   buildFullWeekScheduleDays,
   isVotableTrainingScheduleDay,
+  resolveTrainingScheduleMapHref,
 } from '@/lib/running-league/training-schedule'
 import {
   isTrainingScheduleSignupClosed,
   trainingScheduleSignupClosedMessage,
 } from '@/lib/running-league/training-schedule-signup-deadline'
-import { parseTrainingScheduleDayId } from '@/lib/training-schedule-audience'
+import {
+  parseTrainingScheduleDayId,
+  trainingScheduleDayId,
+} from '@/lib/training-schedule-audience'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -68,6 +76,8 @@ type MemberRunningLeagueTrainingScheduleProps = {
   readOnly?: boolean
   /** 마감 후 관리자·강사 대리 참여 (회원 선택) */
   canStaffProxySignup?: boolean
+  /** 육상선수반 — 날짜만 골라 수정, 참여자 추가·삭제 */
+  canEditDays?: boolean
   embedded?: boolean
   /** 카드 헤더 없이 본문만 (툴바 팝업용) */
   contentOnly?: boolean
@@ -108,12 +118,15 @@ export function MemberRunningLeagueTrainingSchedule({
   canParticipate,
   readOnly = false,
   canStaffProxySignup = false,
+  canEditDays = false,
   embedded = false,
   contentOnly = false,
   title = '훈련 일정',
   className,
 }: MemberRunningLeagueTrainingScheduleProps) {
+  const router = useRouter()
   const [pending, startTransition] = useTransition()
+  const [dayEditOpen, setDayEditOpen] = useState(false)
   const [pendingDayId, setPendingDayId] = useState<string | null>(null)
   const [scheduleDays, setScheduleDays] = useState(days)
   const [pastScheduleDays, setPastScheduleDays] = useState(previousWeekDays)
@@ -219,14 +232,59 @@ export function MemberRunningLeagueTrainingSchedule({
     setProxyDay((current) => (current?.id === dayId ? { ...current, ...patch } : current))
   }
 
+  function patchDayContent(update: TrainingScheduleDayContentUpdate) {
+    const date = update.schedule_date.slice(0, 10)
+    const mapHref = resolveTrainingScheduleMapHref({
+      naver_map_url: update.naver_map_url,
+      location_label: update.location_label,
+    })
+    const apply = (list: RunningLeagueTrainingScheduleDayView[]) =>
+      list.map((day) =>
+        day.schedule_date?.slice(0, 10) === date && day.weekday === update.weekday
+          ? {
+              ...day,
+              training_summary: update.training_summary.trim(),
+              location_label: update.location_label.trim(),
+              naver_map_url: update.naver_map_url.trim() || null,
+              map_href: mapHref,
+              training_time: update.training_time,
+              is_hidden: update.is_hidden,
+            }
+          : day,
+      )
+
+    setScheduleDays((current) => apply(current))
+    setPastScheduleDays((current) => apply(current))
+    setUpcomingScheduleDays((current) => apply(current))
+  }
+
+  function replaceDaySignups(
+    day: RunningLeagueTrainingScheduleDayView,
+    signups: RunningLeagueTrainingScheduleSignup[],
+  ) {
+    const date = day.schedule_date?.slice(0, 10)
+    patchDaySignup(day.id, { signups, signup_count: signups.length })
+    if (!date) return
+    const apply = (list: RunningLeagueTrainingScheduleDayView[]) =>
+      list.map((item) =>
+        item.schedule_date?.slice(0, 10) === date && item.weekday === day.weekday
+          ? { ...item, signups, signup_count: signups.length }
+          : item,
+      )
+    setScheduleDays((current) => apply(current))
+    setPastScheduleDays((current) => apply(current))
+    setUpcomingScheduleDays((current) => apply(current))
+  }
+
   function openStaffProxyPicker(day: RunningLeagueTrainingScheduleDayView) {
     setProxyDay(day)
     setProxyQuery('')
     setProxyLoading(true)
     setProxyMembers(null)
 
-    const audience =
-      parseTrainingScheduleDayId(day.id)?.audience ?? 'adult_running'
+    const audience = canEditDays
+      ? 'youth_athletics'
+      : (parseTrainingScheduleDayId(day.id)?.audience ?? 'adult_running')
 
     void listMembersForTrainingScheduleStaffSignup(audience)
       .then((rows) => {
@@ -243,6 +301,12 @@ export function MemberRunningLeagueTrainingSchedule({
     const closed = daySignupClosed(day)
     const isSignedUp = signupDraft[day.id] ?? day.is_signed_up
     if (isSignedUp) return
+
+    // 육상 스케줄은 관리자·강사가 마감 전에도 참여자를 넣는다
+    if (canEditDays && canStaffProxySignup) {
+      openStaffProxyPicker(day)
+      return
+    }
 
     // 마감 후: 관리자·강사만 회원 선택 참여
     if (closed) {
@@ -332,7 +396,9 @@ export function MemberRunningLeagueTrainingSchedule({
 
     startTransition(async () => {
       const result = await staffRemoveCenterRunningTrainingScheduleSignup(
-        day.id,
+        canEditDays && day.schedule_date
+          ? trainingScheduleDayId('youth_athletics', day.weekday, day.schedule_date)
+          : day.id,
         signup.member_id,
       )
       setPendingDayId(null)
@@ -361,7 +427,12 @@ export function MemberRunningLeagueTrainingSchedule({
     setPendingDayId(day.id)
 
     startTransition(async () => {
-      const result = await staffAddCenterRunningTrainingScheduleSignup(day.id, member.id)
+      const result = await staffAddCenterRunningTrainingScheduleSignup(
+        canEditDays && day.schedule_date
+          ? trainingScheduleDayId('youth_athletics', day.weekday, day.schedule_date)
+          : day.id,
+        member.id,
+      )
       setPendingDayId(null)
 
       if (!result.ok) {
@@ -411,10 +482,15 @@ export function MemberRunningLeagueTrainingSchedule({
           day={day}
           pending={pending && pendingDayId === day.id}
           showActions={
-            options.participate && (!readOnly || canStaffProxySignup)
+            (options.participate && (!readOnly || canStaffProxySignup)) ||
+            (canEditDays && canStaffProxySignup)
           }
           canSelfSignup={canParticipate && options.participate}
-          canStaffProxySignup={canStaffProxySignup && options.participate}
+          canStaffProxySignup={
+            (canStaffProxySignup && options.participate) ||
+            (canEditDays && canStaffProxySignup)
+          }
+          staffSignupAnytime={canEditDays && canStaffProxySignup}
           isSignedUp={signupDraft[day.id] ?? day.is_signed_up}
           signupClosed={daySignupClosed(day)}
           onOpenParticipants={() => openParticipants(day)}
@@ -500,6 +576,24 @@ export function MemberRunningLeagueTrainingSchedule({
           })}
         </div>
       ) : null}
+
+      {canEditDays ? (
+        <div className="border-t border-border/70 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() => setDayEditOpen(true)}
+          >
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            수정
+          </Button>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            날짜만 골라 훈련 내용과 참여자를 수정하면 육상 포털에 바로 반영됩니다.
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 
@@ -521,6 +615,7 @@ export function MemberRunningLeagueTrainingSchedule({
         canSelfSignup={canParticipate}
         canStaffProxySignup={canStaffProxySignup}
         canStaffRemoveSignup={canStaffProxySignup}
+        staffSignupAnytime={canEditDays && canStaffProxySignup}
         signupClosed={activeDay ? daySignupClosed(activeDay) : false}
         onRequestRemoveSignup={(signup) => {
           if (!activeDay) return
@@ -643,6 +738,24 @@ export function MemberRunningLeagueTrainingSchedule({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {canEditDays ? (
+        <YouthScheduleDayEditDialog
+          open={dayEditOpen}
+          onOpenChange={setDayEditOpen}
+          pastDays={fullPastWeekDays}
+          currentDays={fullWeekDays}
+          nextDays={fullNextWeekDays}
+          onApplied={(updates) => {
+            for (const update of updates) patchDayContent(update)
+            router.refresh()
+          }}
+          onSignupsChanged={(day, signups) => {
+            replaceDaySignups(day, signups)
+            router.refresh()
+          }}
+        />
+      ) : null}
     </>
   )
 
@@ -777,16 +890,18 @@ function toggleDisabled({
   canSelfSignup,
   canStaffProxySignup,
   signupClosed,
+  staffSignupAnytime = false,
 }: {
   isSignedUp: boolean
   canSelfSignup: boolean
   canStaffProxySignup: boolean
   signupClosed: boolean
+  staffSignupAnytime?: boolean
 }): boolean {
   if (isSignedUp) return !canSelfSignup
   return !(
     (canSelfSignup && !signupClosed) ||
-    (canStaffProxySignup && signupClosed)
+    (canStaffProxySignup && (signupClosed || staffSignupAnytime))
   )
 }
 
@@ -796,6 +911,7 @@ function ScheduleDayRow({
   showActions,
   canSelfSignup,
   canStaffProxySignup,
+  staffSignupAnytime = false,
   isSignedUp,
   signupClosed,
   onOpenParticipants,
@@ -806,6 +922,7 @@ function ScheduleDayRow({
   showActions: boolean
   canSelfSignup: boolean
   canStaffProxySignup: boolean
+  staffSignupAnytime?: boolean
   isSignedUp: boolean
   signupClosed: boolean
   onOpenParticipants: () => void
@@ -884,6 +1001,7 @@ function ScheduleDayRow({
             canSelfSignup,
             canStaffProxySignup,
             signupClosed,
+            staffSignupAnytime,
           })}
           onToggle={onToggleSignup}
         />
@@ -902,6 +1020,7 @@ function ParticipantsDialog({
   canSelfSignup,
   canStaffProxySignup,
   canStaffRemoveSignup,
+  staffSignupAnytime = false,
   signupClosed,
   onRequestRemoveSignup,
 }: {
@@ -914,6 +1033,7 @@ function ParticipantsDialog({
   canSelfSignup: boolean
   canStaffProxySignup: boolean
   canStaffRemoveSignup: boolean
+  staffSignupAnytime?: boolean
   signupClosed: boolean
   onRequestRemoveSignup: (signup: RunningLeagueTrainingScheduleSignup) => void
 }) {
@@ -983,6 +1103,7 @@ function ParticipantsDialog({
                       canSelfSignup,
                       canStaffProxySignup,
                       signupClosed,
+                      staffSignupAnytime,
                     })}
                     onToggle={onToggleSignup}
                   />
