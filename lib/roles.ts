@@ -164,6 +164,8 @@ export function canAccessPath(role: AppRole, pathname: string): boolean {
     pathname.startsWith('/dashboard/lesson-status') ||
     pathname.startsWith('/dashboard/lessons') ||
     pathname.startsWith('/dashboard/calendar') ||
-    pathname.startsWith('/dashboard/attendance')
+    pathname.startsWith('/dashboard/attendance') ||
+    pathname.startsWith('/dashboard/running-portal') ||
+    pathname.startsWith('/dashboard/youth-athletics-portal')
   )
 }
