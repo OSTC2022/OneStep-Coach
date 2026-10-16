@@ -58,11 +58,14 @@ export function waitForInstallPrompt(timeoutMs = 5000): Promise<BeforeInstallPro
   })
 }
 
+/** 한 번만 기존 워커를 지우고 다시 연다. 빈 fetch 리스너에 막힌 설치 앱 복구용. */
+export const SW_RECOVERY_SCRIPT = `(function(){try{if(!("serviceWorker"in navigator))return;var key="onestep-sw-reset-v3";if(localStorage.getItem(key)==="1")return;navigator.serviceWorker.getRegistrations().then(function(regs){if(!regs||!regs.length){localStorage.setItem(key,"1");return}localStorage.setItem(key,"1");Promise.all(regs.map(function(reg){return reg.unregister()})).then(function(){location.reload()})})}catch(e){}})();`
+
 export async function registerPwaServiceWorker(): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
   try {
-    await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    await navigator.serviceWorker.register('/sw.js?v=onestep-v3', { scope: '/' })
     await navigator.serviceWorker.ready
   } catch {
     /* installability may still work on some browsers */

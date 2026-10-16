@@ -19,6 +19,7 @@ import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
 import { PwaInstallAffordance } from '@/components/pwa/pwa-install-affordance'
+import { SW_RECOVERY_SCRIPT } from '@/lib/pwa/install-prompt'
 import { SPLASH_BOOT_SCRIPT } from '@/lib/splash-boot'
 import './globals.css'
 
@@ -158,6 +159,9 @@ export default function RootLayout({
     >
       <head>
         <PwaSplashHeadLinks />
+        <script
+          dangerouslySetInnerHTML={{ __html: SW_RECOVERY_SCRIPT }}
+        />
         <script
           dangerouslySetInnerHTML={{ __html: SPLASH_BOOT_SCRIPT }}
         />
