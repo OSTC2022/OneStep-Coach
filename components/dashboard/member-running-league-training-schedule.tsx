@@ -18,6 +18,7 @@ import {
   staffAddCenterRunningTrainingScheduleSignup,
   staffRemoveCenterRunningTrainingScheduleSignup,
   toggleCenterRunningTrainingScheduleSignup,
+  updateSelectedTrainingScheduleDays,
   type TrainingScheduleDayContentUpdate,
 } from '@/lib/actions/center-running-training-schedule'
 import { YouthScheduleDayEditDialog } from '@/components/settings/running-schedule/youth-schedule-day-edit-dialog'
@@ -57,6 +58,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
   MEMBER_PORTAL_CARD_CLASS,
@@ -256,6 +258,21 @@ export function MemberRunningLeagueTrainingSchedule({
     setScheduleDays((current) => apply(current))
     setPastScheduleDays((current) => apply(current))
     setUpcomingScheduleDays((current) => apply(current))
+    setActiveDay((current) =>
+      current &&
+      current.schedule_date?.slice(0, 10) === date &&
+      current.weekday === update.weekday
+        ? {
+            ...current,
+            training_summary: update.training_summary.trim(),
+            location_label: update.location_label.trim(),
+            naver_map_url: update.naver_map_url.trim() || null,
+            map_href: mapHref,
+            training_time: update.training_time,
+            is_hidden: update.is_hidden,
+          }
+        : current,
+    )
   }
 
   function replaceDaySignups(
@@ -617,6 +634,11 @@ export function MemberRunningLeagueTrainingSchedule({
         canStaffRemoveSignup={canStaffProxySignup}
         staffSignupAnytime={canEditDays && canStaffProxySignup}
         signupClosed={activeDay ? daySignupClosed(activeDay) : false}
+        canEditContent={canEditDays}
+        onContentSaved={(update) => {
+          patchDayContent(update)
+          router.refresh()
+        }}
         onRequestRemoveSignup={(signup) => {
           if (!activeDay) return
           setRemoveTarget({ day: activeDay, signup })
@@ -1010,6 +1032,73 @@ function ScheduleDayRow({
   )
 }
 
+function DayContentQuickEdit({
+  day,
+  onSaved,
+}: {
+  day: RunningLeagueTrainingScheduleDayView
+  onSaved?: (update: TrainingScheduleDayContentUpdate) => void
+}) {
+  const [summary, setSummary] = useState(day.training_summary)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setSummary(day.training_summary)
+  }, [day.id, day.training_summary])
+
+  async function save() {
+    const date = day.schedule_date?.slice(0, 10)
+    if (!date) {
+      toast.error('날짜가 있는 일정만 수정할 수 있습니다.')
+      return
+    }
+    setSaving(true)
+    try {
+      const update: TrainingScheduleDayContentUpdate = {
+        schedule_date: date,
+        weekday: day.weekday,
+        training_summary: summary,
+        location_label: day.location_label,
+        naver_map_url: day.naver_map_url ?? '',
+        training_time: day.training_time,
+        is_hidden: day.is_hidden,
+      }
+      const result = await updateSelectedTrainingScheduleDays([update], 'youth_athletics')
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      onSaved?.(update)
+      toast.success('수업 내용을 수정했습니다.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="text-xs font-medium text-zinc-400">수업 내용</label>
+      <Textarea
+        value={summary}
+        onChange={(event) => setSummary(event.target.value)}
+        rows={3}
+        disabled={saving}
+        className="min-h-[72px] border-lime-500/20 bg-black/40 text-sm text-zinc-100"
+      />
+      <Button
+        type="button"
+        size="sm"
+        className="h-8"
+        disabled={saving}
+        onClick={() => void save()}
+      >
+        {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+        내용 저장
+      </Button>
+    </div>
+  )
+}
+
 function ParticipantsDialog({
   day,
   isSignedUp,
@@ -1022,6 +1111,8 @@ function ParticipantsDialog({
   canStaffRemoveSignup,
   staffSignupAnytime = false,
   signupClosed,
+  canEditContent = false,
+  onContentSaved,
   onRequestRemoveSignup,
 }: {
   day: RunningLeagueTrainingScheduleDayView | null
@@ -1035,11 +1126,13 @@ function ParticipantsDialog({
   canStaffRemoveSignup: boolean
   staffSignupAnytime?: boolean
   signupClosed: boolean
+  canEditContent?: boolean
+  onContentSaved?: (update: TrainingScheduleDayContentUpdate) => void
   onRequestRemoveSignup: (signup: RunningLeagueTrainingScheduleSignup) => void
 }) {
   return (
     <Dialog open={day != null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950">
+      <DialogContent className="max-h-[min(90vh,720px)] max-w-sm overflow-y-auto border-lime-500/25 bg-zinc-950">
         {day ? (
           <>
             <DialogHeader>
@@ -1051,10 +1144,20 @@ function ParticipantsDialog({
                   </span>
                 ) : null}
               </DialogTitle>
-              <DialogDescription className="text-left text-zinc-400">
-                {day.training_summary}
-              </DialogDescription>
+              {canEditContent ? (
+                <DialogDescription className="text-left text-zinc-400">
+                  이 날짜의 수업 내용을 바로 수정합니다.
+                </DialogDescription>
+              ) : (
+                <DialogDescription className="text-left text-zinc-400">
+                  {day.training_summary}
+                </DialogDescription>
+              )}
             </DialogHeader>
+
+            {canEditContent ? (
+              <DayContentQuickEdit day={day} onSaved={onContentSaved} />
+            ) : null}
 
             <div className="space-y-2">
               {day.signups.length === 0 ? (

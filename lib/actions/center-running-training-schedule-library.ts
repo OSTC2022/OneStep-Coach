@@ -316,6 +316,32 @@ async function attachSignupsToSnapshotDays(
   })
 }
 
+export async function listCenterTrainingScheduleLocationPresets(
+  audience: TrainingScheduleAudience = 'youth_athletics',
+): Promise<CenterTrainingScheduleLocationPreset[]> {
+  await requireRole(['admin', 'instructor'])
+  const supabase = await libraryClient()
+  const { data, error } = await supabase
+    .from(trainingScheduleConfig(audience).locationsTable)
+    .select('id, location_label, naver_map_url, saved_at')
+    .order('saved_at', { ascending: false })
+    .limit(30)
+
+  if (error) {
+    if (!isMissingLibraryTableError(error)) {
+      console.error('listCenterTrainingScheduleLocationPresets', error)
+    }
+    return []
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    location_label: row.location_label?.trim() ?? '',
+    naver_map_url: row.naver_map_url?.trim() ?? '',
+    saved_at: row.saved_at,
+  }))
+}
+
 export async function fetchCenterTrainingScheduleLibrary(
   audience: TrainingScheduleAudience = 'adult_running',
 ): Promise<CenterTrainingScheduleLibrary> {

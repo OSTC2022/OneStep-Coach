@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { Loader2, UserPlus, X } from 'lucide-react'
+import { ChevronDown, FolderOpen, Loader2, UserPlus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   listMembersForTrainingScheduleStaffSignup,
@@ -10,6 +10,10 @@ import {
   updateSelectedTrainingScheduleDays,
   type TrainingScheduleDayContentUpdate,
 } from '@/lib/actions/center-running-training-schedule'
+import {
+  listCenterTrainingScheduleLocationPresets,
+  type CenterTrainingScheduleLocationPreset,
+} from '@/lib/actions/center-running-training-schedule-library'
 import type { MemberPickerOption } from '@/lib/actions/members'
 import type {
   RunningLeagueTrainingScheduleDayView,
@@ -17,6 +21,7 @@ import type {
 } from '@/lib/running-league/training-schedule'
 import { TRAINING_WEEKDAY_LABELS } from '@/lib/running-league/training-schedule'
 import { trainingScheduleDayId } from '@/lib/training-schedule-audience'
+import { parseSingleTimeToken } from '@/lib/time-input-parse'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -50,12 +55,24 @@ function daySelectionKey(day: RunningLeagueTrainingScheduleDayView): string | nu
   return `${date}:${day.weekday}`
 }
 
+function isCompleteClockDraft(raw: string): boolean {
+  const trimmed = raw.trim()
+  return /^\d{1,2}:\d{2}$/.test(trimmed) || /^\d{4}$/.test(trimmed)
+}
+
+function normalizeScheduleClock(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  return parseSingleTimeToken(trimmed)
+}
+
 function draftFromDay(day: RunningLeagueTrainingScheduleDayView): DayDraft {
+  const stored = (day.training_time ?? '').slice(0, 5)
   return {
     training_summary: day.training_summary ?? '',
     location_label: day.location_label ?? '',
     naver_map_url: day.naver_map_url ?? '',
-    training_time: day.training_time ?? '',
+    training_time: normalizeScheduleClock(stored) || stored,
     is_hidden: day.is_hidden,
   }
 }
@@ -93,12 +110,26 @@ export function YouthScheduleDayEditDialog({
   const [signupOverride, setSignupOverride] = useState<
     Record<string, RunningLeagueTrainingScheduleSignup[]>
   >({})
+  const [locationPresets, setLocationPresets] = useState<CenterTrainingScheduleLocationPreset[]>(
+    [],
+  )
 
   useEffect(() => {
     if (!open) return
     setSelectedKeys([])
     setDrafts({})
     setSignupOverride({})
+    let cancelled = false
+    void listCenterTrainingScheduleLocationPresets('youth_athletics')
+      .then((rows) => {
+        if (!cancelled) setLocationPresets(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setLocationPresets([])
+      })
+    return () => {
+      cancelled = true
+    }
   }, [open])
 
   const weeks = useMemo<WeekGroup[]>(() => {
@@ -164,13 +195,18 @@ export function YouthScheduleDayEditDialog({
       const day = dayByKey.get(key)
       const draft = drafts[key]
       if (!day?.schedule_date || !draft) continue
+      const trainingTime = normalizeScheduleClock(draft.training_time)
+      if (trainingTime == null) {
+        toast.error('시간은 20:00처럼 입력해주세요.')
+        return
+      }
       updates.push({
         schedule_date: day.schedule_date,
         weekday: day.weekday,
         training_summary: draft.training_summary,
         location_label: draft.location_label,
         naver_map_url: draft.naver_map_url,
-        training_time: draft.training_time || null,
+        training_time: trainingTime || null,
         is_hidden: draft.is_hidden,
       })
     }
@@ -249,6 +285,7 @@ export function YouthScheduleDayEditDialog({
                 draft={draft}
                 signups={signupsFor(day)}
                 pending={pending}
+                locationPresets={locationPresets}
                 onChange={(patch) => updateDraft(key, patch)}
                 onSignupsChange={(signups) => setSignups(day, signups)}
               />
@@ -272,6 +309,7 @@ function DayEditor({
   draft,
   signups,
   pending,
+  locationPresets,
   onChange,
   onSignupsChange,
 }: {
@@ -279,6 +317,7 @@ function DayEditor({
   draft: DayDraft
   signups: RunningLeagueTrainingScheduleSignup[]
   pending: boolean
+  locationPresets: CenterTrainingScheduleLocationPreset[]
   onChange: (patch: Partial<DayDraft>) => void
   onSignupsChange: (signups: RunningLeagueTrainingScheduleSignup[]) => void
 }) {
@@ -286,6 +325,7 @@ function DayEditor({
   const [members, setMembers] = useState<MemberPickerOption[] | null>(null)
   const [membersOpen, setMembersOpen] = useState(false)
   const [memberPending, setMemberPending] = useState(false)
+  const [placesOpen, setPlacesOpen] = useState(false)
 
   useEffect(() => {
     if (!membersOpen || members) return
@@ -366,9 +406,23 @@ function DayEditor({
         <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground">시간</Label>
           <Input
-            type="time"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="20:00"
             value={draft.training_time}
-            onChange={(event) => onChange({ training_time: event.target.value })}
+            onChange={(event) => {
+              const next = event.target.value
+              if (!isCompleteClockDraft(next)) {
+                onChange({ training_time: next })
+                return
+              }
+              onChange({ training_time: normalizeScheduleClock(next) ?? next })
+            }}
+            onBlur={() => {
+              const normalized = normalizeScheduleClock(draft.training_time)
+              if (normalized != null) onChange({ training_time: normalized })
+            }}
           />
         </div>
         <div className="space-y-1">
@@ -385,6 +439,49 @@ function DayEditor({
         onChange={(event) => onChange({ naver_map_url: event.target.value })}
         placeholder="네이버 지도 URL (선택)"
       />
+      <div className="space-y-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8"
+          disabled={pending || locationPresets.length === 0}
+          onClick={() => setPlacesOpen((value) => !value)}
+        >
+          <FolderOpen className="mr-1 h-3.5 w-3.5" />
+          {locationPresets.length === 0 ? '저장된 장소 없음' : '장소 불러오기'}
+          {locationPresets.length > 0 ? (
+            <ChevronDown className={cn('ml-1 h-3.5 w-3.5', placesOpen && 'rotate-180')} />
+          ) : null}
+        </Button>
+        {placesOpen && locationPresets.length > 0 ? (
+          <ul className="max-h-40 overflow-y-auto rounded-md border">
+            {locationPresets.map((preset) => (
+              <li key={preset.id} className="border-b last:border-b-0">
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-start gap-0.5 px-2.5 py-2 text-left hover:bg-muted"
+                  onClick={() => {
+                    onChange({
+                      location_label: preset.location_label,
+                      naver_map_url: preset.naver_map_url,
+                    })
+                    setPlacesOpen(false)
+                    toast.success(`${preset.location_label} 장소를 불러왔습니다.`)
+                  }}
+                >
+                  <span className="text-sm font-medium">{preset.location_label}</span>
+                  {preset.naver_map_url ? (
+                    <span className="max-w-full truncate text-[11px] text-muted-foreground">
+                      {preset.naver_map_url}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
