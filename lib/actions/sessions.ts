@@ -26,7 +26,11 @@ import {
   calculateMonthlyRecurringExpiryDate,
   isMonthlyRecurringPlan,
   resolvePackagePeriodExpiryDate,
+  appendPackageExtensionMarker,
+  preservePackageExtensionMarkers,
+  sumPackageExtensionAmounts,
 } from '@/lib/session-package-utils'
+import { getKstDateKey } from '@/lib/member-backup/kst-date'
 import {
   pickSessionPackageIdForDeduction,
   type SessionPackageDeductionCandidate,
@@ -650,13 +654,60 @@ async function fetchSessionRevenueRows(
   return data ?? []
 }
 
+async function sumStoredPackageExtensionRevenue(
+  supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
+  options?: { paidFrom?: string; paidTo?: string },
+): Promise<number> {
+  const trashEnabled = await isSessionPackageTrashEnabled()
+  let query = supabase
+    .from('session_packages')
+    .select('note')
+    .like('note', '%[[ext:%')
+
+  if (trashEnabled) {
+    query = query.is('deleted_at', null)
+  }
+
+  let { data, error } = await query.limit(2000)
+
+  if (error?.code === '42703' || error?.message?.includes('deleted_at')) {
+    const retry = await supabase
+      .from('session_packages')
+      .select('note')
+      .like('note', '%[[ext:%')
+      .limit(2000)
+    data = retry.data
+    error = retry.error
+  }
+
+  if (error) {
+    console.error('Error summing package extension revenue:', error)
+    return 0
+  }
+
+  return (data ?? []).reduce(
+    (sum, row) =>
+      sum +
+      sumPackageExtensionAmounts(row.note, {
+        from: options?.paidFrom,
+        to: options?.paidTo,
+      }),
+    0,
+  )
+}
+
 export async function sumSessionPackageRevenue(options?: {
   paidFrom?: string
   paidTo?: string
 }): Promise<number> {
   const supabase = await createStaffDataClient()
-  const rows = await fetchSessionRevenueRows(supabase, options)
-  return rows.reduce((sum, row) => sum + (Number(row.price) || 0), 0)
+  const [rows, extensionRevenue] = await Promise.all([
+    fetchSessionRevenueRows(supabase, options),
+    sumStoredPackageExtensionRevenue(supabase, options),
+  ])
+  return (
+    rows.reduce((sum, row) => sum + (Number(row.price) || 0), 0) + extensionRevenue
+  )
 }
 
 /** 대시보드·세션/결제 공통 — 이번 달 결제 합계 (휴지통 제외) */
@@ -977,6 +1028,14 @@ export async function updateSessionPackage(
   if ('expires_at' in updates) {
     payload.expires_at = normalizeOptionalDate(updates.expires_at)
   }
+  if ('note' in updates) {
+    const { data: existing } = await supabase
+      .from('session_packages')
+      .select('note')
+      .eq('id', id)
+      .maybeSingle()
+    payload.note = preservePackageExtensionMarkers(existing?.note, updates.note ?? null)
+  }
 
   const { data, error } = await supabase
     .from('session_packages')
@@ -1219,7 +1278,12 @@ function bumpMonthlyPlanNoteMonths(note: string | null | undefined): string | nu
 /** 월정액 만료일을 기존 기간 끝에 1개월 이어 붙인다. 버튼 누른 날은 쓰지 않는다. 관리자만. */
 export async function extendMonthlyPlanByOneMonth(
   id: string,
-): Promise<{ data?: SessionPackage; error?: string; expiresAt?: string }> {
+): Promise<{
+  data?: SessionPackage
+  error?: string
+  expiresAt?: string
+  extensionAmount?: number
+}> {
   await requireRole(['admin'])
   const packageId = id.trim()
   if (!packageId) return { error: '수업권을 찾을 수 없습니다.' }
@@ -1227,7 +1291,9 @@ export async function extendMonthlyPlanByOneMonth(
   const supabase = await sessionWriteClient()
   const { data: pkg, error: fetchError } = await supabase
     .from('session_packages')
-    .select('id, member_id, note, is_active, expires_at, paid_at, created_at, deleted_at')
+    .select(
+      'id, member_id, note, is_active, expires_at, paid_at, created_at, deleted_at, price',
+    )
     .eq('id', packageId)
     .maybeSingle()
 
@@ -1252,7 +1318,12 @@ export async function extendMonthlyPlanByOneMonth(
     }
   }
   const nextExpiry = addMonthsToDate(currentExpiry, 1)
-  const nextNote = bumpMonthlyPlanNoteMonths(pkg.note)
+  const extensionAmount = Math.round(Number(pkg.price) || 0)
+  const bumpedNote = bumpMonthlyPlanNoteMonths(pkg.note)
+  const nextNote =
+    extensionAmount > 0
+      ? appendPackageExtensionMarker(bumpedNote, getKstDateKey(), extensionAmount)
+      : bumpedNote
 
   const { data, error } = await supabase
     .from('session_packages')
@@ -1277,7 +1348,13 @@ export async function extendMonthlyPlanByOneMonth(
   revalidatePath(`/dashboard/members/${pkg.member_id}/youth-athletics-portal`)
   revalidatePath('/dashboard/my')
   revalidatePath('/dashboard/sessions')
-  return { data: data as SessionPackage, expiresAt: nextExpiry }
+  revalidatePath('/dashboard/reports')
+  revalidatePath('/dashboard')
+  return {
+    data: data as SessionPackage,
+    expiresAt: nextExpiry,
+    extensionAmount: extensionAmount > 0 ? extensionAmount : undefined,
+  }
 }
 
 /** 휴지통에서 복구 */

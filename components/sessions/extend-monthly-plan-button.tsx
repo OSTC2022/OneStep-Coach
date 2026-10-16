@@ -32,10 +32,14 @@ export function ExtendMonthlyPlanButton({
       const until = result.expiresAt
         ? formatPackageExpiryDateLabel(result.expiresAt)
         : ''
+      const amountLabel =
+        result.extensionAmount && result.extensionAmount > 0
+          ? ` 이번 달 매출에 ${result.extensionAmount.toLocaleString('ko-KR')}원이 더해졌습니다.`
+          : ''
       toast.success(
         until
-          ? `기존 기간에 이어 ${until}까지 연장했습니다.`
-          : '월정액 기간을 1개월 추가했습니다.',
+          ? `기존 기간에 이어 ${until}까지 연장했습니다.${amountLabel}`
+          : `월정액 기간을 1개월 추가했습니다.${amountLabel}`,
       )
       onExtended?.(result.data)
       router.refresh()

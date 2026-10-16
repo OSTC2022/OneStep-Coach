@@ -13,6 +13,10 @@ import {
   type KstYearMonth,
 } from '@/lib/member-backup/kst-month'
 import { isLessonSchedulePassedInKst } from '@/lib/member-backup/kst-date'
+import {
+  listPackageExtensionPayments,
+  stripPackageExtensionMarkers,
+} from '@/lib/session-package-utils'
 
 export const BACKUP_ROW_KEY = '기록키' as const
 
@@ -128,7 +132,7 @@ function buildPaymentRow(
     사용횟수: used,
     결제방법: pkg.payment_method ?? '',
     만료일: pkg.expires_at ? pkg.expires_at.split('T')[0] : '',
-    메모: pkg.note ?? '',
+    메모: stripPackageExtensionMarkers(pkg.note),
     패키지ID: pkg.id,
     수업ID: '',
   }
@@ -188,10 +192,39 @@ export async function fetchMonthlyBackupSheets(
     const member = memberById.get(pkg.member_id)
     if (!member) continue
     const monthKey = getKstYearMonthKey(pkg.paid_at ?? pkg.created_at)
-    if (!monthKeys.has(monthKey)) continue
-    const sheetName = months.find((m) => m.key === monthKey)?.sheetName
-    if (!sheetName) continue
-    sheetByKey.get(sheetName)!.push(buildPaymentRow(pkg, member))
+    if (monthKeys.has(monthKey)) {
+      const sheetName = months.find((m) => m.key === monthKey)?.sheetName
+      if (sheetName) sheetByKey.get(sheetName)!.push(buildPaymentRow(pkg, member))
+    }
+
+    listPackageExtensionPayments(pkg.note).forEach((extension, index) => {
+      const extensionMonthKey = getKstYearMonthKey(extension.date)
+      if (!monthKeys.has(extensionMonthKey)) return
+      const sheetName = months.find((m) => m.key === extensionMonthKey)?.sheetName
+      if (!sheetName) return
+      sheetByKey.get(sheetName)!.push({
+        [BACKUP_ROW_KEY]: `payext|${pkg.id}|${extension.date}|${index}`,
+        구분: '결제',
+        회원ID: pkg.member_id,
+        회원명: member.name,
+        종목: member.sport ?? '',
+        연락처: member.phone ?? '',
+        일자: extension.date,
+        시작시간: '',
+        종료시간: '',
+        출석상태: '',
+        수업권차감: '',
+        결제금액: extension.amount,
+        구매횟수: '',
+        남은횟수: '',
+        사용횟수: '',
+        결제방법: pkg.payment_method ?? '',
+        만료일: pkg.expires_at ? pkg.expires_at.split('T')[0] : '',
+        메모: '월정액 1개월 연장',
+        패키지ID: pkg.id,
+        수업ID: '',
+      })
+    })
   }
 
   const lessons = dedupeLessonsBySlot((lessonsRes.data ?? []) as LessonBackupRow[])

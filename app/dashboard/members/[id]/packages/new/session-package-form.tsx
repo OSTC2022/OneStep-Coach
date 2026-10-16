@@ -41,6 +41,7 @@ import {
   mergeMonthlyPlanNote,
   mergeMonthlyRecurringPlanNote,
   parseMonthlyPlanMonthsFromNote,
+  stripPackageExtensionMarkers,
   toMonthStartDate,
   type MonthlyPlanMonths,
 } from '@/lib/session-package-utils'
@@ -85,7 +86,7 @@ function buildInitialFormData(sessionPackage?: SessionPackage) {
       paid_at: toDateInputValue(sessionPackage.paid_at),
       expires_at: toDateInputValue(sessionPackage.expires_at),
       payment_method: sessionPackage.payment_method || 'card',
-      note: sessionPackage.note || '',
+      note: stripPackageExtensionMarkers(sessionPackage.note),
       is_active: sessionPackage.is_active,
     }
   }

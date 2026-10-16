@@ -102,6 +102,74 @@ export function mergeMonthlyRecurringPlanNote(currentNote: string) {
   return [...parts, label].join(' · ')
 }
 
+const PACKAGE_EXTENSION_MARKER =
+  /\[\[ext:(\d{4}-\d{2}-\d{2}):(\d+)\]\]/g
+
+export type PackageExtensionPayment = {
+  date: string
+  amount: number
+}
+
+/** 월정액 1개월 추가 때 남긴 매출 기록. 메모 표시에서는 뺀다. */
+export function listPackageExtensionPayments(
+  note?: string | null,
+): PackageExtensionPayment[] {
+  if (!note) return []
+  const rows: PackageExtensionPayment[] = []
+  for (const match of note.matchAll(PACKAGE_EXTENSION_MARKER)) {
+    const amount = Number(match[2])
+    if (!Number.isFinite(amount) || amount <= 0) continue
+    rows.push({ date: match[1], amount })
+  }
+  return rows
+}
+
+export function stripPackageExtensionMarkers(note?: string | null): string {
+  if (!note) return ''
+  return note
+    .replace(/\s*·\s*\[\[ext:\d{4}-\d{2}-\d{2}:\d+\]\]/g, '')
+    .replace(/\[\[ext:\d{4}-\d{2}-\d{2}:\d+\]\]/g, '')
+    .replace(/(?:\s*·\s*)+$/g, '')
+    .trim()
+}
+
+export function appendPackageExtensionMarker(
+  note: string | null | undefined,
+  date: string,
+  amount: number,
+): string {
+  const marker = `[[ext:${date}:${Math.round(amount)}]]`
+  const base = (note ?? '').trim()
+  return base ? `${base} · ${marker}` : marker
+}
+
+/** 수업권 메모를 고쳐도 이미 기록된 연장 매출은 유지한다. */
+export function preservePackageExtensionMarkers(
+  existingNote: string | null | undefined,
+  nextNote: string | null | undefined,
+): string | null {
+  const markers = listPackageExtensionPayments(existingNote)
+  const cleaned = stripPackageExtensionMarkers(nextNote)
+  if (markers.length === 0) return cleaned || null
+  return markers.reduce(
+    (note, marker) => appendPackageExtensionMarker(note, marker.date, marker.amount),
+    cleaned,
+  )
+}
+
+export function sumPackageExtensionAmounts(
+  note: string | null | undefined,
+  range?: { from?: string; to?: string },
+): number {
+  const from = range?.from?.slice(0, 10)
+  const to = range?.to?.slice(0, 10)
+  return listPackageExtensionPayments(note).reduce((sum, row) => {
+    if (from && row.date < from) return sum
+    if (to && row.date > to) return sum
+    return sum + row.amount
+  }, 0)
+}
+
 export function isMonthlyRecurringPlan(note?: string | null): boolean {
   if (!note) return false
   return note

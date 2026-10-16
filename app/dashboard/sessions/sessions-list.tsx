@@ -55,6 +55,7 @@ import {
   isMonthlyPlanPackage,
   isPackageUsableForLesson,
   isSessionPackageOverage,
+  stripPackageExtensionMarkers,
 } from '@/lib/session-package-utils'
 import { GroupedPackageUsageDisplay } from '@/components/sessions/grouped-package-usage-display'
 import {
@@ -331,7 +332,7 @@ export function SessionsList({
       paid_at: pkg.paid_at?.split('T')[0] ?? '',
       expires_at: pkg.expires_at?.split('T')[0] ?? '',
       payment_method: pkg.payment_method || '카드',
-      note: pkg.note || '',
+      note: stripPackageExtensionMarkers(pkg.note),
     })
   }
 
