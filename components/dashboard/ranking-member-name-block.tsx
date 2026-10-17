@@ -53,7 +53,14 @@ export function RankingMemberNameBlock({
   return (
     <span className={cn('min-w-0 justify-self-start overflow-hidden font-medium', className)}>
       <span className="inline-flex max-w-full items-center gap-1">
-        <span className="min-w-0 shrink truncate">{formatRankingMemberName(memberName)}</span>
+        <span
+          className={cn(
+            'min-w-0 shrink truncate',
+            showBeatRival && 'beat-rival-chased-name pl-2',
+          )}
+        >
+          {formatRankingMemberName(memberName)}
+        </span>
         {showBeatRival ? <BeatRivalFireBadge className="flex-none" /> : null}
       </span>
     </span>
