@@ -673,7 +673,7 @@ function RankingFilterChip({
 
 function topRankRowAccent(rank: number) {
   if (rank === 1) {
-    return 'border-amber-200/70 bg-gradient-to-r from-amber-200/30 via-amber-400/14 to-zinc-950 text-amber-50 shadow-[inset_0_1px_0_rgba(255,244,200,0.55),0_10px_22px_-16px_rgba(245,197,66,0.95)]'
+    return 'border-amber-200/70 bg-gradient-to-r from-amber-200/30 via-amber-400/14 to-zinc-950 text-amber-50 shadow-[inset_0_1px_0_rgba(255,244,200,0.55)]'
   }
   if (rank === 2) return 'border-zinc-300/25 bg-zinc-400/[0.07]'
   if (rank === 3) return 'border-orange-300/25 bg-orange-500/[0.07]'
@@ -682,14 +682,13 @@ function topRankRowAccent(rank: number) {
 
 function PortalFirstPlaceFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="relative z-[1] overflow-hidden rounded-xl border border-amber-200/55 bg-[linear-gradient(165deg,rgba(255,220,120,0.28),rgba(48,32,8,0.55)_38%,rgba(9,9,11,0.96))] p-1.5 shadow-[0_0_0_1px_rgba(255,214,102,0.16),0_14px_32px_-16px_rgba(245,197,66,0.75)]">
+    <div className="relative z-[1] isolate overflow-hidden rounded-xl border border-amber-200/55 bg-[linear-gradient(180deg,rgba(255,220,120,0.28),rgba(48,32,8,0.72)_46%,rgba(9,9,11,0.98))] p-1.5 shadow-[inset_0_1px_0_rgba(255,236,180,0.35)]">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-[radial-gradient(ellipse_at_top,rgba(255,236,170,0.45),transparent_68%)]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-7 bg-[radial-gradient(ellipse_at_top,rgba(255,236,170,0.4),transparent_72%)]"
       />
-      <div className="relative mb-1 flex items-center justify-center gap-1.5 pt-0.5 text-[10px] font-semibold tracking-[0.24em] text-amber-100">
-        <Crown className="h-3.5 w-3.5 text-amber-300" aria-hidden />
-        1위
+      <div className="relative mb-1 flex items-center justify-center pt-0.5">
+        <Crown className="h-4 w-4 text-amber-300" aria-label="1위" />
       </div>
       {children}
     </div>
