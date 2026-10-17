@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Crown, Search } from 'lucide-react'
 import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberRunningLeagueRankingsSkeleton } from '@/components/dashboard/member-running-league-rankings-skeleton'
@@ -672,10 +672,28 @@ function RankingFilterChip({
 }
 
 function topRankRowAccent(rank: number) {
-  if (rank === 1) return 'border-amber-400/25 bg-amber-500/[0.06]'
-  if (rank === 2) return 'border-zinc-400/20 bg-zinc-500/[0.06]'
-  if (rank === 3) return 'border-orange-400/20 bg-orange-500/[0.05]'
+  if (rank === 1) {
+    return 'border-amber-200/70 bg-gradient-to-r from-amber-200/30 via-amber-400/14 to-zinc-950 text-amber-50 shadow-[inset_0_1px_0_rgba(255,244,200,0.55),0_10px_22px_-16px_rgba(245,197,66,0.95)]'
+  }
+  if (rank === 2) return 'border-zinc-300/25 bg-zinc-400/[0.07]'
+  if (rank === 3) return 'border-orange-300/25 bg-orange-500/[0.07]'
   return ''
+}
+
+function PortalFirstPlaceFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative z-[1] overflow-hidden rounded-xl border border-amber-200/55 bg-[linear-gradient(165deg,rgba(255,220,120,0.28),rgba(48,32,8,0.55)_38%,rgba(9,9,11,0.96))] p-1.5 shadow-[0_0_0_1px_rgba(255,214,102,0.16),0_14px_32px_-16px_rgba(245,197,66,0.75)]">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-[radial-gradient(ellipse_at_top,rgba(255,236,170,0.45),transparent_68%)]"
+      />
+      <div className="relative mb-1 flex items-center justify-center gap-1.5 pt-0.5 text-[10px] font-semibold tracking-[0.24em] text-amber-100">
+        <Crown className="h-3.5 w-3.5 text-amber-300" aria-hidden />
+        1위
+      </div>
+      {children}
+    </div>
+  )
 }
 
 interface MemberRunningLeagueRankingsProps {
@@ -1290,9 +1308,7 @@ function RankingPreview({
               aria-label="랭킹 미리보기"
             >
               {firstRow ? (
-                <div className="relative z-[1] rounded-lg bg-zinc-950/90 pb-0.5 shadow-[0_8px_16px_-8px_rgba(0,0,0,0.85)]">
-                  {renderPreviewRow(firstRow)}
-                </div>
+                <PortalFirstPlaceFrame>{renderPreviewRow(firstRow)}</PortalFirstPlaceFrame>
               ) : null}
 
               <div
@@ -1471,8 +1487,8 @@ function PbRankingRow({
           isSelected: isRowSelected,
         }),
         'rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
-        topRankRowAccent(row.rank),
         rankingRowClass(isRowSelected),
+        !isRowSelected && topRankRowAccent(row.rank),
       )}
     >
       <RankChangeBadge delta={rankChangeDelta} />
@@ -1539,8 +1555,8 @@ function MileageRankingRow({
       className={cn(
         resolveRankingRowGridClass({ isSelected: isRowSelected }),
         'rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
-        topRankRowAccent(row.rank),
         rankingRowClass(isRowSelected),
+        !isRowSelected && topRankRowAccent(row.rank),
       )}
     >
       <RankChangeBadge delta={rankChangeDelta} />
@@ -1606,8 +1622,8 @@ function AttendanceRankingRow({
       className={cn(
         resolveRankingRowGridClass({ isSelected: isRowSelected }),
         'rounded-lg border px-3 py-2.5 text-left text-sm transition-all duration-200',
-        topRankRowAccent(row.rank),
         rankingRowClass(isRowSelected),
+        !isRowSelected && topRankRowAccent(row.rank),
       )}
     >
       <RankChangeBadge delta={null} />
@@ -1982,8 +1998,8 @@ function ScoreRankingRow({
       onClick={() => onMemberSelect?.(row.memberId, row.memberName)}
       className={cn(
         'flex min-w-0 w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
-        topRankRowAccent(row.rank),
         rankingRowClass(isRowSelected),
+        !isRowSelected && topRankRowAccent(row.rank),
       )}
     >
       <RankMedalDisplay rank={row.rank} />
