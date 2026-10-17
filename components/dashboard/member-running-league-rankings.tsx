@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { MemberMileageLogDialog } from '@/components/dashboard/member-mileage-log-dialog'
 import { MemberLeagueMomentumStrip } from '@/components/dashboard/member-league-momentum-strip'
 import { MemberRunningLeagueRankingsSkeleton } from '@/components/dashboard/member-running-league-rankings-skeleton'
@@ -772,21 +772,6 @@ function buildDisplayRows<T extends RankedRow>(
   return [...topRows, myRow]
 }
 
-const RANKING_PREVIEW_VISIBLE = 5
-
-function resolveRankingWindowStart(
-  rankedLength: number,
-  focusIndex: number,
-  visibleCount = RANKING_PREVIEW_VISIBLE,
-): number {
-  if (rankedLength <= 0) return 0
-  const maxStart = Math.max(0, rankedLength - visibleCount)
-  if (focusIndex < 0) return 0
-  // 내 순위가 창 중앙에 오도록
-  const idealStart = focusIndex - Math.floor((Math.min(visibleCount, rankedLength) - 1) / 2)
-  return Math.min(maxStart, Math.max(0, idealStart))
-}
-
 function MyRankSeparator() {
   return (
     <div
@@ -1072,80 +1057,63 @@ function RankingPreview({
 
   const firstRow = allRows[0] ?? null
   const restRows = allRows.slice(1)
-  /** 1위 고정 후 아래에 보이는 행 수 */
-  const scrollVisibleCount = Math.max(1, RANKING_PREVIEW_VISIBLE - 1)
 
   const myIndex = useMemo(() => {
     if (!highlightMemberId) return -1
     return allRows.findIndex((row) => row.memberId === highlightMemberId)
   }, [allRows, highlightMemberId])
 
-  const myRestIndex = myIndex <= 0 ? -1 : myIndex - 1
-
-  const [windowStart, setWindowStart] = useState(() =>
-    resolveRankingWindowStart(restRows.length, myRestIndex, scrollVisibleCount),
-  )
-  const wheelLockRef = useRef(false)
-  const windowStartRef = useRef(windowStart)
-  const maxWindowStartRef = useRef(0)
-  const canScrollRanksRef = useRef(false)
+  const canScrollRanks = restRows.length > 4
+  const listRef = useRef<HTMLDivElement>(null)
+  const restScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setWindowStart(
-      resolveRankingWindowStart(restRows.length, myRestIndex, scrollVisibleCount),
-    )
-  }, [restRows.length, myRestIndex, scrollVisibleCount, rankingView, pbDistance, genderFilter])
-
-  const maxWindowStart = Math.max(0, restRows.length - scrollVisibleCount)
-  const previewRestRows = restRows.slice(
-    windowStart,
-    windowStart + scrollVisibleCount,
-  )
-  const canScrollRanks = restRows.length > scrollVisibleCount
-  const listRef = useRef<HTMLDivElement>(null)
-
-  windowStartRef.current = windowStart
-  maxWindowStartRef.current = maxWindowStart
-  canScrollRanksRef.current = canScrollRanks
-
-  function shiftRankingWindow(delta: number) {
-    if (!canScrollRanksRef.current || delta === 0) return
-    setWindowStart((current) =>
-      Math.min(maxWindowStartRef.current, Math.max(0, current + delta)),
-    )
-  }
+    const node = restScrollRef.current
+    if (!node) return
+    const frame = window.requestAnimationFrame(() => {
+      if (!highlightMemberId || myIndex <= 0) {
+        node.scrollTop = 0
+        return
+      }
+      const row = node.querySelector<HTMLElement>(
+        `[data-rank-member="${highlightMemberId}"]`,
+      )
+      if (!row) return
+      const nextTop = row.offsetTop - (node.clientHeight - row.offsetHeight) / 2
+      node.scrollTop = Math.max(0, nextTop)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [genderFilter, highlightMemberId, myIndex, pbDistance, rankingView])
 
   useEffect(() => {
     const node = listRef.current
-    if (!node) return
+    const scroller = restScrollRef.current
+    if (!node || !scroller) return
+
+    function wheelDelta(event: WheelEvent, viewport: number) {
+      if (event.deltaMode === 1) return event.deltaY * 16
+      if (event.deltaMode === 2) return event.deltaY * viewport
+      return event.deltaY
+    }
 
     function onWheel(event: WheelEvent) {
-      if (!canScrollRanksRef.current) return
-      if (Math.abs(event.deltaY) < 2 && Math.abs(event.deltaX) < 2) return
+      if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return
+      if (event.target instanceof Node && scroller.contains(event.target)) return
 
-      const start = windowStartRef.current
-      const maxStart = maxWindowStartRef.current
-      const goingDown = event.deltaY > 0 || event.deltaX > 0
-      const goingUp = event.deltaY < 0 || event.deltaX < 0
-      if (goingDown && start >= maxStart) return
-      if (goingUp && start <= 0) return
+      const delta = wheelDelta(event, scroller.clientHeight)
+      if (Math.abs(delta) < 0.5) return
+      const atTop = scroller.scrollTop <= 0
+      const atBottom =
+        scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1
+      if ((delta < 0 && atTop) || (delta > 0 && atBottom)) return
 
       event.preventDefault()
-      event.stopPropagation()
-
-      if (wheelLockRef.current) return
-      wheelLockRef.current = true
-      setWindowStart((current) =>
-        Math.min(maxStart, Math.max(0, current + (goingDown ? 1 : -1))),
-      )
-      window.setTimeout(() => {
-        wheelLockRef.current = false
-      }, 80)
+      scroller.scrollTop += delta
     }
 
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [canScrollRanks])
 
   const showBeatRivalLabel = rankingView === 'beat_rival'
 
@@ -1270,12 +1238,6 @@ function RankingPreview({
     )
   }
 
-  const restWindowFrom = restRows.length === 0 ? null : windowStart + 2
-  const restWindowTo =
-    restRows.length === 0
-      ? null
-      : Math.min(allRows.length, windowStart + 1 + scrollVisibleCount)
-
   return (
     <div className={MEMBER_PORTAL_CARD_CLASS}>
       <div className="flex items-center justify-between gap-2 border-b border-lime-500/15 px-3 py-2">
@@ -1323,10 +1285,7 @@ function RankingPreview({
           <>
             <div
               ref={listRef}
-              className={cn(
-                'relative space-y-1.5 overscroll-contain',
-                canScrollRanks && 'cursor-ns-resize touch-pan-y',
-              )}
+              className="relative space-y-1.5"
               role="list"
               aria-label="랭킹 미리보기"
             >
@@ -1336,29 +1295,20 @@ function RankingPreview({
                 </div>
               ) : null}
 
-              {canScrollRanks && windowStart > 0 ? (
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-center py-0.5 text-zinc-500 transition-colors hover:text-lime-300"
-                  aria-label="위 순위 보기"
-                  onClick={() => shiftRankingWindow(-1)}
-                >
-                  <ChevronUp className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-
-              {previewRestRows.map((row) => renderPreviewRow(row))}
-
-              {canScrollRanks && windowStart < maxWindowStart ? (
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-center py-0.5 text-zinc-500 transition-colors hover:text-lime-300"
-                  aria-label="아래 순위 보기"
-                  onClick={() => shiftRankingWindow(1)}
-                >
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
+              <div
+                ref={restScrollRef}
+                className={cn(
+                  'space-y-1.5',
+                  canScrollRanks &&
+                    'relative max-h-[18rem] overflow-y-auto overscroll-y-auto touch-pan-y [scroll-behavior:auto] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+                )}
+              >
+                {restRows.map((row) => (
+                  <div key={row.memberId} data-rank-member={row.memberId}>
+                    {renderPreviewRow(row)}
+                  </div>
+                ))}
+              </div>
             </div>
             <RankingMemberQuickActionsSlot
               selectedMemberId={selectedMemberId}
@@ -1374,11 +1324,7 @@ function RankingPreview({
             />
             {canScrollRanks ? (
               <p className="text-center text-[10px] text-zinc-500">
-                1위 고정 · 휠로 순위 이동
-                {restWindowFrom != null && restWindowTo != null
-                  ? ` · ${restWindowFrom}–${restWindowTo}위`
-                  : ''}{' '}
-                / {allRows.length}명
+                1위 고정 · 휠로 이어서 스크롤 / {allRows.length}명
               </p>
             ) : null}
             {leagueStatus?.isSoloRanked ? (
