@@ -130,6 +130,7 @@ import { LessonStatusMemoBoard } from '@/components/lesson-status/lesson-status-
 import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
 import { MemberDrinkPreferenceButton } from '@/components/members/member-drink-preference-button'
 import { MemberStaffMemoButton } from '@/components/members/member-staff-memo-button'
+import { MemberTrainingJournalButton } from '@/components/members/member-training-journal-button'
 import type { StaffMemoNote } from '@/lib/actions/staff-memo-notes'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 
@@ -559,6 +560,11 @@ const AthleteTile = memo(function AthleteTile({
             onNotesChange={(notes) =>
               onMemberStaffMemoNotesChange(lesson.member_id!, notes)
             }
+          />
+          <MemberTrainingJournalButton
+            memberId={lesson.member_id}
+            memberName={lesson.member?.name?.trim() || display.name}
+            compact={!expanded}
           />
         </div>
       ) : (
