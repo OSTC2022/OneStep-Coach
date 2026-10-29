@@ -257,6 +257,7 @@ export function MemberMyPage({
                   contentOnly
                   showManageLink={showMarathonManageLink}
                   canPinEvents={canPinMarathonEvents}
+                  canStaffAddParticipants={canPinMarathonEvents}
                 />
               ) : null
             }

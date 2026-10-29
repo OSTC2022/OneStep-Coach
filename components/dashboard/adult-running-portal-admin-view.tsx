@@ -127,6 +127,7 @@ export function AdultRunningPortalAdminView({
               contentOnly
               showManageLink
               canPinEvents
+              canStaffAddParticipants
             />
           }
         />

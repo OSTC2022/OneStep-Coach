@@ -825,6 +825,151 @@ export async function toggleMarathonEventSignup(
   }
 }
 
+/** 관리자·강사 — 대회 참여 명단에 회원 추가 */
+export async function staffAddMarathonEventSignup(
+  eventId: string,
+  memberId: string,
+): Promise<
+  | {
+      ok: true
+      signupCount: number
+      signup: MarathonEventSignup
+      alreadySignedUp: boolean
+    }
+  | { ok: false; error: string }
+> {
+  await requireRole(['admin', 'instructor'])
+
+  const id = eventId.trim()
+  const targetMemberId = memberId.trim()
+  if (!id) return { ok: false, error: '대회를 찾을 수 없습니다.' }
+  if (!targetMemberId) return { ok: false, error: '회원을 선택해 주세요.' }
+
+  try {
+    const supabase = await scheduleClient()
+    const [{ data: eventRow, error: eventError }, { data: memberRow, error: memberError }] =
+      await Promise.all([
+        supabase
+          .from('center_marathon_events')
+          .select('id, title, is_hidden')
+          .eq('id', id)
+          .maybeSingle(),
+        supabase
+          .from('members')
+          .select('id, name')
+          .eq('id', targetMemberId)
+          .is('deleted_at', null)
+          .maybeSingle(),
+      ])
+
+    if (isMissingTableError(eventError)) {
+      return { ok: false, error: '마라톤 일정 기능이 준비되지 않았습니다.' }
+    }
+    if (eventError || !eventRow) {
+      return { ok: false, error: '대회를 찾을 수 없습니다.' }
+    }
+    if (eventRow.is_hidden || !String(eventRow.title ?? '').trim()) {
+      return { ok: false, error: '참여할 수 없는 일정입니다.' }
+    }
+    if (memberError || !memberRow) {
+      return { ok: false, error: '회원을 찾을 수 없습니다.' }
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('center_marathon_event_signups')
+      .select('id, created_at')
+      .eq('event_id', id)
+      .eq('member_id', targetMemberId)
+      .maybeSingle()
+
+    if (existingError && !isMissingTableError(existingError)) {
+      console.error('staffAddMarathonEventSignup.existing', existingError)
+      return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+    }
+
+    if (!existing) {
+      const { error: insertError } = await supabase
+        .from('center_marathon_event_signups')
+        .insert({
+          event_id: id,
+          member_id: targetMemberId,
+        })
+
+      if (insertError) {
+        console.error('staffAddMarathonEventSignup.insert', insertError)
+        return { ok: false, error: '참가자 추가에 실패했습니다.' }
+      }
+    }
+
+    const { count, error: countError } = await supabase
+      .from('center_marathon_event_signups')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', id)
+
+    if (countError) {
+      console.error('staffAddMarathonEventSignup.count', countError)
+    }
+
+    return {
+      ok: true,
+      signupCount: count ?? 0,
+      alreadySignedUp: Boolean(existing),
+      signup: {
+        member_id: targetMemberId,
+        member_name: (memberRow.name as string)?.trim() || '회원',
+        signed_at: existing?.created_at ?? new Date().toISOString(),
+      },
+    }
+  } catch (error) {
+    console.error('staffAddMarathonEventSignup', error)
+    return { ok: false, error: '참가자 추가에 실패했습니다.' }
+  }
+}
+
+/** 관리자·강사 — 대회 참여 명단에서 회원 제거 */
+export async function staffRemoveMarathonEventSignup(
+  eventId: string,
+  memberId: string,
+): Promise<{ ok: true; signupCount: number } | { ok: false; error: string }> {
+  await requireRole(['admin', 'instructor'])
+
+  const id = eventId.trim()
+  const targetMemberId = memberId.trim()
+  if (!id) return { ok: false, error: '대회를 찾을 수 없습니다.' }
+  if (!targetMemberId) return { ok: false, error: '회원을 선택해 주세요.' }
+
+  try {
+    const supabase = await scheduleClient()
+    const { error: deleteError } = await supabase
+      .from('center_marathon_event_signups')
+      .delete()
+      .eq('event_id', id)
+      .eq('member_id', targetMemberId)
+
+    if (deleteError) {
+      if (isMissingTableError(deleteError)) {
+        return { ok: false, error: '마라톤 일정 기능이 준비되지 않았습니다.' }
+      }
+      console.error('staffRemoveMarathonEventSignup.delete', deleteError)
+      return { ok: false, error: '참가자 제거에 실패했습니다.' }
+    }
+
+    const { count, error: countError } = await supabase
+      .from('center_marathon_event_signups')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', id)
+
+    if (countError) {
+      console.error('staffRemoveMarathonEventSignup.count', countError)
+    }
+
+    return { ok: true, signupCount: count ?? 0 }
+  } catch (error) {
+    console.error('staffRemoveMarathonEventSignup', error)
+    return { ok: false, error: '참가자 제거에 실패했습니다.' }
+  }
+}
+
 /** 관리자·강사 — 대회 일정 상단 고정 토글 */
 export async function toggleMarathonEventPinned(
   eventId: string,

@@ -9,9 +9,11 @@ import {
   Loader2,
   MapPin,
   Pin,
+  Plus,
   RefreshCw,
   Search,
   Settings2,
+  Trash2,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -20,8 +22,14 @@ import {
   toggleMarathonEventPinned,
   getCenterMarathonScheduleForMember,
   refreshMarathonCatalog,
+  staffAddMarathonEventSignup,
+  staffRemoveMarathonEventSignup,
   type CenterMarathonScheduleBundle,
 } from '@/lib/actions/center-marathon-schedule'
+import {
+  listAdultRunningMembersForPicker,
+  type MemberPickerOption,
+} from '@/lib/actions/members'
 import {
   compareMarathonEventsForDisplay,
   formatMarathonMonthLabel,
@@ -66,6 +74,8 @@ type MemberMarathonScheduleProps = {
   showManageLink?: boolean
   /** 관리자·강사 — 상단 고정 토글 */
   canPinEvents?: boolean
+  /** 관리자·강사 — 참여 목록에 회원 추가 */
+  canStaffAddParticipants?: boolean
   className?: string
   onMonthChange?: (monthKey: string) => void
 }
@@ -78,9 +88,11 @@ export function MemberMarathonSchedule({
   contentOnly = false,
   showManageLink = false,
   canPinEvents = false,
+  canStaffAddParticipants = false,
   className,
   onMonthChange,
 }: MemberMarathonScheduleProps) {
+  const canManageParticipants = canStaffAddParticipants || canPinEvents
   const [pending, startTransition] = useTransition()
   const [pendingEventId, setPendingEventId] = useState<string | null>(null)
   const [pendingPinId, setPendingPinId] = useState<string | null>(null)
@@ -509,6 +521,70 @@ export function MemberMarathonSchedule({
     </div>
   )
 
+  function patchEventSignups(
+    eventId: string,
+    next: { signup_count: number; signups: MarathonEventView['signups'] },
+  ) {
+    setCountDraft((current) => ({ ...current, [eventId]: next.signup_count }))
+    setEvents((current) =>
+      current.map((row) =>
+        row.id === eventId
+          ? { ...row, signup_count: next.signup_count, signups: next.signups }
+          : row,
+      ),
+    )
+    setActiveEvent((current) =>
+      current && current.id === eventId
+        ? { ...current, signup_count: next.signup_count, signups: next.signups }
+        : current,
+    )
+  }
+
+  function handleStaffAddParticipant(member: MemberPickerOption) {
+    if (!activeEvent || pending) return
+    setPendingEventId(activeEvent.id)
+    startTransition(async () => {
+      const result = await staffAddMarathonEventSignup(activeEvent.id, member.id)
+      setPendingEventId(null)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      const already = activeEvent.signups.some((signup) => signup.member_id === member.id)
+      const nextSignups = already
+        ? activeEvent.signups
+        : [...activeEvent.signups, result.signup]
+      patchEventSignups(activeEvent.id, {
+        signup_count: result.signupCount,
+        signups: nextSignups,
+      })
+      toast.success(
+        result.alreadySignedUp
+          ? `${member.name} 님은 이미 참여 중입니다.`
+          : `${member.name} 님을 참가자로 추가했습니다.`,
+      )
+    })
+  }
+
+  function handleStaffRemoveParticipant(memberId: string, memberName: string) {
+    if (!activeEvent || pending) return
+    if (!window.confirm(`${memberName} 님을 참여 목록에서 제거할까요?`)) return
+    setPendingEventId(activeEvent.id)
+    startTransition(async () => {
+      const result = await staffRemoveMarathonEventSignup(activeEvent.id, memberId)
+      setPendingEventId(null)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      patchEventSignups(activeEvent.id, {
+        signup_count: result.signupCount,
+        signups: activeEvent.signups.filter((signup) => signup.member_id !== memberId),
+      })
+      toast.success(`${memberName} 님을 참여 목록에서 제거했습니다.`)
+    })
+  }
+
   const participantsDialog = (
     <ParticipantsDialog
       event={
@@ -529,6 +605,9 @@ export function MemberMarathonSchedule({
       pending={pending && pendingEventId === activeEvent?.id}
       readOnly={readOnly}
       canParticipate={canParticipate}
+      canStaffAddParticipants={canManageParticipants}
+      onStaffAddParticipant={handleStaffAddParticipant}
+      onStaffRemoveParticipant={handleStaffRemoveParticipant}
     />
   )
 
@@ -800,6 +879,9 @@ function ParticipantsDialog({
   pending,
   readOnly,
   canParticipate,
+  canStaffAddParticipants = false,
+  onStaffAddParticipant,
+  onStaffRemoveParticipant,
 }: {
   event: MarathonEventView | null
   onOpenChange: (open: boolean) => void
@@ -807,7 +889,50 @@ function ParticipantsDialog({
   pending: boolean
   readOnly: boolean
   canParticipate: boolean
+  canStaffAddParticipants?: boolean
+  onStaffAddParticipant?: (member: MemberPickerOption) => void
+  onStaffRemoveParticipant?: (memberId: string, memberName: string) => void
 }) {
+  const [adding, setAdding] = useState(false)
+  const [members, setMembers] = useState<MemberPickerOption[] | null>(null)
+  const [loadingMembers, setLoadingMembers] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const eventId = event?.id ?? null
+  useEffect(() => {
+    setAdding(false)
+    setQuery('')
+    if (!eventId) {
+      setMembers(null)
+      setLoadingMembers(false)
+    }
+  }, [eventId])
+
+  function openAddPicker() {
+    setAdding(true)
+    setQuery('')
+    if (members) return
+    setLoadingMembers(true)
+    void listAdultRunningMembersForPicker(300)
+      .then((rows) => setMembers(rows))
+      .catch(() => {
+        toast.error('회원 목록을 불러오지 못했습니다.')
+        setAdding(false)
+      })
+      .finally(() => setLoadingMembers(false))
+  }
+
+  const filteredMembers = useMemo(() => {
+    const rows = members ?? []
+    const q = query.trim()
+    if (!q) return rows
+    return rows.filter(
+      (member) =>
+        matchKoreanNameSearch(member.name, q) ||
+        (member.sport ?? '').toLowerCase().includes(q.toLowerCase()),
+    )
+  }, [members, query])
+
   return (
     <Dialog open={event != null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950">
@@ -848,15 +973,112 @@ function ParticipantsDialog({
                   {event.signups.map((signup) => (
                     <li
                       key={`${signup.member_id}-${signup.signed_at}`}
-                      className="rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
+                      className="flex items-center justify-between gap-2 rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
                     >
-                      {signup.member_name}
+                      <span className="min-w-0 truncate">{signup.member_name}</span>
+                      {canStaffAddParticipants && onStaffRemoveParticipant ? (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          className="shrink-0 rounded p-1 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-50"
+                          aria-label={`${signup.member_name} 참여 제거`}
+                          onClick={() =>
+                            onStaffRemoveParticipant(signup.member_id, signup.member_name)
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
               )}
 
+              {adding && canStaffAddParticipants ? (
+                <div className="space-y-2 rounded-md border border-lime-500/20 bg-black/30 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-medium text-lime-200">참가자 추가</p>
+                    <button
+                      type="button"
+                      className="text-[11px] text-zinc-500 hover:text-zinc-300"
+                      onClick={() => setAdding(false)}
+                    >
+                      닫기
+                    </button>
+                  </div>
+                  <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="이름 검색"
+                    className="h-8 border-zinc-700 bg-black/40 text-xs text-zinc-100"
+                    autoFocus
+                  />
+                  <div className="max-h-48 overflow-y-auto rounded-md border border-zinc-800">
+                    {loadingMembers ? (
+                      <div className="flex items-center justify-center gap-2 py-6 text-sm text-zinc-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        불러오는 중…
+                      </div>
+                    ) : filteredMembers.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-zinc-500">회원이 없습니다.</p>
+                    ) : (
+                      <ul className="divide-y divide-zinc-800">
+                        {filteredMembers.map((member) => {
+                          const already = event.signups.some(
+                            (signup) => signup.member_id === member.id,
+                          )
+                          return (
+                            <li key={member.id}>
+                              <button
+                                type="button"
+                                disabled={pending || already}
+                                onClick={() => onStaffAddParticipant?.(member)}
+                                className={cn(
+                                  'flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-lime-500/10 disabled:opacity-60',
+                                  already && 'bg-lime-500/5',
+                                )}
+                              >
+                                <span className="min-w-0">
+                                  <span className="block font-medium text-zinc-100">
+                                    {member.name}
+                                  </span>
+                                  {member.sport ? (
+                                    <span className="block truncate text-[11px] text-zinc-500">
+                                      {member.sport}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                {already ? (
+                                  <span className="shrink-0 rounded-full border border-lime-500/40 px-2 py-0.5 text-[10px] font-medium text-lime-300">
+                                    참여중
+                                  </span>
+                                ) : (
+                                  <span className="shrink-0 text-[11px] text-zinc-500">추가</span>
+                                )}
+                              </button>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="flex flex-wrap items-center gap-2 pt-1">
+                {canStaffAddParticipants && !adding ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-lime-500/35 text-lime-100"
+                    disabled={pending}
+                    onClick={openAddPicker}
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    참가자 추가
+                  </Button>
+                ) : null}
                 {event.registration_href ? (
                   <Button asChild variant="outline" size="sm" className="border-lime-500/25">
                     <a href={event.registration_href} target="_blank" rel="noopener noreferrer">
