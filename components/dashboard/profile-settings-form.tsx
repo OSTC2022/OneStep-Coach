@@ -1,14 +1,22 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition } from 'react'
-import { Camera, Loader2, Trash2 } from 'lucide-react'
+import { Camera, KeyRound, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PhoneInput } from '@/components/ui/phone-input'
-import { updateMyProfile } from '@/lib/actions/profile-settings'
+import { changeMyPassword, updateMyProfile } from '@/lib/actions/profile-settings'
 import {
   PROFILE_AVATAR_ACCEPT,
   removeProfileAvatar,
@@ -67,6 +75,11 @@ export function ProfileSettingsForm({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isPending, startTransition] = useTransition()
   const [isUploading, setIsUploading] = useState(false)
+  const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('')
+  const [passwordBusy, setPasswordBusy] = useState(false)
   const [fullName, setFullName] = useState(
     () => settingsFromUser(user, memberGender, memberRankingStatusMessage, memberRankingStatusMessageColor).fullName,
   )
@@ -185,6 +198,32 @@ export function ProfileSettingsForm({
       toast.success('프로필이 저장되었습니다.')
       onSaved?.()
     })
+  }
+
+  function openPasswordDialog() {
+    setCurrentPassword('')
+    setNewPassword('')
+    setNewPasswordConfirm('')
+    setShowPasswordForm(true)
+  }
+
+  async function handleChangePassword() {
+    setPasswordBusy(true)
+    const result = await changeMyPassword({
+      currentPassword,
+      newPassword,
+      newPasswordConfirm,
+    })
+    setPasswordBusy(false)
+    if (result.error) {
+      toast.error('비밀번호 변경 실패', { description: result.error })
+      return
+    }
+    toast.success('비밀번호가 변경되었습니다.')
+    setCurrentPassword('')
+    setNewPassword('')
+    setNewPasswordConfirm('')
+    setShowPasswordForm(false)
   }
 
   const avatarUser = {
@@ -342,6 +381,97 @@ export function ProfileSettingsForm({
           />
         </div>
       </div>
+
+      <div className="border-t border-border pt-4">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full sm:w-auto"
+          disabled={disabled || passwordBusy}
+          onClick={openPasswordDialog}
+        >
+          <KeyRound className="mr-2 h-4 w-4" />
+          비밀번호 변경
+        </Button>
+      </div>
+
+      <Dialog
+        open={showPasswordForm}
+        onOpenChange={(open) => {
+          setShowPasswordForm(open)
+          if (!open) {
+            setCurrentPassword('')
+            setNewPassword('')
+            setNewPasswordConfirm('')
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>비밀번호 변경</DialogTitle>
+            <DialogDescription>
+              현재 비밀번호 확인 후 새 비밀번호로 변경합니다. (8자 이상)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idPrefix}-current-password`}>현재 비밀번호</Label>
+              <Input
+                id={`${idPrefix}-current-password`}
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                disabled={passwordBusy}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idPrefix}-new-password`}>새 비밀번호</Label>
+              <Input
+                id={`${idPrefix}-new-password`}
+                type="password"
+                autoComplete="new-password"
+                placeholder="새 비밀번호"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                disabled={passwordBusy}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idPrefix}-new-password-confirm`}>새 비밀번호 확인</Label>
+              <Input
+                id={`${idPrefix}-new-password-confirm`}
+                type="password"
+                autoComplete="new-password"
+                placeholder="새 비밀번호 확인"
+                value={newPasswordConfirm}
+                onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                disabled={passwordBusy}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={
+                passwordBusy ||
+                !currentPassword ||
+                newPassword.trim().length < 8 ||
+                newPassword.trim() !== newPasswordConfirm.trim()
+              }
+              onClick={() => void handleChangePassword()}
+            >
+              {passwordBusy ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <KeyRound className="mr-2 h-4 w-4" />
+              )}
+              비밀번호 저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
         {onCancel ? (

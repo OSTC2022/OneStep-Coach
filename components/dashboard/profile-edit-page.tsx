@@ -41,7 +41,8 @@ export function ProfileEditPage({
         <div>
           <h1 className="text-xl font-bold lg:text-2xl">프로필 수정</h1>
           <p className="text-sm text-muted-foreground">
-            사진·이름·연락처{showMemberGender ? '·성별·랭킹 상태 메시지' : ''}·SNS 정보를 변경합니다.
+            사진·이름·연락처{showMemberGender ? '·성별·랭킹 상태 메시지' : ''}·SNS·비밀번호를
+            변경합니다.
           </p>
         </div>
       </div>

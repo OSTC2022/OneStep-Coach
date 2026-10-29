@@ -409,3 +409,50 @@ export async function updateMemberRankingStatusMessage(input: {
   })
 }
 
+/** 로그인한 본인 — 현재 비밀번호 확인 후 변경 */
+export async function changeMyPassword(input: {
+  currentPassword: string
+  newPassword: string
+  newPasswordConfirm: string
+}): Promise<{ error?: string }> {
+  const user = await requireAuth()
+  const email = user.email?.trim()
+  if (!email) {
+    return { error: '이메일 정보를 확인할 수 없습니다. 관리자에게 문의해 주세요.' }
+  }
+
+  const currentPassword = input.currentPassword
+  const newPassword = input.newPassword.trim()
+  const newPasswordConfirm = input.newPasswordConfirm.trim()
+
+  if (!currentPassword) {
+    return { error: '현재 비밀번호를 입력해주세요.' }
+  }
+  if (!newPassword || newPassword.length < 8) {
+    return { error: '새 비밀번호는 8자 이상이어야 합니다.' }
+  }
+  if (newPassword !== newPasswordConfirm) {
+    return { error: '새 비밀번호가 일치하지 않습니다.' }
+  }
+  if (currentPassword === newPassword) {
+    return { error: '현재 비밀번호와 다른 비밀번호를 입력해주세요.' }
+  }
+
+  const supabase = await createClient()
+  const { error: verifyError } = await supabase.auth.signInWithPassword({
+    email,
+    password: currentPassword,
+  })
+  if (verifyError) {
+    return { error: '현재 비밀번호가 올바르지 않습니다.' }
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) {
+    console.error('changeMyPassword', error)
+    return { error: error.message }
+  }
+
+  return {}
+}
+

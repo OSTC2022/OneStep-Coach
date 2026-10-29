@@ -693,6 +693,41 @@ export async function deleteAccount(userId: string): Promise<{ error?: string }>
   return {}
 }
 
+/** 관리자 — 가입 계정 비밀번호 직접 설정 */
+export async function adminSetAccountPassword(
+  userId: string,
+  password: string,
+  passwordConfirm: string,
+): Promise<{ error?: string }> {
+  await requireRole(['admin'])
+
+  const id = userId.trim()
+  if (!id) return { error: '계정을 찾을 수 없습니다.' }
+
+  const nextPassword = password.trim()
+  if (!nextPassword || nextPassword.length < 8) {
+    return { error: '비밀번호는 8자 이상이어야 합니다.' }
+  }
+  if (nextPassword !== passwordConfirm.trim()) {
+    return { error: '비밀번호가 일치하지 않습니다.' }
+  }
+
+  const admin = createServiceRoleClient()
+  const allProfiles = await fetchAllProfiles(admin)
+  const profile = allProfiles.find((row) => row.id === id)
+  if (!profile) return { error: '계정을 찾을 수 없습니다.' }
+
+  const { error } = await admin.auth.admin.updateUserById(id, {
+    password: nextPassword,
+  })
+  if (error) {
+    console.error('adminSetAccountPassword', error)
+    return { error: error.message }
+  }
+
+  return {}
+}
+
 export async function setAdultRunningPortalManageAccess(
   userId: string,
   enabled: boolean,

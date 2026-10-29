@@ -5,9 +5,10 @@ import Link from 'next/link'
 import { listPendingAccounts, listOnHoldAccounts, putAccountOnHold } from '@/lib/actions/auth-registration'
 import { HoldAccountsPanel } from '@/components/settings/hold-accounts-panel'
 import { useRouter } from 'next/navigation'
-import { Loader2, Search, Shield, Trash2, UserMinus, Ban } from 'lucide-react'
+import { KeyRound, Loader2, Search, Shield, Trash2, UserMinus, Ban } from 'lucide-react'
 import { toast } from 'sonner'
 import {
+  adminSetAccountPassword,
   deleteAccount,
   listRegisteredAccounts,
   revokeAccountApproval,
@@ -56,6 +57,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { InstructorRolePanel } from './instructor-role-panel'
 import { PendingApprovalsPanel } from './pending-approvals-panel'
 import { AdminCreateAccountPanel } from './admin-create-account-panel'
@@ -163,6 +172,10 @@ export function AccountRoleManagement({
   const [saving, setSaving] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [passwordBusy, setPasswordBusy] = useState(false)
 
   useEffect(() => {
     setAccounts(initialAccounts)
@@ -267,6 +280,36 @@ export function AccountRoleManagement({
     const roleSelect = accountToSettingsRoleSelect(account)
     if (roleSelect) setPendingRoleSelect(roleSelect)
     setMemberId(account.linkedMemberId ?? '')
+    setPasswordDialogOpen(false)
+    setPassword('')
+    setPasswordConfirm('')
+  }
+
+  function openPasswordDialog() {
+    setPassword('')
+    setPasswordConfirm('')
+    setPasswordDialogOpen(true)
+  }
+
+  async function handleSetPassword() {
+    if (!selected) return
+    setPasswordBusy(true)
+    const result = await adminSetAccountPassword(
+      selected.id,
+      password,
+      passwordConfirm,
+    )
+    setPasswordBusy(false)
+    if (result.error) {
+      toast.error('비밀번호 변경 실패', { description: result.error })
+      return
+    }
+    toast.success('비밀번호가 변경되었습니다.', {
+      description: selected.full_name || selected.email || undefined,
+    })
+    setPassword('')
+    setPasswordConfirm('')
+    setPasswordDialogOpen(false)
   }
 
   async function handleRefresh() {
@@ -366,6 +409,81 @@ export function AccountRoleManagement({
     )
     router.refresh()
   }
+
+  const accountPasswordActions = selected ? (
+    <>
+      <div className="border-t pt-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={passwordBusy}
+          onClick={openPasswordDialog}
+        >
+          <KeyRound className="mr-2 h-4 w-4" />
+          비밀번호 변경
+        </Button>
+      </div>
+      <Dialog
+        open={passwordDialogOpen}
+        onOpenChange={(open) => {
+          setPasswordDialogOpen(open)
+          if (!open) {
+            setPassword('')
+            setPasswordConfirm('')
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>비밀번호 변경</DialogTitle>
+            <DialogDescription>
+              새 비밀번호를 직접 설정합니다. (8자 이상)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              id="admin-set-password"
+              type="password"
+              autoComplete="new-password"
+              placeholder="새 비밀번호"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={passwordBusy}
+            />
+            <Input
+              id="admin-set-password-confirm"
+              type="password"
+              autoComplete="new-password"
+              placeholder="새 비밀번호 확인"
+              value={passwordConfirm}
+              onChange={(e) => setPasswordConfirm(e.target.value)}
+              disabled={passwordBusy}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={
+                passwordBusy ||
+                password.trim().length < 8 ||
+                password.trim() !== passwordConfirm.trim()
+              }
+              onClick={() => void handleSetPassword()}
+            >
+              {passwordBusy ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <KeyRound className="mr-2 h-4 w-4" />
+              )}
+              비밀번호 저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  ) : null
 
   const accountDangerActions = selected ? (
     <div className="space-y-2 pt-2 border-t">
@@ -555,11 +673,26 @@ export function AccountRoleManagement({
               왼쪽 목록에서 계정을 선택하세요.
             </p>
           ) : selectedRoleSelect === null ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              {selected.isProtected
-                ? '시스템 관리자 계정은 권한을 변경할 수 없습니다.'
-                : '관리자 계정은 이 화면에서 권한을 변경할 수 없습니다.'}
-            </p>
+            <div className="space-y-3">
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <p className="font-medium">
+                  <AccountDisplayName
+                    account={selected}
+                    className="font-medium"
+                    fallback="이름 없음"
+                  />
+                </p>
+                <p className="text-muted-foreground truncate">
+                  {selected.email || selected.loginEmail}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {selected.isProtected
+                    ? '시스템 관리자 계정은 권한을 변경할 수 없습니다.'
+                    : '관리자 계정은 이 화면에서 권한을 변경할 수 없습니다.'}
+                </p>
+              </div>
+              {accountPasswordActions}
+            </div>
           ) : selected.approvalStatus !== 'approved' ? (
             <div className="space-y-3">
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
@@ -585,6 +718,7 @@ export function AccountRoleManagement({
               >
                 가입 승인 탭으로 이동
               </Button>
+              {accountPasswordActions}
               {accountDangerActions}
             </div>
           ) : (
@@ -749,6 +883,7 @@ export function AccountRoleManagement({
                 </Button>
               )}
 
+              {!isOnHoldAction ? accountPasswordActions : null}
               {!isOnHoldAction ? accountDangerActions : null}
             </>
           )}
