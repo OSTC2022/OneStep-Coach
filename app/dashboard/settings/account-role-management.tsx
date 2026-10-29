@@ -1,8 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import Link from 'next/link'
-import { listPendingAccounts, listOnHoldAccounts, putAccountOnHold } from '@/lib/actions/auth-registration'
+import {
+  listPendingAccounts,
+  listOnHoldAccounts,
+  putAccountOnHold,
+  restoreAccountToPending,
+} from '@/lib/actions/auth-registration'
 import { HoldAccountsPanel } from '@/components/settings/hold-accounts-panel'
 import { useRouter } from 'next/navigation'
 import { KeyRound, Loader2, Search, Shield, Trash2, UserMinus, Ban } from 'lucide-react'
@@ -160,12 +165,14 @@ export function AccountRoleManagement({
   initialHold,
 }: AccountRoleManagementProps) {
   const router = useRouter()
+  const tabsTopRef = useRef<HTMLDivElement>(null)
   const [activeTab, setActiveTab] = useState('pending')
   const [accounts, setAccounts] = useState(initialAccounts)
   const [pending, setPending] = useState(initialPending)
   const [hold, setHold] = useState(initialHold)
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [focusPendingId, setFocusPendingId] = useState<string | null>(null)
   const [pendingRoleSelect, setPendingRoleSelect] =
     useState<SettingsRoleSelectValue>('member')
   const [memberId, setMemberId] = useState<string>('')
@@ -289,6 +296,38 @@ export function AccountRoleManagement({
     setPassword('')
     setPasswordConfirm('')
     setPasswordDialogOpen(true)
+  }
+
+  function switchToTab(tab: string) {
+    setActiveTab(tab)
+    requestAnimationFrame(() => {
+      tabsTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  /** 미승인 계정 → 가입 승인 탭 (거절·보류는 승인 대기로 되돌린 뒤 이동) */
+  async function goToPendingApprovalTab() {
+    if (!selected) return
+    const targetId = selected.id
+
+    if (
+      selected.approvalStatus === 'rejected' ||
+      selected.approvalStatus === 'on_hold'
+    ) {
+      setActionBusy(true)
+      const result = await restoreAccountToPending(targetId)
+      setActionBusy(false)
+      if (result.error) {
+        toast.error('승인 대기로 이동 실패', { description: result.error })
+        return
+      }
+      toast.success('승인 대기 목록으로 보냈습니다.')
+      await refreshAccountLists()
+    }
+
+    setSelectedId(null)
+    setFocusPendingId(targetId)
+    switchToTab('pending')
   }
 
   async function handleSetPassword() {
@@ -707,16 +746,26 @@ export function AccountRoleManagement({
                   {selected.email || selected.loginEmail}
                 </p>
                 <p className="text-xs text-amber-600 mt-1">
-                  상태: {selected.approvalLabel} — 가입 승인 탭에서 승인해주세요.
+                  상태: {selected.approvalLabel}
+                  {selected.approvalStatus === 'rejected'
+                    ? ' — 승인 대기로 보낸 뒤 가입 승인 탭에서 다시 승인할 수 있습니다.'
+                    : ' — 가입 승인 탭에서 승인해주세요.'}
                 </p>
               </div>
               <Button
                 type="button"
                 variant="outline"
                 className="w-full"
-                onClick={() => setActiveTab('pending')}
+                disabled={actionBusy}
+                onClick={() => void goToPendingApprovalTab()}
               >
-                가입 승인 탭으로 이동
+                {actionBusy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
+                {selected.approvalStatus === 'rejected' ||
+                selected.approvalStatus === 'on_hold'
+                  ? '승인 대기로 보내기'
+                  : '가입 승인 탭으로 이동'}
               </Button>
               {accountPasswordActions}
               {accountDangerActions}
@@ -896,67 +945,75 @@ export function AccountRoleManagement({
   const holdCount = hold.length
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full min-w-0">
-      <TabsList className="w-full max-w-3xl grid grid-cols-2 sm:grid-cols-5 h-auto">
-        <TabsTrigger value="pending" className="text-xs sm:text-sm">
-          가입 승인
-          {pendingCount > 0 ? ` (${pendingCount})` : ''}
-        </TabsTrigger>
-        <TabsTrigger value="create" className="text-xs sm:text-sm">
-          계정 만들기
-        </TabsTrigger>
-        <TabsTrigger value="instructors" className="text-xs sm:text-sm">
-          강사
-        </TabsTrigger>
-        <TabsTrigger value="accounts" className="text-xs sm:text-sm">
-          가입 계정
-        </TabsTrigger>
-        <TabsTrigger value="hold" className="text-xs sm:text-sm">
-          보류
-          {holdCount > 0 ? ` (${holdCount})` : ''}
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="pending" className="mt-4">
-        <PendingApprovalsPanel
-          initialPending={pending}
-          instructors={initialInstructors}
-          onChanged={async () => {
-            await refreshAccountLists()
-          }}
-          onMovedToHold={async () => {
-            await refreshAccountLists()
-            setActiveTab('hold')
-          }}
-        />
-      </TabsContent>
-      <TabsContent value="create" className="mt-4">
-        <AdminCreateAccountPanel
-          instructors={initialInstructors}
-          onAccountCreated={async () => {
-            await refreshAccountLists()
-            setActiveTab('pending')
-          }}
-        />
-      </TabsContent>
-      <TabsContent value="instructors" className="mt-4">
-        <InstructorRolePanel
-          initialInstructors={initialInstructors}
-          linkableAccounts={accounts.filter((a) => !a.isProtected)}
-          onAccessChanged={() => void refreshAccountLists()}
-        />
-      </TabsContent>
-      <TabsContent value="accounts" className="mt-4">
-        {accountsPanel}
-      </TabsContent>
-      <TabsContent value="hold" className="mt-4">
-        <HoldAccountsPanel
-          initialHold={hold}
-          instructors={initialInstructors}
-          onChanged={async () => {
-            await refreshAccountLists()
-          }}
-        />
-      </TabsContent>
-    </Tabs>
+    <div ref={tabsTopRef} className="w-full min-w-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => switchToTab(value)}
+        className="w-full min-w-0"
+      >
+        <TabsList className="w-full max-w-3xl grid grid-cols-2 sm:grid-cols-5 h-auto">
+          <TabsTrigger value="pending" className="text-xs sm:text-sm">
+            가입 승인
+            {pendingCount > 0 ? ` (${pendingCount})` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="create" className="text-xs sm:text-sm">
+            계정 만들기
+          </TabsTrigger>
+          <TabsTrigger value="instructors" className="text-xs sm:text-sm">
+            강사
+          </TabsTrigger>
+          <TabsTrigger value="accounts" className="text-xs sm:text-sm">
+            가입 계정
+          </TabsTrigger>
+          <TabsTrigger value="hold" className="text-xs sm:text-sm">
+            보류
+            {holdCount > 0 ? ` (${holdCount})` : ''}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="pending" className="mt-4">
+          <PendingApprovalsPanel
+            initialPending={pending}
+            instructors={initialInstructors}
+            focusAccountId={focusPendingId}
+            onFocusHandled={() => setFocusPendingId(null)}
+            onChanged={async () => {
+              await refreshAccountLists()
+            }}
+            onMovedToHold={async () => {
+              await refreshAccountLists()
+              switchToTab('hold')
+            }}
+          />
+        </TabsContent>
+        <TabsContent value="create" className="mt-4">
+          <AdminCreateAccountPanel
+            instructors={initialInstructors}
+            onAccountCreated={async () => {
+              await refreshAccountLists()
+              switchToTab('pending')
+            }}
+          />
+        </TabsContent>
+        <TabsContent value="instructors" className="mt-4">
+          <InstructorRolePanel
+            initialInstructors={initialInstructors}
+            linkableAccounts={accounts.filter((a) => !a.isProtected)}
+            onAccessChanged={() => void refreshAccountLists()}
+          />
+        </TabsContent>
+        <TabsContent value="accounts" className="mt-4">
+          {accountsPanel}
+        </TabsContent>
+        <TabsContent value="hold" className="mt-4">
+          <HoldAccountsPanel
+            initialHold={hold}
+            instructors={initialInstructors}
+            onChanged={async () => {
+              await refreshAccountLists()
+            }}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }

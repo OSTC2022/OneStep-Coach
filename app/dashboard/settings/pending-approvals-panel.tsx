@@ -64,6 +64,8 @@ function formatDate(iso: string) {
 interface PendingApprovalsPanelProps {
   initialPending: PendingAccountRow[]
   instructors: InstructorRoleRow[]
+  focusAccountId?: string | null
+  onFocusHandled?: () => void
   onChanged?: () => void | Promise<void>
   onMovedToHold?: () => void | Promise<void>
 }
@@ -71,6 +73,8 @@ interface PendingApprovalsPanelProps {
 export function PendingApprovalsPanel({
   initialPending,
   instructors,
+  focusAccountId = null,
+  onFocusHandled,
   onChanged,
   onMovedToHold,
 }: PendingApprovalsPanelProps) {
@@ -88,6 +92,15 @@ export function PendingApprovalsPanel({
   useEffect(() => {
     setPending(initialPending)
   }, [initialPending])
+
+  useEffect(() => {
+    if (!focusAccountId) return
+    const exists = pending.some((row) => row.id === focusAccountId)
+    if (!exists) return
+    setSelectedId(focusAccountId)
+    setQuery('')
+    onFocusHandled?.()
+  }, [focusAccountId, pending, onFocusHandled])
 
   const approveParsed = parseSettingsRoleSelect(approveRoleSelect)
   const approveRole = approveParsed.role
