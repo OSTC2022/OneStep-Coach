@@ -54,6 +54,7 @@ import {
   StaffMemberRecordsDialog,
   type StaffRecordsTab,
 } from '@/components/dashboard/staff-member-records-dialog'
+import { StaffRegisterPbDialog } from '@/components/dashboard/staff-register-pb-dialog'
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
 import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
@@ -2542,6 +2543,7 @@ export function MemberRunningLeagueRankings({
   const graphPanelRef = useRef<HTMLDivElement>(null)
   const [selectedMember, setSelectedMember] = useState<{ id: string; name: string } | null>(null)
   const [pbDialogOpen, setPbDialogOpen] = useState(false)
+  const [staffPbRegisterOpen, setStaffPbRegisterOpen] = useState(false)
   const [mileageDialogOpen, setMileageDialogOpen] = useState(false)
   const [staffAttendanceTarget, setStaffAttendanceTarget] = useState<{
     memberId: string
@@ -2570,6 +2572,14 @@ export function MemberRunningLeagueRankings({
 
   function openMileageDialog() {
     setMileageDialogOpen(true)
+  }
+
+  function openPbRegister() {
+    if (canStaffManageAttendance) {
+      setStaffPbRegisterOpen(true)
+      return
+    }
+    setPbDialogOpen(true)
   }
 
   const portalPbDistance = PORTAL_PB_DISTANCES.includes(pbDistance)
@@ -2821,7 +2831,7 @@ export function MemberRunningLeagueRankings({
       onGraphChartTabChange={handleGraphChartTabChange}
       showRecordActions={canShowRecordActions}
       onAddMileage={openMileageDialog}
-      onAddPb={() => setPbDialogOpen(true)}
+      onAddPb={openPbRegister}
     />
   )
 
@@ -3056,6 +3066,11 @@ export function MemberRunningLeagueRankings({
         onOpenChange={setPbDialogOpen}
         readOnly={readOnly}
         portalRecordReady={portalRecordReady}
+        initialDistance={portalPbDistance as RunningLeagueDistanceEvent}
+      />
+      <StaffRegisterPbDialog
+        open={staffPbRegisterOpen}
+        onOpenChange={setStaffPbRegisterOpen}
         initialDistance={portalPbDistance as RunningLeagueDistanceEvent}
       />
       <MemberMileageLogDialog
