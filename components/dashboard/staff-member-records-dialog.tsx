@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -28,6 +28,7 @@ import {
   deleteMemberMileageLog,
   deleteMemberRunningPbRecord,
   fetchStaffMemberRecords,
+  saveMemberMileageLog,
   saveMemberRunningPb,
   updateMemberMileageLog,
 } from '@/lib/actions/running-league'
@@ -37,14 +38,19 @@ import {
   PB_COMPETITION_NAME_MAX_LENGTH,
   type PortalPbRecordListItem,
 } from '@/lib/running-league/pb-portal-history'
+import { getKstDateKey } from '@/lib/member-backup/kst-date'
 import type { RunningLeagueDistanceEvent, RunningLeagueMileageLog } from '@/lib/types'
 import { cn } from '@/lib/utils'
+
+export type StaffRecordsTab = 'mileage' | 'pb'
 
 type StaffMemberRecordsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   memberId: string
   memberName: string
+  initialTab?: StaffRecordsTab
+  startCreating?: boolean
 }
 
 type EditMileageState = {
@@ -60,6 +66,26 @@ type EditPbState = {
   competitionName: string
 }
 
+type CreateMileageState = {
+  distanceKm: string
+  loggedAt: string
+  notes: string
+}
+
+type CreatePbState = {
+  distanceEvent: RunningLeagueDistanceEvent
+  timeText: string
+  measuredAt: string
+  competitionName: string
+}
+
+const PB_CREATE_DISTANCES: RunningLeagueDistanceEvent[] = [
+  '5km',
+  '10km',
+  'half',
+  'full',
+]
+
 function formatLogDate(value: string): string {
   const raw = value.slice(0, 10)
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
@@ -67,21 +93,44 @@ function formatLogDate(value: string): string {
   return `${Number(match[2])}/${Number(match[3])}`
 }
 
+function emptyCreateMileage(): CreateMileageState {
+  return {
+    distanceKm: '',
+    loggedAt: getKstDateKey(),
+    notes: '',
+  }
+}
+
+function emptyCreatePb(
+  distanceEvent: RunningLeagueDistanceEvent = '10km',
+): CreatePbState {
+  return {
+    distanceEvent,
+    timeText: '',
+    measuredAt: getKstDateKey(),
+    competitionName: '',
+  }
+}
+
 export function StaffMemberRecordsDialog({
   open,
   onOpenChange,
   memberId,
   memberName,
+  initialTab = 'mileage',
+  startCreating = false,
 }: StaffMemberRecordsDialogProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [loading, setLoading] = useState(false)
-  const [tab, setTab] = useState<'mileage' | 'pb'>('mileage')
+  const [tab, setTab] = useState<StaffRecordsTab>(initialTab)
   const [displayName, setDisplayName] = useState(memberName)
   const [mileageLogs, setMileageLogs] = useState<RunningLeagueMileageLog[]>([])
   const [pbRecords, setPbRecords] = useState<PortalPbRecordListItem[]>([])
   const [editMileage, setEditMileage] = useState<EditMileageState | null>(null)
   const [editPb, setEditPb] = useState<EditPbState | null>(null)
+  const [createMileage, setCreateMileage] = useState<CreateMileageState | null>(null)
+  const [createPb, setCreatePb] = useState<CreatePbState | null>(null)
   const [deleteMileage, setDeleteMileage] = useState<RunningLeagueMileageLog | null>(null)
   const [deletePb, setDeletePb] = useState<PortalPbRecordListItem | null>(null)
 
@@ -102,12 +151,16 @@ export function StaffMemberRecordsDialog({
 
   useEffect(() => {
     if (!open) return
-    setTab('mileage')
+    setTab(initialTab)
     setEditMileage(null)
     setEditPb(null)
+    setDeleteMileage(null)
+    setDeletePb(null)
+    setCreateMileage(startCreating && initialTab === 'mileage' ? emptyCreateMileage() : null)
+    setCreatePb(startCreating && initialTab === 'pb' ? emptyCreatePb() : null)
     reload()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- open/memberId only
-  }, [open, memberId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open/memberId/initial only
+  }, [open, memberId, initialTab, startCreating])
 
   function handleSaveMileage() {
     if (!editMileage || pending) return
@@ -117,23 +170,49 @@ export function StaffMemberRecordsDialog({
       return
     }
     startTransition(async () => {
-      const result = await updateMemberMileageLog(
-        editMileage.log.id,
-        {
-          distance_km: distanceKm,
-          logged_at: editMileage.loggedAt,
-          notes: editMileage.log.notes,
-          source: editMileage.log.source,
-          skip_duplicate_check: true,
-          forMemberId: memberId,
-        },
-      )
+      const result = await updateMemberMileageLog(editMileage.log.id, {
+        distance_km: distanceKm,
+        logged_at: editMileage.loggedAt,
+        notes: editMileage.log.notes,
+        source: editMileage.log.source,
+        skip_duplicate_check: true,
+        forMemberId: memberId,
+      })
       if (!result.ok) {
         toast.error('마일리지 수정 실패', { description: result.error })
         return
       }
       toast.success('마일리지 기록을 수정했습니다.')
       setEditMileage(null)
+      reload()
+      router.refresh()
+    })
+  }
+
+  function handleCreateMileage() {
+    if (!createMileage || pending) return
+    const distanceKm = Number(createMileage.distanceKm)
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+      toast.error('거리(km)를 확인해 주세요.')
+      return
+    }
+    startTransition(async () => {
+      const result = await saveMemberMileageLog({
+        distance_km: distanceKm,
+        logged_at: createMileage.loggedAt,
+        notes: createMileage.notes.trim() || undefined,
+        source: 'manual',
+        verification_status: 'manual',
+        skip_duplicate_check: true,
+        forMemberId: memberId,
+      })
+      if (!result.ok) {
+        toast.error('마일리지 등록 실패', { description: result.error })
+        return
+      }
+      toast.success(`${displayName} 마일리지를 대신 등록했습니다.`)
+      setCreateMileage(null)
+      setTab('mileage')
       reload()
       router.refresh()
     })
@@ -179,6 +258,32 @@ export function StaffMemberRecordsDialog({
     })
   }
 
+  function handleCreatePb() {
+    if (!createPb || pending) return
+    if (!createPb.timeText.trim()) {
+      toast.error('기록을 입력해주세요.')
+      return
+    }
+    startTransition(async () => {
+      const result = await saveMemberRunningPb({
+        distance_event: createPb.distanceEvent,
+        time_text: createPb.timeText,
+        measured_at: createPb.measuredAt,
+        competition_name: createPb.competitionName,
+        forMemberId: memberId,
+      })
+      if (!result.ok) {
+        toast.error('PB 등록 실패', { description: result.error })
+        return
+      }
+      toast.success(`${displayName} PB를 대신 등록했습니다.`)
+      setCreatePb(null)
+      setTab('pb')
+      reload()
+      router.refresh()
+    })
+  }
+
   function handleDeletePb() {
     if (!deletePb || pending) return
     startTransition(async () => {
@@ -206,7 +311,7 @@ export function StaffMemberRecordsDialog({
           <DialogHeader>
             <DialogTitle>기록 관리</DialogTitle>
             <DialogDescription className="text-zinc-400">
-              {displayName} · 마일리지·PB 기록을 수정하거나 삭제할 수 있습니다.
+              {displayName} · 마일리지·PB를 대신 등록하거나 수정·삭제할 수 있습니다.
             </DialogDescription>
           </DialogHeader>
 
@@ -241,12 +346,42 @@ export function StaffMemberRecordsDialog({
             </Button>
           </div>
 
+          <div className="flex justify-end">
+            {tab === 'mileage' ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1 border-lime-500/35 text-lime-100"
+                disabled={pending || loading}
+                onClick={() => setCreateMileage(emptyCreateMileage())}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                마일리지 대신 등록
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1 border-amber-400/35 text-amber-100"
+                disabled={pending || loading}
+                onClick={() => setCreatePb(emptyCreatePb())}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                PB 대신 등록
+              </Button>
+            )}
+          </div>
+
           <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-1">
             {loading ? (
               <p className="py-6 text-center text-sm text-zinc-400">불러오는 중…</p>
             ) : tab === 'mileage' ? (
               runnableMileage.length === 0 ? (
-                <p className="py-6 text-center text-sm text-zinc-400">마일리지 기록이 없습니다.</p>
+                <p className="py-6 text-center text-sm text-zinc-400">
+                  마일리지 기록이 없습니다. 위에서 대신 등록할 수 있습니다.
+                </p>
               ) : (
                 runnableMileage.map((log) => (
                   <div
@@ -293,7 +428,9 @@ export function StaffMemberRecordsDialog({
                 ))
               )
             ) : pbRecords.length === 0 ? (
-              <p className="py-6 text-center text-sm text-zinc-400">PB 기록이 없습니다.</p>
+              <p className="py-6 text-center text-sm text-zinc-400">
+                PB 기록이 없습니다. 위에서 대신 등록할 수 있습니다.
+              </p>
             ) : (
               pbRecords.map((record) => (
                 <div
@@ -352,6 +489,170 @@ export function StaffMemberRecordsDialog({
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               닫기
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={createMileage != null}
+        onOpenChange={(next) => !next && setCreateMileage(null)}
+      >
+        <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950 text-zinc-100">
+          <DialogHeader>
+            <DialogTitle>마일리지 대신 등록</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              {displayName} 회원 대신 마일리지를 등록합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">날짜</p>
+              <Input
+                type="date"
+                value={createMileage?.loggedAt ?? ''}
+                onChange={(event) =>
+                  setCreateMileage((current) =>
+                    current ? { ...current, loggedAt: event.target.value } : current,
+                  )
+                }
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">거리 (km)</p>
+              <Input
+                type="number"
+                step="0.1"
+                min="0.1"
+                value={createMileage?.distanceKm ?? ''}
+                onChange={(event) =>
+                  setCreateMileage((current) =>
+                    current ? { ...current, distanceKm: event.target.value } : current,
+                  )
+                }
+                placeholder="예: 8.2"
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">메모 (선택)</p>
+              <Input
+                value={createMileage?.notes ?? ''}
+                onChange={(event) =>
+                  setCreateMileage((current) =>
+                    current ? { ...current, notes: event.target.value } : current,
+                  )
+                }
+                placeholder="예: 관리자 대리 등록"
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" onClick={() => setCreateMileage(null)}>
+              취소
+            </Button>
+            <Button
+              type="button"
+              disabled={pending}
+              onClick={handleCreateMileage}
+              className="bg-lime-400 text-zinc-950 hover:bg-lime-300"
+            >
+              {pending ? '등록 중…' : '등록'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createPb != null} onOpenChange={(next) => !next && setCreatePb(null)}>
+        <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950 text-zinc-100">
+          <DialogHeader>
+            <DialogTitle>PB 대신 등록</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              {displayName} 회원 대신 PB를 등록합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">거리</p>
+              <div className="grid grid-cols-4 gap-1">
+                {PB_CREATE_DISTANCES.map((distance) => (
+                  <Button
+                    key={distance}
+                    type="button"
+                    size="sm"
+                    variant={createPb?.distanceEvent === distance ? 'default' : 'outline'}
+                    className={cn(
+                      'h-8 px-1 text-[11px]',
+                      createPb?.distanceEvent === distance
+                        ? 'bg-amber-400 text-zinc-950 hover:bg-amber-300'
+                        : 'border-lime-500/25',
+                    )}
+                    onClick={() =>
+                      setCreatePb((current) =>
+                        current ? { ...current, distanceEvent: distance } : current,
+                      )
+                    }
+                  >
+                    {formatPbDistanceLabel(distance)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">기록 (예: 58:04)</p>
+              <Input
+                value={createPb?.timeText ?? ''}
+                onChange={(event) =>
+                  setCreatePb((current) =>
+                    current ? { ...current, timeText: event.target.value } : current,
+                  )
+                }
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">달성일</p>
+              <Input
+                type="date"
+                value={createPb?.measuredAt ?? ''}
+                onChange={(event) =>
+                  setCreatePb((current) =>
+                    current ? { ...current, measuredAt: event.target.value } : current,
+                  )
+                }
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs text-zinc-400">대회명</p>
+              <Input
+                value={createPb?.competitionName ?? ''}
+                maxLength={PB_COMPETITION_NAME_MAX_LENGTH}
+                onChange={(event) =>
+                  setCreatePb((current) =>
+                    current
+                      ? { ...current, competitionName: event.target.value }
+                      : current,
+                  )
+                }
+                placeholder="예: 서울마라톤"
+                className="border-lime-500/20 bg-black/40"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" onClick={() => setCreatePb(null)}>
+              취소
+            </Button>
+            <Button
+              type="button"
+              disabled={pending}
+              onClick={handleCreatePb}
+              className="bg-lime-400 text-zinc-950 hover:bg-lime-300"
+            >
+              {pending ? '등록 중…' : '등록'}
             </Button>
           </DialogFooter>
         </DialogContent>

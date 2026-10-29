@@ -50,7 +50,10 @@ import {
 } from '@/components/dashboard/ranking-member-name-block'
 import { RankingSelfQuickActions } from '@/components/dashboard/ranking-self-quick-actions'
 import { StaffMemberDayAttendanceDialog } from '@/components/dashboard/staff-member-day-attendance-dialog'
-import { StaffMemberRecordsDialog } from '@/components/dashboard/staff-member-records-dialog'
+import {
+  StaffMemberRecordsDialog,
+  type StaffRecordsTab,
+} from '@/components/dashboard/staff-member-records-dialog'
 import { getKstDateKey } from '@/lib/member-backup/kst-date'
 import { RankMedalDisplay } from '@/components/dashboard/rank-medal'
 import { MemberLeagueStatusCard } from '@/components/dashboard/member-league-status-card'
@@ -964,7 +967,11 @@ function RankingMemberQuickActionsSlot({
   canStaffManageAttendance?: boolean
   onAddMileage?: () => void
   onAddPb?: () => void
-  onStaffManageRecords?: (memberId: string, memberName: string) => void
+  onStaffManageRecords?: (
+    memberId: string,
+    memberName: string,
+    options?: { tab?: StaffRecordsTab; create?: boolean },
+  ) => void
   onStaffAttendance?: (memberId: string, memberName: string) => void
 }) {
   if (!selectedMemberId) return null
@@ -994,7 +1001,11 @@ function RankingMemberQuickActionsSlot({
       onAddMileage={
         staffManagingOther
           ? onStaffManageRecords
-            ? () => onStaffManageRecords(selectedMemberId, memberName)
+            ? () =>
+                onStaffManageRecords(selectedMemberId, memberName, {
+                  tab: 'mileage',
+                  create: true,
+                })
             : undefined
           : selfActionsDisabled
             ? undefined
@@ -1003,7 +1014,11 @@ function RankingMemberQuickActionsSlot({
       onAddPb={
         staffManagingOther
           ? onStaffManageRecords
-            ? () => onStaffManageRecords(selectedMemberId, memberName)
+            ? () =>
+                onStaffManageRecords(selectedMemberId, memberName, {
+                  tab: 'pb',
+                  create: true,
+                })
             : undefined
           : selfActionsDisabled
             ? undefined
@@ -1063,7 +1078,11 @@ function RankingPreview({
   canStaffManageAttendance?: boolean
   onAddMileage?: () => void
   onAddPb?: () => void
-  onStaffManageRecords?: (memberId: string, memberName: string) => void
+  onStaffManageRecords?: (
+    memberId: string,
+    memberName: string,
+    options?: { tab?: StaffRecordsTab; create?: boolean },
+  ) => void
   onStaffAttendance?: (memberId: string, memberName: string) => void
 }) {
   const allRows = usesAttendanceLeaderboard(rankingView)
@@ -2170,7 +2189,11 @@ function FullRankingDialog({
   canStaffManageAttendance?: boolean
   onAddMileage?: () => void
   onAddPb?: () => void
-  onStaffManageRecords?: (memberId: string, memberName: string) => void
+  onStaffManageRecords?: (
+    memberId: string,
+    memberName: string,
+    options?: { tab?: StaffRecordsTab; create?: boolean },
+  ) => void
   onStaffAttendance?: (memberId: string, memberName: string) => void
 }) {
   const [searchQuery, setSearchQuery] = useState('')
@@ -2423,8 +2446,8 @@ function FullRankingDialog({
                 }
                 onStaffManageRecords={
                   onStaffManageRecords
-                    ? (memberId, memberName) => {
-                        onStaffManageRecords(memberId, memberName)
+                    ? (memberId, memberName, options) => {
+                        onStaffManageRecords(memberId, memberName, options)
                         onOpenChange(false)
                       }
                     : undefined
@@ -2525,6 +2548,8 @@ export function MemberRunningLeagueRankings({
   const [staffRecordsTarget, setStaffRecordsTarget] = useState<{
     memberId: string
     memberName: string
+    tab?: StaffRecordsTab
+    create?: boolean
   } | null>(null)
   const router = useRouter()
   const canShowRecordActions = tableReady && !readOnly
@@ -2935,8 +2960,13 @@ export function MemberRunningLeagueRankings({
           onAddPb={canShowRecordActions ? () => setPbDialogOpen(true) : undefined}
           onStaffManageRecords={
             canStaffManageAttendance
-              ? (memberId, memberName) =>
-                  setStaffRecordsTarget({ memberId, memberName })
+              ? (memberId, memberName, options) =>
+                  setStaffRecordsTarget({
+                    memberId,
+                    memberName,
+                    tab: options?.tab,
+                    create: options?.create,
+                  })
               : undefined
           }
           onStaffAttendance={
@@ -2994,8 +3024,13 @@ export function MemberRunningLeagueRankings({
         onAddPb={canShowRecordActions ? () => setPbDialogOpen(true) : undefined}
         onStaffManageRecords={
           canStaffManageAttendance
-            ? (memberId, memberName) =>
-                setStaffRecordsTarget({ memberId, memberName })
+            ? (memberId, memberName, options) =>
+                setStaffRecordsTarget({
+                  memberId,
+                  memberName,
+                  tab: options?.tab,
+                  create: options?.create,
+                })
             : undefined
         }
         onStaffAttendance={
@@ -3051,6 +3086,8 @@ export function MemberRunningLeagueRankings({
           }}
           memberId={staffRecordsTarget.memberId}
           memberName={staffRecordsTarget.memberName}
+          initialTab={staffRecordsTarget.tab}
+          startCreating={staffRecordsTarget.create}
         />
       ) : null}
 
