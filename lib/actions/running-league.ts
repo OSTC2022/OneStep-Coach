@@ -2049,7 +2049,8 @@ async function resolveActingMemberId(
   const targetId = forMemberId?.trim() || null
   if (targetId) {
     const user = await getCurrentUser()
-    if (!user || (user.role !== 'admin' && user.role !== 'instructor')) {
+    const role = String(user?.role ?? '')
+    if (!user || (role !== 'admin' && role !== 'instructor' && role !== 'coach')) {
       return {
         ok: false,
         error: '관리자 또는 강사만 다른 회원 기록을 수정할 수 있습니다.',

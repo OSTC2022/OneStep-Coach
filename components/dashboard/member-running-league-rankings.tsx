@@ -984,22 +984,29 @@ function RankingMemberQuickActionsSlot({
 
   const memberName = memberNameById.get(selectedMemberId) ?? '회원'
   const status = statusByMemberId.get(selectedMemberId)
-  const staffManagingOther = canShowStaff && !isSelf
+  // 회원 미리보기(readOnly)에서는 하이라이트 회원도 강사·관리자가 대신 등록
+  const staffProxyMode = canShowStaff && (!isSelf || selfActionsDisabled)
 
   return (
     <RankingSelfQuickActions
-      title={isSelf ? '내 바로가기' : `${memberName} 바로가기`}
-      disabled={Boolean(selfActionsDisabled && isSelf)}
+      title={
+        staffProxyMode
+          ? `${memberName} 바로가기`
+          : isSelf
+            ? '내 바로가기'
+            : `${memberName} 바로가기`
+      }
+      disabled={false}
       initialStatusMessage={status?.message ?? ''}
       initialStatusColor={status?.color ?? null}
-      statusMemberId={staffManagingOther ? selectedMemberId : null}
+      statusMemberId={staffProxyMode ? selectedMemberId : null}
       onAttendance={
-        staffManagingOther && onStaffAttendance
+        staffProxyMode && onStaffAttendance
           ? () => onStaffAttendance(selectedMemberId, memberName)
           : undefined
       }
       onAddMileage={
-        staffManagingOther
+        staffProxyMode
           ? onStaffManageRecords
             ? () =>
                 onStaffManageRecords(selectedMemberId, memberName, {
@@ -1007,12 +1014,10 @@ function RankingMemberQuickActionsSlot({
                   create: true,
                 })
             : undefined
-          : selfActionsDisabled
-            ? undefined
-            : onAddMileage
+          : onAddMileage
       }
       onAddPb={
-        staffManagingOther
+        staffProxyMode
           ? onStaffManageRecords
             ? () =>
                 onStaffManageRecords(selectedMemberId, memberName, {
@@ -1020,9 +1025,7 @@ function RankingMemberQuickActionsSlot({
                   create: true,
                 })
             : undefined
-          : selfActionsDisabled
-            ? undefined
-            : onAddPb
+          : onAddPb
       }
     />
   )
