@@ -576,8 +576,33 @@ async function resolveSessionPackageId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   lesson: {
     member_id: string
+    session_package_id?: string | null
   },
 ) {
+  const linkedId = lesson.session_package_id?.trim() || null
+  if (linkedId) {
+    // 일정에 이미 연결된 수업권이 있으면 재조회 실패로 '없음' 처리하지 않음
+    const { data: linked, error } = await supabase
+      .from('session_packages')
+      .select('id, deleted_at')
+      .eq('id', linkedId)
+      .maybeSingle()
+
+    if (!error && linked?.id && !(linked as { deleted_at?: string | null }).deleted_at) {
+      return linked.id
+    }
+
+    // deleted_at 컬럼 없는 DB — id만으로 재확인
+    if (error && (error.message?.includes('deleted_at') || error.code === '42703')) {
+      const { data: legacy } = await supabase
+        .from('session_packages')
+        .select('id')
+        .eq('id', linkedId)
+        .maybeSingle()
+      if (legacy?.id) return legacy.id
+    }
+  }
+
   return querySessionPackageIdForDeduction(supabase, lesson.member_id)
 }
 

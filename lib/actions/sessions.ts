@@ -297,14 +297,15 @@ export async function getMemberSessionPackagesForLessonPicker(
   let data: LessonSessionPackageOption[] | null = null
   let error: { message: string; code?: string } | null = null
 
+  // FIFO 차감과 맞추기 위해 등록 오래된 순으로 조회 (최신 40개만 보면 사용 가능 권이 빠질 수 있음)
   {
     const primary = await supabase
       .from('session_packages')
       .select(LESSON_PACKAGE_PICKER_SELECT)
       .eq('member_id', id)
       .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(40)
+      .order('created_at', { ascending: true })
+      .limit(100)
     data = (primary.data as LessonSessionPackageOption[] | null) ?? null
     error = primary.error
   }
@@ -315,8 +316,8 @@ export async function getMemberSessionPackagesForLessonPicker(
       .select(LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE)
       .eq('member_id', id)
       .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(40)
+      .order('created_at', { ascending: true })
+      .limit(100)
     data = ((fallback.data ?? []) as Omit<LessonSessionPackageOption, 'paused_at'>[]).map(
       (row) => ({ ...row, paused_at: null }),
     )
@@ -328,8 +329,8 @@ export async function getMemberSessionPackagesForLessonPicker(
       .from('session_packages')
       .select(LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE)
       .eq('member_id', id)
-      .order('created_at', { ascending: false })
-      .limit(40)
+      .order('created_at', { ascending: true })
+      .limit(100)
     data = ((legacy.data ?? []) as Omit<LessonSessionPackageOption, 'paused_at'>[]).map(
       (row) => ({ ...row, paused_at: null }),
     )
@@ -338,7 +339,11 @@ export async function getMemberSessionPackagesForLessonPicker(
 
   if (error) {
     console.error('getMemberSessionPackagesForLessonPicker', error)
-    return []
+    throw new Error(
+      error.message?.includes('session_packages')
+        ? '수업권을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'
+        : `수업권을 불러오지 못했습니다: ${error.message}`,
+    )
   }
 
   return (data ?? []).map((row) => ({
@@ -805,35 +810,51 @@ export async function queryActiveSessionPackageId(
 ): Promise<string | null> {
   const trashEnabled = await isSessionPackageTrashEnabled()
 
-  let query = supabase
-    .from('session_packages')
-    .select(
-      'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at, paused_at',
-    )
-    .eq('member_id', memberId)
-    .order('created_at', { ascending: true })
+  const selectFull =
+    'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at, paused_at'
+  const selectNoPause =
+    'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at'
+  const selectLegacy =
+    'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at'
 
-  if (trashEnabled) {
-    query = query.is('deleted_at', null)
-  }
-
-  let { data, error } = await query
-  if (error && isPauseColumnMissingError(error.message, error.code)) {
-    let fallback = supabase
+  async function run(select: string, useTrashFilter: boolean) {
+    let query = supabase
       .from('session_packages')
-      .select(
-        'id, remaining_sessions, note, expires_at, is_active, created_at, paid_at, deleted_at',
-      )
+      .select(select)
       .eq('member_id', memberId)
       .order('created_at', { ascending: true })
-    if (trashEnabled) {
-      fallback = fallback.is('deleted_at', null)
+      .limit(100)
+
+    if (useTrashFilter && trashEnabled) {
+      query = query.is('deleted_at', null)
     }
-    const fb = await fallback
+
+    return query
+  }
+
+  let { data, error } = await run(selectFull, true)
+
+  if (error && isPauseColumnMissingError(error.message, error.code)) {
+    const fb = await run(selectNoPause, true)
     data = (fb.data ?? []).map((row) => ({ ...row, paused_at: null })) as typeof data
     error = fb.error
   }
-  if (error || !data?.length) return null
+
+  if (error && isDeletedAtMissingError(error.message, error.code)) {
+    const legacy = await run(selectLegacy, false)
+    data = (legacy.data ?? []).map((row) => ({
+      ...row,
+      deleted_at: null,
+      paused_at: null,
+    })) as typeof data
+    error = legacy.error
+  }
+
+  if (error) {
+    console.error('queryActiveSessionPackageId', error)
+    return null
+  }
+  if (!data?.length) return null
 
   return pickSessionPackageIdForDeduction(data as SessionPackageDeductionCandidate[])
 }

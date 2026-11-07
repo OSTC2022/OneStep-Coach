@@ -709,6 +709,17 @@ export function LessonCreateDialog({
         packagesMemberIdRef.current = linkedMemberId
         setMemberPackages(data)
       })
+      .catch((error) => {
+        if (cancelled) return
+        // 실패 시 목록을 비우지 않음 — '등록된 수업권 없음' 오표시 방지
+        console.error('session packages picker', error)
+        toast.error('수업권을 불러오지 못했습니다', {
+          description:
+            error instanceof Error
+              ? error.message
+              : '네트워크 상태를 확인한 뒤 다시 열어주세요.',
+        })
+      })
       .finally(() => {
         if (!cancelled) setPackagesLoading(false)
       })
@@ -990,11 +1001,13 @@ export function LessonCreateDialog({
       handleOpenChange(false)
 
       void deleteLessonsInSeries(target.id, scope, seriesAnchorDate).then((result) => {
-        if (result.error && !result.error.includes('찾을 수 없습니다')) {
-          toast.error('수업 삭제 실패', {
-            description: `${result.error} 새로고침 후 다시 확인해 주세요.`,
-          })
-        }
+        if (!result.error || result.error.includes('찾을 수 없습니다')) return
+
+        // 서버 삭제 실패 시 캘린더에 다시 복구 (멘트만 나오고 실제론 안 지워진 상태 방지)
+        onSaved(target)
+        toast.error('수업 삭제 실패', {
+          description: `${result.error} 일정을 다시 표시했습니다. 잠시 후 다시 시도해주세요.`,
+        })
       })
       return
     }
