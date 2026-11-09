@@ -16,6 +16,7 @@ export async function getSessionsPageData(
   const orderBy: SessionPackageListOrderBy =
     sort === 'recent_lesson' ? 'recent_lesson' : 'created_at'
 
+  // 목록을 가장 먼저 확보하고, 매출·휴지통·회원선택은 병렬 (매출은 60초 캐시)
   const [
     { data: packages, count: totalCount },
     monthlyRevenue,
@@ -29,7 +30,12 @@ export async function getSessionsPageData(
       orderBy,
     }),
     getMonthlySessionRevenue(),
-    getMembers({ isActive: true, orderBy: 'name', orderAsc: true, limit: 50 }),
+    getMembers({
+      isActive: true,
+      orderBy: 'name',
+      orderAsc: true,
+      limit: 50,
+    }),
     getDeletedSessionPackagesCount(),
   ])
 

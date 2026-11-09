@@ -42,36 +42,21 @@ export function lessonOccurredSortKey(lesson: {
   return `${lesson.lesson_date}T${time}`
 }
 
-const MEMBER_LESSON_LOOKUP_BATCH = 25
-/** 회원별 최근 N건 — 오늘 미래 시간대 수업 제외 후에도 최신 1건 확보 */
-const RECENT_LESSONS_PER_MEMBER = 5
+/** 한 번에 .in()으로 묶을 회원 수 */
+const MEMBER_LESSON_LOOKUP_BATCH = 60
+/** 회원당 후보 수업 수 (미래 슬롯 제외 후에도 1건 확보) */
+const RECENT_LESSONS_PER_MEMBER = 4
 
-async function fetchLastLessonSortKeyForMember(
-  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
-  memberId: string,
-  todayKey: string,
-  asOf: Date,
-): Promise<string | null> {
-  const { data } = await supabase
-    .from('lessons')
-    .select('member_id, lesson_date, start_time')
-    .eq('member_id', memberId)
-    .lte('lesson_date', todayKey)
-    .order('lesson_date', { ascending: false })
-    .order('start_time', { ascending: false })
-    .limit(RECENT_LESSONS_PER_MEMBER)
-
-  const occurred = filterLessonsUpToNow(data ?? [], asOf)
-  if (occurred.length === 0) return null
-
-  let best = ''
-  for (const row of occurred) {
-    const sortKey = lessonOccurredSortKey(row)
-    if (sortKey > best) best = sortKey
-  }
-  return best || null
+type LessonRow = {
+  member_id: string | null
+  lesson_date: string
+  start_time?: string | null
 }
 
+/**
+ * 회원별 최근 수업일.
+ * 예전: 회원마다 개별 쿼리(N+1) → 지금: .in() 배치 1회 + 필요 시 소수만 보완.
+ */
 export async function fetchLastLessonDateByMember(
   supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
   memberIds: string[],
@@ -81,17 +66,61 @@ export async function fetchLastLessonDateByMember(
   if (memberIds.length === 0) return map
 
   const todayKey = getTodayDateKey(asOf)
+  const uniqueIds = [...new Set(memberIds.filter(Boolean))]
 
-  for (let i = 0; i < memberIds.length; i += MEMBER_LESSON_LOOKUP_BATCH) {
-    const batch = memberIds.slice(i, i + MEMBER_LESSON_LOOKUP_BATCH)
-    const results = await Promise.all(
-      batch.map((memberId) =>
-        fetchLastLessonSortKeyForMember(supabase, memberId, todayKey, asOf),
-      ),
-    )
-    for (let j = 0; j < batch.length; j += 1) {
-      const sortKey = results[j]
-      if (sortKey) map.set(batch[j], sortKey)
+  for (let i = 0; i < uniqueIds.length; i += MEMBER_LESSON_LOOKUP_BATCH) {
+    const batch = uniqueIds.slice(i, i + MEMBER_LESSON_LOOKUP_BATCH)
+    const fetchLimit = Math.min(2500, batch.length * RECENT_LESSONS_PER_MEMBER * 3)
+
+    const { data } = await supabase
+      .from('lessons')
+      .select('member_id, lesson_date, start_time')
+      .in('member_id', batch)
+      .lte('lesson_date', todayKey)
+      .order('lesson_date', { ascending: false })
+      .order('start_time', { ascending: false })
+      .limit(fetchLimit)
+
+    const rowsByMember = new Map<string, LessonRow[]>()
+    for (const row of (data ?? []) as LessonRow[]) {
+      if (!row.member_id) continue
+      const list = rowsByMember.get(row.member_id)
+      if (list) {
+        if (list.length < RECENT_LESSONS_PER_MEMBER) list.push(row)
+      } else {
+        rowsByMember.set(row.member_id, [row])
+      }
+    }
+
+    // 배치에 안 잡힌 회원만 소수 개별 보완
+    const missing = batch.filter((id) => !rowsByMember.has(id))
+    if (missing.length > 0 && missing.length <= 20) {
+      await Promise.all(
+        missing.map(async (memberId) => {
+          const { data: fallback } = await supabase
+            .from('lessons')
+            .select('member_id, lesson_date, start_time')
+            .eq('member_id', memberId)
+            .lte('lesson_date', todayKey)
+            .order('lesson_date', { ascending: false })
+            .order('start_time', { ascending: false })
+            .limit(RECENT_LESSONS_PER_MEMBER)
+          if (fallback?.length) {
+            rowsByMember.set(memberId, fallback as LessonRow[])
+          }
+        }),
+      )
+    }
+
+    for (const [memberId, rows] of rowsByMember) {
+      const occurred = filterLessonsUpToNow(rows, asOf)
+      if (occurred.length === 0) continue
+      let best = ''
+      for (const row of occurred) {
+        const sortKey = lessonOccurredSortKey(row)
+        if (sortKey > best) best = sortKey
+      }
+      if (best) map.set(memberId, best)
     }
   }
 

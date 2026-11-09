@@ -36,7 +36,7 @@ export default async function MemberDetailPage({
   const [member, packagesResult, trashCount, accountEmailInfo, canEditBasicInfo, centerSettings, canAddBodyRecord, runningLeagueHome, instructorsResult] =
     await Promise.all([
     getMember(id),
-    getSessionPackages({ memberId: id }),
+    getSessionPackages({ memberId: id, withCount: false, skipMemberJoin: true }),
     getDeletedSessionPackagesCount(id),
     getMemberAccountEmail(id),
     canEditMemberBasicInfoFor(id),

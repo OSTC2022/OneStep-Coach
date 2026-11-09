@@ -74,6 +74,17 @@ const SESSION_PACKAGE_PAUSE_SETUP_MESSAGE =
 let sessionPackageTrashEnabledCache: { value: boolean; at: number } | null = null
 const SESSION_PACKAGE_TRASH_CACHE_MS = 5 * 60 * 1000
 
+/** FULL / NO_PAUSE / LEGACY 스키마 모드 — 매 요청 폴백 재시도 방지 */
+type PackageSelectMode = 'full' | 'no_pause' | 'legacy'
+let packageSelectModeCache: { mode: PackageSelectMode; at: number } | null = null
+const PACKAGE_SELECT_MODE_CACHE_MS = 10 * 60 * 1000
+
+let monthlyRevenueCache: { value: number; at: number; monthKey: string } | null = null
+const MONTHLY_REVENUE_CACHE_MS = 60 * 1000
+
+/** 최근 수업순 정렬 시 전체 테이블 스캔 대신 윈도우 상한 */
+const RECENT_LESSON_PACKAGE_SCAN_LIMIT = 200
+
 function isPauseColumnMissingError(message?: string, code?: string) {
   return Boolean(
     message?.includes('paused_at') || message?.includes('total_paused_days'),
@@ -105,6 +116,10 @@ function applyTrashFilter<T extends { is: (col: string, val: null) => T; not: (c
 }
 
 export async function isSessionPackageTrashEnabled(): Promise<boolean> {
+  const mode = getCachedPackageSelectMode()
+  if (mode === 'full' || mode === 'no_pause') return true
+  if (mode === 'legacy') return false
+
   const now = Date.now()
   if (
     sessionPackageTrashEnabledCache &&
@@ -191,6 +206,34 @@ async function fetchSessionPackageRows(
   return query
 }
 
+function resolvePackageSelect(
+  mode: PackageSelectMode,
+  includeMemberJoin: boolean,
+): string {
+  if (!includeMemberJoin) {
+    if (mode === 'full') return SESSION_PACKAGE_DETAIL_SELECT
+    if (mode === 'no_pause') return SESSION_PACKAGE_DETAIL_SELECT_NO_PAUSE
+    return 'id, member_id, total_sessions, remaining_sessions, price, paid_at, expires_at, payment_method, is_active, created_at, note'
+  }
+  if (mode === 'full') return SESSION_PACKAGE_LIST_SELECT
+  if (mode === 'no_pause') return SESSION_PACKAGE_LIST_SELECT_NO_PAUSE
+  return SESSION_PACKAGE_LIST_SELECT_LEGACY
+}
+
+function getCachedPackageSelectMode(): PackageSelectMode | null {
+  if (
+    packageSelectModeCache &&
+    Date.now() - packageSelectModeCache.at < PACKAGE_SELECT_MODE_CACHE_MS
+  ) {
+    return packageSelectModeCache.mode
+  }
+  return null
+}
+
+function rememberPackageSelectMode(mode: PackageSelectMode) {
+  packageSelectModeCache = { mode, at: Date.now() }
+}
+
 async function fetchSessionPackages(
   supabase: Awaited<ReturnType<typeof createStaffDataClient>>,
   options?: {
@@ -202,70 +245,58 @@ async function fetchSessionPackages(
     orderBy?: 'created_at' | 'deleted_at'
     orderAsc?: boolean
     withCount?: boolean
+    /** 회원 상세처럼 member_id가 이미 있을 때 members 조인 생략 */
+    skipMemberJoin?: boolean
   },
 ) {
-  // FULL → NO_PAUSE → LEGACY 순으로 폴백 (컬럼 미적용 DB 호환)
-  const primary = await fetchSessionPackageRows(supabase, {
-    ...options,
-    orderBy: options?.orderBy ?? 'created_at',
-    orderAsc: options?.orderAsc ?? false,
-    withCount: options?.withCount,
-    select: SESSION_PACKAGE_LIST_SELECT,
-    useTrashFilter: true,
-  })
+  const includeMemberJoin = !options?.skipMemberJoin
+  const cachedMode = getCachedPackageSelectMode()
+  const allModes: PackageSelectMode[] = ['full', 'no_pause', 'legacy']
+  const startIdx = cachedMode ? Math.max(0, allModes.indexOf(cachedMode)) : 0
+  const tryModes = allModes.slice(startIdx)
 
-  if (!primary.error) {
-    return {
-      data: (primary.data ?? []).map((row) => withDeletedAtDefault(row as Record<string, unknown>)),
-      error: null,
-      count: primary.count,
-      trashEnabled: true,
-    }
-  }
+  let lastError: { message: string; code?: string } | null = null
 
-  if (isPauseColumnMissingError(primary.error.message, primary.error.code)) {
-    const noPause = await fetchSessionPackageRows(supabase, {
+  for (const mode of tryModes) {
+    const result = await fetchSessionPackageRows(supabase, {
       ...options,
-      orderBy: options?.orderBy ?? 'created_at',
+      orderBy:
+        mode === 'legacy' && options?.orderBy === 'deleted_at'
+          ? 'created_at'
+          : (options?.orderBy ?? 'created_at'),
       orderAsc: options?.orderAsc ?? false,
       withCount: options?.withCount,
-      select: SESSION_PACKAGE_LIST_SELECT_NO_PAUSE,
-      useTrashFilter: true,
+      select: resolvePackageSelect(mode, includeMemberJoin),
+      useTrashFilter: mode !== 'legacy',
     })
 
-    if (!noPause.error) {
-      return {
-        data: (noPause.data ?? []).map((row) =>
-          withDeletedAtDefault(row as Record<string, unknown>),
+    if (!result.error) {
+      rememberPackageSelectMode(mode)
+      const rows = (result.data ?? []).map((row) =>
+        withDeletedAtDefault(
+          mode === 'legacy'
+            ? ({ ...row, deleted_at: null } as Record<string, unknown>)
+            : (row as Record<string, unknown>),
         ),
+      )
+      return {
+        data: rows,
         error: null,
-        count: noPause.count,
-        trashEnabled: true,
+        count: result.count,
+        trashEnabled: mode !== 'legacy',
       }
     }
 
-    if (!isDeletedAtMissingError(noPause.error.message, noPause.error.code)) {
-      return { data: null, error: noPause.error, count: 0, trashEnabled: false }
-    }
-  } else if (!isDeletedAtMissingError(primary.error.message, primary.error.code)) {
-    return { data: null, error: primary.error, count: 0, trashEnabled: false }
+    lastError = result.error
+    const pauseMissing = isPauseColumnMissingError(result.error.message, result.error.code)
+    const deletedMissing = isDeletedAtMissingError(result.error.message, result.error.code)
+
+    if (mode === 'full' && pauseMissing) continue
+    if ((mode === 'full' || mode === 'no_pause') && deletedMissing) continue
+    break
   }
 
-  const legacy = await fetchSessionPackageRows(supabase, {
-    ...options,
-    orderBy: options?.orderBy === 'deleted_at' ? 'created_at' : (options?.orderBy ?? 'created_at'),
-    orderAsc: options?.orderAsc ?? false,
-    withCount: options?.withCount,
-    select: SESSION_PACKAGE_LIST_SELECT_LEGACY,
-    useTrashFilter: false,
-  })
-
-  return {
-    data: (legacy.data ?? []).map((row) => withDeletedAtDefault({ ...row, deleted_at: null })),
-    error: legacy.error,
-    count: legacy.count,
-    trashEnabled: false,
-  }
+  return { data: null, error: lastError, count: 0, trashEnabled: false }
 }
 
 /** 캘린더 수업 수정용 — 최소 컬럼·무카운트·무조인 빠른 조회 */
@@ -286,38 +317,60 @@ const LESSON_PACKAGE_PICKER_SELECT =
 const LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE =
   'id, total_sessions, remaining_sessions, note, is_active, expires_at, created_at, paid_at'
 
+const pickerPackageCache = new Map<
+  string,
+  { at: number; data: LessonSessionPackageOption[] }
+>()
+const PICKER_PACKAGE_CACHE_MS = 20_000
+
 export async function getMemberSessionPackagesForLessonPicker(
   memberId: string,
 ): Promise<LessonSessionPackageOption[]> {
   const id = memberId.trim()
   if (!id) return []
 
+  const cached = pickerPackageCache.get(id)
+  if (cached && Date.now() - cached.at < PICKER_PACKAGE_CACHE_MS) {
+    return cached.data
+  }
+
   const supabase = await createStaffDataClient()
 
   let data: LessonSessionPackageOption[] | null = null
   let error: { message: string; code?: string } | null = null
 
-  // FIFO 차감과 맞추기 위해 등록 오래된 순으로 조회 (최신 40개만 보면 사용 가능 권이 빠질 수 있음)
+  const mode = getCachedPackageSelectMode() ?? 'full'
+  const select =
+    mode === 'legacy' || mode === 'no_pause'
+      ? LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE
+      : LESSON_PACKAGE_PICKER_SELECT
+
   {
-    const primary = await supabase
+    let query = supabase
       .from('session_packages')
-      .select(LESSON_PACKAGE_PICKER_SELECT)
+      .select(select)
       .eq('member_id', id)
-      .is('deleted_at', null)
       .order('created_at', { ascending: true })
-      .limit(100)
+      .limit(80)
+
+    if (mode !== 'legacy') {
+      query = query.is('deleted_at', null)
+    }
+
+    const primary = await query
     data = (primary.data as LessonSessionPackageOption[] | null) ?? null
     error = primary.error
   }
 
   if (error && isPauseColumnMissingError(error.message, error.code)) {
+    rememberPackageSelectMode('no_pause')
     const fallback = await supabase
       .from('session_packages')
       .select(LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE)
       .eq('member_id', id)
       .is('deleted_at', null)
       .order('created_at', { ascending: true })
-      .limit(100)
+      .limit(80)
     data = ((fallback.data ?? []) as Omit<LessonSessionPackageOption, 'paused_at'>[]).map(
       (row) => ({ ...row, paused_at: null }),
     )
@@ -325,12 +378,13 @@ export async function getMemberSessionPackagesForLessonPicker(
   }
 
   if (error && isDeletedAtMissingError(error.message, error.code)) {
+    rememberPackageSelectMode('legacy')
     const legacy = await supabase
       .from('session_packages')
       .select(LESSON_PACKAGE_PICKER_SELECT_NO_PAUSE)
       .eq('member_id', id)
       .order('created_at', { ascending: true })
-      .limit(100)
+      .limit(80)
     data = ((legacy.data ?? []) as Omit<LessonSessionPackageOption, 'paused_at'>[]).map(
       (row) => ({ ...row, paused_at: null }),
     )
@@ -346,10 +400,16 @@ export async function getMemberSessionPackagesForLessonPicker(
     )
   }
 
-  return (data ?? []).map((row) => ({
+  if (mode === 'full' && !error) {
+    rememberPackageSelectMode('full')
+  }
+
+  const result = (data ?? []).map((row) => ({
     ...row,
     paused_at: row.paused_at ?? null,
   }))
+  pickerPackageCache.set(id, { at: Date.now(), data: result })
+  return result
 }
 
 export async function getSessionPackages(options?: {
@@ -360,6 +420,9 @@ export async function getSessionPackages(options?: {
   offset?: number
   orderBy?: 'created_at' | 'deleted_at'
   orderAsc?: boolean
+  /** 기본 true. 회원 상세 등 페이지네이션 없는 조회는 false 권장 */
+  withCount?: boolean
+  skipMemberJoin?: boolean
 }): Promise<{ data: SessionPackage[]; count: number; trashEnabled: boolean }> {
   const supabase = await createStaffDataClient()
   const trashEnabled = options?.trash ? await isSessionPackageTrashEnabled() : true
@@ -368,9 +431,13 @@ export async function getSessionPackages(options?: {
     return { data: [], count: 0, trashEnabled: false }
   }
 
+  const withCount = options?.withCount ?? true
+  const skipMemberJoin = options?.skipMemberJoin ?? false
+
   const { data, error, count } = await fetchSessionPackages(supabase, {
     ...options,
-    withCount: true,
+    withCount,
+    skipMemberJoin,
   })
 
   if (error) {
@@ -715,9 +782,21 @@ export async function sumSessionPackageRevenue(options?: {
   )
 }
 
-/** 대시보드·세션/결제 공통 — 이번 달 결제 합계 (휴지통 제외) */
+/** 대시보드·세션/결제 공통 — 이번 달 결제 합계 (휴지통 제외, 60초 캐시) */
 export async function getMonthlySessionRevenue(): Promise<number> {
-  return sumSessionPackageRevenue({ paidFrom: getCurrentMonthStartKey() })
+  const monthKey = getCurrentMonthStartKey()
+  const now = Date.now()
+  if (
+    monthlyRevenueCache &&
+    monthlyRevenueCache.monthKey === monthKey &&
+    now - monthlyRevenueCache.at < MONTHLY_REVENUE_CACHE_MS
+  ) {
+    return monthlyRevenueCache.value
+  }
+
+  const value = await sumSessionPackageRevenue({ paidFrom: monthKey })
+  monthlyRevenueCache = { value, at: now, monthKey }
+  return value
 }
 
 export async function getRecentSessionPayments(
@@ -772,13 +851,29 @@ export async function getSessionPackagesPage(options?: {
   const offset = options?.offset ?? 0
   const useRecentLessonSort = orderBy === 'recent_lesson'
 
+  if (!useRecentLessonSort) {
+    return getSessionPackages({
+      memberId: options?.memberId,
+      limit,
+      offset,
+      withCount: true,
+    })
+  }
+
+  // 최근 수업순: 전체 테이블을 끌어오지 않고 최근 등록 윈도우만 스캔 후 정렬
+  const scanLimit = Math.min(
+    RECENT_LESSON_PACKAGE_SCAN_LIMIT,
+    Math.max(limit + offset + limit, 120),
+  )
+
   const { data, count } = await getSessionPackages({
     memberId: options?.memberId,
-    limit: useRecentLessonSort ? undefined : limit,
-    offset: useRecentLessonSort ? undefined : offset,
+    limit: scanLimit,
+    offset: 0,
+    withCount: true,
   })
 
-  if (!useRecentLessonSort || data.length === 0) {
+  if (data.length === 0) {
     return { data, count }
   }
 
