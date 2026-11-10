@@ -1,10 +1,15 @@
 import { differenceInCalendarDays, format, parseISO, startOfMonth, endOfMonth } from 'date-fns'
 import { ko } from 'date-fns/locale'
 
+/** 회원 포털 거리/종목 필터 */
+export type MarathonDistanceFilter = '5km' | '10km' | 'half' | 'full'
+
 export type MarathonEventSignup = {
   member_id: string
   member_name: string
   signed_at: string
+  /** 이 대회에서 뛰는 종목 */
+  distances: MarathonDistanceFilter[]
 }
 
 export type MarathonLabelTone =
@@ -73,6 +78,10 @@ export type MarathonEventView = {
   signup_count: number
   signups: MarathonEventSignup[]
   is_signed_up: boolean
+  /** 대회 메모·제목에서 감지된 종목 (없으면 전체 선택 가능) */
+  available_distances: MarathonDistanceFilter[]
+  /** 현재 로그인 회원이 선택한 종목 */
+  my_distances: MarathonDistanceFilter[]
 }
 
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'] as const
@@ -177,9 +186,6 @@ export function isMarathonEventUpcomingOrToday(
   return date >= todayKey
 }
 
-/** 회원 포털 거리 필터 */
-export type MarathonDistanceFilter = '5km' | '10km' | 'half' | 'full'
-
 export const MARATHON_DISTANCE_FILTERS: Array<{
   id: MarathonDistanceFilter
   label: string
@@ -189,6 +195,68 @@ export const MARATHON_DISTANCE_FILTERS: Array<{
   { id: 'half', label: 'HALF' },
   { id: 'full', label: 'FULL' },
 ]
+
+export function formatMarathonDistanceLabel(id: MarathonDistanceFilter): string {
+  return MARATHON_DISTANCE_FILTERS.find((item) => item.id === id)?.label ?? id
+}
+
+export function formatMarathonDistancesLabel(
+  distances: MarathonDistanceFilter[],
+): string {
+  if (!distances.length) return ''
+  return distances.map(formatMarathonDistanceLabel).join(' · ')
+}
+
+/** JSON/알 수 없는 값 → 유효한 종목 ID만 순서 유지 */
+export function normalizeMarathonDistances(value: unknown): MarathonDistanceFilter[] {
+  const allowed = new Set<MarathonDistanceFilter>(
+    MARATHON_DISTANCE_FILTERS.map((item) => item.id),
+  )
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(value) as unknown
+          } catch {
+            return value.split(/[,|/·\s]+/)
+          }
+        })()
+      : []
+  if (!Array.isArray(raw)) return []
+  const out: MarathonDistanceFilter[] = []
+  for (const item of raw) {
+    const id = String(item ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '') as MarathonDistanceFilter
+    const mapped =
+      id === 'half' || id === '하프'
+        ? 'half'
+        : id === 'full' || id === '풀'
+          ? 'full'
+          : id === '5km' || id === '5k'
+            ? '5km'
+            : id === '10km' || id === '10k'
+              ? '10km'
+              : (id as MarathonDistanceFilter)
+    if (!allowed.has(mapped) || out.includes(mapped)) continue
+    out.push(mapped)
+  }
+  return MARATHON_DISTANCE_FILTERS.map((item) => item.id).filter((id) =>
+    out.includes(id),
+  )
+}
+
+/** 대회에 선택 가능한 종목 — 메모/제목에서 감지, 없으면 전체 */
+export function resolveMarathonEventDistanceOptions(
+  event: Pick<{ notes?: string | null; title?: string | null }, 'notes' | 'title'>,
+): MarathonDistanceFilter[] {
+  const detected = detectMarathonDistanceFilters(event.notes, event.title)
+  return detected.length > 0
+    ? detected
+    : MARATHON_DISTANCE_FILTERS.map((item) => item.id)
+}
 
 /**
  * 대회 메모·제목에서 종목(5km/10km/하프/풀) 추출.

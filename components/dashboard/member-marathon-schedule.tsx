@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import {
   toggleMarathonEventSignup,
   toggleMarathonEventPinned,
+  updateMarathonEventSignupDistances,
   getCenterMarathonScheduleForMember,
   refreshMarathonCatalog,
   staffAddMarathonEventSignup,
@@ -32,12 +33,16 @@ import {
 } from '@/lib/actions/members'
 import {
   compareMarathonEventsForDisplay,
+  formatMarathonDistanceLabel,
+  formatMarathonDistancesLabel,
   formatMarathonMonthLabel,
   listNearbyMarathonMonthKeys,
   marathonEventMatchesDistanceFilters,
   MARATHON_DISTANCE_FILTERS,
   MARATHON_SCHEDULE_ALL_KEY,
+  resolveMarathonEventDistanceOptions,
   type MarathonDistanceFilter,
+  type MarathonEventSignup,
   type MarathonEventView,
 } from '@/lib/running-league/marathon-schedule'
 import { Button } from '@/components/ui/button'
@@ -115,6 +120,18 @@ export function MemberMarathonSchedule({
   const [pinDraft, setPinDraft] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(bundle.events.map((event) => [event.id, event.is_pinned])),
   )
+  const [distanceDraft, setDistanceDraft] = useState<
+    Record<string, MarathonDistanceFilter[]>
+  >(() =>
+    Object.fromEntries(bundle.events.map((event) => [event.id, event.my_distances ?? []])),
+  )
+  const [distancePicker, setDistancePicker] = useState<{
+    event: MarathonEventView
+    mode: 'join' | 'edit' | 'staff-add'
+    member?: MemberPickerOption
+  } | null>(null)
+  const [viewerMemberId, setViewerMemberId] = useState(bundle.viewerMemberId)
+  const [viewerMemberName, setViewerMemberName] = useState(bundle.viewerMemberName)
 
   const monthOptions = useMemo(
     () => [MARATHON_SCHEDULE_ALL_KEY, ...listNearbyMarathonMonthKeys()],
@@ -152,6 +169,13 @@ export function MemberMarathonSchedule({
             nextBundle.events.map((event) => [event.id, event.is_pinned]),
           ),
         )
+        setDistanceDraft(
+          Object.fromEntries(
+            nextBundle.events.map((event) => [event.id, event.my_distances ?? []]),
+          ),
+        )
+        setViewerMemberId(nextBundle.viewerMemberId)
+        setViewerMemberName(nextBundle.viewerMemberName)
       })
       return () => {
         cancelled = true
@@ -171,6 +195,11 @@ export function MemberMarathonSchedule({
     setPinDraft(
       Object.fromEntries(bundle.events.map((event) => [event.id, event.is_pinned])),
     )
+    setDistanceDraft(
+      Object.fromEntries(bundle.events.map((event) => [event.id, event.my_distances ?? []])),
+    )
+    setViewerMemberId(bundle.viewerMemberId)
+    setViewerMemberName(bundle.viewerMemberName)
     setActiveEvent((current) => {
       if (!current) return current
       return bundle.events.find((event) => event.id === current.id) ?? null
@@ -189,6 +218,11 @@ export function MemberMarathonSchedule({
     setPinDraft(
       Object.fromEntries(nextBundle.events.map((event) => [event.id, event.is_pinned])),
     )
+    setDistanceDraft(
+      Object.fromEntries(nextBundle.events.map((event) => [event.id, event.my_distances ?? []])),
+    )
+    setViewerMemberId(nextBundle.viewerMemberId)
+    setViewerMemberName(nextBundle.viewerMemberName)
     setActiveEvent((current) => {
       if (!current) return current
       return nextBundle.events.find((event) => event.id === current.id) ?? null
@@ -296,6 +330,13 @@ export function MemberMarathonSchedule({
       setPinDraft(
         Object.fromEntries(nextBundle.events.map((event) => [event.id, event.is_pinned])),
       )
+      setDistanceDraft(
+        Object.fromEntries(
+          nextBundle.events.map((event) => [event.id, event.my_distances ?? []]),
+        ),
+      )
+      setViewerMemberId(nextBundle.viewerMemberId)
+      setViewerMemberName(nextBundle.viewerMemberName)
     })
   }
 
@@ -334,43 +375,263 @@ export function MemberMarathonSchedule({
       return
     }
 
+    const isSignedUp = signupDraft[event.id] ?? event.is_signed_up
+    if (isSignedUp) {
+      if (!window.confirm(`${event.title} 참여를 취소할까요?`)) return
+      submitSignupToggle(event, [])
+      return
+    }
+
+    setDistancePicker({ event, mode: 'join' })
+  }
+
+  function openEditDistances(event: MarathonEventView) {
+    if (readOnly || !canParticipate) return
+    setDistancePicker({ event, mode: 'edit' })
+  }
+
+  function patchEventOwnSignup(
+    eventId: string,
+    next: {
+      is_signed_up: boolean
+      signup_count: number
+      my_distances: MarathonDistanceFilter[]
+      signups: MarathonEventSignup[]
+    },
+  ) {
+    setSignupDraft((current) => ({ ...current, [eventId]: next.is_signed_up }))
+    setCountDraft((current) => ({ ...current, [eventId]: next.signup_count }))
+    setDistanceDraft((current) => ({ ...current, [eventId]: next.my_distances }))
+    setEvents((current) =>
+      current.map((row) =>
+        row.id === eventId
+          ? {
+              ...row,
+              is_signed_up: next.is_signed_up,
+              signup_count: next.signup_count,
+              my_distances: next.my_distances,
+              signups: next.signups,
+            }
+          : row,
+      ),
+    )
+    setActiveEvent((current) =>
+      current && current.id === eventId
+        ? {
+            ...current,
+            is_signed_up: next.is_signed_up,
+            signup_count: next.signup_count,
+            my_distances: next.my_distances,
+            signups: next.signups,
+          }
+        : current,
+    )
+  }
+
+  function submitSignupToggle(
+    event: MarathonEventView,
+    distances: MarathonDistanceFilter[],
+  ) {
     const previous = signupDraft[event.id] ?? event.is_signed_up
     const previousCount = countDraft[event.id] ?? event.signup_count
+    const previousDistances = distanceDraft[event.id] ?? event.my_distances ?? []
+    const previousSignups = event.signups
     const optimistic = !previous
+    const memberId = viewerMemberId
+    const optimisticSignups =
+      memberId == null
+        ? event.signups
+        : patchMemberSignups(event.signups, memberId, {
+            signedUp: optimistic,
+            distances,
+            memberName: viewerMemberName ?? '회원',
+          })
 
     setSignupDraft((current) => ({ ...current, [event.id]: optimistic }))
     setCountDraft((current) => ({
       ...current,
       [event.id]: Math.max(0, previousCount + (optimistic ? 1 : -1)),
     }))
+    setDistanceDraft((current) => ({
+      ...current,
+      [event.id]: optimistic ? distances : [],
+    }))
+    setEvents((current) =>
+      current.map((row) =>
+        row.id === event.id
+          ? {
+              ...row,
+              is_signed_up: optimistic,
+              signup_count: Math.max(0, previousCount + (optimistic ? 1 : -1)),
+              my_distances: optimistic ? distances : [],
+              signups: optimisticSignups,
+            }
+          : row,
+      ),
+    )
+    setActiveEvent((current) =>
+      current && current.id === event.id
+        ? {
+            ...current,
+            is_signed_up: optimistic,
+            signup_count: Math.max(0, previousCount + (optimistic ? 1 : -1)),
+            my_distances: optimistic ? distances : [],
+            signups: optimisticSignups,
+          }
+        : current,
+    )
     setPendingEventId(event.id)
 
     startTransition(async () => {
-      const result = await toggleMarathonEventSignup(event.id)
+      const result = await toggleMarathonEventSignup(
+        event.id,
+        optimistic ? distances : undefined,
+      )
       setPendingEventId(null)
 
       if (!result.ok) {
-        setSignupDraft((current) => ({ ...current, [event.id]: previous }))
-        setCountDraft((current) => ({ ...current, [event.id]: previousCount }))
+        patchEventOwnSignup(event.id, {
+          is_signed_up: previous,
+          signup_count: previousCount,
+          my_distances: previousDistances,
+          signups: previousSignups,
+        })
         toast.error(result.error)
         return
       }
 
-      setSignupDraft((current) => ({ ...current, [event.id]: result.signedUp }))
-      setCountDraft((current) => ({ ...current, [event.id]: result.signupCount }))
+      if (result.memberId) {
+        setViewerMemberId(result.memberId)
+        if (result.signup?.member_name) {
+          setViewerMemberName(result.signup.member_name)
+        }
+      }
+
+      const nextSignups = patchMemberSignups(
+        previousSignups,
+        result.memberId,
+        {
+          signedUp: result.signedUp,
+          distances: result.distances,
+          memberName:
+            result.signup?.member_name ?? viewerMemberName ?? '회원',
+          signedAt: result.signup?.signed_at,
+        },
+      )
+
+      patchEventOwnSignup(event.id, {
+        is_signed_up: result.signedUp,
+        signup_count: result.signupCount,
+        my_distances: result.signedUp ? result.distances : [],
+        signups: nextSignups,
+      })
+      toast.success(
+        result.signedUp
+          ? `참여 신청했습니다. (${formatMarathonDistancesLabel(result.distances)})`
+          : '참여를 취소했습니다.',
+      )
+    })
+  }
+
+  function submitDistanceUpdate(
+    event: MarathonEventView,
+    distances: MarathonDistanceFilter[],
+  ) {
+    const previous = distanceDraft[event.id] ?? event.my_distances ?? []
+    const previousSignups = event.signups
+    const memberId = viewerMemberId
+    const optimisticSignups =
+      memberId == null
+        ? event.signups
+        : patchMemberSignups(event.signups, memberId, {
+            signedUp: true,
+            distances,
+            memberName: viewerMemberName ?? '회원',
+          })
+
+    setDistanceDraft((current) => ({ ...current, [event.id]: distances }))
+    setEvents((current) =>
+      current.map((row) =>
+        row.id === event.id
+          ? { ...row, my_distances: distances, signups: optimisticSignups }
+          : row,
+      ),
+    )
+    setActiveEvent((current) =>
+      current && current.id === event.id
+        ? { ...current, my_distances: distances, signups: optimisticSignups }
+        : current,
+    )
+    setPendingEventId(event.id)
+    startTransition(async () => {
+      const result = await updateMarathonEventSignupDistances(event.id, distances)
+      setPendingEventId(null)
+      if (!result.ok) {
+        setDistanceDraft((current) => ({ ...current, [event.id]: previous }))
+        setEvents((current) =>
+          current.map((row) =>
+            row.id === event.id
+              ? { ...row, my_distances: previous, signups: previousSignups }
+              : row,
+          ),
+        )
+        setActiveEvent((current) =>
+          current && current.id === event.id
+            ? { ...current, my_distances: previous, signups: previousSignups }
+            : current,
+        )
+        toast.error(result.error)
+        return
+      }
+      const nextSignups =
+        memberId == null
+          ? event.signups
+          : patchMemberSignups(previousSignups, memberId, {
+              signedUp: true,
+              distances: result.distances,
+              memberName: viewerMemberName ?? '회원',
+            })
+      setDistanceDraft((current) => ({ ...current, [event.id]: result.distances }))
       setEvents((current) =>
         current.map((row) =>
           row.id === event.id
             ? {
                 ...row,
-                is_signed_up: result.signedUp,
-                signup_count: result.signupCount,
+                my_distances: result.distances,
+                signups: nextSignups,
               }
             : row,
         ),
       )
-      toast.success(result.signedUp ? '참여 신청했습니다.' : '참여를 취소했습니다.')
+      setActiveEvent((current) =>
+        current && current.id === event.id
+          ? {
+              ...current,
+              my_distances: result.distances,
+              signups: nextSignups,
+            }
+          : current,
+      )
+      toast.success(`종목을 변경했습니다. (${formatMarathonDistancesLabel(result.distances)})`)
     })
+  }
+
+  function handleDistancePickerConfirm(distances: MarathonDistanceFilter[]) {
+    if (!distancePicker) return
+    const { event, mode, member } = distancePicker
+    setDistancePicker(null)
+
+    if (mode === 'join') {
+      submitSignupToggle(event, distances)
+      return
+    }
+    if (mode === 'edit') {
+      submitDistanceUpdate(event, distances)
+      return
+    }
+    if (mode === 'staff-add' && member) {
+      handleStaffAddParticipantWithDistances(member, event, distances)
+    }
   }
 
   if (!embedded && !tableReady) {
@@ -512,8 +773,10 @@ export function MemberMarathonSchedule({
             isSignedUp={signupDraft[event.id] ?? event.is_signed_up}
             isPinned={pinDraft[event.id] ?? event.is_pinned}
             signupCount={countDraft[event.id] ?? event.signup_count}
+            myDistances={distanceDraft[event.id] ?? event.my_distances ?? []}
             onOpenParticipants={() => setActiveEvent(event)}
             onToggleSignup={() => toggleSignup(event)}
+            onEditDistances={() => openEditDistances(event)}
             onTogglePin={() => togglePin(event)}
           />
         ))
@@ -542,26 +805,37 @@ export function MemberMarathonSchedule({
 
   function handleStaffAddParticipant(member: MemberPickerOption) {
     if (!activeEvent || pending) return
-    setPendingEventId(activeEvent.id)
+    setDistancePicker({ event: activeEvent, mode: 'staff-add', member })
+  }
+
+  function handleStaffAddParticipantWithDistances(
+    member: MemberPickerOption,
+    event: MarathonEventView,
+    distances: MarathonDistanceFilter[],
+  ) {
+    if (pending) return
+    setPendingEventId(event.id)
     startTransition(async () => {
-      const result = await staffAddMarathonEventSignup(activeEvent.id, member.id)
+      const result = await staffAddMarathonEventSignup(event.id, member.id, distances)
       setPendingEventId(null)
       if (!result.ok) {
         toast.error(result.error)
         return
       }
-      const already = activeEvent.signups.some((signup) => signup.member_id === member.id)
-      const nextSignups = already
-        ? activeEvent.signups
-        : [...activeEvent.signups, result.signup]
-      patchEventSignups(activeEvent.id, {
+      const nextSignups = patchMemberSignups(event.signups, member.id, {
+        signedUp: true,
+        distances: result.signup.distances,
+        memberName: result.signup.member_name,
+        signedAt: result.signup.signed_at,
+      })
+      patchEventSignups(event.id, {
         signup_count: result.signupCount,
         signups: nextSignups,
       })
       toast.success(
         result.alreadySignedUp
-          ? `${member.name} 님은 이미 참여 중입니다.`
-          : `${member.name} 님을 참가자로 추가했습니다.`,
+          ? `${member.name} 님 종목을 업데이트했습니다. (${formatMarathonDistancesLabel(result.signup.distances)})`
+          : `${member.name} 님을 참가자로 추가했습니다. (${formatMarathonDistancesLabel(result.signup.distances)})`,
       )
     })
   }
@@ -593,6 +867,8 @@ export function MemberMarathonSchedule({
               ...activeEvent,
               is_signed_up: signupDraft[activeEvent.id] ?? activeEvent.is_signed_up,
               signup_count: countDraft[activeEvent.id] ?? activeEvent.signup_count,
+              my_distances:
+                distanceDraft[activeEvent.id] ?? activeEvent.my_distances ?? [],
             }
           : null
       }
@@ -601,6 +877,9 @@ export function MemberMarathonSchedule({
       }}
       onToggleSignup={() => {
         if (activeEvent) toggleSignup(activeEvent)
+      }}
+      onEditDistances={() => {
+        if (activeEvent) openEditDistances(activeEvent)
       }}
       pending={pending && pendingEventId === activeEvent?.id}
       readOnly={readOnly}
@@ -611,11 +890,37 @@ export function MemberMarathonSchedule({
     />
   )
 
+  const distancePickerDialog = (
+    <DistancePickerDialog
+      open={distancePicker != null}
+      event={distancePicker?.event ?? null}
+      mode={distancePicker?.mode ?? 'join'}
+      memberName={distancePicker?.member?.name}
+      initialDistances={
+        distancePicker?.mode === 'edit'
+          ? distanceDraft[distancePicker.event.id] ??
+            distancePicker.event.my_distances ??
+            []
+          : distancePicker?.mode === 'staff-add' && distancePicker.member
+            ? distancePicker.event.signups.find(
+                (signup) => signup.member_id === distancePicker.member?.id,
+              )?.distances ?? []
+            : []
+      }
+      pending={pending}
+      onOpenChange={(open) => {
+        if (!open) setDistancePicker(null)
+      }}
+      onConfirm={handleDistancePickerConfirm}
+    />
+  )
+
   if (contentOnly) {
     return (
       <div className={cn(className)}>
         {scheduleBody}
         {participantsDialog}
+        {distancePickerDialog}
       </div>
     )
   }
@@ -647,8 +952,67 @@ export function MemberMarathonSchedule({
 
         {sectionOpen ? scheduleBody : null}
         {participantsDialog}
+        {distancePickerDialog}
       </div>
     </section>
+  )
+}
+
+function patchMemberSignups(
+  signups: MarathonEventSignup[],
+  memberId: string,
+  next: {
+    signedUp: boolean
+    distances: MarathonDistanceFilter[]
+    memberName: string
+    signedAt?: string
+  },
+): MarathonEventSignup[] {
+  if (!next.signedUp) {
+    return signups.filter((signup) => signup.member_id !== memberId)
+  }
+  const existing = signups.find((signup) => signup.member_id === memberId)
+  if (existing) {
+    return signups.map((signup) =>
+      signup.member_id === memberId
+        ? { ...signup, distances: next.distances }
+        : signup,
+    )
+  }
+  return [
+    ...signups,
+    {
+      member_id: memberId,
+      member_name: next.memberName,
+      signed_at: next.signedAt ?? new Date().toISOString(),
+      distances: next.distances,
+    },
+  ]
+}
+
+function DistanceBadges({
+  distances,
+  emptyLabel,
+}: {
+  distances: MarathonDistanceFilter[]
+  emptyLabel?: string
+}) {
+  if (distances.length === 0) {
+    return emptyLabel ? (
+      <span className="text-[10px] text-zinc-500">{emptyLabel}</span>
+    ) : null
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {distances.map((distance) => (
+        <span
+          key={distance}
+          className="rounded-full border border-sky-500/35 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-100"
+        >
+          {formatMarathonDistanceLabel(distance)}
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -727,8 +1091,10 @@ function MarathonEventRow({
   isSignedUp,
   isPinned,
   signupCount,
+  myDistances,
   onOpenParticipants,
   onToggleSignup,
+  onEditDistances,
   onTogglePin,
 }: {
   event: MarathonEventView
@@ -740,8 +1106,10 @@ function MarathonEventRow({
   isSignedUp: boolean
   isPinned: boolean
   signupCount: number
+  myDistances: MarathonDistanceFilter[]
   onOpenParticipants: () => void
   onToggleSignup: () => void
+  onEditDistances: () => void
   onTogglePin: () => void
 }) {
   return (
@@ -828,6 +1196,9 @@ function MarathonEventRow({
               <Users className="h-3 w-3" />
               {signupCount}명 참여
             </span>
+            {isSignedUp && myDistances.length > 0 ? (
+              <DistanceBadges distances={myDistances} />
+            ) : null}
           </span>
         </span>
       </button>
@@ -835,8 +1206,8 @@ function MarathonEventRow({
         {canPin ? (
           <button
             type="button"
-            onClick={(event) => {
-              event.stopPropagation()
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation()
               onTogglePin()
             }}
             disabled={pinPending}
@@ -860,12 +1231,27 @@ function MarathonEventRow({
           </button>
         ) : null}
         {!readOnly ? (
-          <ParticipationToggle
-            active={isSignedUp}
-            pending={pending}
-            disabled={!canParticipate}
-            onToggle={onToggleSignup}
-          />
+          <>
+            <ParticipationToggle
+              active={isSignedUp}
+              pending={pending}
+              disabled={!canParticipate}
+              onToggle={onToggleSignup}
+            />
+            {isSignedUp && canParticipate ? (
+              <button
+                type="button"
+                onClick={(clickEvent) => {
+                  clickEvent.stopPropagation()
+                  onEditDistances()
+                }}
+                disabled={pending}
+                className="text-[10px] font-medium text-sky-300/90 hover:text-sky-200 disabled:opacity-50"
+              >
+                종목 변경
+              </button>
+            ) : null}
+          </>
         ) : null}
       </div>
     </div>
@@ -876,6 +1262,7 @@ function ParticipantsDialog({
   event,
   onOpenChange,
   onToggleSignup,
+  onEditDistances,
   pending,
   readOnly,
   canParticipate,
@@ -886,6 +1273,7 @@ function ParticipantsDialog({
   event: MarathonEventView | null
   onOpenChange: (open: boolean) => void
   onToggleSignup: () => void
+  onEditDistances: () => void
   pending: boolean
   readOnly: boolean
   canParticipate: boolean
@@ -975,7 +1363,15 @@ function ParticipantsDialog({
                       key={`${signup.member_id}-${signup.signed_at}`}
                       className="flex items-center justify-between gap-2 rounded-md border border-lime-500/15 bg-black/40 px-3 py-2 text-sm text-zinc-200"
                     >
-                      <span className="min-w-0 truncate">{signup.member_name}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{signup.member_name}</span>
+                        <span className="mt-0.5 block">
+                          <DistanceBadges
+                            distances={signup.distances ?? []}
+                            emptyLabel="종목 미선택"
+                          />
+                        </span>
+                      </span>
                       {canStaffAddParticipants && onStaffRemoveParticipant ? (
                         <button
                           type="button"
@@ -1024,18 +1420,18 @@ function ParticipantsDialog({
                     ) : (
                       <ul className="divide-y divide-zinc-800">
                         {filteredMembers.map((member) => {
-                          const already = event.signups.some(
+                          const existing = event.signups.find(
                             (signup) => signup.member_id === member.id,
                           )
                           return (
                             <li key={member.id}>
                               <button
                                 type="button"
-                                disabled={pending || already}
+                                disabled={pending}
                                 onClick={() => onStaffAddParticipant?.(member)}
                                 className={cn(
                                   'flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-lime-500/10 disabled:opacity-60',
-                                  already && 'bg-lime-500/5',
+                                  existing && 'bg-lime-500/5',
                                 )}
                               >
                                 <span className="min-w-0">
@@ -1047,10 +1443,18 @@ function ParticipantsDialog({
                                       {member.sport}
                                     </span>
                                   ) : null}
+                                  {existing ? (
+                                    <span className="mt-0.5 block">
+                                      <DistanceBadges
+                                        distances={existing.distances ?? []}
+                                        emptyLabel="종목 미선택"
+                                      />
+                                    </span>
+                                  ) : null}
                                 </span>
-                                {already ? (
+                                {existing ? (
                                   <span className="shrink-0 rounded-full border border-lime-500/40 px-2 py-0.5 text-[10px] font-medium text-lime-300">
-                                    참여중
+                                    종목변경
                                   </span>
                                 ) : (
                                   <span className="shrink-0 text-[11px] text-zinc-500">추가</span>
@@ -1088,14 +1492,153 @@ function ParticipantsDialog({
                   </Button>
                 ) : null}
                 {!readOnly ? (
-                  <ParticipationToggle
-                    active={event.is_signed_up}
-                    pending={pending}
-                    disabled={!canParticipate}
-                    onToggle={onToggleSignup}
-                  />
+                  <>
+                    <ParticipationToggle
+                      active={event.is_signed_up}
+                      pending={pending}
+                      disabled={!canParticipate}
+                      onToggle={onToggleSignup}
+                    />
+                    {event.is_signed_up && canParticipate ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-sky-500/35 text-sky-100"
+                        disabled={pending}
+                        onClick={onEditDistances}
+                      >
+                        종목 변경
+                        {event.my_distances?.length
+                          ? ` · ${formatMarathonDistancesLabel(event.my_distances)}`
+                          : ''}
+                      </Button>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
+            </div>
+          </>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DistancePickerDialog({
+  open,
+  event,
+  mode,
+  memberName,
+  initialDistances,
+  pending,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean
+  event: MarathonEventView | null
+  mode: 'join' | 'edit' | 'staff-add'
+  memberName?: string
+  initialDistances: MarathonDistanceFilter[]
+  pending: boolean
+  onOpenChange: (open: boolean) => void
+  onConfirm: (distances: MarathonDistanceFilter[]) => void
+}) {
+  const options = useMemo(
+    () =>
+      event
+        ? resolveMarathonEventDistanceOptions({
+            notes: event.notes,
+            title: event.title,
+          })
+        : MARATHON_DISTANCE_FILTERS.map((item) => item.id),
+    [event],
+  )
+  const [selected, setSelected] = useState<MarathonDistanceFilter[]>([])
+  const initialKey = initialDistances.join(',')
+
+  useEffect(() => {
+    if (!open) return
+    const allowed = new Set(options)
+    const seeded = initialKey
+      .split(',')
+      .filter(Boolean) as MarathonDistanceFilter[]
+    const next = seeded.filter((item) => allowed.has(item))
+    setSelected(next.length > 0 ? next : options.length === 1 ? [...options] : [])
+  }, [open, event?.id, mode, memberName, initialKey, options])
+
+  function toggleDistance(id: MarathonDistanceFilter) {
+    setSelected((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    )
+  }
+
+  const title =
+    mode === 'edit'
+      ? '종목 변경'
+      : mode === 'staff-add'
+        ? '참가자 종목 선택'
+        : '참가 종목 선택'
+  const description =
+    mode === 'staff-add' && memberName
+      ? `${memberName} 님이 뛸 종목을 선택하세요.`
+      : mode === 'edit'
+        ? '참가할 종목을 다시 선택하세요. 하나 이상 필요합니다.'
+        : '참가할 종목을 하나 이상 선택하세요.'
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm border-lime-500/25 bg-zinc-950">
+        {event ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="text-lime-100">{title}</DialogTitle>
+              <DialogDescription className="text-zinc-400">
+                {event.title}
+                <span className="mt-1 block text-zinc-500">{description}</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-2">
+              {options.map((distance) => {
+                const active = selected.includes(distance)
+                return (
+                  <button
+                    key={distance}
+                    type="button"
+                    onClick={() => toggleDistance(distance)}
+                    className={cn(
+                      'rounded-lg border px-3 py-3 text-sm font-semibold transition-colors',
+                      active
+                        ? 'border-lime-400/60 bg-lime-500/20 text-lime-50'
+                        : 'border-zinc-700 bg-black/40 text-zinc-400 hover:border-lime-500/30 hover:text-zinc-200',
+                    )}
+                  >
+                    {formatMarathonDistanceLabel(distance)}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-zinc-700"
+                disabled={pending}
+                onClick={() => onOpenChange(false)}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-lime-500 text-black hover:bg-lime-400"
+                disabled={pending || selected.length === 0}
+                onClick={() => onConfirm(selected)}
+              >
+                {pending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                {mode === 'edit' ? '변경' : mode === 'staff-add' ? '추가' : '참여'}
+              </Button>
             </div>
           </>
         ) : null}

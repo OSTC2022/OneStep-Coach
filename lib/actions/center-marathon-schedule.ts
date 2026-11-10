@@ -18,8 +18,11 @@ import {
   resolveMarathonRegistrationHref,
   isMarathonRegistrationOpenActive,
   compareMarathonEventsForDisplay,
+  normalizeMarathonDistances,
+  resolveMarathonEventDistanceOptions,
   MARATHON_SCHEDULE_ALL_KEY,
   type MarathonCustomLabel,
+  type MarathonDistanceFilter,
   type MarathonEventInput,
   type MarathonEventSignup,
   type MarathonEventView,
@@ -48,6 +51,9 @@ export type CenterMarathonScheduleBundle = {
   monthKey: string
   events: MarathonEventView[]
   tableReady: boolean
+  /** 현재 로그인 러닝 포털 회원 (종목 표시·낙관적 갱신용) */
+  viewerMemberId: string | null
+  viewerMemberName: string | null
 }
 
 type MarathonEventRow = {
@@ -72,8 +78,14 @@ type MarathonSignupRow = {
   event_id: string
   member_id: string
   created_at: string
+  distances?: unknown
   member: { name: string } | { name: string }[] | null
 }
+
+const SIGNUP_SELECT =
+  'id, event_id, member_id, created_at, distances, member:members(name)'
+const SIGNUP_SELECT_LEGACY =
+  'id, event_id, member_id, created_at, member:members(name)'
 
 function isMissingTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
@@ -120,10 +132,16 @@ function mapEventView(
   const eventDate = normalizeMarathonDate(row.event_date) ?? row.event_date
   const { day_label, days_until } = formatMarathonDayLabel(eventDate)
   const registrationUrl = row.registration_url?.trim() || null
+  const notes = row.notes?.trim() || ''
+  const title = row.title?.trim() || ''
+  const availableDistances = resolveMarathonEventDistanceOptions({ notes, title })
+  const mySignup = viewerMemberId
+    ? signups.find((signup) => signup.member_id === viewerMemberId)
+    : undefined
 
   return {
     id: row.id,
-    title: row.title?.trim() || '',
+    title,
     event_date: eventDate,
     event_date_label: formatMarathonEventDateLabel(eventDate),
     weekday_label: marathonWeekdayLabel(eventDate),
@@ -132,7 +150,7 @@ function mapEventView(
     location_label: row.location_label?.trim() || '',
     registration_url: registrationUrl,
     registration_href: resolveMarathonRegistrationHref(registrationUrl),
-    notes: row.notes?.trim() || '',
+    notes,
     is_hidden: Boolean(row.is_hidden),
     region: row.region?.trim() || '',
     is_featured: Boolean(row.is_featured),
@@ -148,9 +166,9 @@ function mapEventView(
     catalog_key: row.catalog_key?.trim() || null,
     signup_count: signups.length,
     signups,
-    is_signed_up: viewerMemberId
-      ? signups.some((signup) => signup.member_id === viewerMemberId)
-      : false,
+    is_signed_up: Boolean(mySignup),
+    available_distances: availableDistances,
+    my_distances: mySignup?.distances ?? [],
   }
 }
 
@@ -199,6 +217,8 @@ async function fetchCenterMarathonSchedule(
     monthKey,
     events: [],
     tableReady: true,
+    viewerMemberId,
+    viewerMemberName: null,
   }
 
   try {
@@ -249,11 +269,19 @@ async function fetchCenterMarathonSchedule(
     if (rows.length === 0) return empty
 
     const eventIds = rows.map((row) => row.id)
-    const { data: signupRows, error: signupError } = await supabase
+    let { data: signupRows, error: signupError } = await supabase
       .from('center_marathon_event_signups')
-      .select('id, event_id, member_id, created_at, member:members(name)')
+      .select(SIGNUP_SELECT)
       .in('event_id', eventIds)
       .order('created_at', { ascending: true })
+
+    if (signupError && isMissingColumnError(signupError)) {
+      ;({ data: signupRows, error: signupError } = await supabase
+        .from('center_marathon_event_signups')
+        .select(SIGNUP_SELECT_LEGACY)
+        .in('event_id', eventIds)
+        .order('created_at', { ascending: true }))
+    }
 
     if (signupError && !isMissingTableError(signupError)) {
       console.error('fetchCenterMarathonSchedule.signups', signupError)
@@ -266,6 +294,7 @@ async function fetchCenterMarathonSchedule(
         member_id: signup.member_id,
         member_name: memberNameFromJoin(signup.member),
         signed_at: signup.created_at,
+        distances: normalizeMarathonDistances(signup.distances),
       })
       signupsByEvent.set(signup.event_id, list)
     }
@@ -276,7 +305,20 @@ async function fetchCenterMarathonSchedule(
       .filter((event) => includePast || isMarathonEventUpcomingOrToday(event.event_date, todayKey))
       .sort(compareMarathonEventsForDisplay)
 
-    return { monthKey, events, tableReady: true }
+    const viewerMemberName =
+      viewerMemberId == null
+        ? null
+        : events
+            .flatMap((event) => event.signups)
+            .find((signup) => signup.member_id === viewerMemberId)?.member_name ?? null
+
+    return {
+      monthKey,
+      events,
+      tableReady: true,
+      viewerMemberId,
+      viewerMemberName,
+    }
   } catch (error) {
     console.error('fetchCenterMarathonSchedule', error)
     return empty
@@ -292,7 +334,14 @@ export async function getCenterMarathonScheduleForMember(
     monthKey === undefined || monthKey === null || monthKey === ''
       ? MARATHON_SCHEDULE_ALL_KEY
       : monthKey
-  return fetchCenterMarathonSchedule(resolved, member?.id ?? null)
+  const bundle = await fetchCenterMarathonSchedule(resolved, member?.id ?? null)
+  if (!bundle.viewerMemberName && member?.name) {
+    return {
+      ...bundle,
+      viewerMemberName: member.name.trim() || null,
+    }
+  }
+  return bundle
 }
 
 export async function getCenterMarathonScheduleForAdmin(
@@ -740,8 +789,16 @@ export async function deleteMarathonEvent(
 
 export async function toggleMarathonEventSignup(
   eventId: string,
+  distancesInput?: MarathonDistanceFilter[],
 ): Promise<
-  | { ok: true; signedUp: boolean; signupCount: number }
+  | {
+      ok: true
+      signedUp: boolean
+      signupCount: number
+      distances: MarathonDistanceFilter[]
+      signup: MarathonEventSignup | null
+      memberId: string
+    }
   | { ok: false; error: string }
 > {
   const member = await getRunningPortalMemberForCurrentUser()
@@ -754,7 +811,7 @@ export async function toggleMarathonEventSignup(
     const supabase = await scheduleClient()
     const { data: eventRow, error: eventError } = await supabase
       .from('center_marathon_events')
-      .select('id, title, is_hidden')
+      .select('id, title, notes, is_hidden')
       .eq('id', id)
       .maybeSingle()
 
@@ -770,37 +827,84 @@ export async function toggleMarathonEventSignup(
 
     const { data: existing, error: existingError } = await supabase
       .from('center_marathon_event_signups')
-      .select('id')
+      .select('id, distances')
       .eq('event_id', id)
       .eq('member_id', member.id)
       .maybeSingle()
 
-    if (existingError && !isMissingTableError(existingError)) {
+    if (existingError && !isMissingTableError(existingError) && !isMissingColumnError(existingError)) {
       console.error('toggleMarathonEventSignup.existing', existingError)
       return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
     }
 
-    if (existing) {
+    let existingRow = existing as { id: string; distances?: unknown } | null
+    if (existingError && isMissingColumnError(existingError)) {
+      const legacy = await supabase
+        .from('center_marathon_event_signups')
+        .select('id')
+        .eq('event_id', id)
+        .eq('member_id', member.id)
+        .maybeSingle()
+      if (legacy.error && !isMissingTableError(legacy.error)) {
+        return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+      }
+      existingRow = legacy.data ? { id: legacy.data.id, distances: [] } : null
+    }
+
+    let signedUp = false
+    let distances: MarathonDistanceFilter[] = []
+    let signup: MarathonEventSignup | null = null
+
+    if (existingRow) {
       const { error: deleteError } = await supabase
         .from('center_marathon_event_signups')
         .delete()
-        .eq('id', existing.id)
+        .eq('id', existingRow.id)
 
       if (deleteError) {
         console.error('toggleMarathonEventSignup.delete', deleteError)
         return { ok: false, error: '참여 취소에 실패했습니다.' }
       }
+      signedUp = false
     } else {
-      const { error: insertError } = await supabase
-        .from('center_marathon_event_signups')
-        .insert({
+      const allowed = resolveMarathonEventDistanceOptions({
+        notes: eventRow.notes,
+        title: eventRow.title,
+      })
+      distances = normalizeMarathonDistances(distancesInput).filter((item) =>
+        allowed.includes(item),
+      )
+      if (distances.length === 0) {
+        return { ok: false, error: '참가할 종목을 하나 이상 선택해주세요.' }
+      }
+
+      let insertError = (
+        await supabase.from('center_marathon_event_signups').insert({
           event_id: id,
           member_id: member.id,
+          distances,
         })
+      ).error
+
+      if (insertError && isMissingColumnError(insertError)) {
+        insertError = (
+          await supabase.from('center_marathon_event_signups').insert({
+            event_id: id,
+            member_id: member.id,
+          })
+        ).error
+      }
 
       if (insertError) {
         console.error('toggleMarathonEventSignup.insert', insertError)
         return { ok: false, error: '참여 신청에 실패했습니다.' }
+      }
+      signedUp = true
+      signup = {
+        member_id: member.id,
+        member_name: member.name?.trim() || '회원',
+        signed_at: new Date().toISOString(),
+        distances,
       }
     }
 
@@ -813,11 +917,13 @@ export async function toggleMarathonEventSignup(
       console.error('toggleMarathonEventSignup.count', countError)
     }
 
-    // 참여 토글은 클라이언트 낙관적 UI로 반영. revalidate하면 월 선택·메뉴가 초기화됨.
     return {
       ok: true,
-      signedUp: !existing,
+      signedUp,
       signupCount: count ?? 0,
+      distances,
+      signup,
+      memberId: member.id,
     }
   } catch (error) {
     console.error('toggleMarathonEventSignup', error)
@@ -825,10 +931,88 @@ export async function toggleMarathonEventSignup(
   }
 }
 
+/** 이미 참여 중인 대회의 종목만 변경 */
+export async function updateMarathonEventSignupDistances(
+  eventId: string,
+  distancesInput: MarathonDistanceFilter[],
+): Promise<
+  | { ok: true; distances: MarathonDistanceFilter[]; signupCount: number }
+  | { ok: false; error: string }
+> {
+  const member = await getRunningPortalMemberForCurrentUser()
+  if (!member) return { ok: false, error: '로그인이 필요합니다.' }
+
+  const id = eventId.trim()
+  if (!id) return { ok: false, error: '대회를 찾을 수 없습니다.' }
+
+  try {
+    const supabase = await scheduleClient()
+    const { data: eventRow, error: eventError } = await supabase
+      .from('center_marathon_events')
+      .select('id, title, notes, is_hidden')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (eventError || !eventRow) {
+      return { ok: false, error: '대회를 찾을 수 없습니다.' }
+    }
+
+    const allowed = resolveMarathonEventDistanceOptions({
+      notes: eventRow.notes,
+      title: eventRow.title,
+    })
+    const distances = normalizeMarathonDistances(distancesInput).filter((item) =>
+      allowed.includes(item),
+    )
+    if (distances.length === 0) {
+      return { ok: false, error: '참가할 종목을 하나 이상 선택해주세요.' }
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('center_marathon_event_signups')
+      .select('id')
+      .eq('event_id', id)
+      .eq('member_id', member.id)
+      .maybeSingle()
+
+    if (existingError || !existing) {
+      return { ok: false, error: '먼저 참여 신청을 해주세요.' }
+    }
+
+    const { error: updateError } = await supabase
+      .from('center_marathon_event_signups')
+      .update({ distances })
+      .eq('id', existing.id)
+
+    if (updateError) {
+      if (isMissingColumnError(updateError)) {
+        return {
+          ok: false,
+          error:
+            '종목 저장 컬럼이 없습니다. Supabase에서 supabase/add-marathon-signup-distances.sql 을 실행해주세요.',
+        }
+      }
+      console.error('updateMarathonEventSignupDistances', updateError)
+      return { ok: false, error: '종목 변경에 실패했습니다.' }
+    }
+
+    const { count } = await supabase
+      .from('center_marathon_event_signups')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', id)
+
+    return { ok: true, distances, signupCount: count ?? 0 }
+  } catch (error) {
+    console.error('updateMarathonEventSignupDistances', error)
+    return { ok: false, error: '종목 변경에 실패했습니다.' }
+  }
+}
+
 /** 관리자·강사 — 대회 참여 명단에 회원 추가 */
 export async function staffAddMarathonEventSignup(
   eventId: string,
   memberId: string,
+  distancesInput?: MarathonDistanceFilter[],
 ): Promise<
   | {
       ok: true
@@ -851,7 +1035,7 @@ export async function staffAddMarathonEventSignup(
       await Promise.all([
         supabase
           .from('center_marathon_events')
-          .select('id, title, is_hidden')
+          .select('id, title, notes, is_hidden')
           .eq('id', id)
           .maybeSingle(),
         supabase
@@ -875,25 +1059,78 @@ export async function staffAddMarathonEventSignup(
       return { ok: false, error: '회원을 찾을 수 없습니다.' }
     }
 
+    const allowed = resolveMarathonEventDistanceOptions({
+      notes: eventRow.notes,
+      title: eventRow.title,
+    })
+    const distances = normalizeMarathonDistances(distancesInput).filter((item) =>
+      allowed.includes(item),
+    )
+    if (distances.length === 0) {
+      return { ok: false, error: '참가할 종목을 하나 이상 선택해주세요.' }
+    }
+
     const { data: existing, error: existingError } = await supabase
       .from('center_marathon_event_signups')
-      .select('id, created_at')
+      .select('id, created_at, distances')
       .eq('event_id', id)
       .eq('member_id', targetMemberId)
       .maybeSingle()
 
-    if (existingError && !isMissingTableError(existingError)) {
+    if (existingError && isMissingColumnError(existingError)) {
+      const legacy = await supabase
+        .from('center_marathon_event_signups')
+        .select('id, created_at')
+        .eq('event_id', id)
+        .eq('member_id', targetMemberId)
+        .maybeSingle()
+      if (legacy.error && !isMissingTableError(legacy.error)) {
+        return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
+      }
+      if (legacy.data) {
+        return {
+          ok: true,
+          signupCount: 0,
+          alreadySignedUp: true,
+          signup: {
+            member_id: targetMemberId,
+            member_name: (memberRow.name as string)?.trim() || '회원',
+            signed_at: legacy.data.created_at,
+            distances: [],
+          },
+        }
+      }
+    } else if (existingError && !isMissingTableError(existingError)) {
       console.error('staffAddMarathonEventSignup.existing', existingError)
       return { ok: false, error: '참여 상태를 확인하지 못했습니다.' }
     }
 
-    if (!existing) {
-      const { error: insertError } = await supabase
+    if (existing) {
+      const { error: updateError } = await supabase
         .from('center_marathon_event_signups')
-        .insert({
+        .update({ distances })
+        .eq('id', existing.id)
+      if (updateError && !isMissingColumnError(updateError)) {
+        console.error('staffAddMarathonEventSignup.update', updateError)
+        return { ok: false, error: '종목 저장에 실패했습니다.' }
+      }
+    } else {
+      let insertError = (
+        await supabase.from('center_marathon_event_signups').insert({
           event_id: id,
           member_id: targetMemberId,
+          distances,
         })
+      ).error
+
+      if (insertError && isMissingColumnError(insertError)) {
+        insertError = (
+          await supabase.from('center_marathon_event_signups').insert({
+            event_id: id,
+            member_id: targetMemberId,
+          })
+        ).error
+      }
 
       if (insertError) {
         console.error('staffAddMarathonEventSignup.insert', insertError)
@@ -918,6 +1155,7 @@ export async function staffAddMarathonEventSignup(
         member_id: targetMemberId,
         member_name: (memberRow.name as string)?.trim() || '회원',
         signed_at: existing?.created_at ?? new Date().toISOString(),
+        distances,
       },
     }
   } catch (error) {
