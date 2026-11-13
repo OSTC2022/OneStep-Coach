@@ -24,9 +24,11 @@ export function OnestepSplashLayer() {
 
     document.documentElement.classList.add('onestep-splash-active')
 
+    // 강제 최소 노출 없이, 화면(하이드레이션) 준비되면 바로 페이드아웃
+    let fadeTimer = 0
     const hideTimer = window.setTimeout(() => {
       setFadeOut(true)
-      window.setTimeout(() => {
+      fadeTimer = window.setTimeout(() => {
         finishSplashBoot()
         setVisible(false)
       }, SPLASH_FADE_MS)
@@ -34,6 +36,7 @@ export function OnestepSplashLayer() {
 
     return () => {
       window.clearTimeout(hideTimer)
+      window.clearTimeout(fadeTimer)
     }
   }, [])
 

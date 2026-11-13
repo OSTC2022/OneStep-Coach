@@ -16,9 +16,9 @@ export const SPLASH_BOOT_SCRIPT = `(function(){try{var skip=false;var nav=perfor
 
 export const SPLASH_SESSION_KEY = 'onestep-splash-seen'
 
-/** 첫 방문 스플래시 최소 표시 시간 (2~3초) */
-export const SPLASH_MIN_VISIBLE_MS = 2800
-export const SPLASH_FADE_MS = 450
+/** 첫 방문 스플래시 — 실제 부팅(하이드레이션) 직후 바로 페이드아웃 */
+export const SPLASH_MIN_VISIBLE_MS = 0
+export const SPLASH_FADE_MS = 220
 
 export function shouldSkipSplashBoot(): boolean {
   if (typeof window === 'undefined') return false

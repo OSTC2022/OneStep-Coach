@@ -267,7 +267,7 @@ a[href] {
 .onestep-app-splash.onestep-splash-fade-out {
   pointer-events: none;
   opacity: 0;
-  transition: opacity 500ms ease;
+  transition: opacity 220ms ease;
 }
 
 html.onestep-app-ready #onestep-app-splash {
