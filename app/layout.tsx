@@ -170,7 +170,7 @@ export default function RootLayout({
             __html:
               'html,body{background:#070d18!important;margin:0;padding:0}' +
               'html.onestep-splash-active,html.onestep-splash-active body{overflow:hidden;position:fixed;inset:0;width:100%;height:100%;height:100dvh;overscroll-behavior:none}' +
-              '#onestep-app-splash{position:fixed;inset:0;z-index:9999;width:100%;height:100%;height:100dvh;min-height:100dvh;min-height:-webkit-fill-available;opacity:1}',
+              '#onestep-app-splash{display:none!important}',
           }}
         />
       </head>

@@ -9,14 +9,14 @@ export function finishSplashBoot() {
 }
 
 /**
- * 인라인 스크립트 — hydration 전 플래그만 설정.
- * 재방문·새로고침은 즉시 숨김(onestep-app-ready), 첫 방문만 스플래시 표시.
+ * 인라인 스크립트 — 첫 페인트 전에 스플래시를 건너뜀.
+ * 로딩 오버레이가 본 화면 앞에 남지 않게 한다.
  */
-export const SPLASH_BOOT_SCRIPT = `(function(){try{var skip=false;var nav=performance.getEntriesByType&&performance.getEntriesByType("navigation")[0];if(nav&&nav.type==="reload")skip=true;if(sessionStorage.getItem("onestep-splash-seen")==="1")skip=true;if(skip){window.__onestepSplashSkip=true;document.documentElement.classList.add("onestep-app-ready");return;}window.__onestepSplashStart=Date.now();sessionStorage.setItem("onestep-splash-seen","1");}catch(e){window.__onestepSplashStart=Date.now();}})();`
+export const SPLASH_BOOT_SCRIPT = `(function(){try{window.__onestepSplashSkip=true;document.documentElement.classList.add("onestep-app-ready");}catch(e){}})();`
 
 export const SPLASH_SESSION_KEY = 'onestep-splash-seen'
 
-/** 첫 방문 스플래시 — 실제 부팅(하이드레이션) 직후 바로 페이드아웃 */
+/** 로딩 오버레이는 표시하지 않음 */
 export const SPLASH_MIN_VISIBLE_MS = 0
 export const SPLASH_FADE_MS = 220
 
