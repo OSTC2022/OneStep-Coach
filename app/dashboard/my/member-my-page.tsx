@@ -30,6 +30,7 @@ import {
   MemberRunningLeagueTrainingSchedule,
 } from '@/components/dashboard/member-running-league-training-schedule'
 import { MemberMarathonSchedule } from '@/components/dashboard/member-marathon-schedule'
+import { CarbCalculator } from '@/components/carb-calculator/carb-calculator'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { AdultRunningPortalDisplaySettings } from '@/lib/actions/adult-running-portal-settings'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
@@ -260,6 +261,13 @@ export function MemberMyPage({
                   canStaffAddParticipants={canPinMarathonEvents}
                 />
               ) : null
+            }
+            weight={
+              <CarbCalculator
+                embedded
+                memberId={member.id}
+                profileHeightCm={member.height_cm}
+              />
             }
           />
           {runningLeagueHome ? (

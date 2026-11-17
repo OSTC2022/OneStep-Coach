@@ -6,6 +6,7 @@ import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/memb
 import { MemberMarathonSchedule } from '@/components/dashboard/member-marathon-schedule'
 import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
 import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal-accordion-menus'
+import { CarbCalculator } from '@/components/carb-calculator/carb-calculator'
 import { AdultRunningPortalSettingsPanel } from '@/components/dashboard/adult-running-portal-settings-panel'
 import { RunningPortalManageLink } from '@/components/dashboard/running-portal-manage-link'
 import type {
@@ -130,6 +131,7 @@ export function AdultRunningPortalAdminView({
               canStaffAddParticipants
             />
           }
+          weight={<CarbCalculator embedded />}
         />
         <MemberRunningLeagueRankings
           pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}

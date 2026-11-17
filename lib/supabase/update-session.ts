@@ -26,6 +26,10 @@ import {
 } from '@/lib/auth/remember-me'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
+
+function isPublicCarbCalculatorPath(pathname: string) {
+  return pathname === '/carb-calculator' || pathname.startsWith('/carb-calculator/')
+}
 const AUTH_CACHE_TTL_MS = process.env.NODE_ENV === 'development' ? 5000 : 8000
 
 let sessionAuthCache: {
@@ -270,6 +274,10 @@ export async function updateSession(request: NextRequest) {
     })
 
     const { user, staleSession } = await getSessionUser(supabase, request)
+
+    if (isPublicCarbCalculatorPath(request.nextUrl.pathname)) {
+      return finalizeProxyResponse(request, supabaseResponse, staleSession)
+    }
 
     if (request.nextUrl.pathname === '/' && !user) {
       const url = request.nextUrl.clone()

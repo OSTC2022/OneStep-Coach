@@ -1,18 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { CalendarDays, ChevronDown, Megaphone } from 'lucide-react'
+import { CalendarDays, ChevronDown, Megaphone, Scale, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MEMBER_PORTAL_CARD_CLASS } from '@/lib/running-league/member-portal-layout'
 
-export type MemberPortalMenuKey = 'notice' | 'training' | 'marathon'
+export type MemberPortalMenuKey = 'notice' | 'training' | 'marathon' | 'weight'
 
 const OPEN_MENU_STORAGE_KEY = 'onestep:member-portal-menu-open'
 
 type MenuDef = {
   key: MemberPortalMenuKey
   label: string
-  icon: typeof Megaphone
+  icon: LucideIcon
   available: boolean
 }
 
@@ -20,8 +20,10 @@ type MemberPortalAccordionMenusProps = {
   notice?: ReactNode
   training: ReactNode
   marathon?: ReactNode
+  weight?: ReactNode
   hasNotice?: boolean
   hasMarathon?: boolean
+  hasWeight?: boolean
   trainingLabel?: string
   className?: string
 }
@@ -29,7 +31,12 @@ type MemberPortalAccordionMenusProps = {
 function readStoredOpenKey(): MemberPortalMenuKey | null {
   try {
     const value = sessionStorage.getItem(OPEN_MENU_STORAGE_KEY)
-    if (value === 'notice' || value === 'training' || value === 'marathon') {
+    if (
+      value === 'notice' ||
+      value === 'training' ||
+      value === 'marathon' ||
+      value === 'weight'
+    ) {
       return value
     }
   } catch {
@@ -51,8 +58,10 @@ export function MemberPortalAccordionMenus({
   notice,
   training,
   marathon,
+  weight,
   hasNotice = Boolean(notice),
   hasMarathon = Boolean(marathon),
+  hasWeight = Boolean(weight),
   trainingLabel = '훈련 일정',
   className,
 }: MemberPortalAccordionMenusProps) {
@@ -65,32 +74,41 @@ export function MemberPortalAccordionMenus({
     const stored = readStoredOpenKey()
     if (stored === 'notice' && !hasNotice) return
     if (stored === 'marathon' && !hasMarathon) return
+    if (stored === 'weight' && !hasWeight) return
     // 훈련 일정은 항상 기본 닫힘 (세션 복원하지 않음)
     if (stored === 'training') return
     // 대회 일정은 기본 닫힘 — 이전에 열어둔 세션만 복원
     if (stored) setOpenKey(stored)
-  }, [hasMarathon, hasNotice])
+  }, [hasMarathon, hasNotice, hasWeight])
 
-  const menus: MenuDef[] = [
-    {
-      key: 'notice',
-      label: '공지사항',
-      icon: Megaphone,
-      available: hasNotice,
-    },
-    {
-      key: 'training',
-      label: trainingLabel,
-      icon: CalendarDays,
-      available: true,
-    },
-    {
-      key: 'marathon',
-      label: '대회 일정',
-      icon: CalendarDays,
-      available: hasMarathon,
-    },
-  ].filter((menu) => menu.available)
+  const menus = (
+    [
+      {
+        key: 'notice',
+        label: '공지사항',
+        icon: Megaphone,
+        available: hasNotice,
+      },
+      {
+        key: 'training',
+        label: trainingLabel,
+        icon: CalendarDays,
+        available: true,
+      },
+      {
+        key: 'marathon',
+        label: '대회 일정',
+        icon: CalendarDays,
+        available: hasMarathon,
+      },
+      {
+        key: 'weight',
+        label: '체중관리',
+        icon: Scale,
+        available: hasWeight,
+      },
+    ] satisfies MenuDef[]
+  ).filter((menu) => menu.available)
 
   function toggle(key: MemberPortalMenuKey) {
     const next = openKey === key ? null : key
@@ -105,7 +123,9 @@ export function MemberPortalAccordionMenus({
         ? training
         : openKey === 'marathon'
           ? marathon
-          : null
+          : openKey === 'weight'
+            ? weight
+            : null
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
@@ -114,7 +134,8 @@ export function MemberPortalAccordionMenus({
           'grid gap-1.5',
           menus.length === 1 && 'grid-cols-1',
           menus.length === 2 && 'grid-cols-2',
-          menus.length >= 3 && 'grid-cols-3',
+          menus.length === 3 && 'grid-cols-3',
+          menus.length >= 4 && 'grid-cols-2 sm:grid-cols-4',
         )}
       >
         {menus.map((menu) => {

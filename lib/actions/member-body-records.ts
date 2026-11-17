@@ -646,6 +646,41 @@ async function memberBodyWriteClient() {
   }
 }
 
+/** 회원 프로필에 적힌 키를 갱신. 탄수화물 계산기에서 회원별로 유지한다. */
+export async function saveMemberProfileHeight(
+  memberId: string,
+  heightCm: number,
+): Promise<{ error?: string }> {
+  const allowed = await canAddBodyRecordFor(memberId)
+  if (!allowed) return { error: '권한이 없습니다.' }
+
+  const height = roundBodyMetric(heightCm)
+  if (height == null || height < 120 || height > 220) {
+    return { error: '키를 올바르게 입력해주세요.' }
+  }
+
+  const supabase = await memberBodyWriteClient()
+  const { data: memberRow } = await supabase
+    .from('members')
+    .select('weight_kg')
+    .eq('id', memberId)
+    .maybeSingle()
+
+  const { error } = await supabase
+    .from('members')
+    .update({
+      height_cm: height,
+      bmi: calculateMemberBmi(height, memberRow?.weight_kg as number | string | null),
+    })
+    .eq('id', memberId)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/dashboard/my')
+  revalidatePath(`/dashboard/members/${memberId}`)
+  return {}
+}
+
 export async function addMemberBodyRecord(
   memberId: string,
   weightKg: number,
