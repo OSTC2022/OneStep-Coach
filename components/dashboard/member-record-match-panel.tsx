@@ -1,19 +1,23 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
+import { Link2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   createRecordMatchEvent,
   deleteRecordMatchEvent,
   getRecordMatchBoard,
   saveRecordMatchActual,
+  setRecordMatchWinners,
   submitRecordMatchEntry,
+  updateRecordMatchEvent,
   type RecordMatchEvent,
 } from '@/lib/actions/member-record-match'
 import { EventNewMark } from '@/components/dashboard/event-new-mark'
 import { useMarkPortalItemsRead } from '@/components/dashboard/portal-seen'
+import { buildEventMatchShareUrl } from '@/lib/event-match-share'
 import { formatTimeGap } from '@/lib/member-record-match'
 import {
   MARATHON_DISTANCE_FILTERS,
@@ -36,7 +40,71 @@ function formatRaceDate(value: string) {
   return format(date, 'M.d (EEE)', { locale: ko })
 }
 
-export function MemberRecordMatchPanel() {
+function PrizeFields({
+  idPrefix,
+  prizes,
+  onChange,
+  disabled = false,
+}: {
+  idPrefix: string
+  prizes: string[]
+  onChange: (next: string[]) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="space-y-2">
+      {prizes.map((value, index) => (
+        <div key={`${idPrefix}-${index}`} className="flex gap-2">
+          <label className="sr-only" htmlFor={`${idPrefix}-prize-${index}`}>
+            상품 {index + 1}
+          </label>
+          <input
+            id={`${idPrefix}-prize-${index}`}
+            value={value}
+            maxLength={80}
+            disabled={disabled}
+            onChange={(event) => {
+              const next = [...prizes]
+              next[index] = event.target.value
+              onChange(next)
+            }}
+            className="h-11 min-w-0 flex-1 rounded-lg border border-border/80 bg-black/40 px-3 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70 disabled:opacity-60"
+            placeholder={index === 0 ? '예: 프로틴 1통' : `상품 ${index + 1}`}
+            required={index === 0}
+          />
+          {prizes.length > 1 ? (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(prizes.filter((_, itemIndex) => itemIndex !== index))}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border/80 text-muted-foreground hover:text-foreground disabled:opacity-60"
+              aria-label={`상품 ${index + 1} 삭제`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      ))}
+      <button
+        type="button"
+        disabled={disabled || prizes.length >= 8}
+        onClick={() => onChange([...prizes, ''])}
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border/80 px-3 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-60"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        상품 추가
+      </button>
+    </div>
+  )
+}
+
+export function MemberRecordMatchPanel({
+  focusEventId = null,
+  sharePath = '/dashboard/running-portal',
+}: {
+  focusEventId?: string | null
+  sharePath?: string
+} = {}) {
   const [events, setEvents] = useState<RecordMatchEvent[]>([])
   const [races, setRaces] = useState<RaceOption[]>([])
   const [mineOnly, setMineOnly] = useState(false)
@@ -47,11 +115,17 @@ export function MemberRecordMatchPanel() {
   const [composerOpen, setComposerOpen] = useState(false)
   const [raceId, setRaceId] = useState('')
   const [distance, setDistance] = useState('')
-  const [prize, setPrize] = useState('')
+  const [prizes, setPrizes] = useState<string[]>([''])
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editingEventId, setEditingEventId] = useState<string | null>(null)
+  const [editDistance, setEditDistance] = useState('')
+  const [editPrizes, setEditPrizes] = useState<string[]>([''])
+  const [editNote, setEditNote] = useState('')
+  const [winnerDrafts, setWinnerDrafts] = useState<Record<string, string[]>>({})
   const [drafts, setDrafts] = useState<Record<string, { predicted: string; actual: string }>>({})
   const [actualDrafts, setActualDrafts] = useState<Record<string, string>>({})
+  const focusedRef = useRef<HTMLLIElement | null>(null)
 
   async function reload() {
     const result = await getRecordMatchBoard()
@@ -80,12 +154,42 @@ export function MemberRecordMatchPanel() {
       }
       return next
     })
+    setWinnerDrafts((current) => {
+      const next = { ...current }
+      for (const event of result.events) {
+        const prizes = event.prizes.length > 0 ? event.prizes : [event.prize]
+        const slots = prizes.map((_, index) => {
+          const winner = event.winners.find((item) => item.prizeIndex === index)
+          return winner?.memberId ?? current[event.id]?.[index] ?? ''
+        })
+        next[event.id] = slots
+      }
+      return next
+    })
     setLoading(false)
   }
 
   useEffect(() => {
     void reload()
   }, [])
+
+  useEffect(() => {
+    if (loading || !focusEventId) return
+    const frame = window.requestAnimationFrame(() => {
+      focusedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [focusEventId, loading, events])
+
+  async function copyEventLink(eventId: string) {
+    const url = buildEventMatchShareUrl(eventId, sharePath)
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('이벤트 링크를 복사했습니다.')
+    } catch {
+      toast.error('링크를 복사하지 못했습니다.', { description: url })
+    }
+  }
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault()
@@ -94,7 +198,7 @@ export function MemberRecordMatchPanel() {
     const result = await createRecordMatchEvent({
       marathonEventId: raceId,
       distance: distanceValue || null,
-      prize,
+      prizes,
       note,
     })
     setSaving(false)
@@ -102,11 +206,47 @@ export function MemberRecordMatchPanel() {
       toast.error('이벤트를 만들지 못했습니다', { description: result.error })
       return
     }
-    setPrize('')
+    setPrizes([''])
     setNote('')
     setDistance('')
     setComposerOpen(false)
     toast.success('기록 맞추기 이벤트를 열었습니다.')
+    if (result.id) void copyEventLink(result.id)
+    await reload()
+  }
+
+  function startEdit(item: RecordMatchEvent) {
+    setEditingEventId(item.id)
+    setEditDistance(item.distance ?? '')
+    setEditPrizes(item.prizes.length > 0 ? item.prizes : [item.prize || ''])
+    setEditNote(item.note)
+    setComposerOpen(false)
+  }
+
+  function cancelEdit() {
+    setEditingEventId(null)
+    setEditDistance('')
+    setEditPrizes([''])
+    setEditNote('')
+  }
+
+  async function handleUpdate(event: FormEvent, eventId: string) {
+    event.preventDefault()
+    if (saving) return
+    setSaving(true)
+    const result = await updateRecordMatchEvent({
+      eventId,
+      distance: editDistance || null,
+      prizes: editPrizes,
+      note: editNote,
+    })
+    setSaving(false)
+    if (result.error) {
+      toast.error('이벤트를 수정하지 못했습니다', { description: result.error })
+      return
+    }
+    cancelEdit()
+    toast.success('이벤트를 수정했습니다.')
     await reload()
   }
 
@@ -151,7 +291,25 @@ export function MemberRecordMatchPanel() {
       return
     }
     setEvents((current) => current.filter((item) => item.id !== eventId))
+    if (editingEventId === eventId) cancelEdit()
     toast.success('이벤트를 삭제했습니다.')
+  }
+
+  async function handleSaveWinners(eventId: string) {
+    if (saving) return
+    const slots = winnerDrafts[eventId] ?? []
+    const winners = slots
+      .map((memberId, prizeIndex) => ({ memberId: memberId.trim(), prizeIndex }))
+      .filter((item) => item.memberId)
+    setSaving(true)
+    const result = await setRecordMatchWinners({ eventId, winners })
+    setSaving(false)
+    if (result.error) {
+      toast.error('당첨자를 저장하지 못했습니다', { description: result.error })
+      return
+    }
+    toast.success(winners.length > 0 ? '당첨자를 저장했습니다.' : '당첨자를 비웠습니다.')
+    await reload()
   }
 
   const matchIds = events.filter((item) => !item.createdByMe).map((item) => `match:${item.id}`)
@@ -262,18 +420,15 @@ export function MemberRecordMatchPanel() {
               </option>
             ))}
           </select>
-          <label className="block text-xs font-medium text-foreground" htmlFor="record-match-prize">
-            상품
-          </label>
-          <input
-            id="record-match-prize"
-            value={prize}
-            maxLength={80}
-            onChange={(event) => setPrize(event.target.value)}
-            className="h-11 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
-            placeholder="예: 프로틴 1통"
-            required
-          />
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground">상품</p>
+            <PrizeFields
+              idPrefix="record-match-create"
+              prizes={prizes}
+              onChange={setPrizes}
+              disabled={saving}
+            />
+          </div>
           <label className="block text-xs font-medium text-foreground" htmlFor="record-match-note">
             안내
           </label>
@@ -306,8 +461,17 @@ export function MemberRecordMatchPanel() {
         <ul className="space-y-2">
           {events.map((item) => {
             const draft = drafts[item.id] ?? { predicted: '', actual: '' }
+            const isFocused = focusEventId === item.id
             return (
-              <li key={item.id} className="rounded-xl border border-primary/20 bg-black/30 px-3 py-3">
+              <li
+                key={item.id}
+                ref={isFocused ? focusedRef : undefined}
+                className={
+                  isFocused
+                    ? 'rounded-xl border border-lime-400/50 bg-lime-500/10 px-3 py-3 ring-1 ring-lime-400/30'
+                    : 'rounded-xl border border-primary/20 bg-black/30 px-3 py-3'
+                }
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
@@ -320,26 +484,127 @@ export function MemberRecordMatchPanel() {
                       {item.location ? ` · ${item.location}` : ''}
                     </p>
                   </div>
-                  {canCreate ? (
+                  <div className="flex shrink-0 items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => void handleDelete(item.id)}
-                      className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => void copyEventLink(item.id)}
+                      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                     >
-                      삭제
+                      <Link2 className="h-3.5 w-3.5" />
+                      링크
                     </button>
-                  ) : null}
+                    {item.canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          editingEventId === item.id ? cancelEdit() : startEdit(item)
+                        }
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        aria-expanded={editingEventId === item.id}
+                      >
+                        {editingEventId === item.id ? '닫기' : '수정'}
+                      </button>
+                    ) : null}
+                    {item.canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(item.id)}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        삭제
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-                <p className="mt-2 text-sm text-foreground">
-                  상품 <span className="font-semibold text-primary">{item.prize}</span>
-                  <span className="mx-1 text-muted-foreground">·</span>
-                  <span className="text-muted-foreground">참여자 {item.participantCount}명</span>
-                </p>
-                {item.note ? (
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-                    {item.note}
-                  </p>
-                ) : null}
+
+                {editingEventId === item.id ? (
+                  <form
+                    className="mt-3 space-y-2 border-t border-primary/15 pt-3"
+                    onSubmit={(event) => void handleUpdate(event, item.id)}
+                  >
+                    <label
+                      className="block text-xs font-medium text-foreground"
+                      htmlFor={`record-match-edit-distance-${item.id}`}
+                    >
+                      종목
+                    </label>
+                    <select
+                      id={`record-match-edit-distance-${item.id}`}
+                      value={editDistance}
+                      onChange={(event) => setEditDistance(event.target.value)}
+                      className="h-11 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-base text-foreground outline-none focus-visible:border-primary/70"
+                    >
+                      <option value="">종목 전체</option>
+                      {MARATHON_DISTANCE_FILTERS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-foreground">상품</p>
+                      <PrizeFields
+                        idPrefix={`record-match-edit-${item.id}`}
+                        prizes={editPrizes}
+                        onChange={setEditPrizes}
+                        disabled={saving}
+                      />
+                    </div>
+                    <label
+                      className="block text-xs font-medium text-foreground"
+                      htmlFor={`record-match-edit-note-${item.id}`}
+                    >
+                      안내
+                    </label>
+                    <textarea
+                      id={`record-match-edit-note-${item.id}`}
+                      value={editNote}
+                      maxLength={300}
+                      rows={2}
+                      onChange={(event) => setEditNote(event.target.value)}
+                      className="w-full resize-y rounded-lg border border-border/80 bg-black/40 px-3 py-2 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
+                      placeholder="예상 기록 마감, 상품 받는 방법"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        disabled={saving}
+                        className="h-9 rounded-lg border border-border/80 px-3 text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={saving}
+                        className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+                      >
+                        {saving ? '저장 중…' : '저장'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <div className="mt-2 space-y-1 text-sm text-foreground">
+                      {(item.prizes.length > 0 ? item.prizes : [item.prize]).map((prize, index) => (
+                        <p key={`${item.id}-prize-${index}`}>
+                          {item.prizes.length > 1 ? (
+                            <span className="text-muted-foreground">{index + 1}등 </span>
+                          ) : (
+                            <span className="text-muted-foreground">상품 </span>
+                          )}
+                          <span className="font-semibold text-primary">{prize}</span>
+                        </p>
+                      ))}
+                      <p className="text-muted-foreground">참여자 {item.participantCount}명</p>
+                    </div>
+                    {item.note ? (
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
+                        {item.note}
+                      </p>
+                    ) : null}
+                  </>
+                )}
 
                 {canEnter ? (
                   <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -376,6 +641,23 @@ export function MemberRecordMatchPanel() {
 
                 {item.mine?.gapSeconds != null ? (
                   <p className="mt-2 text-xs text-primary">내 차이 {formatTimeGap(item.mine.gapSeconds)}</p>
+                ) : null}
+
+                {item.winners.length > 0 ? (
+                  <div className="mt-3 space-y-1 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2">
+                    <p className="text-[11px] font-semibold text-amber-200">당첨자</p>
+                    {item.winners.map((winner) => (
+                      <p key={`${item.id}-winner-${winner.prizeIndex}`} className="text-sm text-foreground">
+                        <span className="text-muted-foreground">
+                          {(item.prizes.length > 1 ? item.prizes : [item.prize]).length > 1
+                            ? `${winner.prizeIndex + 1}등 `
+                            : ''}
+                        </span>
+                        <span className="font-semibold text-amber-100">{winner.memberName}</span>
+                        <span className="text-muted-foreground"> · {winner.prize}</span>
+                      </p>
+                    ))}
+                  </div>
                 ) : null}
 
                 {item.ranking.length > 0 ? (
@@ -438,6 +720,71 @@ export function MemberRecordMatchPanel() {
                       )
                     })}
                   </ul>
+                ) : null}
+
+                {item.canSelectWinners ? (
+                  <div className="mt-3 space-y-2 border-t border-primary/15 pt-3">
+                    <p className="text-xs font-semibold text-foreground">당첨자 선정</p>
+                    {(item.prizes.length > 0 ? item.prizes : [item.prize]).map((prize, index) => {
+                      const slots = winnerDrafts[item.id] ?? []
+                      const candidates =
+                        item.guesses.length > 0
+                          ? item.guesses
+                          : item.ranking.map((entry) => ({
+                              memberId: entry.memberId,
+                              name: entry.authorName,
+                            }))
+                      return (
+                        <div key={`${item.id}-winner-slot-${index}`} className="space-y-1">
+                          <label
+                            className="block text-[11px] text-muted-foreground"
+                            htmlFor={`winner-${item.id}-${index}`}
+                          >
+                            {(item.prizes.length > 1 ? item.prizes : [item.prize]).length > 1
+                              ? `${index + 1}등 · ${prize}`
+                              : `상품 · ${prize}`}
+                          </label>
+                          <select
+                            id={`winner-${item.id}-${index}`}
+                            value={slots[index] ?? ''}
+                            disabled={saving || candidates.length === 0}
+                            onChange={(event) =>
+                              setWinnerDrafts((current) => {
+                                const prizeCount = (
+                                  item.prizes.length > 0 ? item.prizes : [item.prize]
+                                ).length
+                                const nextSlots = [...(current[item.id] ?? Array(prizeCount).fill(''))]
+                                while (nextSlots.length < prizeCount) nextSlots.push('')
+                                nextSlots[index] = event.target.value
+                                return { ...current, [item.id]: nextSlots }
+                              })
+                            }
+                            className="h-10 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-sm text-foreground outline-none focus-visible:border-primary/70 disabled:opacity-60"
+                          >
+                            <option value="">미선정</option>
+                            {candidates.map((candidate) => (
+                              <option key={candidate.memberId} value={candidate.memberId}>
+                                {candidate.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )
+                    })}
+                    <button
+                      type="button"
+                      disabled={saving || (item.guesses.length === 0 && item.ranking.length === 0)}
+                      onClick={() => void handleSaveWinners(item.id)}
+                      className="min-h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+                    >
+                      {saving ? '저장 중…' : '당첨자 저장'}
+                    </button>
+                    {item.guesses.length === 0 && item.ranking.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        참여자가 있어야 당첨자를 선정할 수 있습니다.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </li>
             )

@@ -31,3 +31,17 @@ export function formatTimeGap(seconds: number): string {
   if (gap === 0) return '정확히 맞춤'
   return `${formatFinishTime(gap)} 차이`
 }
+
+export function splitRecordMatchPrizes(prize: string | null | undefined): string[] {
+  return String(prize ?? '')
+    .split(/\n|·|\|/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+export function joinRecordMatchPrizes(prizes: string[]): string {
+  return prizes
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join('\n')
+}

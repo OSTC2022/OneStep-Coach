@@ -4,7 +4,12 @@ import { format, subDays } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 import { getMemberForCurrentUser } from '@/lib/actions/auth'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
-import { formatFinishTime, parseFinishTime } from '@/lib/member-record-match'
+import {
+  formatFinishTime,
+  joinRecordMatchPrizes,
+  parseFinishTime,
+  splitRecordMatchPrizes,
+} from '@/lib/member-record-match'
 import {
   formatMarathonDistanceLabel,
   normalizeMarathonDistances,
@@ -34,6 +39,13 @@ export type RecordMatchEntry = {
   isMine: boolean
 }
 
+export type RecordMatchWinner = {
+  memberId: string
+  memberName: string
+  prizeIndex: number
+  prize: string
+}
+
 export type RecordMatchEvent = {
   id: string
   marathonEventId: string
@@ -43,8 +55,12 @@ export type RecordMatchEvent = {
   distance: MarathonDistanceFilter | null
   distanceLabel: string | null
   prize: string
+  prizes: string[]
   note: string
+  winners: RecordMatchWinner[]
   createdByMe: boolean
+  canEdit: boolean
+  canSelectWinners: boolean
   canWriteActual: boolean
   participantCount: number
   mine: RecordMatchEntry | null
@@ -59,6 +75,8 @@ export type RecordMatchEvent = {
 
 const MISSING_TABLE_HINT =
   '기록 맞추기 테이블이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match.sql 을 실행해주세요.'
+const MISSING_WINNERS_HINT =
+  '당첨자 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match-winners.sql 을 실행해주세요.'
 
 const DISTANCES = new Set<MarathonDistanceFilter>(['5km', '10km', 'half', 'full'])
 
@@ -68,6 +86,34 @@ function isMissingTable(message: string) {
     message.includes('does not exist') ||
     message.includes('Could not find')
   )
+}
+
+function isMissingWinnersColumn(message: string) {
+  return message.includes('winners')
+}
+
+function parseWinnerRows(
+  raw: unknown,
+  prizes: string[],
+  nameByMemberId: Map<string, string>,
+): RecordMatchWinner[] {
+  if (!Array.isArray(raw)) return []
+  const winners: RecordMatchWinner[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const memberId = String((row as { memberId?: unknown }).memberId ?? '').trim()
+    const prizeIndex = Number((row as { prizeIndex?: unknown }).prizeIndex)
+    if (!memberId || !Number.isInteger(prizeIndex) || prizeIndex < 0) continue
+    const prize = prizes[prizeIndex] ?? prizes[0] ?? ''
+    if (!prize) continue
+    winners.push({
+      memberId,
+      memberName: nameByMemberId.get(memberId) ?? '회원',
+      prizeIndex,
+      prize,
+    })
+  }
+  return winners.sort((a, b) => a.prizeIndex - b.prizeIndex)
 }
 
 async function db() {
@@ -162,11 +208,19 @@ export async function getRecordMatchBoard(): Promise<{
     }
   })
 
-  const eventResult = await supabase
+  let eventResult = await supabase
     .from('member_record_match_events')
-    .select('id, marathon_event_id, distance, prize, note, created_by, created_at')
+    .select('id, marathon_event_id, distance, prize, note, winners, created_by, created_at')
     .order('created_at', { ascending: false })
     .limit(30)
+
+  if (eventResult.error && isMissingWinnersColumn(eventResult.error.message)) {
+    eventResult = await supabase
+      .from('member_record_match_events')
+      .select('id, marathon_event_id, distance, prize, note, created_by, created_at')
+      .order('created_at', { ascending: false })
+      .limit(30)
+  }
 
   if (eventResult.error) {
     return {
@@ -249,6 +303,9 @@ export async function getRecordMatchBoard(): Promise<{
     const ranking = entries
       .filter((entry) => entry.gapSeconds != null)
       .sort((a, b) => (a.gapSeconds ?? 0) - (b.gapSeconds ?? 0))
+    const prizes = splitRecordMatchPrizes(String(row.prize ?? ''))
+    const nameByMemberId = new Map(entries.map((entry) => [entry.memberId, entry.authorName]))
+    const canManage = profile.role === 'admin' || row.created_by === profile.id
     return {
       id: String(row.id),
       marathonEventId: String(row.marathon_event_id),
@@ -258,9 +315,17 @@ export async function getRecordMatchBoard(): Promise<{
       distance,
       distanceLabel: distance ? formatMarathonDistanceLabel(distance) : null,
       prize: String(row.prize ?? ''),
+      prizes,
       note: String(row.note ?? ''),
+      winners: parseWinnerRows(
+        'winners' in row ? row.winners : [],
+        prizes,
+        nameByMemberId,
+      ),
       createdByMe: row.created_by === profile.id,
-      canWriteActual: profile.role === 'admin' || row.created_by === profile.id,
+      canEdit: canManage,
+      canSelectWinners: canManage,
+      canWriteActual: canManage,
       participantCount: entries.length,
       mine: entries.find((entry) => entry.isMine) ?? null,
       ranking,
@@ -283,29 +348,95 @@ export async function getRecordMatchBoard(): Promise<{
   }
 }
 
+function normalizePrizeInput(input: {
+  prize?: string
+  prizes?: string[]
+}): { prize: string } | { error: string } {
+  const fromList = Array.isArray(input.prizes)
+    ? joinRecordMatchPrizes(input.prizes)
+    : ''
+  const prize = (fromList || input.prize || '').trim()
+  if (!prize) return { error: '상품을 입력해주세요.' }
+  if (prize.length > 400) return { error: '상품은 합쳐서 400자까지 입력할 수 있습니다.' }
+  const prizes = splitRecordMatchPrizes(prize)
+  if (prizes.some((item) => item.length > 80)) {
+    return { error: '상품 하나는 80자까지 입력할 수 있습니다.' }
+  }
+  return { prize: joinRecordMatchPrizes(prizes) }
+}
+
 export async function createRecordMatchEvent(input: {
   marathonEventId: string
   distance?: string | null
-  prize: string
+  prize?: string
+  prizes?: string[]
   note?: string
-}): Promise<{ error?: string }> {
+}): Promise<{ id?: string; error?: string }> {
   const profile = await getDashboardProfile()
   if (!profile || !isStaff(profile.role)) return { error: '강사 또는 관리자만 이벤트를 만들 수 있습니다.' }
 
-  const prize = input.prize.trim()
   if (!input.marathonEventId) return { error: '대회를 선택해주세요.' }
-  if (!prize) return { error: '상품을 입력해주세요.' }
-  if (prize.length > 80) return { error: '상품은 80자까지 입력할 수 있습니다.' }
+  const prizeResult = normalizePrizeInput(input)
+  if ('error' in prizeResult) return { error: prizeResult.error }
 
   const distance = asDistance(input.distance)
   const supabase = await db()
-  const { error } = await supabase.from('member_record_match_events').insert({
-    marathon_event_id: input.marathonEventId,
-    distance,
-    prize,
-    note: input.note?.trim().slice(0, 300) ?? '',
-    created_by: profile.id,
-  })
+  const { data, error } = await supabase
+    .from('member_record_match_events')
+    .insert({
+      marathon_event_id: input.marathonEventId,
+      distance,
+      prize: prizeResult.prize,
+      note: input.note?.trim().slice(0, 300) ?? '',
+      created_by: profile.id,
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    return { error: isMissingTable(error.message) ? MISSING_TABLE_HINT : error.message }
+  }
+  revalidate()
+  return { id: data?.id ? String(data.id) : undefined }
+}
+
+export async function updateRecordMatchEvent(input: {
+  eventId: string
+  distance?: string | null
+  prize?: string
+  prizes?: string[]
+  note?: string
+}): Promise<{ error?: string }> {
+  const profile = await getDashboardProfile()
+  if (!profile) return { error: '로그인이 필요합니다.' }
+  if (!input.eventId) return { error: '이벤트를 찾지 못했습니다.' }
+
+  const prizeResult = normalizePrizeInput(input)
+  if ('error' in prizeResult) return { error: prizeResult.error }
+
+  const supabase = await db()
+  const existing = await supabase
+    .from('member_record_match_events')
+    .select('id, created_by')
+    .eq('id', input.eventId)
+    .maybeSingle()
+  if (existing.error) {
+    return { error: isMissingTable(existing.error.message) ? MISSING_TABLE_HINT : existing.error.message }
+  }
+  if (!existing.data) return { error: '이벤트를 찾지 못했습니다.' }
+
+  const canEdit =
+    profile.role === 'admin' || existing.data.created_by === profile.id
+  if (!canEdit) return { error: '작성자 또는 관리자만 수정할 수 있습니다.' }
+
+  const { error } = await supabase
+    .from('member_record_match_events')
+    .update({
+      distance: asDistance(input.distance),
+      prize: prizeResult.prize,
+      note: input.note?.trim().slice(0, 300) ?? '',
+    })
+    .eq('id', input.eventId)
 
   if (error) {
     return { error: isMissingTable(error.message) ? MISSING_TABLE_HINT : error.message }
@@ -400,6 +531,91 @@ export async function deleteRecordMatchEvent(eventId: string): Promise<{ error?:
   const supabase = await db()
   const { error } = await supabase.from('member_record_match_events').delete().eq('id', eventId)
   if (error) return { error: error.message }
+  revalidate()
+  return {}
+}
+
+export async function setRecordMatchWinners(input: {
+  eventId: string
+  winners: Array<{ memberId: string; prizeIndex: number }>
+}): Promise<{ error?: string }> {
+  const profile = await getDashboardProfile()
+  if (!profile) return { error: '로그인이 필요합니다.' }
+  if (!input.eventId) return { error: '이벤트를 찾지 못했습니다.' }
+
+  const supabase = await db()
+  const existing = await supabase
+    .from('member_record_match_events')
+    .select('id, created_by, prize')
+    .eq('id', input.eventId)
+    .maybeSingle()
+  if (existing.error) {
+    return {
+      error: isMissingTable(existing.error.message)
+        ? MISSING_TABLE_HINT
+        : existing.error.message,
+    }
+  }
+  if (!existing.data) return { error: '이벤트를 찾지 못했습니다.' }
+
+  const canSelect =
+    profile.role === 'admin' || existing.data.created_by === profile.id
+  if (!canSelect) return { error: '작성자 또는 관리자만 당첨자를 선정할 수 있습니다.' }
+
+  const prizes = splitRecordMatchPrizes(String(existing.data.prize ?? ''))
+  if (prizes.length === 0) return { error: '상품이 없어 당첨자를 선정할 수 없습니다.' }
+
+  const entries = await supabase
+    .from('member_record_match_entries')
+    .select('member_id')
+    .eq('event_id', input.eventId)
+  if (entries.error) {
+    return {
+      error: isMissingTable(entries.error.message)
+        ? MISSING_TABLE_HINT
+        : entries.error.message,
+    }
+  }
+
+  const memberIds = new Set(
+    (entries.data ?? []).map((row) => String(row.member_id)),
+  )
+  const cleaned: Array<{ memberId: string; prizeIndex: number }> = []
+  const usedPrize = new Set<number>()
+  const usedMember = new Set<string>()
+
+  for (const winner of input.winners) {
+    const memberId = winner.memberId.trim()
+    const prizeIndex = Number(winner.prizeIndex)
+    if (!memberId || !memberIds.has(memberId)) {
+      return { error: '참여자만 당첨자로 선정할 수 있습니다.' }
+    }
+    if (!Number.isInteger(prizeIndex) || prizeIndex < 0 || prizeIndex >= prizes.length) {
+      return { error: '상품 등수가 올바르지 않습니다.' }
+    }
+    if (usedPrize.has(prizeIndex)) {
+      return { error: '같은 등수에 두 명을 선정할 수 없습니다.' }
+    }
+    if (usedMember.has(memberId)) {
+      return { error: '한 명이 여러 등수를 받을 수 없습니다.' }
+    }
+    usedPrize.add(prizeIndex)
+    usedMember.add(memberId)
+    cleaned.push({ memberId, prizeIndex })
+  }
+
+  cleaned.sort((a, b) => a.prizeIndex - b.prizeIndex)
+
+  const { error } = await supabase
+    .from('member_record_match_events')
+    .update({ winners: cleaned })
+    .eq('id', input.eventId)
+
+  if (error) {
+    if (isMissingWinnersColumn(error.message)) return { error: MISSING_WINNERS_HINT }
+    return { error: isMissingTable(error.message) ? MISSING_TABLE_HINT : error.message }
+  }
+
   revalidate()
   return {}
 }

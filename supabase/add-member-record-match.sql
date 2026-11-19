@@ -7,9 +7,13 @@ CREATE TABLE IF NOT EXISTS public.member_record_match_events (
   distance TEXT,
   prize TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
+  winners JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE public.member_record_match_events
+  ADD COLUMN IF NOT EXISTS winners JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS member_record_match_events_marathon_idx
   ON public.member_record_match_events (marathon_event_id, created_at DESC);
@@ -55,6 +59,12 @@ CREATE POLICY member_record_match_events_insert ON public.member_record_match_ev
         AND p.role IN ('admin', 'coach', 'instructor')
     )
   );
+
+DROP POLICY IF EXISTS member_record_match_events_update ON public.member_record_match_events;
+CREATE POLICY member_record_match_events_update ON public.member_record_match_events
+  FOR UPDATE TO authenticated
+  USING (created_by = auth.uid() OR public.is_admin())
+  WITH CHECK (created_by = auth.uid() OR public.is_admin());
 
 DROP POLICY IF EXISTS member_record_match_events_delete ON public.member_record_match_events;
 CREATE POLICY member_record_match_events_delete ON public.member_record_match_events

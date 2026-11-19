@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import { MemberRecordMatchPanel } from '@/components/dashboard/member-record-match-panel'
 import { EventNewMark } from '@/components/dashboard/event-new-mark'
 import { PortalViewerProvider } from '@/components/dashboard/portal-seen'
@@ -12,8 +13,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { PortalFeedKeys } from '@/lib/actions/portal-updates'
+import { EVENT_MATCH_QUERY } from '@/lib/event-match-share'
 import { PORTAL_FEED_EVENT, PORTAL_ITEMS_SEEN_EVENT, unseenItemIds } from '@/lib/portal-item-seen'
 import { cn } from '@/lib/utils'
+
+function readEventMatchIdFromLocation() {
+  if (typeof window === 'undefined') return null
+  return new URLSearchParams(window.location.search).get(EVENT_MATCH_QUERY)?.trim() || null
+}
 
 function EventIcon() {
   const rawId = useId().replace(/:/g, '')
@@ -48,7 +55,10 @@ function EventIcon() {
 }
 
 export function PortalHeaderEvent({ className }: { className?: string }) {
+  const router = useRouter()
+  const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  const [focusEventId, setFocusEventId] = useState<string | null>(null)
   const [viewerId, setViewerId] = useState<string | null>(null)
   const [eventKeys, setEventKeys] = useState<string[]>([])
   const [seenTick, setSeenTick] = useState(0)
@@ -69,7 +79,39 @@ export function PortalHeaderEvent({ className }: { className?: string }) {
     }
   }, [])
 
+  useEffect(() => {
+    const openFromQuery = () => {
+      const eventId = readEventMatchIdFromLocation()
+      if (!eventId) return
+      setFocusEventId(eventId)
+      setOpen(true)
+    }
+    openFromQuery()
+    window.addEventListener('popstate', openFromQuery)
+    return () => window.removeEventListener('popstate', openFromQuery)
+  }, [])
+
+  function clearEventMatchQuery() {
+    if (!readEventMatchIdFromLocation()) return
+    const next = new URLSearchParams(window.location.search)
+    next.delete(EVENT_MATCH_QUERY)
+    const query = next.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next)
+    if (!next) {
+      setFocusEventId(null)
+      clearEventMatchQuery()
+    }
+  }
+
   const unread = viewerId ? unseenItemIds(viewerId, eventKeys).length > 0 : false
+  const sharePath =
+    pathname.startsWith('/dashboard/my') || pathname.startsWith('/dashboard/running-portal')
+      ? pathname
+      : '/dashboard/running-portal'
 
   return (
     <>
@@ -93,7 +135,7 @@ export function PortalHeaderEvent({ className }: { className?: string }) {
         ) : null}
       </button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent
           mobileSheet
           showCloseButton
@@ -107,7 +149,12 @@ export function PortalHeaderEvent({ className }: { className?: string }) {
           </DialogHeader>
           <div className="px-4 py-4">
             <PortalViewerProvider viewerId={viewerId}>
-              {open ? <MemberRecordMatchPanel /> : null}
+              {open ? (
+                <MemberRecordMatchPanel
+                  focusEventId={focusEventId}
+                  sharePath={sharePath}
+                />
+              ) : null}
             </PortalViewerProvider>
           </div>
         </DialogContent>
