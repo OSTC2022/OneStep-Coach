@@ -8,12 +8,16 @@ CREATE TABLE IF NOT EXISTS public.member_record_match_events (
   prize TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
   winners JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_public BOOLEAN NOT NULL DEFAULT FALSE,
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE public.member_record_match_events
   ADD COLUMN IF NOT EXISTS winners JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE public.member_record_match_events
+  ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS member_record_match_events_marathon_idx
   ON public.member_record_match_events (marathon_event_id, created_at DESC);

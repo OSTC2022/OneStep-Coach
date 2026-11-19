@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
+import { PublicRecordMatchView } from '@/components/share/public-record-match-view'
 import { ShareRedirect } from '@/components/share/share-redirect'
+import { getPublicRecordMatchEvent } from '@/lib/actions/member-record-match-public'
 import { buildEventMatchPortalPath } from '@/lib/event-match-share'
 
 type PageProps = {
@@ -46,7 +48,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function EventSharePage({ params }: PageProps) {
   const { eventId } = await params
-  const href = buildEventMatchPortalPath(eventId.trim(), '/dashboard/running-portal')
+  const id = eventId.trim()
+  const publicResult = await getPublicRecordMatchEvent(id)
+
+  if (publicResult.event) {
+    return <PublicRecordMatchView initialEvent={publicResult.event} />
+  }
+
+  const href = buildEventMatchPortalPath(id, '/dashboard/running-portal')
 
   return (
     <main className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#070d18] px-6 text-center text-white">
@@ -57,6 +66,9 @@ export default async function EventSharePage({ params }: PageProps) {
       <BrandPulseAppIcon glow className="relative h-20 w-20" />
       <p className="relative mt-4 text-3xl font-black tracking-tight">원스텝</p>
       <p className="relative mt-3 text-sm text-white/60">원스텝 트레이닝센터</p>
+      {publicResult.error ? (
+        <p className="relative mt-4 max-w-xs text-xs text-white/45">{publicResult.error}</p>
+      ) : null}
       <ShareRedirect href={href} />
     </main>
   )

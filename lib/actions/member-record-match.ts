@@ -57,6 +57,7 @@ export type RecordMatchEvent = {
   prize: string
   prizes: string[]
   note: string
+  isPublic: boolean
   winners: RecordMatchWinner[]
   createdByMe: boolean
   canEdit: boolean
@@ -77,6 +78,8 @@ const MISSING_TABLE_HINT =
   '기록 맞추기 테이블이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match.sql 을 실행해주세요.'
 const MISSING_WINNERS_HINT =
   '당첨자 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match-winners.sql 을 실행해주세요.'
+const MISSING_PUBLIC_HINT =
+  '공개 이벤트 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match-public.sql 을 실행해주세요.'
 
 const DISTANCES = new Set<MarathonDistanceFilter>(['5km', '10km', 'half', 'full'])
 
@@ -90,6 +93,10 @@ function isMissingTable(message: string) {
 
 function isMissingWinnersColumn(message: string) {
   return message.includes('winners')
+}
+
+function isMissingPublicColumn(message: string) {
+  return message.includes('is_public')
 }
 
 function parseWinnerRows(
@@ -210,9 +217,19 @@ export async function getRecordMatchBoard(): Promise<{
 
   let eventResult = await supabase
     .from('member_record_match_events')
-    .select('id, marathon_event_id, distance, prize, note, winners, created_by, created_at')
+    .select(
+      'id, marathon_event_id, distance, prize, note, winners, is_public, created_by, created_at',
+    )
     .order('created_at', { ascending: false })
     .limit(30)
+
+  if (eventResult.error && isMissingPublicColumn(eventResult.error.message)) {
+    eventResult = await supabase
+      .from('member_record_match_events')
+      .select('id, marathon_event_id, distance, prize, note, winners, created_by, created_at')
+      .order('created_at', { ascending: false })
+      .limit(30)
+  }
 
   if (eventResult.error && isMissingWinnersColumn(eventResult.error.message)) {
     eventResult = await supabase
@@ -317,6 +334,7 @@ export async function getRecordMatchBoard(): Promise<{
       prize: String(row.prize ?? ''),
       prizes,
       note: String(row.note ?? ''),
+      isPublic: Boolean('is_public' in row ? row.is_public : false),
       winners: parseWinnerRows(
         'winners' in row ? row.winners : [],
         prizes,
@@ -371,6 +389,7 @@ export async function createRecordMatchEvent(input: {
   prize?: string
   prizes?: string[]
   note?: string
+  isPublic?: boolean
 }): Promise<{ id?: string; error?: string }> {
   const profile = await getDashboardProfile()
   if (!profile || !isStaff(profile.role)) return { error: '강사 또는 관리자만 이벤트를 만들 수 있습니다.' }
@@ -380,6 +399,7 @@ export async function createRecordMatchEvent(input: {
   if ('error' in prizeResult) return { error: prizeResult.error }
 
   const distance = asDistance(input.distance)
+  const isPublic = Boolean(input.isPublic)
   const supabase = await db()
   const { data, error } = await supabase
     .from('member_record_match_events')
@@ -388,12 +408,36 @@ export async function createRecordMatchEvent(input: {
       distance,
       prize: prizeResult.prize,
       note: input.note?.trim().slice(0, 300) ?? '',
+      is_public: isPublic,
       created_by: profile.id,
     })
     .select('id')
     .single()
 
   if (error) {
+    if (isMissingPublicColumn(error.message)) {
+      if (isPublic) return { error: MISSING_PUBLIC_HINT }
+      const fallback = await supabase
+        .from('member_record_match_events')
+        .insert({
+          marathon_event_id: input.marathonEventId,
+          distance,
+          prize: prizeResult.prize,
+          note: input.note?.trim().slice(0, 300) ?? '',
+          created_by: profile.id,
+        })
+        .select('id')
+        .single()
+      if (fallback.error) {
+        return {
+          error: isMissingTable(fallback.error.message)
+            ? MISSING_TABLE_HINT
+            : fallback.error.message,
+        }
+      }
+      revalidate()
+      return { id: fallback.data?.id ? String(fallback.data.id) : undefined }
+    }
     return { error: isMissingTable(error.message) ? MISSING_TABLE_HINT : error.message }
   }
   revalidate()
@@ -406,6 +450,7 @@ export async function updateRecordMatchEvent(input: {
   prize?: string
   prizes?: string[]
   note?: string
+  isPublic?: boolean
 }): Promise<{ error?: string }> {
   const profile = await getDashboardProfile()
   if (!profile) return { error: '로그인이 필요합니다.' }
@@ -429,16 +474,27 @@ export async function updateRecordMatchEvent(input: {
     profile.role === 'admin' || existing.data.created_by === profile.id
   if (!canEdit) return { error: '작성자 또는 관리자만 수정할 수 있습니다.' }
 
+  const payload: Record<string, unknown> = {
+    distance: asDistance(input.distance),
+    prize: prizeResult.prize,
+    note: input.note?.trim().slice(0, 300) ?? '',
+  }
+  if (typeof input.isPublic === 'boolean') {
+    if (!isStaff(profile.role)) {
+      return { error: '공개 설정은 강사 또는 관리자만 변경할 수 있습니다.' }
+    }
+    payload.is_public = input.isPublic
+  }
+
   const { error } = await supabase
     .from('member_record_match_events')
-    .update({
-      distance: asDistance(input.distance),
-      prize: prizeResult.prize,
-      note: input.note?.trim().slice(0, 300) ?? '',
-    })
+    .update(payload)
     .eq('id', input.eventId)
 
   if (error) {
+    if (isMissingPublicColumn(error.message) && typeof input.isPublic === 'boolean') {
+      return { error: MISSING_PUBLIC_HINT }
+    }
     return { error: isMissingTable(error.message) ? MISSING_TABLE_HINT : error.message }
   }
   revalidate()

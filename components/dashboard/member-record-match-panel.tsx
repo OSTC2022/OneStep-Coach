@@ -117,11 +117,13 @@ export function MemberRecordMatchPanel({
   const [distance, setDistance] = useState('')
   const [prizes, setPrizes] = useState<string[]>([''])
   const [note, setNote] = useState('')
+  const [isPublic, setIsPublic] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const [editDistance, setEditDistance] = useState('')
   const [editPrizes, setEditPrizes] = useState<string[]>([''])
   const [editNote, setEditNote] = useState('')
+  const [editIsPublic, setEditIsPublic] = useState(false)
   const [winnerDrafts, setWinnerDrafts] = useState<Record<string, string[]>>({})
   const [drafts, setDrafts] = useState<Record<string, { predicted: string; actual: string }>>({})
   const [actualDrafts, setActualDrafts] = useState<Record<string, string>>({})
@@ -200,6 +202,7 @@ export function MemberRecordMatchPanel({
       distance: distanceValue || null,
       prizes,
       note,
+      isPublic,
     })
     setSaving(false)
     if (result.error) {
@@ -208,9 +211,12 @@ export function MemberRecordMatchPanel({
     }
     setPrizes([''])
     setNote('')
+    setIsPublic(false)
     setDistance('')
     setComposerOpen(false)
-    toast.success('기록 맞추기 이벤트를 열었습니다.')
+    toast.success(
+      isPublic ? '공개 이벤트를 열었습니다.' : '기록 맞추기 이벤트를 열었습니다.',
+    )
     if (result.id) void copyEventLink(result.id)
     await reload()
   }
@@ -220,6 +226,7 @@ export function MemberRecordMatchPanel({
     setEditDistance(item.distance ?? '')
     setEditPrizes(item.prizes.length > 0 ? item.prizes : [item.prize || ''])
     setEditNote(item.note)
+    setEditIsPublic(item.isPublic)
     setComposerOpen(false)
   }
 
@@ -228,6 +235,7 @@ export function MemberRecordMatchPanel({
     setEditDistance('')
     setEditPrizes([''])
     setEditNote('')
+    setEditIsPublic(false)
   }
 
   async function handleUpdate(event: FormEvent, eventId: string) {
@@ -239,6 +247,7 @@ export function MemberRecordMatchPanel({
       distance: editDistance || null,
       prizes: editPrizes,
       note: editNote,
+      isPublic: editIsPublic,
     })
     setSaving(false)
     if (result.error) {
@@ -441,6 +450,20 @@ export function MemberRecordMatchPanel({
             className="w-full resize-y rounded-lg border border-border/80 bg-black/40 px-3 py-2 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
             placeholder="예상 기록 마감, 상품 받는 방법"
           />
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-lime-500/20 bg-lime-500/5 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(event) => setIsPublic(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-primary"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-xs font-semibold text-lime-100">공개 이벤트</span>
+              <span className="block text-[11px] leading-relaxed text-muted-foreground">
+                링크를 받은 사람은 로그인 없이 이름·비밀번호로 댓글할 수 있습니다.
+              </span>
+            </span>
+          </label>
           <button
             type="submit"
             disabled={saving || visibleRaces.length === 0}
@@ -476,6 +499,11 @@ export function MemberRecordMatchPanel({
                   <div className="min-w-0">
                     <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                       <span className="min-w-0 truncate">{item.raceTitle}</span>
+                      {item.isPublic ? (
+                        <span className="shrink-0 rounded border border-lime-400/40 bg-lime-500/10 px-1.5 py-0.5 text-[10px] font-bold text-lime-200">
+                          공개
+                        </span>
+                      ) : null}
                       {freshMatchIds.includes(`match:${item.id}`) ? <EventNewMark /> : null}
                     </p>
                     <p className="mt-1 text-[11px] text-primary/80">
@@ -565,6 +593,20 @@ export function MemberRecordMatchPanel({
                       className="w-full resize-y rounded-lg border border-border/80 bg-black/40 px-3 py-2 text-base text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
                       placeholder="예상 기록 마감, 상품 받는 방법"
                     />
+                    <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-lime-500/20 bg-lime-500/5 px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        checked={editIsPublic}
+                        onChange={(event) => setEditIsPublic(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-primary"
+                      />
+                      <span className="space-y-0.5">
+                        <span className="block text-xs font-semibold text-lime-100">공개 이벤트</span>
+                        <span className="block text-[11px] leading-relaxed text-muted-foreground">
+                          링크를 받은 사람은 로그인 없이 이름·비밀번호로 댓글할 수 있습니다.
+                        </span>
+                      </span>
+                    </label>
                     <div className="flex gap-2">
                       <button
                         type="button"
