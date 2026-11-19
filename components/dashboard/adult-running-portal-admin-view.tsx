@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MemberPortalBrandHeader, MemberRunningLeagueRankings } from '@/components/dashboard/member-running-league-rankings'
 import { MemberRunningLeagueTrainingSchedule } from '@/components/dashboard/member-running-league-training-schedule'
 import { MemberMarathonSchedule } from '@/components/dashboard/member-marathon-schedule'
 import { MemberPortalNoticePanel } from '@/components/dashboard/member-portal-notice-panel'
 import { MemberPortalAccordionMenus } from '@/components/dashboard/member-portal-accordion-menus'
 import { CarbCalculator } from '@/components/carb-calculator/carb-calculator'
+import { MemberEventBoard } from '@/components/dashboard/member-event-board'
 import { AdultRunningPortalSettingsPanel } from '@/components/dashboard/adult-running-portal-settings-panel'
 import { RunningPortalManageLink } from '@/components/dashboard/running-portal-manage-link'
 import type {
@@ -17,6 +18,7 @@ import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
 import type { CenterMarathonScheduleBundle } from '@/lib/actions/center-marathon-schedule'
 import { MEMBER_PORTAL_SHELL_CLASS } from '@/lib/running-league/member-portal-layout'
+import { trainingContentKeys } from '@/lib/portal-update-keys'
 import { cn } from '@/lib/utils'
 
 type AdultRunningPortalAdminViewProps = {
@@ -59,6 +61,15 @@ export function AdultRunningPortalAdminView({
     centerTrainingSchedule.previousWeekDays
   const trainingScheduleNextWeekDays = centerTrainingSchedule.nextWeekDays
   const trainingScheduleReady = centerTrainingSchedule.tableReady ?? true
+  const trainingUpdateIds = useMemo(
+    () =>
+      trainingContentKeys([
+        trainingScheduleDays,
+        trainingSchedulePreviousWeekDays,
+        trainingScheduleNextWeekDays,
+      ]),
+    [trainingScheduleDays, trainingScheduleNextWeekDays, trainingSchedulePreviousWeekDays],
+  )
 
   const [draft, setDraft] = useState(() => draftFromSettings(portalSettings))
   const lastSavedFingerprintRef = useRef<string | null>(null)
@@ -102,6 +113,7 @@ export function AdultRunningPortalAdminView({
           action={<RunningPortalManageLink compact />}
         />
         <MemberPortalAccordionMenus
+          trainingUpdateIds={trainingUpdateIds}
           hasNotice={Boolean(draft.notice.trim())}
           hasMarathon
           notice={<MemberPortalNoticePanel notice={draft.notice || null} contentOnly />}
@@ -117,6 +129,7 @@ export function AdultRunningPortalAdminView({
               scheduleAudience="adult_running"
               embedded
               contentOnly
+              trackPortalReads
             />
           }
           marathon={
@@ -132,6 +145,7 @@ export function AdultRunningPortalAdminView({
             />
           }
           weight={<CarbCalculator embedded />}
+          board={<MemberEventBoard />}
         />
         <MemberRunningLeagueRankings
           pb5kLeaderboard={runningLeagueHome.pb5kLeaderboard}

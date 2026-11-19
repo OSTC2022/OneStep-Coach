@@ -362,7 +362,7 @@ export function CarbCalculator({
 
         <fieldset>
           <legend className="text-sm font-medium text-foreground">식사 횟수</legend>
-          <div className="mt-2 grid grid-cols-2 gap-2">
+          <div className="mt-2 grid grid-cols-3 gap-2">
             {CARB_MEAL_PLANS.map((item) => {
               const selected = settings.meals === item.id
               return (

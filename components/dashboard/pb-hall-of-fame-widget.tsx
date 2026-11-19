@@ -49,14 +49,14 @@ function storageKeyForMember(memberId?: string | null) {
     : `${POSITION_STORAGE_PREFIX}:guest`
 }
 
-/** 기본 위치: 돌림판 왼쪽 옆 */
+/** 기본 위치: 돌림판·이벤트 아이콘 왼쪽 */
 function defaultPositionNearRoulette(): StoredPosition {
   if (typeof window === 'undefined') return { x: 24, y: 72 }
   const roulette = document.getElementById('portal-header-roulette')
   if (roulette) {
     const rect = roulette.getBoundingClientRect()
     return clampPosition(
-      rect.left - BUTTON_SIZE - 10,
+      rect.left - BUTTON_SIZE - 78,
       rect.top + rect.height / 2 - BUTTON_SIZE / 2,
     )
   }

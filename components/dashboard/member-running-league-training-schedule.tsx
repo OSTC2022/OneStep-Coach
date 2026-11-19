@@ -14,6 +14,9 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { EventNewMark } from '@/components/dashboard/event-new-mark'
+import { useMarkPortalItemsRead } from '@/components/dashboard/portal-seen'
+import { trainingContentKey, trainingContentKeys } from '@/lib/portal-update-keys'
 import {
   listMembersForTrainingScheduleStaffSignup,
   staffAddCenterRunningTrainingScheduleSignup,
@@ -95,6 +98,8 @@ type MemberRunningLeagueTrainingScheduleProps = {
   embedded?: boolean
   /** 카드 헤더 없이 본문만 (툴바 팝업용) */
   contentOnly?: boolean
+  /** 포털 훈련 일정 탭에서만 읽음 처리 */
+  trackPortalReads?: boolean
   title?: string
   className?: string
 }
@@ -136,6 +141,7 @@ export function MemberRunningLeagueTrainingSchedule({
   scheduleAudience = 'adult_running',
   embedded = false,
   contentOnly = false,
+  trackPortalReads = false,
   title = '훈련 일정',
   className,
 }: MemberRunningLeagueTrainingScheduleProps) {
@@ -214,6 +220,11 @@ export function MemberRunningLeagueTrainingSchedule({
       Boolean(day.schedule_date) ||
       Boolean(day.training_summary?.trim()),
   )
+  const trainingIds = useMemo(
+    () => trainingContentKeys([scheduleDays, pastScheduleDays, upcomingScheduleDays]),
+    [pastScheduleDays, scheduleDays, upcomingScheduleDays],
+  )
+  const freshTrainingIds = useMarkPortalItemsRead(trackPortalReads ? trainingIds : [])
   const hasNextWeekSchedule = fullNextWeekDays.some(
     (day) =>
       isVotableDay(day) ||
@@ -542,6 +553,7 @@ export function MemberRunningLeagueTrainingSchedule({
         <ScheduleDayRow
           key={day.id}
           day={day}
+          isNew={freshTrainingIds.includes(trainingContentKey(day) ?? '')}
           pending={pending && pendingDayId === day.id}
           showActions={
             (options.participate && (!readOnly || canStaffProxySignup)) ||
@@ -1044,6 +1056,7 @@ function toggleDisabled({
 
 function ScheduleDayRow({
   day,
+  isNew = false,
   pending,
   showActions,
   canSelfSignup,
@@ -1055,6 +1068,7 @@ function ScheduleDayRow({
   onToggleSignup,
 }: {
   day: RunningLeagueTrainingScheduleDayView
+  isNew?: boolean
   pending: boolean
   showActions: boolean
   canSelfSignup: boolean
@@ -1083,8 +1097,9 @@ function ScheduleDayRow({
           ) : null}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium leading-snug text-zinc-100">
-            {day.training_summary}
+          <span className="flex items-center gap-1.5 text-sm font-medium leading-snug text-zinc-100">
+            <span className="min-w-0">{day.training_summary}</span>
+            {isNew ? <EventNewMark /> : null}
           </span>
           {formatTrainingScheduleTimeListLabel(day.training_time) ? (
             <span className="mt-0.5 block text-[11px] tabular-nums text-lime-200/80">

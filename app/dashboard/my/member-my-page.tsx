@@ -4,6 +4,7 @@ import {
   Children,
   type ReactNode,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -31,6 +32,7 @@ import {
 } from '@/components/dashboard/member-running-league-training-schedule'
 import { MemberMarathonSchedule } from '@/components/dashboard/member-marathon-schedule'
 import { CarbCalculator } from '@/components/carb-calculator/carb-calculator'
+import { MemberEventBoard } from '@/components/dashboard/member-event-board'
 import type { MemberRunningLeagueHome } from '@/lib/actions/running-league'
 import type { AdultRunningPortalDisplaySettings } from '@/lib/actions/adult-running-portal-settings'
 import type { CenterRunningTrainingScheduleBundle } from '@/lib/actions/center-running-training-schedule'
@@ -43,6 +45,7 @@ import { formatPackageExpiryDateLabel } from '@/lib/session-package-utils'
 import { MEMBER_PORTAL_SHELL_CLASS } from '@/lib/running-league/member-portal-layout'
 import { isAdultRunningSport } from '@/lib/adult-member-programs'
 import { isYouthAthleticsClassSport } from '@/lib/youth-athletics-class'
+import { trainingContentKeys } from '@/lib/portal-update-keys'
 import { cn } from '@/lib/utils'
 
 interface MemberMyPageProps {
@@ -184,6 +187,15 @@ export function MemberMyPage({
     centerTrainingSchedule?.previousWeekDays
   const trainingScheduleNextWeekDays = centerTrainingSchedule?.nextWeekDays
   const trainingScheduleReady = centerTrainingSchedule?.tableReady ?? true
+  const trainingUpdateIds = useMemo(
+    () =>
+      trainingContentKeys([
+        trainingScheduleDays,
+        trainingSchedulePreviousWeekDays,
+        trainingScheduleNextWeekDays,
+      ]),
+    [trainingScheduleDays, trainingScheduleNextWeekDays, trainingSchedulePreviousWeekDays],
+  )
   const canStaffProxySignup =
     canStaffManageAttendance ||
     role === 'admin' ||
@@ -228,6 +240,7 @@ export function MemberMyPage({
             }
           />
           <MemberPortalAccordionMenus
+            trainingUpdateIds={trainingUpdateIds}
             hasNotice={Boolean(portalDisplay?.notice?.trim())}
             hasMarathon={Boolean(marathonSchedule)}
             notice={
@@ -246,6 +259,7 @@ export function MemberMyPage({
                 scheduleAudience="adult_running"
                 embedded
                 contentOnly
+                trackPortalReads
               />
             }
             marathon={
@@ -269,6 +283,7 @@ export function MemberMyPage({
                 profileHeightCm={member.height_cm}
               />
             }
+            board={<MemberEventBoard />}
           />
           {runningLeagueHome ? (
             <MemberRunningLeagueRankings

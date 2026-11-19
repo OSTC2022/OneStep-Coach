@@ -137,6 +137,7 @@ import {
   type AttendanceKingRow,
 } from '@/lib/running-league/attendance-king'
 import { MemberPortalHeroShell, PortalBrandTitleLockup } from '@/components/dashboard/member-portal-hero-shell'
+import { PortalHeaderEvent } from '@/components/dashboard/portal-header-event'
 import { MemberPortalHeaderRoulette } from '@/components/dashboard/portal-header-roulette'
 
 function filterRankedBySearch<R extends { memberId: string; memberName: string }>(
@@ -938,9 +939,10 @@ function MemberPortalBrandHeader({
           {action}
         </div>
 
-        {resolvedRoulette ? (
-          <div className="shrink-0 self-start pt-0.5">{resolvedRoulette}</div>
-        ) : null}
+        <div className="flex shrink-0 items-start gap-2 self-start pt-0.5">
+          <PortalHeaderEvent />
+          {resolvedRoulette}
+        </div>
       </div>
     </MemberPortalHeroShell>
   )

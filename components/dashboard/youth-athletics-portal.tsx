@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
+import { trainingContentKeys } from '@/lib/portal-update-keys'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import {
@@ -65,6 +66,10 @@ export function YouthAthleticsPortal({
   const nextWeekDays = centerTrainingSchedule?.nextWeekDays
   const tableReady = centerTrainingSchedule?.tableReady ?? true
   const visibleDays = (days ?? []).filter((day) => !day.is_hidden)
+  const trainingUpdateIds = useMemo(
+    () => trainingContentKeys([days, previousWeekDays, nextWeekDays]),
+    [days, nextWeekDays, previousWeekDays],
+  )
   const schoolLine = [member.school, member.grade].filter((value) => value?.trim()).join(' · ')
   const [primaryEvent1, setPrimaryEvent1] = useState(pbBundle?.primaryEvent1 ?? null)
   const [primaryEvent2, setPrimaryEvent2] = useState(pbBundle?.primaryEvent2 ?? null)
@@ -258,6 +263,7 @@ export function YouthAthleticsPortal({
       ) : null}
 
       <MemberPortalAccordionMenus
+        trainingUpdateIds={trainingUpdateIds}
         trainingLabel="육상선수반 스케줄"
         training={
           <MemberRunningLeagueTrainingSchedule
@@ -272,6 +278,7 @@ export function YouthAthleticsPortal({
             scheduleAudience="youth_athletics"
             embedded
             contentOnly
+            trackPortalReads
             title="육상선수반 스케줄"
           />
         }

@@ -21,7 +21,7 @@ export const CARB_MEAL_NOTE =
 
 export type CarbIntensityId = 'jog' | 'steady' | 'hard'
 export type CarbRunTime = 'morning' | 'afternoon' | 'evening'
-export type CarbMealPlan = '3' | 'snack'
+export type CarbMealPlan = '2' | '3' | 'snack'
 
 export type CarbRange = { min: number; max: number }
 
@@ -50,6 +50,7 @@ export const CARB_RUN_TIMES: { id: CarbRunTime; label: string }[] = [
 ]
 
 export const CARB_MEAL_PLANS: { id: CarbMealPlan; label: string }[] = [
+  { id: '2', label: '2끼' },
   { id: '3', label: '3끼' },
   { id: 'snack', label: '3끼+간식' },
 ]
@@ -61,6 +62,20 @@ export type CarbMealSlot = {
 }
 
 const MEAL_SLOTS: Record<CarbMealPlan, Record<CarbRunTime, CarbMealSlot[]>> = {
+  '2': {
+    morning: [
+      { id: 'breakfast', label: '아침', ratio: 60 },
+      { id: 'lunch', label: '점심', ratio: 40 },
+    ],
+    afternoon: [
+      { id: 'lunch', label: '점심', ratio: 55 },
+      { id: 'dinner', label: '저녁', ratio: 45 },
+    ],
+    evening: [
+      { id: 'lunch', label: '점심', ratio: 35 },
+      { id: 'dinner', label: '저녁', ratio: 65 },
+    ],
+  },
   '3': {
     morning: [
       { id: 'breakfast', label: '아침', ratio: 40 },
@@ -236,7 +251,7 @@ function isRunTime(value: string | null): value is CarbRunTime {
 }
 
 function isMealPlan(value: string | null): value is CarbMealPlan {
-  return value === '3' || value === 'snack'
+  return value === '2' || value === '3' || value === 'snack'
 }
 
 export function settingsToSearchParams(settings: CarbSettings): URLSearchParams {
