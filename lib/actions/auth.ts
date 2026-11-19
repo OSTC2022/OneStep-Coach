@@ -216,7 +216,11 @@ export async function signIn(
     // service role 미설정 시 SQL 트리거에만 의존
   }
 
-  return { redirectTo: getDefaultDashboardPath(appRole) }
+  const { getSafeNextPath } = await import('@/lib/auth/safe-next-path')
+  const nextRaw = (formData.get('next') as string | null)?.trim() ?? ''
+  return {
+    redirectTo: getSafeNextPath(nextRaw, getDefaultDashboardPath(appRole)),
+  }
 }
 
 export async function signOut() {

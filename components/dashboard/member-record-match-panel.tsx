@@ -185,7 +185,10 @@ export function MemberRecordMatchPanel({
     const url = buildEventMatchShareUrl(eventId, sharePath)
     try {
       await navigator.clipboard.writeText(url)
-      toast.success('이벤트 링크를 복사했습니다.')
+      toast.success('이벤트 링크를 복사했습니다.', {
+        description:
+          '카카오톡 등에서는 로그인 세션이 따로라 한 번 로그인하면 이벤트로 이동합니다.',
+      })
     } catch {
       toast.error('링크를 복사하지 못했습니다.', { description: url })
     }

@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { Suspense, useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { isRedirectError } from 'next/dist/client/components/redirect-error'
 import { requestPasswordReset, signIn } from '@/lib/actions/auth'
+import { getSafeNextPath } from '@/lib/auth/safe-next-path'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,7 +37,9 @@ type SignUpResult = {
   loginIdentifier?: string
 }
 
-export default function LoginPage() {
+function LoginPageInner() {
+  const searchParams = useSearchParams()
+  const nextPath = getSafeNextPath(searchParams.get('next'), '')
   const [tab, setTab] = useState('login')
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [signUpBirthDate, setSignUpBirthDate] = useState('')
@@ -352,6 +356,15 @@ export default function LoginPage() {
                 </form>
               ) : (
                 <form key="login-form" onSubmit={handleLoginSubmit} className="space-y-4">
+                  {nextPath ? (
+                    <input type="hidden" name="next" value={nextPath} />
+                  ) : null}
+                  {nextPath.includes('eventMatch=') ? (
+                    <p className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                      이벤트 링크로 들어왔습니다. 카카오톡 등 외부 앱에서는 로그인
+                      세션이 따로라서 한 번 로그인하면 해당 이벤트로 이동합니다.
+                    </p>
+                  ) : null}
                   <div className="space-y-2">
                     <Label htmlFor="login-email">이메일 또는 로그인 ID</Label>
                     <Input
@@ -590,5 +603,19 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-svh items-center justify-center p-4">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
   )
 }

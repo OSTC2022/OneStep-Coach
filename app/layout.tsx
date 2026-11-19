@@ -109,13 +109,41 @@ const portalFontVariables = [
   caveat.variable,
 ].join(' ')
 
+const SITE_DESCRIPTION =
+  '러닝 · 기록 · 함께 한 걸음. OneStep Training Center 회원 포털'
+
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+      'https://onesteptc.com',
+  ),
   title: {
     default: '원스텝',
     template: '%s · 원스텝',
   },
-  description: '회원, 수업, 출석 관리를 위한 OneStep Training Center',
+  description: SITE_DESCRIPTION,
   applicationName: '원스텝',
+  openGraph: {
+    title: '원스텝',
+    description: SITE_DESCRIPTION,
+    siteName: '원스텝',
+    locale: 'ko_KR',
+    type: 'website',
+    images: [
+      {
+        url: '/og-default.jpg',
+        width: 1200,
+        height: 630,
+        alt: '원스텝 OneStep Training Center',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: '원스텝',
+    description: SITE_DESCRIPTION,
+    images: ['/og-default.jpg'],
+  },
   appleWebApp: {
     capable: true,
     title: '원스텝',
@@ -124,7 +152,7 @@ export const metadata: Metadata = {
   formatDetection: {
     telephone: false,
   },
-    icons: {
+  icons: {
     icon: [
       { url: '/icons/icon-32.png?v=12', sizes: '32x32', type: 'image/png' },
       { url: '/favicon.ico?v=12', sizes: '48x48' },

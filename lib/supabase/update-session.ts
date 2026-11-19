@@ -24,6 +24,7 @@ import {
   applyRememberMeToSupabaseCookieOptions,
   getRememberMeFromCookieList,
 } from '@/lib/auth/remember-me'
+import { buildLoginRedirectUrl, getSafeNextPath } from '@/lib/auth/safe-next-path'
 
 const AUTH_STATUS_PATHS = ['/auth/pending', '/auth/rejected'] as const
 
@@ -282,6 +283,7 @@ export async function updateSession(request: NextRequest) {
     if (request.nextUrl.pathname === '/' && !user) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
+      url.search = ''
       return finalizeProxyResponse(
         request,
         NextResponse.redirect(url),
@@ -293,11 +295,17 @@ export async function updateSession(request: NextRequest) {
       request.nextUrl.pathname.startsWith('/dashboard') &&
       !user
     ) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/auth/login'
       return finalizeProxyResponse(
         request,
-        NextResponse.redirect(url),
+        NextResponse.redirect(
+          new URL(
+            buildLoginRedirectUrl(
+              request.nextUrl.pathname,
+              request.nextUrl.search,
+            ),
+            request.nextUrl.origin,
+          ),
+        ),
         staleSession || shouldSkipAuthLookup(request),
       )
     }
@@ -308,6 +316,7 @@ export async function updateSession(request: NextRequest) {
     ) {
       const url = request.nextUrl.clone()
       url.pathname = '/auth/login'
+      url.search = ''
       return finalizeProxyResponse(
         request,
         NextResponse.redirect(url),
@@ -374,7 +383,17 @@ export async function updateSession(request: NextRequest) {
 
       if (!canAccessPath(role, request.nextUrl.pathname)) {
         const url = request.nextUrl.clone()
-        url.pathname = getDefaultDashboardPath(role)
+        const hasEventMatch = url.searchParams.has('eventMatch')
+        if (hasEventMatch && canAccessPath(role, '/dashboard/my')) {
+          url.pathname = '/dashboard/my'
+        } else if (
+          hasEventMatch &&
+          canAccessPath(role, '/dashboard/running-portal')
+        ) {
+          url.pathname = '/dashboard/running-portal'
+        } else {
+          url.pathname = getDefaultDashboardPath(role)
+        }
         return finalizeProxyResponse(
           request,
           NextResponse.redirect(url),
@@ -388,8 +407,14 @@ export async function updateSession(request: NextRequest) {
       user
     ) {
       const role = await resolveUserSessionRole(supabase, user)
+      const nextPath = getSafeNextPath(
+        request.nextUrl.searchParams.get('next'),
+        getDefaultDashboardPath(role),
+      )
       const url = request.nextUrl.clone()
-      url.pathname = getDefaultDashboardPath(role)
+      const [pathname, search = ''] = nextPath.split('?')
+      url.pathname = pathname
+      url.search = search ? `?${search}` : ''
       return finalizeProxyResponse(
         request,
         NextResponse.redirect(url),
