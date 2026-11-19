@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS public.member_record_match_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   marathon_event_id UUID NOT NULL REFERENCES public.center_marathon_events(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT '',
   distance TEXT,
   prize TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
@@ -18,6 +19,9 @@ ALTER TABLE public.member_record_match_events
 
 ALTER TABLE public.member_record_match_events
   ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE public.member_record_match_events
+  ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS member_record_match_events_marathon_idx
   ON public.member_record_match_events (marathon_event_id, created_at DESC);

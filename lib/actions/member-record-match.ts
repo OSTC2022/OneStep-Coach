@@ -49,6 +49,7 @@ export type RecordMatchWinner = {
 export type RecordMatchEvent = {
   id: string
   marathonEventId: string
+  title: string
   raceTitle: string
   raceDate: string
   location: string
@@ -80,6 +81,8 @@ const MISSING_WINNERS_HINT =
   '당첨자 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match-winners.sql 을 실행해주세요.'
 const MISSING_PUBLIC_HINT =
   '공개 이벤트 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match-public.sql 을 실행해주세요.'
+const MISSING_TITLE_HINT =
+  '제목 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-record-match-title.sql 을 실행해주세요.'
 
 const DISTANCES = new Set<MarathonDistanceFilter>(['5km', '10km', 'half', 'full'])
 
@@ -97,6 +100,14 @@ function isMissingWinnersColumn(message: string) {
 
 function isMissingPublicColumn(message: string) {
   return message.includes('is_public')
+}
+
+function isMissingTitleColumn(message: string) {
+  return message.includes('title') && !message.includes('center_marathon')
+}
+
+function normalizeEventTitle(value: string | null | undefined) {
+  return (value ?? '').trim().slice(0, 80)
 }
 
 function parseWinnerRows(
@@ -218,17 +229,34 @@ export async function getRecordMatchBoard(): Promise<{
   let eventResult = await supabase
     .from('member_record_match_events')
     .select(
-      'id, marathon_event_id, distance, prize, note, winners, is_public, created_by, created_at',
+      'id, marathon_event_id, title, distance, prize, note, winners, is_public, created_by, created_at',
     )
     .order('created_at', { ascending: false })
     .limit(30)
 
+  if (eventResult.error && isMissingTitleColumn(eventResult.error.message)) {
+    eventResult = await supabase
+      .from('member_record_match_events')
+      .select(
+        'id, marathon_event_id, distance, prize, note, winners, is_public, created_by, created_at',
+      )
+      .order('created_at', { ascending: false })
+      .limit(30)
+  }
+
   if (eventResult.error && isMissingPublicColumn(eventResult.error.message)) {
     eventResult = await supabase
       .from('member_record_match_events')
-      .select('id, marathon_event_id, distance, prize, note, winners, created_by, created_at')
+      .select('id, marathon_event_id, title, distance, prize, note, winners, created_by, created_at')
       .order('created_at', { ascending: false })
       .limit(30)
+    if (eventResult.error && isMissingTitleColumn(eventResult.error.message)) {
+      eventResult = await supabase
+        .from('member_record_match_events')
+        .select('id, marathon_event_id, distance, prize, note, winners, created_by, created_at')
+        .order('created_at', { ascending: false })
+        .limit(30)
+    }
   }
 
   if (eventResult.error && isMissingWinnersColumn(eventResult.error.message)) {
@@ -329,10 +357,15 @@ export async function getRecordMatchBoard(): Promise<{
       const prizes = splitRecordMatchPrizes(String(row.prize ?? ''))
       const nameByMemberId = new Map(entries.map((entry) => [entry.memberId, entry.authorName]))
       const canManage = profile.role === 'admin' || row.created_by === profile.id
+      const raceTitle = race?.title ?? '대회'
+      const customTitle = normalizeEventTitle(
+        'title' in row ? String(row.title ?? '') : '',
+      )
       return {
         id: String(row.id),
         marathonEventId: String(row.marathon_event_id),
-        raceTitle: race?.title ?? '대회',
+        title: customTitle || raceTitle,
+        raceTitle,
         raceDate: race?.eventDate ?? '',
         location: race?.location ?? '',
         distance,
@@ -391,6 +424,7 @@ function normalizePrizeInput(input: {
 
 export async function createRecordMatchEvent(input: {
   marathonEventId: string
+  title?: string
   distance?: string | null
   prize?: string
   prizes?: string[]
@@ -401,6 +435,8 @@ export async function createRecordMatchEvent(input: {
   if (!profile || !isStaff(profile.role)) return { error: '강사 또는 관리자만 이벤트를 만들 수 있습니다.' }
 
   if (!input.marathonEventId) return { error: '대회를 선택해주세요.' }
+  const title = normalizeEventTitle(input.title)
+  if (!title) return { error: '제목을 입력해주세요.' }
   const prizeResult = normalizePrizeInput(input)
   if ('error' in prizeResult) return { error: prizeResult.error }
 
@@ -411,6 +447,7 @@ export async function createRecordMatchEvent(input: {
     .from('member_record_match_events')
     .insert({
       marathon_event_id: input.marathonEventId,
+      title,
       distance,
       prize: prizeResult.prize,
       note: input.note?.trim().slice(0, 300) ?? '',
@@ -421,12 +458,14 @@ export async function createRecordMatchEvent(input: {
     .single()
 
   if (error) {
+    if (isMissingTitleColumn(error.message)) return { error: MISSING_TITLE_HINT }
     if (isMissingPublicColumn(error.message)) {
       if (isPublic) return { error: MISSING_PUBLIC_HINT }
       const fallback = await supabase
         .from('member_record_match_events')
         .insert({
           marathon_event_id: input.marathonEventId,
+          title,
           distance,
           prize: prizeResult.prize,
           note: input.note?.trim().slice(0, 300) ?? '',
@@ -435,6 +474,7 @@ export async function createRecordMatchEvent(input: {
         .select('id')
         .single()
       if (fallback.error) {
+        if (isMissingTitleColumn(fallback.error.message)) return { error: MISSING_TITLE_HINT }
         return {
           error: isMissingTable(fallback.error.message)
             ? MISSING_TABLE_HINT
@@ -452,6 +492,7 @@ export async function createRecordMatchEvent(input: {
 
 export async function updateRecordMatchEvent(input: {
   eventId: string
+  title?: string
   distance?: string | null
   prize?: string
   prizes?: string[]
@@ -462,6 +503,8 @@ export async function updateRecordMatchEvent(input: {
   if (!profile) return { error: '로그인이 필요합니다.' }
   if (!input.eventId) return { error: '이벤트를 찾지 못했습니다.' }
 
+  const title = normalizeEventTitle(input.title)
+  if (!title) return { error: '제목을 입력해주세요.' }
   const prizeResult = normalizePrizeInput(input)
   if ('error' in prizeResult) return { error: prizeResult.error }
 
@@ -481,6 +524,7 @@ export async function updateRecordMatchEvent(input: {
   if (!canEdit) return { error: '작성자 또는 관리자만 수정할 수 있습니다.' }
 
   const payload: Record<string, unknown> = {
+    title,
     distance: asDistance(input.distance),
     prize: prizeResult.prize,
     note: input.note?.trim().slice(0, 300) ?? '',
@@ -498,6 +542,7 @@ export async function updateRecordMatchEvent(input: {
     .eq('id', input.eventId)
 
   if (error) {
+    if (isMissingTitleColumn(error.message)) return { error: MISSING_TITLE_HINT }
     if (isMissingPublicColumn(error.message) && typeof input.isPublic === 'boolean') {
       return { error: MISSING_PUBLIC_HINT }
     }

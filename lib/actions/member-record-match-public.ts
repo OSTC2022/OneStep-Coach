@@ -18,6 +18,7 @@ export type PublicRecordMatchComment = {
 
 export type PublicRecordMatchEvent = {
   id: string
+  title: string
   raceTitle: string
   raceDate: string
   location: string
@@ -82,11 +83,19 @@ export async function getPublicRecordMatchEvent(
   if (!id) return { error: '이벤트를 찾지 못했습니다.' }
 
   const supabase = await db()
-  const eventResult = await supabase
+  let eventResult = await supabase
     .from('member_record_match_events')
-    .select('id, marathon_event_id, distance, prize, note, is_public')
+    .select('id, marathon_event_id, title, distance, prize, note, is_public')
     .eq('id', id)
     .maybeSingle()
+
+  if (eventResult.error && String(eventResult.error.message).includes('title')) {
+    eventResult = await supabase
+      .from('member_record_match_events')
+      .select('id, marathon_event_id, distance, prize, note, is_public')
+      .eq('id', id)
+      .maybeSingle()
+  }
 
   if (eventResult.error) {
     return { error: isMissing(eventResult.error.message) ? MISSING_HINT : eventResult.error.message }
@@ -113,11 +122,16 @@ export async function getPublicRecordMatchEvent(
   if (commentResult.error) return { error: commentResult.error.message }
 
   const distance = eventResult.data.distance as MarathonDistanceFilter | null
+  const raceTitle = String(raceResult.data?.title ?? '대회')
+  const customTitle = String(
+    'title' in eventResult.data ? (eventResult.data.title ?? '') : '',
+  ).trim()
 
   return {
     event: {
       id,
-      raceTitle: String(raceResult.data?.title ?? '대회'),
+      title: customTitle || raceTitle,
+      raceTitle,
       raceDate: String(raceResult.data?.event_date ?? '').slice(0, 10),
       location: String(raceResult.data?.location_label ?? ''),
       distanceLabel: distance ? formatMarathonDistanceLabel(distance) : null,

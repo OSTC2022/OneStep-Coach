@@ -84,7 +84,10 @@ export function PublicRecordMatchView({
         </header>
 
         <section className="rounded-2xl border border-lime-500/20 bg-black/35 p-4">
-          <p className="text-lg font-bold text-lime-100">{event.raceTitle}</p>
+          <h1 className="text-2xl font-black leading-snug tracking-tight text-white sm:text-[1.75rem]">
+            {event.title}
+          </h1>
+          <p className="mt-2 text-sm font-medium text-lime-200/90">{event.raceTitle}</p>
           <p className="mt-1 text-sm text-white/70">
             {[formatDate(event.raceDate), event.distanceLabel, event.location]
               .filter(Boolean)

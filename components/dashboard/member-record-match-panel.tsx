@@ -116,10 +116,12 @@ export function MemberRecordMatchPanel({
   const [raceId, setRaceId] = useState('')
   const [distance, setDistance] = useState('')
   const [prizes, setPrizes] = useState<string[]>([''])
+  const [title, setTitle] = useState('')
   const [note, setNote] = useState('')
   const [isPublic, setIsPublic] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editingEventId, setEditingEventId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
   const [editDistance, setEditDistance] = useState('')
   const [editPrizes, setEditPrizes] = useState<string[]>([''])
   const [editNote, setEditNote] = useState('')
@@ -199,6 +201,7 @@ export function MemberRecordMatchPanel({
     setSaving(true)
     const result = await createRecordMatchEvent({
       marathonEventId: raceId,
+      title,
       distance: distanceValue || null,
       prizes,
       note,
@@ -209,6 +212,7 @@ export function MemberRecordMatchPanel({
       toast.error('이벤트를 만들지 못했습니다', { description: result.error })
       return
     }
+    setTitle('')
     setPrizes([''])
     setNote('')
     setIsPublic(false)
@@ -223,6 +227,7 @@ export function MemberRecordMatchPanel({
 
   function startEdit(item: RecordMatchEvent) {
     setEditingEventId(item.id)
+    setEditTitle(item.title)
     setEditDistance(item.distance ?? '')
     setEditPrizes(item.prizes.length > 0 ? item.prizes : [item.prize || ''])
     setEditNote(item.note)
@@ -232,6 +237,7 @@ export function MemberRecordMatchPanel({
 
   function cancelEdit() {
     setEditingEventId(null)
+    setEditTitle('')
     setEditDistance('')
     setEditPrizes([''])
     setEditNote('')
@@ -244,6 +250,7 @@ export function MemberRecordMatchPanel({
     setSaving(true)
     const result = await updateRecordMatchEvent({
       eventId,
+      title: editTitle,
       distance: editDistance || null,
       prizes: editPrizes,
       note: editNote,
@@ -419,6 +426,18 @@ export function MemberRecordMatchPanel({
               </option>
             ))}
           </select>
+          <label className="block text-xs font-medium text-foreground" htmlFor="record-match-title">
+            제목
+          </label>
+          <input
+            id="record-match-title"
+            value={title}
+            maxLength={80}
+            required
+            onChange={(event) => setTitle(event.target.value)}
+            className="h-11 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-base font-semibold text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
+            placeholder="예: 봄 하프 예상 기록 맞히기"
+          />
           <label className="block text-xs font-medium text-foreground" htmlFor="record-match-distance">
             종목
           </label>
@@ -503,16 +522,14 @@ export function MemberRecordMatchPanel({
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                      <span className="min-w-0 truncate">{item.raceTitle}</span>
-                      {item.isPublic ? (
-                        <span className="shrink-0 rounded border border-lime-400/40 bg-lime-500/10 px-1.5 py-0.5 text-[10px] font-bold text-lime-200">
-                          공개
-                        </span>
-                      ) : null}
+                    <p className="flex items-start gap-1.5">
+                      <span className="min-w-0 text-base font-black leading-snug tracking-tight text-foreground">
+                        {item.title}
+                      </span>
                       {freshMatchIds.includes(`match:${item.id}`) ? <EventNewMark /> : null}
                     </p>
-                    <p className="mt-1 text-[11px] text-primary/80">
+                    <p className="mt-1 text-xs font-medium text-lime-100/90">{item.raceTitle}</p>
+                    <p className="mt-0.5 text-[11px] text-primary/80">
                       {formatRaceDate(item.raceDate)}
                       {item.distanceLabel ? ` · ${item.distanceLabel}` : ''}
                       {item.location ? ` · ${item.location}` : ''}
@@ -556,6 +573,21 @@ export function MemberRecordMatchPanel({
                     className="mt-3 space-y-2 border-t border-primary/15 pt-3"
                     onSubmit={(event) => void handleUpdate(event, item.id)}
                   >
+                    <label
+                      className="block text-xs font-medium text-foreground"
+                      htmlFor={`record-match-edit-title-${item.id}`}
+                    >
+                      제목
+                    </label>
+                    <input
+                      id={`record-match-edit-title-${item.id}`}
+                      value={editTitle}
+                      maxLength={80}
+                      required
+                      onChange={(event) => setEditTitle(event.target.value)}
+                      className="h-11 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-base font-semibold text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
+                      placeholder="이벤트 제목"
+                    />
                     <label
                       className="block text-xs font-medium text-foreground"
                       htmlFor={`record-match-edit-distance-${item.id}`}
@@ -878,13 +910,16 @@ export function MemberRecordMatchPanel({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                          <span className="min-w-0 truncate">{item.raceTitle}</span>
-                          <span className="shrink-0 rounded border border-lime-400/40 bg-lime-500/10 px-1.5 py-0.5 text-[10px] font-bold text-lime-200">
+                        <p className="flex items-start gap-1.5">
+                          <span className="min-w-0 text-base font-black leading-snug tracking-tight text-foreground">
+                            {item.title}
+                          </span>
+                          <span className="mt-0.5 shrink-0 rounded border border-lime-400/40 bg-lime-500/10 px-1.5 py-0.5 text-[10px] font-bold text-lime-200">
                             외부
                           </span>
                         </p>
-                        <p className="mt-1 text-[11px] text-primary/80">
+                        <p className="mt-1 text-xs font-medium text-lime-100/90">{item.raceTitle}</p>
+                        <p className="mt-0.5 text-[11px] text-primary/80">
                           {formatRaceDate(item.raceDate)}
                           {item.distanceLabel ? ` · ${item.distanceLabel}` : ''}
                           {item.location ? ` · ${item.location}` : ''}
@@ -928,6 +963,21 @@ export function MemberRecordMatchPanel({
                         className="mt-3 space-y-2 border-t border-primary/15 pt-3"
                         onSubmit={(event) => void handleUpdate(event, item.id)}
                       >
+                        <label
+                          className="block text-xs font-medium text-foreground"
+                          htmlFor={`record-match-edit-title-public-${item.id}`}
+                        >
+                          제목
+                        </label>
+                        <input
+                          id={`record-match-edit-title-public-${item.id}`}
+                          value={editTitle}
+                          maxLength={80}
+                          required
+                          onChange={(event) => setEditTitle(event.target.value)}
+                          className="h-11 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-base font-semibold text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
+                          placeholder="이벤트 제목"
+                        />
                         <label
                           className="block text-xs font-medium text-foreground"
                           htmlFor={`record-match-edit-distance-${item.id}`}
