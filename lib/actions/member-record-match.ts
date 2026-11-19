@@ -688,7 +688,6 @@ export async function setRecordMatchWinners(input: {
     (entries.data ?? []).map((row) => String(row.member_id)),
   )
   const cleaned: Array<{ memberId: string; prizeIndex: number }> = []
-  const usedPrize = new Set<number>()
   const usedMember = new Set<string>()
 
   for (const winner of input.winners) {
@@ -700,18 +699,14 @@ export async function setRecordMatchWinners(input: {
     if (!Number.isInteger(prizeIndex) || prizeIndex < 0 || prizeIndex >= prizes.length) {
       return { error: '상품 등수가 올바르지 않습니다.' }
     }
-    if (usedPrize.has(prizeIndex)) {
-      return { error: '같은 등수에 두 명을 선정할 수 없습니다.' }
-    }
     if (usedMember.has(memberId)) {
       return { error: '한 명이 여러 등수를 받을 수 없습니다.' }
     }
-    usedPrize.add(prizeIndex)
     usedMember.add(memberId)
     cleaned.push({ memberId, prizeIndex })
   }
 
-  cleaned.sort((a, b) => a.prizeIndex - b.prizeIndex)
+  cleaned.sort((a, b) => a.prizeIndex - b.prizeIndex || a.memberId.localeCompare(b.memberId))
 
   const { error } = await supabase
     .from('member_record_match_events')

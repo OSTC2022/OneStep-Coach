@@ -126,7 +126,8 @@ export function MemberRecordMatchPanel({
   const [editPrizes, setEditPrizes] = useState<string[]>([''])
   const [editNote, setEditNote] = useState('')
   const [editIsPublic, setEditIsPublic] = useState(false)
-  const [winnerDrafts, setWinnerDrafts] = useState<Record<string, string[]>>({})
+  /** eventId → 상품등수별 당첨자 memberId 목록 (복수 선정 가능) */
+  const [winnerDrafts, setWinnerDrafts] = useState<Record<string, string[][]>>({})
   const [drafts, setDrafts] = useState<Record<string, { predicted: string; actual: string }>>({})
   const [actualDrafts, setActualDrafts] = useState<Record<string, string>>({})
   const focusedRef = useRef<HTMLLIElement | null>(null)
@@ -163,8 +164,12 @@ export function MemberRecordMatchPanel({
       for (const event of result.events) {
         const prizes = event.prizes.length > 0 ? event.prizes : [event.prize]
         const slots = prizes.map((_, index) => {
-          const winner = event.winners.find((item) => item.prizeIndex === index)
-          return winner?.memberId ?? current[event.id]?.[index] ?? ''
+          const saved = event.winners
+            .filter((item) => item.prizeIndex === index)
+            .map((item) => item.memberId)
+          if (saved.length > 0) return saved
+          const draft = current[event.id]?.[index]
+          return draft && draft.length > 0 ? draft : ['']
         })
         next[event.id] = slots
       }
@@ -314,9 +319,12 @@ export function MemberRecordMatchPanel({
   async function handleSaveWinners(eventId: string) {
     if (saving) return
     const slots = winnerDrafts[eventId] ?? []
-    const winners = slots
-      .map((memberId, prizeIndex) => ({ memberId: memberId.trim(), prizeIndex }))
-      .filter((item) => item.memberId)
+    const winners = slots.flatMap((memberIds, prizeIndex) =>
+      (memberIds ?? [])
+        .map((memberId) => memberId.trim())
+        .filter(Boolean)
+        .map((memberId) => ({ memberId, prizeIndex })),
+    )
     setSaving(true)
     const result = await setRecordMatchWinners({ eventId, winners })
     setSaving(false)
@@ -729,7 +737,10 @@ export function MemberRecordMatchPanel({
                   <div className="mt-3 space-y-1 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2">
                     <p className="text-[11px] font-semibold text-amber-200">당첨자</p>
                     {item.winners.map((winner) => (
-                      <p key={`${item.id}-winner-${winner.prizeIndex}`} className="text-sm text-foreground">
+                      <p
+                        key={`${item.id}-winner-${winner.prizeIndex}-${winner.memberId}`}
+                        className="text-sm text-foreground"
+                      >
                         <span className="text-muted-foreground">
                           {(item.prizes.length > 1 ? item.prizes : [item.prize]).length > 1
                             ? `${winner.prizeIndex + 1}등 `
@@ -807,8 +818,14 @@ export function MemberRecordMatchPanel({
                 {item.canSelectWinners ? (
                   <div className="mt-3 space-y-2 border-t border-primary/15 pt-3">
                     <p className="text-xs font-semibold text-foreground">당첨자 선정</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      같은 등수에 여러 명을 추가할 수 있습니다.
+                    </p>
                     {(item.prizes.length > 0 ? item.prizes : [item.prize]).map((prize, index) => {
-                      const slots = winnerDrafts[item.id] ?? []
+                      const prizeCount = (
+                        item.prizes.length > 0 ? item.prizes : [item.prize]
+                      ).length
+                      const picks = winnerDrafts[item.id]?.[index] ?? ['']
                       const candidates =
                         item.guesses.length > 0
                           ? item.guesses
@@ -817,39 +834,91 @@ export function MemberRecordMatchPanel({
                               name: entry.authorName,
                             }))
                       return (
-                        <div key={`${item.id}-winner-slot-${index}`} className="space-y-1">
-                          <label
-                            className="block text-[11px] text-muted-foreground"
-                            htmlFor={`winner-${item.id}-${index}`}
-                          >
-                            {(item.prizes.length > 1 ? item.prizes : [item.prize]).length > 1
-                              ? `${index + 1}등 · ${prize}`
-                              : `상품 · ${prize}`}
-                          </label>
-                          <select
-                            id={`winner-${item.id}-${index}`}
-                            value={slots[index] ?? ''}
+                        <div key={`${item.id}-winner-slot-${index}`} className="space-y-1.5">
+                          <p className="text-[11px] text-muted-foreground">
+                            {prizeCount > 1 ? `${index + 1}등 · ${prize}` : `상품 · ${prize}`}
+                          </p>
+                          {picks.map((memberId, pickIndex) => (
+                            <div
+                              key={`${item.id}-winner-${index}-${pickIndex}`}
+                              className="flex items-center gap-1.5"
+                            >
+                              <label
+                                className="sr-only"
+                                htmlFor={`winner-${item.id}-${index}-${pickIndex}`}
+                              >
+                                {prizeCount > 1 ? `${index + 1}등` : '상품'} 당첨자 {pickIndex + 1}
+                              </label>
+                              <select
+                                id={`winner-${item.id}-${index}-${pickIndex}`}
+                                value={memberId}
+                                disabled={saving || candidates.length === 0}
+                                onChange={(event) =>
+                                  setWinnerDrafts((current) => {
+                                    const nextSlots = [
+                                      ...(current[item.id] ??
+                                        Array.from({ length: prizeCount }, () => [''])),
+                                    ]
+                                    while (nextSlots.length < prizeCount) nextSlots.push([''])
+                                    const nextPicks = [...(nextSlots[index] ?? [''])]
+                                    nextPicks[pickIndex] = event.target.value
+                                    nextSlots[index] = nextPicks
+                                    return { ...current, [item.id]: nextSlots }
+                                  })
+                                }
+                                className="h-10 min-w-0 flex-1 rounded-lg border border-border/80 bg-black/40 px-3 text-sm text-foreground outline-none focus-visible:border-primary/70 disabled:opacity-60"
+                              >
+                                <option value="">미선정</option>
+                                {candidates.map((candidate) => (
+                                  <option key={candidate.memberId} value={candidate.memberId}>
+                                    {candidate.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {picks.length > 1 ? (
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  aria-label="당첨자 제거"
+                                  onClick={() =>
+                                    setWinnerDrafts((current) => {
+                                      const nextSlots = [
+                                        ...(current[item.id] ??
+                                          Array.from({ length: prizeCount }, () => [''])),
+                                      ]
+                                      while (nextSlots.length < prizeCount) nextSlots.push([''])
+                                      const nextPicks = [...(nextSlots[index] ?? [''])]
+                                      nextPicks.splice(pickIndex, 1)
+                                      nextSlots[index] = nextPicks.length > 0 ? nextPicks : ['']
+                                      return { ...current, [item.id]: nextSlots }
+                                    })
+                                  }
+                                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 text-muted-foreground hover:text-foreground disabled:opacity-60"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+                          <button
+                            type="button"
                             disabled={saving || candidates.length === 0}
-                            onChange={(event) =>
+                            onClick={() =>
                               setWinnerDrafts((current) => {
-                                const prizeCount = (
-                                  item.prizes.length > 0 ? item.prizes : [item.prize]
-                                ).length
-                                const nextSlots = [...(current[item.id] ?? Array(prizeCount).fill(''))]
-                                while (nextSlots.length < prizeCount) nextSlots.push('')
-                                nextSlots[index] = event.target.value
+                                const nextSlots = [
+                                  ...(current[item.id] ??
+                                    Array.from({ length: prizeCount }, () => [''])),
+                                ]
+                                while (nextSlots.length < prizeCount) nextSlots.push([''])
+                                nextSlots[index] = [...(nextSlots[index] ?? ['']), '']
                                 return { ...current, [item.id]: nextSlots }
                               })
                             }
-                            className="h-10 w-full rounded-lg border border-border/80 bg-black/40 px-3 text-sm text-foreground outline-none focus-visible:border-primary/70 disabled:opacity-60"
+                            className="inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 disabled:opacity-60"
                           >
-                            <option value="">미선정</option>
-                            {candidates.map((candidate) => (
-                              <option key={candidate.memberId} value={candidate.memberId}>
-                                {candidate.name}
-                              </option>
-                            ))}
-                          </select>
+                            <Plus className="h-3.5 w-3.5" />
+                            인원 추가
+                          </button>
                         </div>
                       )
                     })}
