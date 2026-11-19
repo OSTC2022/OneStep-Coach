@@ -110,7 +110,7 @@ const portalFontVariables = [
 ].join(' ')
 
 const SITE_DESCRIPTION =
-  '러닝 · 기록 · 함께 한 걸음. OneStep Training Center 회원 포털'
+  '원스텝 트레이닝센터 — 러닝과 트레이닝을 함께하는 공간. OneStep Training Center'
 
 export const metadata: Metadata = {
   metadataBase: new URL(

@@ -359,10 +359,9 @@ function LoginPageInner() {
                   {nextPath ? (
                     <input type="hidden" name="next" value={nextPath} />
                   ) : null}
-                  {nextPath.includes('eventMatch=') ? (
+                  {nextPath ? (
                     <p className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                      이벤트 링크로 들어왔습니다. 카카오톡 등 외부 앱에서는 로그인
-                      세션이 따로라서 한 번 로그인하면 해당 이벤트로 이동합니다.
+                      공유 링크로 들어왔습니다. 로그인하면 해당 화면으로 이동합니다.
                     </p>
                   ) : null}
                   <div className="space-y-2">
