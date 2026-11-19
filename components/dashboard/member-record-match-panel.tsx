@@ -6,15 +6,21 @@ import { ko } from 'date-fns/locale'
 import { Link2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
+  addRecordMatchComment,
   createRecordMatchEvent,
+  deleteRecordMatchComment,
+  deleteRecordMatchEntry,
   deleteRecordMatchEvent,
   getRecordMatchBoard,
   saveRecordMatchActual,
   setRecordMatchWinners,
   submitRecordMatchEntry,
+  updateRecordMatchComment,
   updateRecordMatchEvent,
+  updateRecordMatchPredicted,
   type RecordMatchEvent,
 } from '@/lib/actions/member-record-match'
+import { formatCommentEditedAt } from '@/lib/comment-edited'
 import { EventNewMark } from '@/components/dashboard/event-new-mark'
 import { useMarkPortalItemsRead } from '@/components/dashboard/portal-seen'
 import { buildEventMatchShareUrl } from '@/lib/event-match-share'
@@ -130,6 +136,10 @@ export function MemberRecordMatchPanel({
   const [winnerDrafts, setWinnerDrafts] = useState<Record<string, string[][]>>({})
   const [drafts, setDrafts] = useState<Record<string, { predicted: string; actual: string }>>({})
   const [actualDrafts, setActualDrafts] = useState<Record<string, string>>({})
+  const [predictedEditDrafts, setPredictedEditDrafts] = useState<Record<string, string>>({})
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({})
+  const [commentEditDrafts, setCommentEditDrafts] = useState<Record<string, string>>({})
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
   const focusedRef = useRef<HTMLLIElement | null>(null)
 
   async function reload() {
@@ -155,6 +165,16 @@ export function MemberRecordMatchPanel({
       for (const event of result.events) {
         for (const guess of event.guesses) {
           next[`${event.id}:${guess.memberId}`] = guess.actualLabel ?? ''
+        }
+      }
+      return next
+    })
+    setPredictedEditDrafts((current) => {
+      const next = { ...current }
+      for (const event of result.events) {
+        for (const guess of event.guesses) {
+          next[`${event.id}:${guess.memberId}`] =
+            guess.predictedLabel || current[`${event.id}:${guess.memberId}`] || ''
         }
       }
       return next
@@ -299,10 +319,93 @@ export function MemberRecordMatchPanel({
     })
     setSaving(false)
     if (result.error) {
-      toast.error('실제 기록을 저장하지 못했습니다', { description: result.error })
+      toast.error('최종 기록을 저장하지 못했습니다', { description: result.error })
       return
     }
-    toast.success('실제 기록을 저장했습니다.')
+    toast.success(
+      (actualDrafts[`${eventId}:${memberId}`] ?? '').trim()
+        ? '최종 기록을 저장했습니다.'
+        : '최종 기록을 비웠습니다.',
+    )
+    await reload()
+  }
+
+  async function handleUpdatePredicted(eventId: string, memberId: string) {
+    if (saving) return
+    setSaving(true)
+    const result = await updateRecordMatchPredicted({
+      eventId,
+      memberId,
+      predicted: predictedEditDrafts[`${eventId}:${memberId}`] ?? '',
+    })
+    setSaving(false)
+    if (result.error) {
+      toast.error('예상 기록을 수정하지 못했습니다', { description: result.error })
+      return
+    }
+    toast.success('예상 기록을 수정했습니다.')
+    await reload()
+  }
+
+  async function handleDeleteEntry(eventId: string, memberId: string) {
+    if (saving) return
+    if (!window.confirm('이 예상 기록을 삭제할까요?')) return
+    setSaving(true)
+    const result = await deleteRecordMatchEntry({ eventId, memberId })
+    setSaving(false)
+    if (result.error) {
+      toast.error('예상 기록을 삭제하지 못했습니다', { description: result.error })
+      return
+    }
+    toast.success('예상 기록을 삭제했습니다.')
+    await reload()
+  }
+
+  async function handleAddComment(eventId: string) {
+    if (saving) return
+    setSaving(true)
+    const result = await addRecordMatchComment({
+      eventId,
+      body: commentDrafts[eventId] ?? '',
+    })
+    setSaving(false)
+    if (result.error) {
+      toast.error('댓글을 등록하지 못했습니다', { description: result.error })
+      return
+    }
+    setCommentDrafts((current) => ({ ...current, [eventId]: '' }))
+    toast.success('댓글을 등록했습니다.')
+    await reload()
+  }
+
+  async function handleUpdateComment(commentId: string) {
+    if (saving) return
+    setSaving(true)
+    const result = await updateRecordMatchComment({
+      commentId,
+      body: commentEditDrafts[commentId] ?? '',
+    })
+    setSaving(false)
+    if (result.error) {
+      toast.error('댓글을 수정하지 못했습니다', { description: result.error })
+      return
+    }
+    setEditingCommentId(null)
+    toast.success('댓글을 수정했습니다.')
+    await reload()
+  }
+
+  async function handleDeleteComment(commentId: string) {
+    if (saving) return
+    if (!window.confirm('이 댓글을 삭제할까요?')) return
+    setSaving(true)
+    const result = await deleteRecordMatchComment(commentId)
+    setSaving(false)
+    if (result.error) {
+      toast.error('댓글을 삭제하지 못했습니다', { description: result.error })
+      return
+    }
+    toast.success('댓글을 삭제했습니다.')
     await reload()
   }
 
@@ -732,7 +835,9 @@ export function MemberRecordMatchPanel({
                   <p className="mt-2 text-xs text-muted-foreground">회원 계정이 연결되면 예상 기록을 낼 수 있습니다.</p>
                 )}
                 {item.mine?.actualLabel && !item.canWriteActual ? (
-                  <p className="mt-2 text-xs text-muted-foreground">실제 기록 {item.mine.actualLabel}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    최종 기록 {item.mine.actualLabel}
+                  </p>
                 ) : null}
 
                 {item.mine?.gapSeconds != null ? (
@@ -770,7 +875,7 @@ export function MemberRecordMatchPanel({
                         </span>
                         <span className="text-muted-foreground">
                           {entry.gapSeconds == null ? '' : formatTimeGap(entry.gapSeconds)}
-                          {entry.actualLabel ? ` · 실제 ${entry.actualLabel}` : ''}
+                          {entry.actualLabel ? ` · 최종 ${entry.actualLabel}` : ''}
                         </span>
                       </li>
                     ))}
@@ -782,19 +887,57 @@ export function MemberRecordMatchPanel({
                     {item.guesses.map((guess) => {
                       const actualKey = `${item.id}:${guess.memberId}`
                       return (
-                        <li key={actualKey} className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                          <span>
-                            {guess.name}
-                            <span className="ml-2">예상 {guess.predictedLabel}</span>
-                          </span>
+                        <li
+                          key={actualKey}
+                          className="space-y-1.5 rounded-lg border border-border/40 bg-black/20 px-2.5 py-2 text-xs text-muted-foreground"
+                        >
+                          <p className="font-semibold text-foreground">{guess.name}</p>
+                          {item.canManageEntries ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <label className="sr-only" htmlFor={`predicted-${actualKey}`}>
+                                {guess.name} 예상 기록
+                              </label>
+                              <input
+                                id={`predicted-${actualKey}`}
+                                value={predictedEditDrafts[actualKey] ?? guess.predictedLabel}
+                                onChange={(event) =>
+                                  setPredictedEditDrafts((current) => ({
+                                    ...current,
+                                    [actualKey]: event.target.value,
+                                  }))
+                                }
+                                inputMode="numeric"
+                                placeholder="예상 기록"
+                                className="h-9 w-28 rounded-lg border border-border/80 bg-black/40 px-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
+                              />
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => void handleUpdatePredicted(item.id, guess.memberId)}
+                                className="h-9 rounded-lg bg-primary px-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+                              >
+                                예상 수정
+                              </button>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => void handleDeleteEntry(item.id, guess.memberId)}
+                                className="h-9 rounded-lg border border-border/80 px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                              >
+                                삭제
+                              </button>
+                            </div>
+                          ) : (
+                            <p>예상 {guess.predictedLabel}</p>
+                          )}
                           {item.canWriteActual ? (
-                            <span className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <label className="sr-only" htmlFor={`actual-${actualKey}`}>
-                                {guess.name} 실제 기록
+                                {guess.name} 최종 기록
                               </label>
                               <input
                                 id={`actual-${actualKey}`}
-                                value={actualDrafts[actualKey] ?? ''}
+                                value={actualDrafts[actualKey] ?? guess.actualLabel ?? ''}
                                 onChange={(event) =>
                                   setActualDrafts((current) => ({
                                     ...current,
@@ -802,7 +945,7 @@ export function MemberRecordMatchPanel({
                                   }))
                                 }
                                 inputMode="numeric"
-                                placeholder="실제 기록"
+                                placeholder="최종 기록"
                                 className="h-9 w-28 rounded-lg border border-border/80 bg-black/40 px-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
                               />
                               <button
@@ -811,16 +954,140 @@ export function MemberRecordMatchPanel({
                                 onClick={() => void handleActual(item.id, guess.memberId)}
                                 className="h-9 rounded-lg bg-primary px-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
                               >
-                                실제 기록
+                                {guess.actualLabel ? '최종 수정' : '최종 저장'}
                               </button>
-                            </span>
+                            </div>
                           ) : guess.actualLabel ? (
-                            <span>실제 {guess.actualLabel}</span>
+                            <p>최종 {guess.actualLabel}</p>
                           ) : null}
                         </li>
                       )
                     })}
                   </ul>
+                ) : null}
+
+                {!item.isPublic ? (
+                  <div className="mt-3 space-y-2 border-t border-primary/15 pt-3">
+                    <p className="text-xs font-semibold text-foreground">
+                      댓글 {item.comments.length}
+                    </p>
+                    {item.comments.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground">아직 댓글이 없습니다.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {item.comments.map((comment) => (
+                          <li
+                            key={comment.id}
+                            className="rounded-lg border border-border/50 bg-black/20 px-2.5 py-2"
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <p className="text-xs font-semibold text-lime-100">
+                                {comment.authorName}
+                              </p>
+                              <time className="shrink-0 text-[10px] text-muted-foreground">
+                                {comment.isEdited
+                                  ? `수정됨 · ${formatCommentEditedAt(comment.updatedAt)}`
+                                  : new Date(comment.createdAt).toLocaleString('ko-KR', {
+                                      month: 'numeric',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                              </time>
+                            </div>
+                            {editingCommentId === comment.id ? (
+                              <div className="mt-1.5 space-y-1.5">
+                                <textarea
+                                  value={commentEditDrafts[comment.id] ?? comment.body}
+                                  maxLength={500}
+                                  rows={2}
+                                  onChange={(event) =>
+                                    setCommentEditDrafts((current) => ({
+                                      ...current,
+                                      [comment.id]: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full resize-y rounded-lg border border-border/80 bg-black/40 px-2 py-1.5 text-sm text-foreground outline-none focus-visible:border-primary/70"
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => setEditingCommentId(null)}
+                                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                                  >
+                                    취소
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => void handleUpdateComment(comment.id)}
+                                    className="text-[11px] font-semibold text-primary"
+                                  >
+                                    저장
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground/90">
+                                  {comment.body}
+                                </p>
+                                <div className="mt-1.5 flex gap-2">
+                                  {comment.canEdit ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingCommentId(comment.id)
+                                        setCommentEditDrafts((current) => ({
+                                          ...current,
+                                          [comment.id]: comment.body,
+                                        }))
+                                      }}
+                                      className="text-[11px] text-muted-foreground hover:text-foreground"
+                                    >
+                                      수정
+                                    </button>
+                                  ) : null}
+                                  {comment.canDelete ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDeleteComment(comment.id)}
+                                      className="text-[11px] text-muted-foreground hover:text-foreground"
+                                    >
+                                      삭제
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        value={commentDrafts[item.id] ?? ''}
+                        maxLength={500}
+                        onChange={(event) =>
+                          setCommentDrafts((current) => ({
+                            ...current,
+                            [item.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="댓글을 입력하세요"
+                        className="h-10 min-w-0 flex-1 rounded-lg border border-border/80 bg-black/40 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-primary/70"
+                      />
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void handleAddComment(item.id)}
+                        className="h-10 shrink-0 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+                      >
+                        등록
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
 
                 {item.canSelectWinners ? (

@@ -3,6 +3,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { getDashboardProfile } from '@/lib/auth/dashboard-user'
+import { isCommentEdited } from '@/lib/comment-edited'
 import { splitRecordMatchPrizes } from '@/lib/member-record-match'
 import { formatMarathonDistanceLabel } from '@/lib/running-league/marathon-schedule'
 import type { MarathonDistanceFilter } from '@/lib/running-league/marathon-schedule'
@@ -14,6 +15,8 @@ export type PublicRecordMatchComment = {
   authorName: string
   body: string
   createdAt: string
+  updatedAt: string
+  isEdited: boolean
 }
 
 export type PublicRecordMatchWinner = {
@@ -125,12 +128,21 @@ export async function getPublicRecordMatchEvent(
     .eq('id', eventResult.data.marathon_event_id)
     .maybeSingle()
 
-  const commentResult = await supabase
+  let commentResult = await supabase
     .from('member_record_match_comments')
-    .select('id, author_name, body, created_at')
+    .select('id, author_name, body, created_at, updated_at')
     .eq('event_id', id)
     .order('created_at', { ascending: true })
     .limit(200)
+
+  if (commentResult.error && String(commentResult.error.message).includes('updated_at')) {
+    commentResult = await supabase
+      .from('member_record_match_comments')
+      .select('id, author_name, body, created_at')
+      .eq('event_id', id)
+      .order('created_at', { ascending: true })
+      .limit(200)
+  }
 
   if (commentResult.error && isMissing(commentResult.error.message)) {
     return { error: MISSING_HINT }
@@ -182,12 +194,20 @@ export async function getPublicRecordMatchEvent(
       isPublic: true,
       winners,
       canSelectWinners,
-      comments: (commentResult.data ?? []).map((row) => ({
-        id: String(row.id),
-        authorName: String(row.author_name ?? '익명'),
-        body: String(row.body ?? ''),
-        createdAt: String(row.created_at ?? ''),
-      })),
+      comments: (commentResult.data ?? []).map((row) => {
+        const createdAt = String(row.created_at ?? '')
+        const updatedAt = String(
+          'updated_at' in row && row.updated_at ? row.updated_at : createdAt,
+        )
+        return {
+          id: String(row.id),
+          authorName: String(row.author_name ?? '익명'),
+          body: String(row.body ?? ''),
+          createdAt,
+          updatedAt,
+          isEdited: isCommentEdited(createdAt, updatedAt),
+        }
+      }),
     },
   }
 }
@@ -230,20 +250,85 @@ export async function addPublicRecordMatchComment(input: {
       body,
       password_hash: hashPassword(password),
     })
-    .select('id, author_name, body, created_at')
+    .select('id, author_name, body, created_at, updated_at')
     .single()
 
   if (error) {
     return { error: isMissing(error.message) ? MISSING_HINT : error.message }
   }
   revalidatePublic(eventId)
+  const createdAt = String(data?.created_at ?? new Date().toISOString())
+  const updatedAt = String(data?.updated_at ?? createdAt)
   return {
     comment: data
       ? {
           id: String(data.id),
           authorName: String(data.author_name ?? authorName),
           body: String(data.body ?? body),
-          createdAt: String(data.created_at ?? new Date().toISOString()),
+          createdAt,
+          updatedAt,
+          isEdited: isCommentEdited(createdAt, updatedAt),
+        }
+      : undefined,
+  }
+}
+
+export async function updatePublicRecordMatchComment(input: {
+  eventId: string
+  commentId: string
+  password: string
+  body: string
+}): Promise<{ error?: string; comment?: PublicRecordMatchComment }> {
+  const eventId = input.eventId.trim()
+  const commentId = input.commentId.trim()
+  const body = input.body.trim().slice(0, 500)
+  const password = input.password.trim()
+
+  if (!eventId || !commentId) return { error: '댓글을 찾지 못했습니다.' }
+  if (!body) return { error: '댓글을 입력해주세요.' }
+  if (!isFourCharPassword(password)) {
+    return { error: '비밀번호는 공백 없이 4자로 입력해주세요.' }
+  }
+
+  const supabase = await db()
+  const commentResult = await supabase
+    .from('member_record_match_comments')
+    .select('id, author_name, password_hash')
+    .eq('id', commentId)
+    .eq('event_id', eventId)
+    .maybeSingle()
+
+  if (commentResult.error) {
+    return { error: isMissing(commentResult.error.message) ? MISSING_HINT : commentResult.error.message }
+  }
+  if (!commentResult.data) return { error: '댓글을 찾지 못했습니다.' }
+  if (!passwordMatches(password, commentResult.data.password_hash)) {
+    return { error: '비밀번호가 맞지 않습니다.' }
+  }
+
+  const updatedAt = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('member_record_match_comments')
+    .update({ body, updated_at: updatedAt })
+    .eq('id', commentId)
+    .select('id, author_name, body, created_at, updated_at')
+    .single()
+
+  if (error) {
+    return { error: isMissing(error.message) ? MISSING_HINT : error.message }
+  }
+  revalidatePublic(eventId)
+  const createdAt = String(data?.created_at ?? '')
+  const nextUpdated = String(data?.updated_at ?? updatedAt)
+  return {
+    comment: data
+      ? {
+          id: String(data.id),
+          authorName: String(data.author_name ?? '익명'),
+          body: String(data.body ?? body),
+          createdAt,
+          updatedAt: nextUpdated,
+          isEdited: true,
         }
       : undefined,
   }

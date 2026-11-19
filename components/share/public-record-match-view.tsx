@@ -7,8 +7,10 @@ import { setRecordMatchWinners } from '@/lib/actions/member-record-match'
 import {
   addPublicRecordMatchComment,
   deletePublicRecordMatchComment,
+  updatePublicRecordMatchComment,
   type PublicRecordMatchEvent,
 } from '@/lib/actions/member-record-match-public'
+import { formatCommentEditedAt } from '@/lib/comment-edited'
 import { toast } from 'sonner'
 
 function formatDate(value: string) {
@@ -30,6 +32,8 @@ export function PublicRecordMatchView({
   const [saving, setSaving] = useState(false)
   const [deletePasswordById, setDeletePasswordById] = useState<Record<string, string>>({})
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
+  const [editBodies, setEditBodies] = useState<Record<string, string>>({})
   const [winnerDrafts, setWinnerDrafts] = useState<string[][]>(() =>
     initialEvent.prizes.map((_, index) => {
       const names = initialEvent.winners
@@ -40,10 +44,11 @@ export function PublicRecordMatchView({
   )
 
   const candidateNames = useMemo(() => {
-    const names = new Set(event.comments.map((comment) => comment.authorName.trim()).filter(Boolean))
-    for (const winner of event.winners) names.add(winner.name)
+    const names = new Set(
+      event.comments.map((comment) => comment.authorName.trim()).filter(Boolean),
+    )
     return [...names].sort((a, b) => a.localeCompare(b, 'ko'))
-  }, [event.comments, event.winners])
+  }, [event.comments])
 
   async function handleSubmit(formEvent: FormEvent) {
     formEvent.preventDefault()
@@ -88,6 +93,32 @@ export function PublicRecordMatchView({
       comments: current.comments.filter((comment) => comment.id !== commentId),
     }))
     toast.success('댓글을 삭제했습니다.')
+  }
+
+  async function handleUpdateComment(commentId: string) {
+    if (saving) return
+    setSaving(true)
+    const result = await updatePublicRecordMatchComment({
+      eventId: event.id,
+      commentId,
+      password: deletePasswordById[commentId] ?? '',
+      body: editBodies[commentId] ?? '',
+    })
+    setSaving(false)
+    if (result.error) {
+      toast.error(result.error)
+      return
+    }
+    if (result.comment) {
+      setEvent((current) => ({
+        ...current,
+        comments: current.comments.map((comment) =>
+          comment.id === commentId ? result.comment! : comment,
+        ),
+      }))
+    }
+    setEditingCommentId(null)
+    toast.success('댓글을 수정했습니다.')
   }
 
   async function handleSaveWinners() {
@@ -280,44 +311,111 @@ export function PublicRecordMatchView({
                   <div className="flex items-baseline justify-between gap-2">
                     <p className="text-sm font-semibold text-lime-100">{comment.authorName}</p>
                     <time className="shrink-0 text-[11px] text-white/40">
-                      {comment.createdAt
-                        ? new Date(comment.createdAt).toLocaleString('ko-KR', {
-                            month: 'numeric',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })
-                        : ''}
+                      {comment.isEdited
+                        ? `수정됨 · ${formatCommentEditedAt(comment.updatedAt)}`
+                        : comment.createdAt
+                          ? new Date(comment.createdAt).toLocaleString('ko-KR', {
+                              month: 'numeric',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : ''}
                     </time>
                   </div>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white/80">
-                    {comment.body}
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <input
-                      type="password"
-                      inputMode="text"
-                      maxLength={4}
-                      value={deletePasswordById[comment.id] ?? ''}
-                      onChange={(change) =>
-                        setDeletePasswordById((current) => ({
-                          ...current,
-                          [comment.id]: change.target.value,
-                        }))
-                      }
-                      placeholder="비번 4자"
-                      className="h-8 w-24 rounded-md border border-white/15 bg-black/40 px-2 text-xs text-white outline-none placeholder:text-white/35 focus-visible:border-lime-400/60"
-                      aria-label="삭제용 비밀번호"
-                    />
-                    <button
-                      type="button"
-                      disabled={deletingId === comment.id}
-                      onClick={() => void handleDelete(comment.id)}
-                      className="text-xs text-white/45 hover:text-white disabled:opacity-50"
-                    >
-                      {deletingId === comment.id ? '삭제 중…' : '삭제'}
-                    </button>
-                  </div>
+                  {editingCommentId === comment.id ? (
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        value={editBodies[comment.id] ?? comment.body}
+                        maxLength={500}
+                        rows={3}
+                        onChange={(change) =>
+                          setEditBodies((current) => ({
+                            ...current,
+                            [comment.id]: change.target.value,
+                          }))
+                        }
+                        className="w-full resize-y rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus-visible:border-lime-400/60"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="password"
+                          inputMode="text"
+                          maxLength={4}
+                          value={deletePasswordById[comment.id] ?? ''}
+                          onChange={(change) =>
+                            setDeletePasswordById((current) => ({
+                              ...current,
+                              [comment.id]: change.target.value,
+                            }))
+                          }
+                          placeholder="비번 4자"
+                          className="h-8 w-24 rounded-md border border-white/15 bg-black/40 px-2 text-xs text-white outline-none placeholder:text-white/35 focus-visible:border-lime-400/60"
+                          aria-label="수정용 비밀번호"
+                        />
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => setEditingCommentId(null)}
+                          className="text-xs text-white/45 hover:text-white"
+                        >
+                          취소
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void handleUpdateComment(comment.id)}
+                          className="text-xs font-semibold text-[#aaff00]"
+                        >
+                          저장
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white/80">
+                        {comment.body}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <input
+                          type="password"
+                          inputMode="text"
+                          maxLength={4}
+                          value={deletePasswordById[comment.id] ?? ''}
+                          onChange={(change) =>
+                            setDeletePasswordById((current) => ({
+                              ...current,
+                              [comment.id]: change.target.value,
+                            }))
+                          }
+                          placeholder="비번 4자"
+                          className="h-8 w-24 rounded-md border border-white/15 bg-black/40 px-2 text-xs text-white outline-none placeholder:text-white/35 focus-visible:border-lime-400/60"
+                          aria-label="비밀번호"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCommentId(comment.id)
+                            setEditBodies((current) => ({
+                              ...current,
+                              [comment.id]: comment.body,
+                            }))
+                          }}
+                          className="text-xs text-white/45 hover:text-white"
+                        >
+                          수정
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === comment.id}
+                          onClick={() => void handleDelete(comment.id)}
+                          className="text-xs text-white/45 hover:text-white disabled:opacity-50"
+                        >
+                          {deletingId === comment.id ? '삭제 중…' : '삭제'}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

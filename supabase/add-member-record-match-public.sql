@@ -11,9 +11,10 @@ CREATE INDEX IF NOT EXISTS member_record_match_events_public_idx
 CREATE TABLE IF NOT EXISTS public.member_record_match_comments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id UUID NOT NULL REFERENCES public.member_record_match_events(id) ON DELETE CASCADE,
+  author_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   author_name TEXT NOT NULL,
   body TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
+  password_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
