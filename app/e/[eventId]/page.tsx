@@ -11,13 +11,13 @@ type PageProps = {
 const SHARE_TITLE = '원스텝'
 const SHARE_DESCRIPTION =
   '원스텝 트레이닝센터 — 러닝과 트레이닝을 함께하는 공간'
-const SHARE_IMAGE = '/og/onestep-share.jpg?v=2'
+const SHARE_IMAGE = '/og/onestep-share.jpg?v=3'
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { eventId } = await params
 
   return {
-    title: SHARE_TITLE,
+    title: { absolute: SHARE_TITLE },
     description: SHARE_DESCRIPTION,
     openGraph: {
       title: SHARE_TITLE,

@@ -114,8 +114,13 @@ const SITE_DESCRIPTION =
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
-      'https://onesteptc.com',
+    (
+      process.env.NEXT_PUBLIC_CANONICAL_SITE_URL ||
+      (process.env.VERCEL_ENV === 'production'
+        ? 'https://onesteptc.com'
+        : process.env.NEXT_PUBLIC_SITE_URL) ||
+      'https://onesteptc.com'
+    ).replace(/\/$/, ''),
   ),
   title: {
     default: '원스텝',
@@ -131,7 +136,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: '/og/onestep-share.jpg?v=2',
+        url: '/og/onestep-share.jpg?v=3',
         width: 1200,
         height: 630,
         alt: '원스텝',
@@ -142,7 +147,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: '원스텝',
     description: SITE_DESCRIPTION,
-    images: ['/og/onestep-share.jpg?v=2'],
+    images: ['/og/onestep-share.jpg?v=3'],
   },
   appleWebApp: {
     capable: true,
