@@ -310,53 +310,59 @@ export async function getRecordMatchBoard(): Promise<{
   }
 
   const staff = isStaff(profile.role)
-  const events: RecordMatchEvent[] = eventRows.map((row) => {
-    const race = raceById.get(String(row.marathon_event_id))
-    const distance = asDistance(row.distance)
-    const entries = (entriesByEvent.get(String(row.id)) ?? []).map((entry) => {
-      if (staff || entry.isMine) return entry
-      return { ...entry, predictedSeconds: 0, predictedLabel: '' }
+  const events: RecordMatchEvent[] = eventRows
+    .filter((row) => {
+      // 공개 이벤트는 링크 전용 — 회원 포털 목록에는 안 보임 (관리자/강사만 관리용으로 표시)
+      const isPublic = Boolean('is_public' in row ? row.is_public : false)
+      return staff || !isPublic
     })
-    const ranking = entries
-      .filter((entry) => entry.gapSeconds != null)
-      .sort((a, b) => (a.gapSeconds ?? 0) - (b.gapSeconds ?? 0))
-    const prizes = splitRecordMatchPrizes(String(row.prize ?? ''))
-    const nameByMemberId = new Map(entries.map((entry) => [entry.memberId, entry.authorName]))
-    const canManage = profile.role === 'admin' || row.created_by === profile.id
-    return {
-      id: String(row.id),
-      marathonEventId: String(row.marathon_event_id),
-      raceTitle: race?.title ?? '대회',
-      raceDate: race?.eventDate ?? '',
-      location: race?.location ?? '',
-      distance,
-      distanceLabel: distance ? formatMarathonDistanceLabel(distance) : null,
-      prize: String(row.prize ?? ''),
-      prizes,
-      note: String(row.note ?? ''),
-      isPublic: Boolean('is_public' in row ? row.is_public : false),
-      winners: parseWinnerRows(
-        'winners' in row ? row.winners : [],
+    .map((row) => {
+      const race = raceById.get(String(row.marathon_event_id))
+      const distance = asDistance(row.distance)
+      const entries = (entriesByEvent.get(String(row.id)) ?? []).map((entry) => {
+        if (staff || entry.isMine) return entry
+        return { ...entry, predictedSeconds: 0, predictedLabel: '' }
+      })
+      const ranking = entries
+        .filter((entry) => entry.gapSeconds != null)
+        .sort((a, b) => (a.gapSeconds ?? 0) - (b.gapSeconds ?? 0))
+      const prizes = splitRecordMatchPrizes(String(row.prize ?? ''))
+      const nameByMemberId = new Map(entries.map((entry) => [entry.memberId, entry.authorName]))
+      const canManage = profile.role === 'admin' || row.created_by === profile.id
+      return {
+        id: String(row.id),
+        marathonEventId: String(row.marathon_event_id),
+        raceTitle: race?.title ?? '대회',
+        raceDate: race?.eventDate ?? '',
+        location: race?.location ?? '',
+        distance,
+        distanceLabel: distance ? formatMarathonDistanceLabel(distance) : null,
+        prize: String(row.prize ?? ''),
         prizes,
-        nameByMemberId,
-      ),
-      createdByMe: row.created_by === profile.id,
-      canEdit: canManage,
-      canSelectWinners: canManage,
-      canWriteActual: canManage,
-      participantCount: entries.length,
-      mine: entries.find((entry) => entry.isMine) ?? null,
-      ranking,
-      guesses: staff
-        ? entries.map((entry) => ({
-            memberId: entry.memberId,
-            name: entry.authorName,
-            predictedLabel: entry.predictedLabel,
-            actualLabel: entry.actualLabel,
-          }))
-        : [],
-    }
-  })
+        note: String(row.note ?? ''),
+        isPublic: Boolean('is_public' in row ? row.is_public : false),
+        winners: parseWinnerRows(
+          'winners' in row ? row.winners : [],
+          prizes,
+          nameByMemberId,
+        ),
+        createdByMe: row.created_by === profile.id,
+        canEdit: canManage,
+        canSelectWinners: canManage,
+        canWriteActual: canManage,
+        participantCount: entries.length,
+        mine: entries.find((entry) => entry.isMine) ?? null,
+        ranking,
+        guesses: staff
+          ? entries.map((entry) => ({
+              memberId: entry.memberId,
+              name: entry.authorName,
+              predictedLabel: entry.predictedLabel,
+              actualLabel: entry.actualLabel,
+            }))
+          : [],
+      }
+    })
 
   return {
     races,

@@ -51,14 +51,23 @@ export async function listPortalFeed(): Promise<PortalFeedKeys> {
     }
   }
 
-  const matches = await supabase
+  // 공개(외부) 이벤트는 회원 포털 새알림에서 제외 — 링크 전용 홍보 채널
+  let matches = await supabase
     .from('member_record_match_events')
-    .select('id, created_by')
+    .select('id, created_by, is_public')
     .order('created_at', { ascending: false })
     .limit(30)
+  if (matches.error && String(matches.error.message).includes('is_public')) {
+    matches = await supabase
+      .from('member_record_match_events')
+      .select('id, created_by')
+      .order('created_at', { ascending: false })
+      .limit(30)
+  }
   if (!matches.error) {
     for (const row of matches.data ?? []) {
       if (row.created_by === profile.id) continue
+      if ('is_public' in row && row.is_public) continue
       event.add(`match:${String(row.id)}`)
     }
   }

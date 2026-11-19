@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { PortalFeedKeys } from '@/lib/actions/portal-updates'
+import { getPublicRecordMatchEvent } from '@/lib/actions/member-record-match-public'
 import { EVENT_MATCH_QUERY } from '@/lib/event-match-share'
 import { PORTAL_FEED_EVENT, PORTAL_ITEMS_SEEN_EVENT, unseenItemIds } from '@/lib/portal-item-seen'
 import { cn } from '@/lib/utils'
@@ -80,15 +81,28 @@ export function PortalHeaderEvent({ className }: { className?: string }) {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
     const openFromQuery = () => {
       const eventId = readEventMatchIdFromLocation()
       if (!eventId) return
-      setFocusEventId(eventId)
-      setOpen(true)
+      void (async () => {
+        const publicResult = await getPublicRecordMatchEvent(eventId)
+        if (cancelled) return
+        // 공개(외부) 이벤트는 회원 포털이 아니라 링크 전용 페이지로 분리
+        if (publicResult.event) {
+          window.location.replace(`/e/${encodeURIComponent(eventId)}`)
+          return
+        }
+        setFocusEventId(eventId)
+        setOpen(true)
+      })()
     }
     openFromQuery()
     window.addEventListener('popstate', openFromQuery)
-    return () => window.removeEventListener('popstate', openFromQuery)
+    return () => {
+      cancelled = true
+      window.removeEventListener('popstate', openFromQuery)
+    }
   }, [])
 
   function clearEventMatchQuery() {
@@ -144,7 +158,7 @@ export function PortalHeaderEvent({ className }: { className?: string }) {
           <DialogHeader className="border-b border-lime-500/15 px-5 pb-3 pt-5 text-left">
             <DialogTitle className="text-lg text-lime-100">이벤트</DialogTitle>
             <DialogDescription className="text-zinc-400">
-              대회 예상 기록을 맞추고, 실제 기록과 가장 가까운 사람이 상품을 받습니다.
+              회원용 기록 맞추기입니다. 외부 공개 이벤트는 공유 링크로만 열립니다.
             </DialogDescription>
           </DialogHeader>
           <div className="px-4 py-4">

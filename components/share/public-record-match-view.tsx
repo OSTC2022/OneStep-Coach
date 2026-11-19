@@ -80,7 +80,7 @@ export function PublicRecordMatchView({
         <header className="flex flex-col items-center text-center">
           <BrandPulseAppIcon glow className="h-14 w-14" />
           <p className="mt-3 text-2xl font-black tracking-tight">원스텝</p>
-          <p className="mt-1 text-xs text-white/55">링크 공유 공개 이벤트</p>
+          <p className="mt-1 text-xs text-white/55">원스텝 외부 공개 이벤트</p>
         </header>
 
         <section className="rounded-2xl border border-lime-500/20 bg-black/35 p-4">
@@ -168,7 +168,7 @@ export function PublicRecordMatchView({
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-2 rounded-2xl border border-lime-500/20 bg-black/35 p-4">
           <p className="text-sm font-semibold text-white">댓글 쓰기</p>
           <p className="text-[11px] leading-relaxed text-white/45">
-            이름과 비밀번호(4자)만 있으면 됩니다. 링크를 받은 사람만 이 화면에 들어올 수 있습니다.
+            회원 로그인 없이 이름·비밀번호(4자)로 댓글할 수 있습니다. 링크를 받은 분만 이 화면에 들어올 수 있습니다.
           </p>
           <div className="grid grid-cols-2 gap-2">
             <div>
