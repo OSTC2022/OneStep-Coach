@@ -1,23 +1,17 @@
 import type { Metadata } from 'next'
-import { headers } from 'next/headers'
-import { redirect } from 'next/navigation'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
+import { ShareRedirect } from '@/components/share/share-redirect'
 import { buildEventMatchPortalPath } from '@/lib/event-match-share'
 
 type PageProps = {
   params: Promise<{ eventId: string }>
 }
 
+/** 카카오 미리보기용 — 이벤트 멘트 없이 센터 브랜드만 */
 const SHARE_TITLE = '원스텝'
 const SHARE_DESCRIPTION =
-  '원스텝 트레이닝센터 — 러닝과 트레이닝을 함께하는 공간. OneStep Training Center'
-
-function isLinkPreviewScraper(userAgent: string) {
-  // 실제 카카오톡 인앱 브라우저(UA에 Kakaotalk 포함)는 제외 — 스크래퍼만
-  return /facebookexternalhit|kakaotalk-scrap|Twitterbot|Slackbot|LinkedInBot|Discordbot|WhatsApp|TelegramBot|embedly|Pinterest|bingbot|Googlebot|Yeti|naver|Daum/i.test(
-    userAgent,
-  )
-}
+  '원스텝 트레이닝센터 — 러닝과 트레이닝을 함께하는 공간'
+const SHARE_IMAGE = '/og/onestep-share.jpg?v=2'
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { eventId } = await params
@@ -34,7 +28,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       type: 'website',
       images: [
         {
-          url: '/og-default.jpg',
+          url: SHARE_IMAGE,
           width: 1200,
           height: 630,
           alt: '원스텝',
@@ -45,7 +39,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       card: 'summary_large_image',
       title: SHARE_TITLE,
       description: SHARE_DESCRIPTION,
-      images: ['/og-default.jpg'],
+      images: [SHARE_IMAGE],
     },
   }
 }
@@ -53,11 +47,6 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function EventSharePage({ params }: PageProps) {
   const { eventId } = await params
   const href = buildEventMatchPortalPath(eventId.trim(), '/dashboard/running-portal')
-  const ua = (await headers()).get('user-agent') ?? ''
-
-  if (!isLinkPreviewScraper(ua)) {
-    redirect(href)
-  }
 
   return (
     <main className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#070d18] px-6 text-center text-white">
@@ -67,9 +56,8 @@ export default async function EventSharePage({ params }: PageProps) {
       />
       <BrandPulseAppIcon glow className="relative h-20 w-20" />
       <p className="relative mt-4 text-3xl font-black tracking-tight">원스텝</p>
-      <p className="relative mt-3 max-w-xs text-sm leading-relaxed text-white/65">
-        원스텝 트레이닝센터
-      </p>
+      <p className="relative mt-3 text-sm text-white/60">원스텝 트레이닝센터</p>
+      <ShareRedirect href={href} />
     </main>
   )
 }

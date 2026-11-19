@@ -131,10 +131,10 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: '/og-default.jpg',
+        url: '/og/onestep-share.jpg?v=2',
         width: 1200,
         height: 630,
-        alt: '원스텝 OneStep Training Center',
+        alt: '원스텝',
       },
     ],
   },
@@ -142,7 +142,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: '원스텝',
     description: SITE_DESCRIPTION,
-    images: ['/og-default.jpg'],
+    images: ['/og/onestep-share.jpg?v=2'],
   },
   appleWebApp: {
     capable: true,
