@@ -356,9 +356,23 @@ export function MemberEventBoard() {
 
       {composerOpen ? (
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-2">
-          <label className="block text-xs font-medium text-foreground" htmlFor="event-post-title">
-            제목
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-medium text-foreground" htmlFor="event-post-title">
+              제목
+            </label>
+            {canPinNotice ? (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="event-post-notice"
+                  checked={isNotice}
+                  onCheckedChange={(checked) => setIsNotice(checked === true)}
+                />
+                <Label htmlFor="event-post-notice" className="text-xs font-medium text-foreground">
+                  공지
+                </Label>
+              </div>
+            ) : null}
+          </div>
           <input
             id="event-post-title"
             value={title}
@@ -396,18 +410,6 @@ export function MemberEventBoard() {
             placeholder="4자"
             required
           />
-          {canPinNotice ? (
-            <div className="flex items-center gap-2 pt-1">
-              <Checkbox
-                id="event-post-notice"
-                checked={isNotice}
-                onCheckedChange={(checked) => setIsNotice(checked === true)}
-              />
-              <Label htmlFor="event-post-notice" className="text-xs font-medium text-foreground">
-                공지
-              </Label>
-            </div>
-          ) : null}
           <button
             type="submit"
             disabled={saving}
@@ -467,11 +469,6 @@ export function MemberEventBoard() {
                     {post.isNotice ? '공지' : postNumber}
                   </span>
                   <span className="flex min-w-0 items-center gap-1.5">
-                    {post.isNotice ? (
-                      <span className="shrink-0 rounded border border-amber-400/40 bg-amber-500/15 px-1 py-0.5 text-[10px] font-semibold text-amber-200">
-                        공지
-                      </span>
-                    ) : null}
                     <span className="min-w-0 truncate text-sm font-semibold text-foreground">
                       {post.title}
                     </span>
@@ -571,9 +568,31 @@ export function MemberEventBoard() {
                         className="space-y-2"
                         onSubmit={(event) => void handleUpdate(event, post.id)}
                       >
-                        <label className="sr-only" htmlFor={`event-edit-title-${post.id}`}>
-                          제목 수정
-                        </label>
+                        <div className="flex items-center justify-between gap-2">
+                          <label
+                            className="text-xs font-medium text-foreground"
+                            htmlFor={`event-edit-title-${post.id}`}
+                          >
+                            제목
+                          </label>
+                          {canPinNotice ? (
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id={`event-edit-notice-${post.id}`}
+                                checked={editIsNotice}
+                                onCheckedChange={(checked) =>
+                                  setEditIsNotice(checked === true)
+                                }
+                              />
+                              <Label
+                                htmlFor={`event-edit-notice-${post.id}`}
+                                className="text-xs font-medium text-foreground"
+                              >
+                                공지
+                              </Label>
+                            </div>
+                          ) : null}
+                        </div>
                         <input
                           id={`event-edit-title-${post.id}`}
                           value={editTitle}
@@ -596,23 +615,6 @@ export function MemberEventBoard() {
                           placeholder="내용"
                           required
                         />
-                        {canPinNotice ? (
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`event-edit-notice-${post.id}`}
-                              checked={editIsNotice}
-                              onCheckedChange={(checked) =>
-                                setEditIsNotice(checked === true)
-                              }
-                            />
-                            <Label
-                              htmlFor={`event-edit-notice-${post.id}`}
-                              className="text-xs font-medium text-foreground"
-                            >
-                              공지
-                            </Label>
-                          </div>
-                        ) : null}
                         <div className="flex gap-2">
                           <button
                             type="button"
