@@ -166,7 +166,8 @@ export function MemberRecordMatchPanel({
         const slots = prizes.map((_, index) => {
           const saved = event.winners
             .filter((item) => item.prizeIndex === index)
-            .map((item) => item.memberId)
+            .map((item) => (item.isGuest ? item.memberName : item.memberId))
+            .filter(Boolean)
           if (saved.length > 0) return saved
           const draft = current[event.id]?.[index]
           return draft && draft.length > 0 ? draft : ['']
@@ -318,12 +319,17 @@ export function MemberRecordMatchPanel({
 
   async function handleSaveWinners(eventId: string) {
     if (saving) return
+    const event = events.find((item) => item.id === eventId)
     const slots = winnerDrafts[eventId] ?? []
-    const winners = slots.flatMap((memberIds, prizeIndex) =>
-      (memberIds ?? [])
-        .map((memberId) => memberId.trim())
+    const winners = slots.flatMap((ids, prizeIndex) =>
+      (ids ?? [])
+        .map((id) => id.trim())
         .filter(Boolean)
-        .map((memberId) => ({ memberId, prizeIndex })),
+        .map((id) =>
+          event?.isPublic
+            ? { guestName: id, prizeIndex }
+            : { memberId: id, prizeIndex },
+        ),
     )
     setSaving(true)
     const result = await setRecordMatchWinners({ eventId, winners })
@@ -734,21 +740,23 @@ export function MemberRecordMatchPanel({
                 ) : null}
 
                 {item.winners.length > 0 ? (
-                  <div className="mt-3 space-y-1 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2">
-                    <p className="text-[11px] font-semibold text-amber-200">당첨자</p>
+                  <div className="mt-3 space-y-2 rounded-xl border-2 border-amber-400/45 bg-amber-500/15 px-3 py-3">
+                    <p className="text-center text-[11px] font-bold tracking-[0.18em] text-amber-200">
+                      당첨자
+                    </p>
                     {item.winners.map((winner) => (
-                      <p
-                        key={`${item.id}-winner-${winner.prizeIndex}-${winner.memberId}`}
-                        className="text-sm text-foreground"
+                      <div
+                        key={`${item.id}-winner-${winner.prizeIndex}-${winner.memberId || winner.memberName}`}
+                        className="rounded-lg border border-amber-300/25 bg-black/25 px-3 py-2 text-center"
                       >
-                        <span className="text-muted-foreground">
+                        <p className="text-[11px] text-amber-200/80">
                           {(item.prizes.length > 1 ? item.prizes : [item.prize]).length > 1
-                            ? `${winner.prizeIndex + 1}등 `
-                            : ''}
-                        </span>
-                        <span className="font-semibold text-amber-100">{winner.memberName}</span>
-                        <span className="text-muted-foreground"> · {winner.prize}</span>
-                      </p>
+                            ? `${winner.prizeIndex + 1}등`
+                            : '상품'}{' '}
+                          · {winner.prize}
+                        </p>
+                        <p className="text-base font-black text-amber-50">{winner.memberName}</p>
+                      </div>
                     ))}
                   </div>
                 ) : null}
@@ -1145,11 +1153,152 @@ export function MemberRecordMatchPanel({
                             {item.note}
                           </p>
                         ) : null}
+                        {item.winners.length > 0 ? (
+                          <div className="mt-3 space-y-2 rounded-xl border-2 border-amber-400/45 bg-amber-500/15 px-3 py-3">
+                            <p className="text-center text-[11px] font-bold tracking-[0.18em] text-amber-200">
+                              당첨자
+                            </p>
+                            {item.winners.map((winner) => (
+                              <div
+                                key={`${item.id}-public-winner-${winner.prizeIndex}-${winner.memberName}`}
+                                className="rounded-lg border border-amber-300/25 bg-black/25 px-3 py-2 text-center"
+                              >
+                                <p className="text-[11px] text-amber-200/80">
+                                  {(item.prizes.length > 1 ? item.prizes : [item.prize]).length > 1
+                                    ? `${winner.prizeIndex + 1}등`
+                                    : '상품'}{' '}
+                                  · {winner.prize}
+                                </p>
+                                <p className="text-base font-black text-amber-50">
+                                  {winner.memberName}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                         <p className="mt-2 text-[11px] text-muted-foreground">
                           회원 예상 기록·랭킹과 무관합니다. 외부는 공유 링크에서만 댓글합니다.
                         </p>
                       </>
                     )}
+
+                    {item.canSelectWinners ? (
+                      <div className="mt-3 space-y-2 border-t border-amber-400/25 pt-3">
+                        <p className="text-xs font-semibold text-amber-100">당첨자 선정 (관리자)</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          댓글 작성자 중에서 같은 등수에 여러 명을 추가할 수 있습니다.
+                        </p>
+                        {(item.prizes.length > 0 ? item.prizes : [item.prize]).map(
+                          (prize, index) => {
+                            const prizeCount = (
+                              item.prizes.length > 0 ? item.prizes : [item.prize]
+                            ).length
+                            const picks = winnerDrafts[item.id]?.[index] ?? ['']
+                            const candidates = item.guestCandidates
+                            return (
+                              <div
+                                key={`${item.id}-public-winner-slot-${index}`}
+                                className="space-y-1.5"
+                              >
+                                <p className="text-[11px] text-muted-foreground">
+                                  {prizeCount > 1 ? `${index + 1}등 · ${prize}` : `상품 · ${prize}`}
+                                </p>
+                                {picks.map((name, pickIndex) => (
+                                  <div
+                                    key={`${item.id}-public-pick-${index}-${pickIndex}`}
+                                    className="flex items-center gap-1.5"
+                                  >
+                                    <select
+                                      value={name}
+                                      disabled={saving || candidates.length === 0}
+                                      onChange={(change) =>
+                                        setWinnerDrafts((current) => {
+                                          const nextSlots = [
+                                            ...(current[item.id] ??
+                                              Array.from({ length: prizeCount }, () => [''])),
+                                          ]
+                                          while (nextSlots.length < prizeCount) nextSlots.push([''])
+                                          const nextPicks = [...(nextSlots[index] ?? [''])]
+                                          nextPicks[pickIndex] = change.target.value
+                                          nextSlots[index] = nextPicks
+                                          return { ...current, [item.id]: nextSlots }
+                                        })
+                                      }
+                                      className="h-10 min-w-0 flex-1 rounded-lg border border-border/80 bg-black/40 px-3 text-sm text-foreground outline-none focus-visible:border-primary/70 disabled:opacity-60"
+                                    >
+                                      <option value="">미선정</option>
+                                      {candidates.map((candidate) => (
+                                        <option key={candidate} value={candidate}>
+                                          {candidate}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {picks.length > 1 ? (
+                                      <button
+                                        type="button"
+                                        disabled={saving}
+                                        aria-label="당첨자 제거"
+                                        onClick={() =>
+                                          setWinnerDrafts((current) => {
+                                            const nextSlots = [
+                                              ...(current[item.id] ??
+                                                Array.from({ length: prizeCount }, () => [''])),
+                                            ]
+                                            while (nextSlots.length < prizeCount) {
+                                              nextSlots.push([''])
+                                            }
+                                            const nextPicks = [...(nextSlots[index] ?? [''])]
+                                            nextPicks.splice(pickIndex, 1)
+                                            nextSlots[index] =
+                                              nextPicks.length > 0 ? nextPicks : ['']
+                                            return { ...current, [item.id]: nextSlots }
+                                          })
+                                        }
+                                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 text-muted-foreground hover:text-foreground disabled:opacity-60"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  disabled={saving || candidates.length === 0}
+                                  onClick={() =>
+                                    setWinnerDrafts((current) => {
+                                      const nextSlots = [
+                                        ...(current[item.id] ??
+                                          Array.from({ length: prizeCount }, () => [''])),
+                                      ]
+                                      while (nextSlots.length < prizeCount) nextSlots.push([''])
+                                      nextSlots[index] = [...(nextSlots[index] ?? ['']), '']
+                                      return { ...current, [item.id]: nextSlots }
+                                    })
+                                  }
+                                  className="inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-amber-200 hover:text-amber-100 disabled:opacity-60"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  인원 추가
+                                </button>
+                              </div>
+                            )
+                          },
+                        )}
+                        <button
+                          type="button"
+                          disabled={saving || item.guestCandidates.length === 0}
+                          onClick={() => void handleSaveWinners(item.id)}
+                          className="min-h-9 rounded-lg bg-amber-400 px-3 text-xs font-semibold text-[#070d18] disabled:opacity-60"
+                        >
+                          {saving ? '저장 중…' : '당첨자 저장'}
+                        </button>
+                        {item.guestCandidates.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            공개 링크에 댓글이 있어야 당첨자를 선정할 수 있습니다.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </li>
                 )
               })}

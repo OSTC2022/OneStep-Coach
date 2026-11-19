@@ -44,6 +44,8 @@ export type RecordMatchWinner = {
   memberName: string
   prizeIndex: number
   prize: string
+  /** 공개 이벤트 게스트 당첨자 */
+  isGuest?: boolean
 }
 
 export type RecordMatchEvent = {
@@ -65,6 +67,8 @@ export type RecordMatchEvent = {
   canSelectWinners: boolean
   canWriteActual: boolean
   participantCount: number
+  /** 공개 이벤트 당첨 후보(댓글 작성자 이름) */
+  guestCandidates: string[]
   mine: RecordMatchEntry | null
   ranking: RecordMatchEntry[]
   guesses: Array<{
@@ -120,10 +124,22 @@ function parseWinnerRows(
   for (const row of raw) {
     if (!row || typeof row !== 'object') continue
     const memberId = String((row as { memberId?: unknown }).memberId ?? '').trim()
+    const guestName = String((row as { guestName?: unknown }).guestName ?? '').trim()
     const prizeIndex = Number((row as { prizeIndex?: unknown }).prizeIndex)
-    if (!memberId || !Number.isInteger(prizeIndex) || prizeIndex < 0) continue
+    if (!Number.isInteger(prizeIndex) || prizeIndex < 0) continue
     const prize = prizes[prizeIndex] ?? prizes[0] ?? ''
     if (!prize) continue
+    if (guestName) {
+      winners.push({
+        memberId: '',
+        memberName: guestName,
+        prizeIndex,
+        prize,
+        isGuest: true,
+      })
+      continue
+    }
+    if (!memberId) continue
     winners.push({
       memberId,
       memberName: nameByMemberId.get(memberId) ?? '회원',
@@ -131,7 +147,9 @@ function parseWinnerRows(
       prize,
     })
   }
-  return winners.sort((a, b) => a.prizeIndex - b.prizeIndex)
+  return winners.sort(
+    (a, b) => a.prizeIndex - b.prizeIndex || a.memberName.localeCompare(b.memberName, 'ko'),
+  )
 }
 
 async function db() {
@@ -381,9 +399,10 @@ export async function getRecordMatchBoard(): Promise<{
         ),
         createdByMe: row.created_by === profile.id,
         canEdit: canManage,
-        canSelectWinners: canManage,
+        canSelectWinners: profile.role === 'admin',
         canWriteActual: canManage,
         participantCount: entries.length,
+        guestCandidates: [],
         mine: entries.find((entry) => entry.isMine) ?? null,
         ranking,
         guesses: staff
@@ -396,6 +415,34 @@ export async function getRecordMatchBoard(): Promise<{
           : [],
       }
     })
+
+  if (profile.role === 'admin') {
+    const publicIds = events.filter((event) => event.isPublic).map((event) => event.id)
+    if (publicIds.length > 0) {
+      const commentAuthors = await supabase
+        .from('member_record_match_comments')
+        .select('event_id, author_name')
+        .in('event_id', publicIds)
+        .limit(500)
+      if (!commentAuthors.error) {
+        const namesByEvent = new Map<string, Set<string>>()
+        for (const row of commentAuthors.data ?? []) {
+          const eventId = String(row.event_id)
+          const name = String(row.author_name ?? '').trim()
+          if (!name) continue
+          const set = namesByEvent.get(eventId) ?? new Set<string>()
+          set.add(name)
+          namesByEvent.set(eventId, set)
+        }
+        for (const event of events) {
+          if (!event.isPublic) continue
+          event.guestCandidates = [...(namesByEvent.get(event.id) ?? [])].sort((a, b) =>
+            a.localeCompare(b, 'ko'),
+          )
+        }
+      }
+    }
+  }
 
   return {
     races,
@@ -644,18 +691,26 @@ export async function deleteRecordMatchEvent(eventId: string): Promise<{ error?:
 
 export async function setRecordMatchWinners(input: {
   eventId: string
-  winners: Array<{ memberId: string; prizeIndex: number }>
+  winners: Array<{ memberId?: string; guestName?: string; prizeIndex: number }>
 }): Promise<{ error?: string }> {
   const profile = await getDashboardProfile()
   if (!profile) return { error: '로그인이 필요합니다.' }
+  if (profile.role !== 'admin') return { error: '관리자만 당첨자를 선정할 수 있습니다.' }
   if (!input.eventId) return { error: '이벤트를 찾지 못했습니다.' }
 
   const supabase = await db()
-  const existing = await supabase
+  let existing = await supabase
     .from('member_record_match_events')
-    .select('id, created_by, prize')
+    .select('id, created_by, prize, is_public')
     .eq('id', input.eventId)
     .maybeSingle()
+  if (existing.error && isMissingPublicColumn(existing.error.message)) {
+    existing = await supabase
+      .from('member_record_match_events')
+      .select('id, created_by, prize')
+      .eq('id', input.eventId)
+      .maybeSingle()
+  }
   if (existing.error) {
     return {
       error: isMissingTable(existing.error.message)
@@ -665,48 +720,94 @@ export async function setRecordMatchWinners(input: {
   }
   if (!existing.data) return { error: '이벤트를 찾지 못했습니다.' }
 
-  const canSelect =
-    profile.role === 'admin' || existing.data.created_by === profile.id
-  if (!canSelect) return { error: '작성자 또는 관리자만 당첨자를 선정할 수 있습니다.' }
-
   const prizes = splitRecordMatchPrizes(String(existing.data.prize ?? ''))
   if (prizes.length === 0) return { error: '상품이 없어 당첨자를 선정할 수 없습니다.' }
 
-  const entries = await supabase
-    .from('member_record_match_entries')
-    .select('member_id')
-    .eq('event_id', input.eventId)
-  if (entries.error) {
-    return {
-      error: isMissingTable(entries.error.message)
-        ? MISSING_TABLE_HINT
-        : entries.error.message,
-    }
-  }
-
-  const memberIds = new Set(
-    (entries.data ?? []).map((row) => String(row.member_id)),
+  const isPublic = Boolean(
+    'is_public' in existing.data ? existing.data.is_public : false,
   )
-  const cleaned: Array<{ memberId: string; prizeIndex: number }> = []
-  const usedMember = new Set<string>()
 
-  for (const winner of input.winners) {
-    const memberId = winner.memberId.trim()
-    const prizeIndex = Number(winner.prizeIndex)
-    if (!memberId || !memberIds.has(memberId)) {
-      return { error: '참여자만 당첨자로 선정할 수 있습니다.' }
+  const cleaned: Array<
+    { memberId: string; prizeIndex: number } | { guestName: string; prizeIndex: number }
+  > = []
+  const usedKey = new Set<string>()
+
+  if (isPublic) {
+    const comments = await supabase
+      .from('member_record_match_comments')
+      .select('author_name')
+      .eq('event_id', input.eventId)
+      .limit(500)
+    if (comments.error) {
+      return {
+        error: isMissingTable(comments.error.message)
+          ? MISSING_TABLE_HINT
+          : comments.error.message,
+      }
     }
-    if (!Number.isInteger(prizeIndex) || prizeIndex < 0 || prizeIndex >= prizes.length) {
-      return { error: '상품 등수가 올바르지 않습니다.' }
+    const guestNames = new Set(
+      (comments.data ?? [])
+        .map((row) => String(row.author_name ?? '').trim())
+        .filter(Boolean),
+    )
+
+    for (const winner of input.winners) {
+      const guestName = (winner.guestName ?? winner.memberId ?? '').trim()
+      const prizeIndex = Number(winner.prizeIndex)
+      if (!guestName || !guestNames.has(guestName)) {
+        return { error: '댓글을 남긴 사람만 당첨자로 선정할 수 있습니다.' }
+      }
+      if (!Number.isInteger(prizeIndex) || prizeIndex < 0 || prizeIndex >= prizes.length) {
+        return { error: '상품 등수가 올바르지 않습니다.' }
+      }
+      const key = `g:${guestName}`
+      if (usedKey.has(key)) {
+        return { error: '한 명이 여러 등수를 받을 수 없습니다.' }
+      }
+      usedKey.add(key)
+      cleaned.push({ guestName, prizeIndex })
     }
-    if (usedMember.has(memberId)) {
-      return { error: '한 명이 여러 등수를 받을 수 없습니다.' }
+  } else {
+    const entries = await supabase
+      .from('member_record_match_entries')
+      .select('member_id')
+      .eq('event_id', input.eventId)
+    if (entries.error) {
+      return {
+        error: isMissingTable(entries.error.message)
+          ? MISSING_TABLE_HINT
+          : entries.error.message,
+      }
     }
-    usedMember.add(memberId)
-    cleaned.push({ memberId, prizeIndex })
+
+    const memberIds = new Set(
+      (entries.data ?? []).map((row) => String(row.member_id)),
+    )
+
+    for (const winner of input.winners) {
+      const memberId = (winner.memberId ?? '').trim()
+      const prizeIndex = Number(winner.prizeIndex)
+      if (!memberId || !memberIds.has(memberId)) {
+        return { error: '참여자만 당첨자로 선정할 수 있습니다.' }
+      }
+      if (!Number.isInteger(prizeIndex) || prizeIndex < 0 || prizeIndex >= prizes.length) {
+        return { error: '상품 등수가 올바르지 않습니다.' }
+      }
+      const key = `m:${memberId}`
+      if (usedKey.has(key)) {
+        return { error: '한 명이 여러 등수를 받을 수 없습니다.' }
+      }
+      usedKey.add(key)
+      cleaned.push({ memberId, prizeIndex })
+    }
   }
 
-  cleaned.sort((a, b) => a.prizeIndex - b.prizeIndex || a.memberId.localeCompare(b.memberId))
+  cleaned.sort((a, b) => {
+    if (a.prizeIndex !== b.prizeIndex) return a.prizeIndex - b.prizeIndex
+    const aKey = 'guestName' in a ? a.guestName : a.memberId
+    const bKey = 'guestName' in b ? b.guestName : b.memberId
+    return aKey.localeCompare(bKey, 'ko')
+  })
 
   const { error } = await supabase
     .from('member_record_match_events')
@@ -719,5 +820,6 @@ export async function setRecordMatchWinners(input: {
   }
 
   revalidate()
+  revalidatePath(`/e/${input.eventId}`)
   return {}
 }

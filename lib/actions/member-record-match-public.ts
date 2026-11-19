@@ -16,6 +16,12 @@ export type PublicRecordMatchComment = {
   createdAt: string
 }
 
+export type PublicRecordMatchWinner = {
+  name: string
+  prizeIndex: number
+  prize: string
+}
+
 export type PublicRecordMatchEvent = {
   id: string
   title: string
@@ -26,6 +32,8 @@ export type PublicRecordMatchEvent = {
   prizes: string[]
   note: string
   isPublic: true
+  winners: PublicRecordMatchWinner[]
+  canSelectWinners: boolean
   comments: PublicRecordMatchComment[]
 }
 
@@ -85,14 +93,22 @@ export async function getPublicRecordMatchEvent(
   const supabase = await db()
   let eventResult = await supabase
     .from('member_record_match_events')
-    .select('id, marathon_event_id, title, distance, prize, note, is_public')
+    .select('id, marathon_event_id, title, distance, prize, note, winners, is_public')
     .eq('id', id)
     .maybeSingle()
 
   if (eventResult.error && String(eventResult.error.message).includes('title')) {
     eventResult = await supabase
       .from('member_record_match_events')
-      .select('id, marathon_event_id, distance, prize, note, is_public')
+      .select('id, marathon_event_id, distance, prize, note, winners, is_public')
+      .eq('id', id)
+      .maybeSingle()
+  }
+
+  if (eventResult.error && String(eventResult.error.message).includes('winners')) {
+    eventResult = await supabase
+      .from('member_record_match_events')
+      .select('id, marathon_event_id, title, distance, prize, note, is_public')
       .eq('id', id)
       .maybeSingle()
   }
@@ -126,6 +142,32 @@ export async function getPublicRecordMatchEvent(
   const customTitle = String(
     'title' in eventResult.data ? (eventResult.data.title ?? '') : '',
   ).trim()
+  const prizes = splitRecordMatchPrizes(String(eventResult.data.prize ?? ''))
+  const winnersRaw =
+    'winners' in eventResult.data ? eventResult.data.winners : []
+  const winners: PublicRecordMatchWinner[] = []
+  if (Array.isArray(winnersRaw)) {
+    for (const row of winnersRaw) {
+      if (!row || typeof row !== 'object') continue
+      const guestName = String((row as { guestName?: unknown }).guestName ?? '').trim()
+      const prizeIndex = Number((row as { prizeIndex?: unknown }).prizeIndex)
+      if (!guestName || !Number.isInteger(prizeIndex) || prizeIndex < 0) continue
+      const prize = prizes[prizeIndex] ?? prizes[0] ?? ''
+      if (!prize) continue
+      winners.push({ name: guestName, prizeIndex, prize })
+    }
+    winners.sort(
+      (a, b) => a.prizeIndex - b.prizeIndex || a.name.localeCompare(b.name, 'ko'),
+    )
+  }
+
+  let canSelectWinners = false
+  try {
+    const profile = await getDashboardProfile()
+    canSelectWinners = profile?.role === 'admin'
+  } catch {
+    canSelectWinners = false
+  }
 
   return {
     event: {
@@ -135,9 +177,11 @@ export async function getPublicRecordMatchEvent(
       raceDate: String(raceResult.data?.event_date ?? '').slice(0, 10),
       location: String(raceResult.data?.location_label ?? ''),
       distanceLabel: distance ? formatMarathonDistanceLabel(distance) : null,
-      prizes: splitRecordMatchPrizes(String(eventResult.data.prize ?? '')),
+      prizes,
       note: String(eventResult.data.note ?? ''),
       isPublic: true,
+      winners,
+      canSelectWinners,
       comments: (commentResult.data ?? []).map((row) => ({
         id: String(row.id),
         authorName: String(row.author_name ?? '익명'),
