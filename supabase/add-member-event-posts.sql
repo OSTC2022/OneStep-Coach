@@ -16,8 +16,14 @@ CREATE TABLE IF NOT EXISTS public.member_event_posts (
 ALTER TABLE public.member_event_posts
   ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
+ALTER TABLE public.member_event_posts
+  ADD COLUMN IF NOT EXISTS is_notice BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE INDEX IF NOT EXISTS member_event_posts_created_idx
   ON public.member_event_posts (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS member_event_posts_notice_created_idx
+  ON public.member_event_posts (is_notice DESC, created_at DESC);
 
 ALTER TABLE public.member_event_posts ENABLE ROW LEVEL SECURITY;
 

@@ -16,6 +16,8 @@ import {
 } from '@/lib/actions/member-event-posts'
 import { EventNewMark } from '@/components/dashboard/event-new-mark'
 import { useMarkPortalItemsRead } from '@/components/dashboard/portal-seen'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 
 function formatPostedAt(value: string) {
   try {
@@ -179,17 +181,20 @@ function CommentThread({
 export function MemberEventBoard() {
   const [posts, setPosts] = useState<MemberEventPost[]>([])
   const [canPost, setCanPost] = useState(false)
+  const [canPinNotice, setCanPinNotice] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [password, setPassword] = useState('')
+  const [isNotice, setIsNotice] = useState(false)
   const [saving, setSaving] = useState(false)
   const [composerOpen, setComposerOpen] = useState(false)
   const [openPostId, setOpenPostId] = useState<string | null>(null)
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [editBody, setEditBody] = useState('')
+  const [editIsNotice, setEditIsNotice] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
   const [deletePostId, setDeletePostId] = useState<string | null>(null)
   const [deletePassword, setDeletePassword] = useState('')
@@ -206,6 +211,7 @@ export function MemberEventBoard() {
     const result = await getMemberEventPosts()
     setPosts(result.posts)
     setCanPost(result.canPost)
+    setCanPinNotice(result.canPinNotice)
     setError(result.error ?? null)
     setLoading(false)
   }
@@ -222,7 +228,12 @@ export function MemberEventBoard() {
       return
     }
     setSaving(true)
-    const result = await createMemberEventPost({ title, body, password })
+    const result = await createMemberEventPost({
+      title,
+      body,
+      password,
+      isNotice: canPinNotice ? isNotice : false,
+    })
     setSaving(false)
     if (result.error) {
       toast.error('글을 올리지 못했습니다', { description: result.error })
@@ -231,8 +242,9 @@ export function MemberEventBoard() {
     setTitle('')
     setBody('')
     setPassword('')
+    setIsNotice(false)
     setComposerOpen(false)
-    toast.success('글을 올렸습니다.')
+    toast.success(isNotice ? '공지를 올렸습니다.' : '글을 올렸습니다.')
     await reload()
   }
 
@@ -240,6 +252,7 @@ export function MemberEventBoard() {
     setEditingPostId(post.id)
     setEditTitle(post.title)
     setEditBody(post.body)
+    setEditIsNotice(post.isNotice)
     setDeletePostId(null)
     setDeletePassword('')
   }
@@ -248,6 +261,7 @@ export function MemberEventBoard() {
     setEditingPostId(null)
     setEditTitle('')
     setEditBody('')
+    setEditIsNotice(false)
   }
 
   async function handleUpdate(event: FormEvent, postId: string) {
@@ -258,21 +272,16 @@ export function MemberEventBoard() {
       postId,
       title: editTitle,
       body: editBody,
+      isNotice: canPinNotice ? editIsNotice : undefined,
     })
     setEditSaving(false)
     if (result.error) {
       toast.error('글을 수정하지 못했습니다', { description: result.error })
       return
     }
-    setPosts((current) =>
-      current.map((post) =>
-        post.id === postId
-          ? { ...post, title: editTitle.trim(), body: editBody.trim() }
-          : post,
-      ),
-    )
     cancelEdit()
     toast.success('글을 수정했습니다.')
+    await reload()
   }
 
   async function handleDelete(postId: string, withPassword?: string) {
@@ -387,12 +396,24 @@ export function MemberEventBoard() {
             placeholder="4자"
             required
           />
+          {canPinNotice ? (
+            <div className="flex items-center gap-2 pt-1">
+              <Checkbox
+                id="event-post-notice"
+                checked={isNotice}
+                onCheckedChange={(checked) => setIsNotice(checked === true)}
+              />
+              <Label htmlFor="event-post-notice" className="text-xs font-medium text-foreground">
+                공지
+              </Label>
+            </div>
+          ) : null}
           <button
             type="submit"
             disabled={saving}
             className="min-h-11 w-full rounded-lg bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
           >
-            {saving ? '올리는 중…' : '게시'}
+            {saving ? '올리는 중…' : isNotice ? '공지 등록' : '게시'}
           </button>
         </form>
       ) : null}
@@ -412,16 +433,22 @@ export function MemberEventBoard() {
             <span className="text-right">작성일</span>
           </div>
           <ul className="divide-y divide-primary/15">
-          {posts.map((post, index) => {
+          {posts.map((post) => {
             const postIsNew = freshIds.includes(`post:${post.id}`)
             const postHasNewComment = otherCommentIds(post.comments).some((id) =>
               freshIds.includes(id),
             )
             const isOpen = openPostId === post.id
             const commentCount = countComments(post.comments)
-            const postNumber = posts.length - index
+            const regularPosts = posts.filter((item) => !item.isNotice)
+            const postNumber = post.isNotice
+              ? null
+              : regularPosts.length - regularPosts.findIndex((item) => item.id === post.id)
             return (
-              <li key={post.id}>
+              <li
+                key={post.id}
+                className={post.isNotice ? 'bg-amber-500/5' : undefined}
+              >
                 <button
                   type="button"
                   onClick={() =>
@@ -430,10 +457,21 @@ export function MemberEventBoard() {
                   className="grid w-full grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 px-3 py-2.5 text-left hover:bg-white/5 sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_4.75rem]"
                   aria-expanded={isOpen}
                 >
-                  <span className="text-center text-xs tabular-nums text-muted-foreground">
-                    {postNumber}
+                  <span
+                    className={
+                      post.isNotice
+                        ? 'text-center text-[10px] font-semibold text-amber-300'
+                        : 'text-center text-xs tabular-nums text-muted-foreground'
+                    }
+                  >
+                    {post.isNotice ? '공지' : postNumber}
                   </span>
                   <span className="flex min-w-0 items-center gap-1.5">
+                    {post.isNotice ? (
+                      <span className="shrink-0 rounded border border-amber-400/40 bg-amber-500/15 px-1 py-0.5 text-[10px] font-semibold text-amber-200">
+                        공지
+                      </span>
+                    ) : null}
                     <span className="min-w-0 truncate text-sm font-semibold text-foreground">
                       {post.title}
                     </span>
@@ -558,6 +596,23 @@ export function MemberEventBoard() {
                           placeholder="내용"
                           required
                         />
+                        {canPinNotice ? (
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={`event-edit-notice-${post.id}`}
+                              checked={editIsNotice}
+                              onCheckedChange={(checked) =>
+                                setEditIsNotice(checked === true)
+                              }
+                            />
+                            <Label
+                              htmlFor={`event-edit-notice-${post.id}`}
+                              className="text-xs font-medium text-foreground"
+                            >
+                              공지
+                            </Label>
+                          </div>
+                        ) : null}
                         <div className="flex gap-2">
                           <button
                             type="button"

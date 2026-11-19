@@ -24,6 +24,7 @@ export type MemberEventPost = {
   title: string
   body: string
   createdAt: string
+  isNotice: boolean
   adminCanDelete: boolean
   isMine: boolean
   comments: MemberEventComment[]
@@ -40,13 +41,15 @@ const MISSING_COMMENT_HINT =
   '댓글 테이블이 없습니다. Supabase SQL Editor에서 supabase/add-member-event-posts.sql 을 다시 실행해주세요.'
 const MISSING_REPLY_HINT =
   '대댓글 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-event-posts.sql 을 다시 실행해주세요.'
+const MISSING_NOTICE_HINT =
+  '공지 칸이 없습니다. Supabase SQL Editor에서 supabase/add-member-event-posts-notice.sql 을 실행해주세요.'
 
 function isMissingTable(message: string) {
   return message.includes('member_event_posts') && (
     message.includes('schema cache') ||
     message.includes('does not exist') ||
     message.includes('Could not find')
-  ) && !message.includes('password_hash') && !message.includes('member_event_comments')
+  ) && !message.includes('password_hash') && !message.includes('member_event_comments') && !message.includes('is_notice')
 }
 
 function isMissingCommentTable(message: string) {
@@ -65,12 +68,21 @@ function isMissingReplyColumn(message: string) {
   return message.includes('parent_id')
 }
 
+function isMissingNoticeColumn(message: string) {
+  return message.includes('is_notice')
+}
+
 function boardError(message: string) {
+  if (isMissingNoticeColumn(message)) return MISSING_NOTICE_HINT
   if (isMissingReplyColumn(message)) return MISSING_REPLY_HINT
   if (isMissingCommentTable(message)) return MISSING_COMMENT_HINT
   if (isMissingPasswordColumn(message)) return MISSING_PASSWORD_HINT
   if (isMissingTable(message)) return MISSING_TABLE_HINT
   return message
+}
+
+function canPinNotice(role: string | null | undefined) {
+  return role === 'admin' || role === 'instructor'
 }
 
 function hashPostPassword(password: string) {
@@ -113,37 +125,58 @@ function mapPost(
     title: String(row.title ?? ''),
     body: String(row.body ?? ''),
     createdAt: String(row.created_at),
+    isNotice: Boolean(row.is_notice),
     adminCanDelete,
     isMine: row.author_user_id === viewerId,
     comments,
   }
 }
 
+function sortBoardPosts(posts: MemberEventPost[]) {
+  return [...posts].sort((a, b) => {
+    if (a.isNotice !== b.isNotice) return a.isNotice ? -1 : 1
+    return b.createdAt.localeCompare(a.createdAt)
+  })
+}
+
 export async function getMemberEventPosts(): Promise<{
   posts: MemberEventPost[]
   canPost: boolean
+  canPinNotice: boolean
   error?: string
 }> {
   const profile = await getDashboardProfile()
-  if (!profile) return { posts: [], canPost: false, error: '로그인이 필요합니다.' }
+  if (!profile) {
+    return { posts: [], canPost: false, canPinNotice: false, error: '로그인이 필요합니다.' }
+  }
 
+  const pinNotice = canPinNotice(profile.role)
   const supabase = await boardClient()
-  const { data, error } = await supabase
+  let result = await supabase
     .from('member_event_posts')
-    .select('id, author_user_id, author_name, title, body, created_at')
+    .select('id, author_user_id, author_name, title, body, created_at, is_notice')
     .order('created_at', { ascending: false })
     .limit(50)
 
-  if (error) {
+  if (result.error && isMissingNoticeColumn(result.error.message)) {
+    result = await supabase
+      .from('member_event_posts')
+      .select('id, author_user_id, author_name, title, body, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50)
+  }
+
+  if (result.error) {
     return {
       posts: [],
       canPost: true,
-      error: boardError(error.message),
+      canPinNotice: pinNotice,
+      error: boardError(result.error.message),
     }
   }
 
   const adminCanDelete = profile.role === 'admin'
-  const postRows = data ?? []
+  const postRows = result.data ?? []
   const postIds = postRows.map((row) => String(row.id))
   const commentsByPost = new Map<string, MemberEventComment[]>()
   if (postIds.length > 0) {
@@ -164,6 +197,7 @@ export async function getMemberEventPosts(): Promise<{
       return {
         posts: [],
         canPost: true,
+        canPinNotice: pinNotice,
         error: boardError(commentResult.error.message),
       }
     }
@@ -181,15 +215,18 @@ export async function getMemberEventPosts(): Promise<{
   }
 
   return {
-    posts: postRows.map((row) =>
-      mapPost(
-        row as Record<string, unknown>,
-        adminCanDelete,
-        commentsByPost.get(String(row.id)) ?? [],
-        profile.id,
+    posts: sortBoardPosts(
+      postRows.map((row) =>
+        mapPost(
+          row as Record<string, unknown>,
+          adminCanDelete,
+          commentsByPost.get(String(row.id)) ?? [],
+          profile.id,
+        ),
       ),
     ),
     canPost: true,
+    canPinNotice: pinNotice,
   }
 }
 
@@ -319,6 +356,7 @@ export async function createMemberEventPost(input: {
   title: string
   body: string
   password: string
+  isNotice?: boolean
 }): Promise<{ error?: string }> {
   const profile = await getDashboardProfile()
   if (!profile) return { error: '로그인이 필요합니다.' }
@@ -326,11 +364,15 @@ export async function createMemberEventPost(input: {
   const title = input.title.trim()
   const body = input.body.trim()
   const password = input.password
+  const isNotice = Boolean(input.isNotice) && canPinNotice(profile.role)
   if (!title) return { error: '제목을 입력해주세요.' }
   if (title.length > TITLE_MAX) return { error: `제목은 ${TITLE_MAX}자까지 입력할 수 있습니다.` }
   if (!body) return { error: '내용을 입력해주세요.' }
   if (body.length > BODY_MAX) return { error: `내용은 ${BODY_MAX}자까지 입력할 수 있습니다.` }
   if (!isFourCharPassword(password)) return { error: '비밀번호는 4자로 입력해주세요.' }
+  if (input.isNotice && !canPinNotice(profile.role)) {
+    return { error: '관리자 또는 강사만 공지를 등록할 수 있습니다.' }
+  }
 
   const member = await getMemberForCurrentUser()
   const authorName = member?.name?.trim() || profile.full_name?.trim() || '회원'
@@ -342,6 +384,7 @@ export async function createMemberEventPost(input: {
     title,
     body,
     password_hash: hashPostPassword(password),
+    is_notice: isNotice,
   })
 
   if (error) {
@@ -357,6 +400,7 @@ export async function updateMemberEventPost(input: {
   postId: string
   title: string
   body: string
+  isNotice?: boolean
 }): Promise<{ error?: string }> {
   const profile = await getDashboardProfile()
   if (!profile) return { error: '로그인이 필요합니다.' }
@@ -372,14 +416,51 @@ export async function updateMemberEventPost(input: {
   const supabase = await boardClient()
   const { data, error: readError } = await supabase
     .from('member_event_posts')
-    .select('id, author_user_id')
+    .select('id, author_user_id, is_notice')
     .eq('id', input.postId)
     .maybeSingle()
 
-  if (readError) return { error: boardError(readError.message) }
+  if (readError && !isMissingNoticeColumn(readError.message)) {
+    return { error: boardError(readError.message) }
+  }
+  if (readError && isMissingNoticeColumn(readError.message)) {
+    const fallback = await supabase
+      .from('member_event_posts')
+      .select('id, author_user_id')
+      .eq('id', input.postId)
+      .maybeSingle()
+    if (fallback.error) return { error: boardError(fallback.error.message) }
+    if (!fallback.data) return { error: '글을 찾지 못했습니다.' }
+    if (fallback.data.author_user_id !== profile.id) {
+      return { error: '본인 글만 수정할 수 있습니다.' }
+    }
+    if (input.isNotice) return { error: MISSING_NOTICE_HINT }
+    const { error } = await supabase
+      .from('member_event_posts')
+      .update({
+        title,
+        body,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.postId)
+      .eq('author_user_id', profile.id)
+    if (error) return { error: boardError(error.message) }
+    revalidatePath('/dashboard/my')
+    revalidatePath('/dashboard/running-portal')
+    return {}
+  }
+
   if (!data) return { error: '글을 찾지 못했습니다.' }
   if (data.author_user_id !== profile.id) {
     return { error: '본인 글만 수정할 수 있습니다.' }
+  }
+
+  const nextNotice =
+    input.isNotice === undefined
+      ? Boolean(data.is_notice)
+      : Boolean(input.isNotice) && canPinNotice(profile.role)
+  if (input.isNotice && !canPinNotice(profile.role)) {
+    return { error: '관리자 또는 강사만 공지를 설정할 수 있습니다.' }
   }
 
   const { error } = await supabase
@@ -387,6 +468,7 @@ export async function updateMemberEventPost(input: {
     .update({
       title,
       body,
+      is_notice: nextNotice,
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.postId)
