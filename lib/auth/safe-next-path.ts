@@ -14,6 +14,15 @@ export function getSafeNextPath(
   return raw
 }
 
+/** 이벤트 공유 링크로 들어온 next 인지 (일반 대시보드 복귀와 구분) */
+export function isEventShareNextPath(nextPath: string | null | undefined): boolean {
+  const raw = nextPath?.trim() ?? ''
+  if (!raw) return false
+  if (raw.includes('eventMatch=')) return true
+  if (raw.startsWith('/e/')) return true
+  return false
+}
+
 export function buildLoginRedirectUrl(pathname: string, search: string) {
   const next = `${pathname}${search}`
   const params = new URLSearchParams()

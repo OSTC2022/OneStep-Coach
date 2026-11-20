@@ -3,8 +3,11 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { UserRole } from '@/lib/types'
 
-/** 일반 회원 — 기기 1대 (새 로그인 시 기존 세션 종료) */
-export const MAX_CONCURRENT_AUTH_SESSIONS_MEMBER = 1
+/**
+ * 일반 회원 — 동시 로그인 2대
+ * (설치 앱 + 카카오/외부 브라우저에서 링크 열 때 앱 세션이 바로 끊기지 않도록)
+ */
+export const MAX_CONCURRENT_AUTH_SESSIONS_MEMBER = 2
 
 /** 관리자·강사 — 동시 로그인 최대 */
 export const MAX_CONCURRENT_AUTH_SESSIONS_STAFF = 4

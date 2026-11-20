@@ -4,7 +4,10 @@ import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { isRedirectError } from 'next/dist/client/components/redirect-error'
 import { requestPasswordReset, signIn } from '@/lib/actions/auth'
-import { getSafeNextPath } from '@/lib/auth/safe-next-path'
+import {
+  getSafeNextPath,
+  isEventShareNextPath,
+} from '@/lib/auth/safe-next-path'
 import { BirthDateInput } from '@/components/members/birth-date-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +43,7 @@ type SignUpResult = {
 function LoginPageInner() {
   const searchParams = useSearchParams()
   const nextPath = getSafeNextPath(searchParams.get('next'), '')
+  const fromEventShare = isEventShareNextPath(nextPath)
   const [tab, setTab] = useState('login')
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [signUpBirthDate, setSignUpBirthDate] = useState('')
@@ -359,9 +363,9 @@ function LoginPageInner() {
                   {nextPath ? (
                     <input type="hidden" name="next" value={nextPath} />
                   ) : null}
-                  {nextPath ? (
+                  {fromEventShare ? (
                     <p className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                      공유 링크로 들어왔습니다. 로그인하면 해당 화면으로 이동합니다.
+                      이벤트 공유 링크로 들어왔습니다. 로그인하면 해당 화면으로 이동합니다.
                     </p>
                   ) : null}
                   <div className="space-y-2">
