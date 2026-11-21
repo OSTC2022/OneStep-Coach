@@ -1,5 +1,5 @@
 /**
- * 브랜드 스플래시 마스터 이미지 생성 → generate-pwa-splash.mjs 입력
+ * iOS PWA 시작 이미지 — 풀블리드 다크 + 펄스 (이중 박스/흰 테두리 느낌 제거)
  */
 import sharp from 'sharp'
 import path from 'node:path'
@@ -11,71 +11,36 @@ const width = 1290
 const height = 2796
 const bgColor = '#070d18'
 const primary = '#AAFF00'
-
-const iconPath = path.join(root, 'public/brand-pulse-icon.png')
-const bgPath = path.join(root, 'public/images/onestep-splash-bg.png')
 const outPath = path.join(root, 'public/images/onestep-splash-startup.png')
 
-const iconSize = 220
-const iconTop = Math.round(height * 0.36) - Math.round(iconSize / 2)
+const iconSize = 260
+const iconTop = Math.round(height * 0.38) - Math.round(iconSize / 2)
+const stroke = 2.1
 
 const svg = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
   <rect width="${width}" height="${height}" fill="${bgColor}"/>
   <defs>
-    <radialGradient id="g" cx="50%" cy="34%" r="48%">
-      <stop offset="0%" stop-color="${primary}" stop-opacity="0.18"/>
+    <radialGradient id="g" cx="50%" cy="36%" r="42%">
+      <stop offset="0%" stop-color="${primary}" stop-opacity="0.2"/>
+      <stop offset="55%" stop-color="${primary}" stop-opacity="0.05"/>
       <stop offset="100%" stop-color="${primary}" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <rect width="${width}" height="${height}" fill="url(#g)"/>
-  <text x="50%" y="${iconTop + iconSize + 110}" text-anchor="middle"
-    font-family="Arial Black, Arial, sans-serif" font-size="92" font-weight="700" fill="#ffffff">원스텝</text>
-  <text x="50%" y="${iconTop + iconSize + 168}" text-anchor="middle"
-    font-family="Arial, sans-serif" font-size="28" font-weight="600" letter-spacing="10"
-    fill="rgba(255,255,255,0.58)">ONE-STEP TRAINING CENTER</text>
-  <line x1="${width / 2 - 150}" y1="${iconTop + iconSize + 220}" x2="${width / 2 - 48}" y2="${iconTop + iconSize + 220}"
-    stroke="${primary}" stroke-opacity="0.7" stroke-width="2"/>
-  <line x1="${width / 2 + 48}" y1="${iconTop + iconSize + 220}" x2="${width / 2 + 150}" y2="${iconTop + iconSize + 220}"
-    stroke="${primary}" stroke-opacity="0.7" stroke-width="2"/>
-  <text x="50%" y="${iconTop + iconSize + 228}" text-anchor="middle"
-    font-family="Arial, sans-serif" font-size="30" font-weight="500" fill="rgba(255,255,255,0.72)">러닝 &amp; 트레이닝</text>
-  <rect x="${width / 2 - 120}" y="${height - 280}" width="240" height="4" rx="2" fill="rgba(255,255,255,0.1)"/>
-  <rect x="${width / 2 - 120}" y="${height - 280}" width="110" height="4" rx="2" fill="${primary}"/>
-  <text x="50%" y="${height - 230}" text-anchor="middle"
-    font-family="Arial, sans-serif" font-size="24" font-weight="500" letter-spacing="8"
-    fill="rgba(255,255,255,0.55)">시작 준비 중</text>
+  <g transform="translate(${(width - iconSize) / 2} ${iconTop})">
+    <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24">
+      <path d="M3 12A9 9 0 0112 3A9 9 0 0121 12" fill="none" stroke="${primary}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12A9 9 0 0012 21A9 9 0 0021 12" fill="none" stroke="${primary}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12H6.25L7.1 6L8.65 12L12 18.5L15.35 9.5L16.9 12H21" fill="none" stroke="${primary}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+    </svg>
+  </g>
+  <text x="50%" y="${iconTop + iconSize + 120}" text-anchor="middle"
+    font-family="Arial Black, Arial, sans-serif" font-size="96" font-weight="700" fill="#ffffff">원스텝</text>
+  <text x="50%" y="${iconTop + iconSize + 186}" text-anchor="middle"
+    font-family="Arial, sans-serif" font-size="26" font-weight="600" letter-spacing="12"
+    fill="rgba(255,255,255,0.55)">ONE-STEP TRAINING CENTER</text>
 </svg>`)
 
-const bg = await sharp(bgPath)
-  .resize(width, height, { fit: 'cover', position: 'centre' })
-  .modulate({ brightness: 0.55 })
-  .toBuffer()
-
-const icon = await sharp(iconPath)
-  .resize(iconSize, iconSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-  .png()
-  .toBuffer()
-
-const base = await sharp({
-  create: {
-    width,
-    height,
-    channels: 3,
-    background: bgColor,
-  },
-})
-  .composite([
-    { input: bg, blend: 'over', opacity: 0.34 },
-    { input: svg, blend: 'over' },
-    {
-      input: icon,
-      left: Math.round((width - iconSize) / 2),
-      top: iconTop,
-    },
-  ])
-  .png()
-  .toFile(outPath)
-
+await sharp(svg).png().toFile(outPath)
 console.log(`Wrote ${outPath}`)
-void base

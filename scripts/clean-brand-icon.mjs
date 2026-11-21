@@ -13,8 +13,9 @@ const final = path.join(root, 'public/brand-pulse-icon.png')
 const BOX = { r: 26, g: 35, b: 26 } // #1a231a
 const NEON = { r: 170, g: 255, b: 0 } // #AAFF00
 
-/** Home-screen / PWA icon canvas */
+/** Home-screen / PWA / Android splash — 스플래시와 동일 톤 (흰 테두리·이중 박스 방지) */
 const APP_BG = '#070d18'
+const PULSE_GREEN = '#AAFF00'
 
 function lum(r, g, b) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -100,41 +101,40 @@ await rename(output, final)
 
 console.log('Cleaned brand-pulse-icon.png')
 
-const symbolBuffer = await sharp(final).png().toBuffer()
 const iconsDir = path.join(root, 'public/icons')
 const appDir = path.join(root, 'app')
 
-async function renderHomeIcon(size, logoScale) {
-  const logoSize = Math.round(size * logoScale)
-  const logo = await sharp(symbolBuffer)
-    .resize(logoSize, logoSize, { kernel: sharp.kernel.lanczos3 })
-    .png()
-    .toBuffer()
+/** 풀블리드 다크 배경 + 펄스 심볼 (스플래시/홈 아이콘용 — 내부 스쿼클 없음) */
+function buildPulseIconSvg(size, symbolScale) {
+  const symbolSize = Math.round(size * symbolScale)
+  const offset = (size - symbolSize) / 2
+  const stroke = Math.max(1.6, size * 0.0048)
 
-  const top = Math.round((size - logoSize) / 2) + Math.max(1, Math.round(size * 0.04))
-  const left = Math.round((size - logoSize) / 2)
+  return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+  <rect width="${size}" height="${size}" fill="${APP_BG}"/>
+  <g transform="translate(${offset} ${offset})">
+    <svg width="${symbolSize}" height="${symbolSize}" viewBox="0 0 24 24">
+      <path d="M3 12A9 9 0 0112 3A9 9 0 0121 12" fill="none" stroke="${PULSE_GREEN}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12A9 9 0 0012 21A9 9 0 0021 12" fill="none" stroke="${PULSE_GREEN}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12H6.25L7.1 6L8.65 12L12 18.5L15.35 9.5L16.9 12H21" fill="none" stroke="${PULSE_GREEN}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+    </svg>
+  </g>
+</svg>`)
+}
 
-  return sharp({
-    create: {
-      width: size,
-      height: size,
-      channels: 4,
-      background: APP_BG,
-    },
-  })
-    .composite([{ input: logo, left, top }])
-    .png()
-    .toBuffer()
+async function renderHomeIcon(size, symbolScale) {
+  return sharp(buildPulseIconSvg(size, symbolScale)).png().toBuffer()
 }
 
 const homeIcons = [
-  { name: 'icon-32.png', size: 32, scale: 0.88 },
-  { name: 'icon-180.png', size: 180, scale: 0.86 },
-  { name: 'apple-icon.png', size: 180, scale: 0.86 },
-  { name: 'icon-192.png', size: 192, scale: 0.86 },
-  { name: 'icon-512.png', size: 512, scale: 0.86 },
-  // maskable: 안전영역 안쪽에 심볼을 두되, 배경은 스플래시와 동일 톤으로 채움
-  { name: 'icon-512-maskable.png', size: 512, scale: 0.78 },
+  { name: 'icon-32.png', size: 32, scale: 0.72 },
+  { name: 'icon-180.png', size: 180, scale: 0.62 },
+  { name: 'apple-icon.png', size: 180, scale: 0.62 },
+  { name: 'icon-192.png', size: 192, scale: 0.62 },
+  { name: 'icon-512.png', size: 512, scale: 0.58 },
+  // maskable: 안전영역 안쪽에 심볼, 배경은 전체 동일 톤
+  { name: 'icon-512-maskable.png', size: 512, scale: 0.48 },
 ]
 
 for (const { name, size, scale } of homeIcons) {
@@ -145,7 +145,6 @@ for (const { name, size, scale } of homeIcons) {
 await copyFile(path.join(iconsDir, 'icon-512.png'), path.join(appDir, 'icon.png'))
 await copyFile(path.join(iconsDir, 'apple-icon.png'), path.join(appDir, 'apple-icon.png'))
 
-// favicon.ico for desktop browser tabs
-await sharp(await renderHomeIcon(32, 0.88)).toFile(path.join(root, 'public/favicon.ico'))
+await sharp(await renderHomeIcon(32, 0.72)).toFile(path.join(root, 'public/favicon.ico'))
 
-console.log('Generated home-screen / PWA icons')
+console.log('Generated home-screen / PWA icons (full-bleed)')

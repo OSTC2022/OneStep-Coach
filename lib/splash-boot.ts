@@ -6,12 +6,6 @@ export function finishSplashBoot() {
   document.documentElement.classList.remove('onestep-splash-active')
   document.documentElement.classList.add('onestep-app-ready')
 
-  try {
-    sessionStorage.setItem(SPLASH_SESSION_KEY, '1')
-  } catch {
-    /* ignore */
-  }
-
   const node = document.getElementById('onestep-app-splash')
   if (node) node.remove()
 
@@ -19,19 +13,17 @@ export function finishSplashBoot() {
 }
 
 /**
- * 인라인 스크립트 — 첫 페인트 전에 스플래시 표시 여부 결정.
- * 같은 탭에서 이미 본 경우엔 바로 앱을 연다.
+ * 인라인 스크립트 — 인위적인 로딩 오버레이를 쓰지 않는다.
+ * (Android 기본 스플래시 + 추가 1초 오버레이가 겹치면 전문감이 떨어짐)
  */
 export const SPLASH_SESSION_KEY = 'onestep-splash-seen'
 
-export const SPLASH_BOOT_SCRIPT = `(function(){try{var k=${JSON.stringify(
-  SPLASH_SESSION_KEY,
-)};if(sessionStorage.getItem(k)==="1"){window.__onestepSplashSkip=true;document.documentElement.classList.add("onestep-app-ready");}else{document.documentElement.classList.add("onestep-splash-active");window.__onestepSplashStart=Date.now();}}catch(e){document.documentElement.classList.add("onestep-splash-active");window.__onestepSplashStart=Date.now();}})();`
+export const SPLASH_BOOT_SCRIPT = `(function(){try{window.__onestepSplashSkip=true;document.documentElement.classList.add("onestep-app-ready");}catch(e){}})();`
 
-/** 첫 진입 시 브랜드 스플래시를 잠깐 보여 줌 */
-export const SPLASH_MIN_VISIBLE_MS = 1100
-export const SPLASH_FADE_MS = 320
-export const SPLASH_MAX_WAIT_MS = 2800
+/** 오버레이 스플래시 미사용 */
+export const SPLASH_MIN_VISIBLE_MS = 0
+export const SPLASH_FADE_MS = 180
+export const SPLASH_MAX_WAIT_MS = 0
 
 export function shouldSkipSplashBoot(): boolean {
   if (typeof window === 'undefined') return false

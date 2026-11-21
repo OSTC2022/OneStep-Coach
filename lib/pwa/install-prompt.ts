@@ -62,17 +62,29 @@ export function waitForInstallPrompt(timeoutMs = 5000): Promise<BeforeInstallPro
   })
 }
 
-/** 한 번만 기존 워커를 지우고, 설치 이벤트는 페이지 스크립트보다 먼저 잡아 둔다. */
-export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var key="onestep-sw-reset-v3";if(localStorage.getItem(key)==="1")return;navigator.serviceWorker.getRegistrations().then(function(regs){if(!regs||!regs.length){localStorage.setItem(key,"1");return}localStorage.setItem(key,"1");Promise.all(regs.map(function(reg){return reg.unregister()})).then(function(){location.reload()})})}catch(e){}})();`
+/**
+ * 기존에 페이지를 가로채던 서비스 워커를 한 번 더 제거하고 캐시를 비운다.
+ * (버튼 이동 시 "이 페이지를 읽을 수 없습니다" 복구)
+ */
+export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var key="onestep-sw-reset-v5";if(localStorage.getItem(key)==="1")return;localStorage.setItem(key,"1");var jobs=[];jobs.push(navigator.serviceWorker.getRegistrations().then(function(regs){return Promise.all((regs||[]).map(function(reg){return reg.unregister()}));}));if("caches"in window){jobs.push(caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}));}));}Promise.all(jobs).then(function(){if(navigator.serviceWorker.controller)location.reload();}).catch(function(){})}catch(e){}})();`
 
+/**
+ * 제어하는 서비스 워커를 등록하지 않는다.
+ * 남아 있는 등록/캐시만 정리한다.
+ */
 export async function registerPwaServiceWorker(): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
   try {
-    await navigator.serviceWorker.register('/sw.js?v=onestep-v4', { scope: '/' })
-    await navigator.serviceWorker.ready
+    const registrations = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(registrations.map((registration) => registration.unregister()))
+
+    if ('caches' in window) {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((key) => caches.delete(key)))
+    }
   } catch {
-    /* installability may still work on some browsers */
+    /* ignore */
   }
 }
 
