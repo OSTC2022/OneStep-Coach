@@ -204,7 +204,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html:
               'html,body{background:#070d18!important;margin:0;padding:0}' +
-              'html.onestep-splash-active,html.onestep-splash-active body{overflow:hidden;position:fixed;inset:0;width:100%;height:100%;height:100dvh;overscroll-behavior:none}' +
+              'html.onestep-splash-active,html.onestep-splash-active body{overflow:hidden;overscroll-behavior:none}' +
               'html.onestep-app-ready #onestep-app-splash{display:none!important}',
           }}
         />

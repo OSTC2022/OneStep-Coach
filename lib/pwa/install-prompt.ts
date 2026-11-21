@@ -63,15 +63,12 @@ export function waitForInstallPrompt(timeoutMs = 5000): Promise<BeforeInstallPro
 }
 
 /**
- * 기존에 페이지를 가로채던 서비스 워커를 한 번 더 제거하고 캐시를 비운다.
- * (버튼 이동 시 "이 페이지를 읽을 수 없습니다" 복구)
+ * 앱을 열 때마다(세션당 1회) 남아 있는 서비스 워커를 제거하고,
+ * 컨트롤러가 있으면 새로고침해 "이 페이지를 읽을 수 없습니다" 를 막는다.
  */
-export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var key="onestep-sw-reset-v5";if(localStorage.getItem(key)==="1")return;localStorage.setItem(key,"1");var jobs=[];jobs.push(navigator.serviceWorker.getRegistrations().then(function(regs){return Promise.all((regs||[]).map(function(reg){return reg.unregister()}));}));if("caches"in window){jobs.push(caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}));}));}Promise.all(jobs).then(function(){if(navigator.serviceWorker.controller)location.reload();}).catch(function(){})}catch(e){}})();`
+export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var sk="onestep-sw-cleared-v6";if(sessionStorage.getItem(sk)==="1")return;navigator.serviceWorker.getRegistrations().then(function(regs){var list=regs||[];var hasController=!!navigator.serviceWorker.controller;if(!list.length&&!hasController){try{sessionStorage.setItem(sk,"1")}catch(e){}return}var jobs=list.map(function(reg){return reg.unregister()});if("caches"in window){jobs.push(caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}))}))}Promise.all(jobs).then(function(){try{sessionStorage.setItem(sk,"1")}catch(e){}if(hasController||list.length){location.reload()}}).catch(function(){try{sessionStorage.setItem(sk,"1")}catch(e){}})})}catch(e){}})();`
 
-/**
- * 제어하는 서비스 워커를 등록하지 않는다.
- * 남아 있는 등록/캐시만 정리한다.
- */
+/** 서비스 워커를 등록하지 않고, 남아 있으면 계속 제거한다. */
 export async function registerPwaServiceWorker(): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
@@ -95,7 +92,6 @@ export async function triggerPwaInstall(): Promise<
   if (!prompt) return 'unavailable'
 
   try {
-    // prompt()는 클릭 직후, await 전에 호출해야 브라우저가 설치 창을 연다.
     const shown = prompt.prompt()
     deferredPrompt = null
     if (typeof window !== 'undefined') {
