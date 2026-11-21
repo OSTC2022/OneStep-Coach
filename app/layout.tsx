@@ -17,6 +17,7 @@ import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
+import { SplashInlineBoot } from '@/components/brand/splash-inline-boot'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
 import { PwaInstallAffordance } from '@/components/pwa/pwa-install-affordance'
 import { PwaSplashReinstallHint } from '@/components/pwa/pwa-splash-reinstall-hint'
@@ -160,13 +161,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icons/icon-32.png?v=15', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon.ico?v=15', sizes: '48x48' },
-      { url: '/icons/icon-192.png?v=15', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png?v=15', sizes: '512x512', type: 'image/png' },
+      { url: '/icons/icon-32.png?v=16', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=16', sizes: '48x48' },
+      { url: '/icons/icon-192.png?v=16', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png?v=16', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-icon.png?v=15', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-icon.png?v=16', sizes: '180x180', type: 'image/png' },
     ],
   },
 }
@@ -203,13 +204,15 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html:
               'html,body{background:#070d18!important;margin:0;padding:0}' +
-              '#onestep-app-splash{display:none!important}',
+              'html.onestep-splash-active,html.onestep-splash-active body{overflow:hidden;position:fixed;inset:0;width:100%;height:100%;height:100dvh;overscroll-behavior:none}' +
+              'html.onestep-app-ready #onestep-app-splash{display:none!important}',
           }}
         />
       </head>
       <body
         className={`${geistSans.className} antialiased bg-[#070d18] text-foreground min-h-screen`}
       >
+        <SplashInlineBoot />
         <OnestepSplashLayer />
         <PwaBootstrap />
         <PwaInstallAffordance />

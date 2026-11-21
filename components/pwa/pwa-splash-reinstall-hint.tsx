@@ -20,12 +20,12 @@ export function PwaSplashReinstallHint() {
     }
 
     window.setTimeout(() => {
-      toast.message('첫 로딩 화면이 예전 그대로면', {
+      toast.message('아이콘·첫 화면이 안 바뀌면', {
         description:
-          '홈 화면 앱을 삭제했다가 브라우저에서 다시 설치해 주세요. 설치 앱은 첫 화면을 기기에 저장해 둡니다.',
-        duration: 8000,
+          '홈 화면 앱을 지운 뒤 다시 설치해 주세요. (설치 앱은 아이콘을 기기에 저장합니다)',
+        duration: 7000,
       })
-    }, 1600)
+    }, 1800)
   }, [])
 
   return null

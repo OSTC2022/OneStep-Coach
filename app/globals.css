@@ -395,6 +395,20 @@ html.onestep-splash-active body {
   animation: onestep-splash-mark-beat 1.35s ease-in-out infinite;
 }
 
+/* 스플래시 — 스쿼클 마크만 (흰 박스/플레이트 없음) */
+.onestep-splash-mark-squircle {
+  position: relative;
+  display: block;
+  height: 6rem;
+  width: 6rem;
+  object-fit: contain;
+  background: transparent;
+  border: 0;
+  border-radius: 22%;
+  filter: drop-shadow(0 0 14px rgba(170, 255, 0, 0.45));
+  animation: onestep-splash-mark-beat 1.35s ease-in-out infinite;
+}
+
 .onestep-splash-title {
   margin: 1.75rem 0 0;
   font-family: var(--font-portal-blackhan), var(--font-noto-sans-kr), sans-serif;

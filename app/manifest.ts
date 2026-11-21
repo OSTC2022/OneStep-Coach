@@ -5,7 +5,6 @@ export default function manifest(): MetadataRoute.Manifest {
   const iconQuery = `v=${PWA_ASSET_VERSION}`
 
   return {
-    // id 변경 → 기기에 깔린 옛 WebAPK 스플래시와 분리 (재설치 시 새 아이콘 사용)
     id: `onestep-coach-pwa-v${PWA_ASSET_VERSION}`,
     name: '원스텝',
     short_name: '원스텝',
