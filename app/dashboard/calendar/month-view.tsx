@@ -54,9 +54,9 @@ const WEEKDAY_LABELS = WEEKDAY_LABELS_MON_START
 const MAX_LINES = 3
 const LINE_HEIGHT = 2
 const COLLAPSE_BAR_PX = 36
-const WEEKDAY_HEADER_PX = 28
-/** 날짜 숫자(24px) + 여백 — 마지막 주(다음달 1·2일)가 잘리지 않도록 */
-const MIN_WEEK_ROW_PX = 34
+const WEEKDAY_HEADER_PX = 24
+/** 날짜 숫자만 보일 최소 높이 (고무줄로 여기까지 축소 가능) */
+const MIN_WEEK_ROW_PX = 20
 const MIN_BOTTOM_PX = 160
 const MIN_BOTTOM_PX_MOBILE = 160
 const DEFAULT_BOTTOM_PX = 420
@@ -135,12 +135,15 @@ export function MonthView({
 
   const monthCalendarGrid = (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="grid shrink-0 grid-cols-7 border-b border-border bg-muted/30">
+      <div
+        className="grid shrink-0 grid-cols-7 border-b border-border bg-muted/30"
+        style={{ height: WEEKDAY_HEADER_PX }}
+      >
         {WEEKDAY_LABELS.map((label, i) => (
           <div
             key={label}
             className={cn(
-              'py-1 text-center text-[10px] font-medium md:py-1.5 md:text-xs',
+              'flex items-center justify-center text-[10px] font-medium md:text-xs',
               getWeekdayHeaderColorClass(i),
             )}
           >
@@ -175,17 +178,17 @@ export function MonthView({
                   key={dateKey}
                   type="button"
                   className={cn(
-                    'flex h-full min-h-0 flex-col overflow-hidden border-r border-border p-0 text-left last:border-r-0 md:p-0.5',
+                    'flex h-full min-h-0 flex-col overflow-hidden border-r border-border p-0 text-left last:border-r-0',
                     !inMonth && 'bg-muted/20',
                     isToday && !isSelected && 'bg-primary/5',
-                    isSelected && 'bg-primary/10 ring-2 ring-inset ring-primary/50',
+                    isSelected && 'bg-primary/10 ring-1 ring-inset ring-primary/50',
                   )}
                   onClick={() => onSelectDate(date)}
                 >
-                  <div className="flex shrink-0 items-center justify-between">
+                  <div className="flex h-5 shrink-0 items-center justify-center gap-0.5">
                     <span
                       className={cn(
-                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium tabular-nums md:h-6 md:w-6 md:text-xs',
+                        'flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-medium tabular-nums leading-none md:h-[18px] md:w-[18px] md:text-[11px]',
                         !isSelected && !isToday && dateColor,
                         isToday && !isSelected && 'ring-1 ring-primary/40',
                         isSelected && 'bg-primary text-primary-foreground',
@@ -194,7 +197,7 @@ export function MonthView({
                       {format(date, 'd')}
                     </span>
                     {isHoliday && !isSelected && (
-                      <span className="shrink-0 text-[8px] font-medium text-red-500 md:text-[9px]">
+                      <span className="hidden shrink-0 text-[7px] font-medium text-red-500 sm:inline">
                         휴
                       </span>
                     )}
