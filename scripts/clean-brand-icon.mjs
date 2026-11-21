@@ -13,7 +13,7 @@ const final = path.join(root, 'public/brand-pulse-icon.png')
 const BOX = { r: 26, g: 35, b: 26 } // #1a231a
 const NEON = { r: 170, g: 255, b: 0 } // #AAFF00
 
-/** Home-screen / PWA / Android splash — 스플래시와 동일 톤 (흰 테두리·이중 박스 방지) */
+/** Android/iOS 스플래시·홈 아이콘 배경 (매니페스트 background_color와 동일) */
 const APP_BG = '#070d18'
 const PULSE_GREEN = '#AAFF00'
 
@@ -104,20 +104,33 @@ console.log('Cleaned brand-pulse-icon.png')
 const iconsDir = path.join(root, 'public/icons')
 const appDir = path.join(root, 'app')
 
-/** 풀블리드 다크 배경 + 펄스 심볼 (스플래시/홈 아이콘용 — 내부 스쿼클 없음) */
+/**
+ * 풀블리드 #070d18 + 펄스.
+ * Android 기본 스플래시가 아이콘을 흰 칸에 넣어도
+ * 안쪽에 또 다른 사각 박스가 보이지 않게 한다.
+ */
 function buildPulseIconSvg(size, symbolScale) {
   const symbolSize = Math.round(size * symbolScale)
   const offset = (size - symbolSize) / 2
-  const stroke = Math.max(1.6, size * 0.0048)
+  const stroke = Math.max(1.8, (24 * symbolScale * size) / size / 12 + size * 0.0055)
 
   return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
   <rect width="${size}" height="${size}" fill="${APP_BG}"/>
-  <g transform="translate(${offset} ${offset})">
+  <defs>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="${Math.max(2, size * 0.012)}" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#glow)" transform="translate(${offset} ${offset})">
     <svg width="${symbolSize}" height="${symbolSize}" viewBox="0 0 24 24">
-      <path d="M3 12A9 9 0 0112 3A9 9 0 0121 12" fill="none" stroke="${PULSE_GREEN}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
-      <path d="M3 12A9 9 0 0012 21A9 9 0 0021 12" fill="none" stroke="${PULSE_GREEN}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
-      <path d="M3 12H6.25L7.1 6L8.65 12L12 18.5L15.35 9.5L16.9 12H21" fill="none" stroke="${PULSE_GREEN}" stroke-width="${stroke}" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12A9 9 0 0112 3A9 9 0 0121 12" fill="none" stroke="${PULSE_GREEN}" stroke-width="1.9" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12A9 9 0 0012 21A9 9 0 0021 12" fill="none" stroke="${PULSE_GREEN}" stroke-width="1.9" stroke-linecap="butt" stroke-linejoin="miter"/>
+      <path d="M3 12H6.25L7.1 6L8.65 12L12 18.5L15.35 9.5L16.9 12H21" fill="none" stroke="${PULSE_GREEN}" stroke-width="1.9" stroke-linecap="butt" stroke-linejoin="miter"/>
     </svg>
   </g>
 </svg>`)
@@ -128,13 +141,13 @@ async function renderHomeIcon(size, symbolScale) {
 }
 
 const homeIcons = [
-  { name: 'icon-32.png', size: 32, scale: 0.72 },
-  { name: 'icon-180.png', size: 180, scale: 0.62 },
-  { name: 'apple-icon.png', size: 180, scale: 0.62 },
-  { name: 'icon-192.png', size: 192, scale: 0.62 },
-  { name: 'icon-512.png', size: 512, scale: 0.58 },
-  // maskable: 안전영역 안쪽에 심볼, 배경은 전체 동일 톤
-  { name: 'icon-512-maskable.png', size: 512, scale: 0.48 },
+  { name: 'icon-32.png', size: 32, scale: 0.78 },
+  { name: 'icon-180.png', size: 180, scale: 0.68 },
+  { name: 'apple-icon.png', size: 180, scale: 0.68 },
+  { name: 'icon-192.png', size: 192, scale: 0.68 },
+  { name: 'icon-512.png', size: 512, scale: 0.64 },
+  // maskable 안전영역(중앙 ~80%) 안에 심볼
+  { name: 'icon-512-maskable.png', size: 512, scale: 0.52 },
 ]
 
 for (const { name, size, scale } of homeIcons) {
@@ -144,7 +157,6 @@ for (const { name, size, scale } of homeIcons) {
 
 await copyFile(path.join(iconsDir, 'icon-512.png'), path.join(appDir, 'icon.png'))
 await copyFile(path.join(iconsDir, 'apple-icon.png'), path.join(appDir, 'apple-icon.png'))
+await sharp(await renderHomeIcon(32, 0.78)).toFile(path.join(root, 'public/favicon.ico'))
 
-await sharp(await renderHomeIcon(32, 0.72)).toFile(path.join(root, 'public/favicon.ico'))
-
-console.log('Generated home-screen / PWA icons (full-bleed)')
+console.log('Generated home-screen / PWA icons (splash-safe full-bleed)')

@@ -19,6 +19,7 @@ import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
 import { PwaInstallAffordance } from '@/components/pwa/pwa-install-affordance'
+import { PwaSplashReinstallHint } from '@/components/pwa/pwa-splash-reinstall-hint'
 import { SW_RECOVERY_SCRIPT } from '@/lib/pwa/install-prompt'
 import { SPLASH_BOOT_SCRIPT } from '@/lib/splash-boot'
 import './globals.css'
@@ -159,13 +160,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icons/icon-32.png?v=14', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon.ico?v=14', sizes: '48x48' },
-      { url: '/icons/icon-192.png?v=14', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png?v=14', sizes: '512x512', type: 'image/png' },
+      { url: '/icons/icon-32.png?v=15', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=15', sizes: '48x48' },
+      { url: '/icons/icon-192.png?v=15', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png?v=15', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-icon.png?v=14', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-icon.png?v=15', sizes: '180x180', type: 'image/png' },
     ],
   },
 }
@@ -212,6 +213,7 @@ export default function RootLayout({
         <OnestepSplashLayer />
         <PwaBootstrap />
         <PwaInstallAffordance />
+        <PwaSplashReinstallHint />
         <div id="app-root" className="onestep-app-root">
           {children}
           <Toaster richColors position="top-center" />
