@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
     "generate:icons": "node scripts/clean-brand-icon.mjs",
-    "generate:splash": "node scripts/generate-pwa-splash.mjs",
+    "generate:splash": "node scripts/generate-splash-startup.mjs && node scripts/generate-pwa-splash.mjs",
     "verify:member-backup": "node scripts/verify-member-backup.mjs",
     "verify:running-league-scoring": "node scripts/verify-running-league-scoring.mjs",
     "verify:ranking-data-logic": "node scripts/verify-ranking-data-logic.mjs",

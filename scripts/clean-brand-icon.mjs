@@ -133,7 +133,8 @@ const homeIcons = [
   { name: 'apple-icon.png', size: 180, scale: 0.86 },
   { name: 'icon-192.png', size: 192, scale: 0.86 },
   { name: 'icon-512.png', size: 512, scale: 0.86 },
-  { name: 'icon-512-maskable.png', size: 512, scale: 0.72 },
+  // maskable: 안전영역 안쪽에 심볼을 두되, 배경은 스플래시와 동일 톤으로 채움
+  { name: 'icon-512-maskable.png', size: 512, scale: 0.78 },
 ]
 
 for (const { name, size, scale } of homeIcons) {

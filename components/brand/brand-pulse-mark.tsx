@@ -1,7 +1,7 @@
 import Image from 'next/image'
 import { cn } from '@/lib/utils'
 
-export const BRAND_PULSE_ICON_SRC = '/brand-pulse-icon.png?v=10'
+export const BRAND_PULSE_ICON_SRC = '/brand-pulse-icon.png?v=11'
 
 const GLOW_CLASS =
   'drop-shadow-[0_0_10px_rgba(170,255,0,0.9)] drop-shadow-[0_0_22px_rgba(170,255,0,0.55)] drop-shadow-[0_0_40px_rgba(170,255,0,0.28)]'

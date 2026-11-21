@@ -1,93 +1,59 @@
 'use client'
 
-import { useEffect, useId, useState } from 'react'
 import { BrandPulseAppIcon } from '@/components/brand/brand-pulse-mark'
 import { cn } from '@/lib/utils'
 
-function PulseLine({ mirrored }: { mirrored?: boolean }) {
-  const gradientId = useId()
-
+function SplashAtmosphere() {
   return (
-    <svg
-      viewBox="0 0 140 20"
-      className={cn('h-4 w-28 shrink-0 text-primary', mirrored && 'scale-x-[-1]')}
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0" />
-          <stop offset="35%" stopColor="currentColor" stopOpacity="1" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M0 10 H24 L30 3 L38 17 L46 6 L54 10 H140"
-        fill="none"
-        stroke={`url(#${gradientId})`}
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="onestep-pulse-line"
+    <>
+      <div
+        className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-[0.34]"
+        style={{ backgroundImage: "url('/images/onestep-splash-bg.png')" }}
+        aria-hidden
       />
-    </svg>
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_32%,rgba(170,255,0,0.16),transparent_52%)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_100%,rgba(7,13,24,0.2),#070d18_62%)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,13,24,0.55)_0%,rgba(7,13,24,0.2)_28%,rgba(7,13,24,0.55)_72%,#070d18_100%)]"
+        aria-hidden
+      />
+    </>
   )
 }
 
-function LogoMark() {
+function BrandPulseRing() {
   return (
-    <div className="flex shrink-0 flex-col items-center">
-      <BrandPulseAppIcon glow className="h-20 w-20 translate-y-2" />
-      <p className="mt-3 text-2xl font-bold tracking-tight text-foreground">원스텝</p>
-      <p className="mt-1 text-[11px] font-medium tracking-wide text-foreground/75">
-        One-Step Training Center
-      </p>
+    <div className="relative flex h-[7.25rem] w-[7.25rem] items-center justify-center">
+      <span
+        className="onestep-splash-ring absolute inset-0 rounded-full border border-primary/25"
+        aria-hidden
+      />
+      <span
+        className="onestep-splash-ring-delayed absolute inset-[-10%] rounded-full border border-primary/12"
+        aria-hidden
+      />
+      <BrandPulseAppIcon glow className="onestep-splash-mark h-[4.75rem] w-[4.75rem]" />
     </div>
   )
 }
 
-function SplashLoader() {
-  const [dots, setDots] = useState(0)
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setDots((value) => (value + 1) % 4)
-    }, 420)
-    return () => window.clearInterval(timer)
-  }, [])
-
+function SplashProgress() {
   return (
-    <div className="flex flex-col items-center gap-4 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
-      <div className="relative h-14 w-14" aria-hidden>
-        <svg
-          className="h-full w-full animate-spin"
-          viewBox="0 0 50 50"
-          style={{ animationDuration: '1.1s' }}
-        >
-          <circle
-            cx="25"
-            cy="25"
-            r="20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3.5"
-            className="text-white/12"
-          />
-          <circle
-            cx="25"
-            cy="25"
-            r="20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-            strokeDasharray="36 89.5"
-            className="text-primary"
-            transform="rotate(-90 25 25)"
-          />
-        </svg>
+    <div className="flex w-full max-w-[13rem] flex-col items-center gap-3 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div
+        className="relative h-[2px] w-full overflow-hidden rounded-full bg-white/10"
+        aria-hidden
+      >
+        <span className="onestep-splash-progress absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary" />
       </div>
-      <p className="min-w-[8.5rem] text-center text-[11px] font-semibold tracking-[0.32em] text-foreground/85">
-        LOADING{'.'.repeat(dots)}
+      <p className="text-[11px] font-medium tracking-[0.28em] text-white/55">
+        시작 준비 중
       </p>
     </div>
   )
@@ -108,44 +74,37 @@ export function OnestepSplashScreen({
     <div
       role="status"
       aria-live="polite"
-      aria-label="로딩 중"
+      aria-label="원스텝 로딩 중"
       className={cn(
-        'relative flex min-h-svh w-full flex-col overflow-hidden bg-[#070d18] text-foreground',
+        'relative flex min-h-svh w-full flex-col overflow-hidden bg-[#070d18] text-white',
         fixed && 'fixed inset-0 z-[9999]',
-        fading && 'pointer-events-none opacity-0 transition-opacity duration-500',
+        fading && 'onestep-splash-fade-out',
         className,
       )}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_88%_0%,rgba(170,255,0,0.1),transparent_52%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_92%,rgba(13,27,42,0.85),transparent_48%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(165deg,rgba(7,13,24,0.2)_0%,rgba(7,13,24,0.95)_55%)]" />
+      <SplashAtmosphere />
 
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6">
-        <div className="flex w-full max-w-md items-center justify-center gap-1 sm:gap-3">
-          <PulseLine />
-          <LogoMark />
-          <PulseLine mirrored />
-        </div>
+        <div className="onestep-splash-enter flex flex-col items-center">
+          <BrandPulseRing />
 
-        <div className="relative mt-8 px-7 py-2 text-sm font-medium text-foreground/90">
-          <span
-            className="absolute left-0 top-0 text-lg leading-none text-primary"
-            aria-hidden
-          >
-            「
-          </span>
-          러닝 &amp; 트레이닝 센터
-          <span
-            className="absolute bottom-0 right-0 text-lg leading-none text-primary"
-            aria-hidden
-          >
-            」
-          </span>
+          <p className="mt-7 font-[family-name:var(--font-portal-blackhan)] text-[2.35rem] leading-none tracking-tight text-white sm:text-[2.6rem]">
+            원스텝
+          </p>
+          <p className="mt-2.5 text-[11px] font-semibold uppercase tracking-[0.34em] text-white/58">
+            One-Step Training Center
+          </p>
+
+          <div className="mt-6 flex items-center gap-3 text-[12px] font-medium tracking-wide text-white/72">
+            <span className="h-px w-7 bg-primary/70" aria-hidden />
+            러닝 &amp; 트레이닝
+            <span className="h-px w-7 bg-primary/70" aria-hidden />
+          </div>
         </div>
       </div>
 
-      <div className="relative z-10">
-        <SplashLoader />
+      <div className="relative z-10 flex justify-center px-6">
+        <SplashProgress />
       </div>
     </div>
   )
