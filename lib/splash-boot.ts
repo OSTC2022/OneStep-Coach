@@ -12,8 +12,9 @@ export function finishSplashBoot() {
     /* ignore */
   }
 
-  const node = document.getElementById('onestep-app-splash')
-  if (node) node.remove()
+  // React가 관리하는 #onestep-app-splash 를 DOM에서 직접 remove 하면
+  // 이후 라우트 이동 때 insertBefore/removeChild NotFoundError 가 난다.
+  // 숨김은 html.onestep-app-ready CSS 만 사용한다.
 
   window.dispatchEvent(new Event('onestep-splash-finished'))
 }

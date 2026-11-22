@@ -1,14 +1,12 @@
 'use client'
 
-import { useTheme } from 'next-themes'
 import { Toaster as Sonner, ToasterProps } from 'sonner'
 
+/** 앱은 고정 dark — next-themes Provider 없이 useTheme 쓰면 라우트 전환 때 불안정해질 수 있음 */
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = 'system' } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps['theme']}
+      theme="dark"
       className="toaster group"
       style={
         {

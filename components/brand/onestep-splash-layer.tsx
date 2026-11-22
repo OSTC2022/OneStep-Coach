@@ -18,6 +18,7 @@ function elapsedSinceSplashStart() {
 
 function fadeAndFinish() {
   const node = document.getElementById('onestep-app-splash')
+  // class만 변경 — DOM remove 는 SplashInlineBoot 가 이벤트 후 React로 처리
   if (node) {
     node.classList.add('onestep-splash-fade-out')
     window.setTimeout(() => finishSplashBoot(), SPLASH_FADE_MS)

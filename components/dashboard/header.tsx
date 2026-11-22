@@ -22,6 +22,7 @@ import { UserAvatar } from '@/components/dashboard/user-avatar'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { ShareWebsiteButton } from '@/components/pwa/share-website-button'
 import { MemberCenterContactHeaderButton } from '@/components/dashboard/member-center-contact-header-button'
+import { RunningScheduleToolbarButton } from '@/components/dashboard/running-schedule-toolbar-button'
 
 interface DashboardHeaderProps {
   user: User | null
@@ -29,6 +30,8 @@ interface DashboardHeaderProps {
 
 export function DashboardHeader({ user }: DashboardHeaderProps) {
   const router = useRouter()
+  const canOpenRunningSchedule =
+    user?.role === 'admin' || user?.role === 'instructor'
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -40,10 +43,14 @@ export function DashboardHeader({ user }: DashboardHeaderProps) {
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b border-border bg-background px-4 md:bg-background/95 md:backdrop-blur md:supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b border-border bg-background px-4 sm:gap-3 md:bg-background/95 md:backdrop-blur md:supports-[backdrop-filter]:bg-background/60 md:gap-4">
         <SidebarTrigger className="-ml-1" />
 
         <div className="flex-1" />
+
+        {canOpenRunningSchedule ? (
+          <RunningScheduleToolbarButton triggerClassName="h-8 shrink-0 text-xs" />
+        ) : null}
 
         {user ? <NotificationBell userId={user.id} /> : null}
 
