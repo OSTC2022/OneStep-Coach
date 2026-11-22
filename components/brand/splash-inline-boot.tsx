@@ -18,7 +18,7 @@ export function SplashInlineBoot() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             className="onestep-splash-mark-squircle"
-            src="/brand-pulse-icon.png?v=17"
+            src="/brand-pulse-icon.png?v=18"
             alt=""
             width={96}
             height={96}
