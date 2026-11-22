@@ -4,9 +4,9 @@ import { useEffect } from 'react'
 import { isStandaloneDisplay } from '@/lib/pwa/install-prompt'
 
 /**
- * 설치 앱(standalone)에서는 Next 클라이언트 라우팅 대신 전체 이동을 쓴다.
- * (서비스 워커/WebAPK 환경에서 soft navigation 시
- *  "이 페이지를 읽을 수 없습니다" 가 반복되는 문제 완화)
+ * 설치 앱에서 내부 링크는 전체 이동.
+ * (클라이언트 soft navigation 이 WebAPK에서 깨지는 경우 대비)
+ * 자동 새로고침/루프는 만들지 않는다.
  */
 export function StandaloneHardNav() {
   useEffect(() => {
@@ -43,7 +43,6 @@ export function StandaloneHardNav() {
       }
 
       if (url.origin !== window.location.origin) return
-      // 같은 페이지 해시만 바꾸면 그대로 둔다
       if (
         url.pathname === window.location.pathname &&
         url.search === window.location.search

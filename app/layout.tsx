@@ -17,7 +17,6 @@ import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { OnestepSplashLayer } from '@/components/brand/onestep-splash-layer'
 import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
-import { SplashInlineBoot } from '@/components/brand/splash-inline-boot'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
 import { PwaInstallAffordance } from '@/components/pwa/pwa-install-affordance'
 import { StandaloneHardNav } from '@/components/pwa/standalone-hard-nav'
@@ -204,15 +203,13 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html:
               'html,body{background:#070d18!important;margin:0;padding:0}' +
-              'html.onestep-splash-active,html.onestep-splash-active body{overflow:hidden;overscroll-behavior:none}' +
-              'html.onestep-app-ready #onestep-app-splash{display:none!important}',
+              '#onestep-app-splash{display:none!important}',
           }}
         />
       </head>
       <body
         className={`${geistSans.className} antialiased bg-[#070d18] text-foreground min-h-screen`}
       >
-        <SplashInlineBoot />
         <OnestepSplashLayer />
         <PwaBootstrap />
         <PwaInstallAffordance />
