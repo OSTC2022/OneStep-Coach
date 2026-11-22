@@ -41,7 +41,8 @@ export function preloadRouteChunk(
   options?: PreloadRouteChunkOptions,
 ) {
   if (typeof window === 'undefined') return
-  const allowInDev = options?.intent && shouldPreloadRouteChunkOnIntent()
-  if (process.env.NODE_ENV !== 'production' && !allowInDev) return
+  // intent preload는 standalone 등에서 끌 수 있음 (클릭 경합 방지)
+  if (options?.intent && !shouldPreloadRouteChunkOnIntent()) return
+  if (process.env.NODE_ENV !== 'production' && !options?.intent) return
   ROUTE_CHUNK_LOADERS[pathname]?.()
 }

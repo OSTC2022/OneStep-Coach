@@ -4,9 +4,9 @@ import { useEffect } from 'react'
 import { isStandaloneDisplay } from '@/lib/pwa/install-prompt'
 
 /**
- * 설치 앱에서 내부 링크는 전체 이동.
- * (클라이언트 soft navigation 이 WebAPK에서 깨지는 경우 대비)
- * 자동 새로고침/루프는 만들지 않는다.
+ * 설치 앱 + 서비스 워커가 아직 페이지를 잡고 있을 때만 내부 링크를 전체 이동.
+ * SW 컨트롤러가 없으면 Next soft navigation 을 그대로 쓴다.
+ * (불필요한 hard nav / claim 중 hard nav 가 “읽을 수 없습니다” 를 키움)
  */
 export function StandaloneHardNav() {
   useEffect(() => {
@@ -16,6 +16,11 @@ export function StandaloneHardNav() {
       if (event.defaultPrevented) return
       if (event.button !== 0) return
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+      // SW가 없으면 soft nav가 안전하다
+      if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+        return
+      }
 
       const target = event.target
       if (!(target instanceof Element)) return

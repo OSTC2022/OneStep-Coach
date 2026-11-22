@@ -218,12 +218,18 @@ export function DashboardSidebar({ user }: DashboardSidebarProps) {
   function prefetchMenuRoute(href: string) {
     if (prefetchedRoutesRef.current.has(href)) return
     prefetchedRoutesRef.current.add(href)
-    router.prefetch(href)
+    // router.prefetch HTML/RSC 는 설치 앱에서 이동과 경합해
+    // “이 페이지를 읽을 수 없습니다” 를 키울 수 있어 끔.
+    // 의도적 hover/탭 시에만 클라이언트 청크만 미리 받는다.
+    if (shouldLinkPrefetch() || shouldBackgroundPrefetch()) {
+      router.prefetch(href)
+    }
     preloadRouteChunk(href, { intent: true })
   }
 
   useEffect(() => {
     if (editMode) return
+    if (!shouldBackgroundPrefetch() && !shouldLinkPrefetch()) return
     const routes = isMobile ? menuItems.slice(0, 4) : menuItems.slice(0, 8)
     const timers: number[] = []
     let delay = shouldBackgroundPrefetch() ? 0 : 300

@@ -64,33 +64,33 @@ export function waitForInstallPrompt(timeoutMs = 5000): Promise<BeforeInstallPro
 
 /**
  * 자동 location.reload 금지 — 반복 “페이지를 읽을 수 없습니다 / 다시 로드” 유발.
- * 옛 워커가 있으면 킬러 SW를 한 번만 등록해 교체·해제한 뒤, 등록만 정리한다.
+ * clients.claim 도 금지. 등록된 SW는 해제만 하고, 가능하면 새 SW를 올리지 않는다.
+ * (구형 컨트롤러가 남을 때만 킬러 SW를 한 번 올려 교체 — claim 없는 sw.js)
  */
-export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var once="onestep-sw-kill-v8";if(sessionStorage.getItem(once)==="1")return;sessionStorage.setItem(once,"1");navigator.serviceWorker.getRegistrations().then(function(regs){var list=regs||[];var dirty=list.length>0||!!navigator.serviceWorker.controller;var chain=Promise.resolve();if(dirty){chain=navigator.serviceWorker.register("/sw.js?v=onestep-kill-v8",{scope:"/"}).catch(function(){})}return chain.then(function(){return Promise.all(list.map(function(reg){return reg.unregister()}))}).then(function(){if(!("caches"in window))return;return caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}))})})}).catch(function(){})}catch(e){}})();`
+export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var once="onestep-sw-kill-v9";if(sessionStorage.getItem(once)==="1")return;sessionStorage.setItem(once,"1");function clearCaches(){if(!("caches"in window))return Promise.resolve();return caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}))})}navigator.serviceWorker.getRegistrations().then(function(regs){var list=regs||[];return Promise.all(list.map(function(reg){return reg.unregister()})).then(function(){if(!navigator.serviceWorker.controller)return null;return navigator.serviceWorker.register("/sw.js?v=onestep-kill-v9",{scope:"/"}).catch(function(){return null})}).then(function(){return clearCaches()})}).catch(function(){})}catch(e){}})();`
 
 /**
- * 서비스 워커를 유지하지 않는다. 자동 새로고침은 하지 않는다.
+ * 서비스 워커를 유지하지 않는다. 자동 새로고침·clients.claim 은 하지 않는다.
  */
 export async function registerPwaServiceWorker(): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
   try {
-    const dirty =
-      !!navigator.serviceWorker.controller ||
-      (await navigator.serviceWorker.getRegistrations()).length > 0
+    const registrations = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(registrations.map((registration) => registration.unregister()))
 
-    if (dirty) {
+    // 이미 해제했는데도 이전 컨트롤러가 남아 있으면 킬러 SW로만 교체 (claim 없음)
+    if (navigator.serviceWorker.controller) {
       try {
-        await navigator.serviceWorker.register('/sw.js?v=onestep-kill-v8', {
+        await navigator.serviceWorker.register('/sw.js?v=onestep-kill-v9', {
           scope: '/',
         })
+        const after = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(after.map((registration) => registration.unregister()))
       } catch {
         /* ignore */
       }
     }
-
-    const registrations = await navigator.serviceWorker.getRegistrations()
-    await Promise.all(registrations.map((registration) => registration.unregister()))
 
     if ('caches' in window) {
       const keys = await caches.keys()
