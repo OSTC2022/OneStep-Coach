@@ -160,13 +160,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icons/icon-32.png?v=16', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon.ico?v=16', sizes: '48x48' },
-      { url: '/icons/icon-192.png?v=16', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png?v=16', sizes: '512x512', type: 'image/png' },
+      { url: '/icons/icon-32.png?v=17', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=17', sizes: '48x48' },
+      { url: '/icons/icon-192.png?v=17', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png?v=17', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-icon.png?v=16', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-icon.png?v=17', sizes: '180x180', type: 'image/png' },
     ],
   },
 }
