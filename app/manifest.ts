@@ -10,11 +10,14 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: '원스텝',
     description: 'OneStep Training Center',
     scope: '/',
+    // 모바일 설치 앱도 PC와 같은 / 진입 → 동일 HTML 스플래시
     start_url: '/?source=pwa',
     display: 'standalone',
     display_override: ['standalone', 'fullscreen'],
     background_color: '#070d18',
     theme_color: '#070d18',
+    // 안드로이드 기본 스플래시 배경을 브랜드 톤으로 고정
+    categories: ['sports', 'health'],
     orientation: 'portrait-primary',
     lang: 'ko',
     prefer_related_applications: false,

@@ -8,6 +8,7 @@ import {
   SPLASH_MAX_WAIT_MS,
   SPLASH_MIN_VISIBLE_MS,
 } from '@/lib/splash-boot'
+import { isStandaloneDisplay } from '@/lib/pwa/install-prompt'
 
 function elapsedSinceSplashStart() {
   const start = window.__onestepSplashStart
@@ -25,7 +26,7 @@ function fadeAndFinish() {
   finishSplashBoot()
 }
 
-/** PC·모바일 공통 스플래시 타이밍 */
+/** PC·모바일(설치 앱 포함) 공통 스플래시 타이밍 */
 export function OnestepSplashLayer() {
   useEffect(() => {
     if (shouldSkipSplashBoot()) {
@@ -40,9 +41,17 @@ export function OnestepSplashLayer() {
       fadeAndFinish()
     }
 
-    const remain = Math.max(0, SPLASH_MIN_VISIBLE_MS - elapsedSinceSplashStart())
+    // 모바일 설치 앱은 OS 스플래시 직후라 조금 더 보여 통일감을 줌
+    const minVisible = isStandaloneDisplay()
+      ? Math.max(SPLASH_MIN_VISIBLE_MS, 720)
+      : SPLASH_MIN_VISIBLE_MS
+
+    const remain = Math.max(0, minVisible - elapsedSinceSplashStart())
     const showTimer = window.setTimeout(complete, remain)
-    const maxTimer = window.setTimeout(complete, SPLASH_MAX_WAIT_MS)
+    const maxTimer = window.setTimeout(
+      complete,
+      Math.max(SPLASH_MAX_WAIT_MS, minVisible + 400),
+    )
 
     return () => {
       window.clearTimeout(showTimer)

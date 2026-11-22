@@ -1,4 +1,6 @@
-/** 첫 페인트 — 흰 박스 없이 풀스크린 브랜드 화면 */
+import { PWA_ASSET_VERSION } from '@/lib/pwa-splash-links'
+
+/** PC·모바일 공통 첫 페인트 — 동일 브랜드 화면 */
 export function SplashInlineBoot() {
   return (
     <div
@@ -18,10 +20,10 @@ export function SplashInlineBoot() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             className="onestep-splash-mark-squircle"
-            src="/brand-pulse-icon.png?v=18"
+            src={`/brand-pulse-icon.png?v=${PWA_ASSET_VERSION}`}
             alt=""
-            width={96}
-            height={96}
+            width={112}
+            height={112}
           />
           <p className="onestep-splash-title">원스텝</p>
           <p className="onestep-splash-sub">One-Step Training Center</p>

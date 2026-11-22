@@ -399,14 +399,26 @@ html.onestep-splash-active body {
 .onestep-splash-mark-squircle {
   position: relative;
   display: block;
-  height: 6rem;
-  width: 6rem;
+  height: 7rem;
+  width: 7rem;
   object-fit: contain;
   background: transparent;
   border: 0;
   border-radius: 22%;
-  filter: drop-shadow(0 0 14px rgba(170, 255, 0, 0.45));
+  /* 글로우 과하면 모바일에서 뭉개져 보이므로 약하게만 */
+  filter: drop-shadow(0 0 10px rgba(170, 255, 0, 0.28));
   animation: onestep-splash-mark-beat 1.35s ease-in-out infinite;
+}
+
+@media (max-width: 640px) {
+  .onestep-splash-title {
+    font-size: 2.1rem;
+  }
+
+  .onestep-splash-mark-squircle {
+    height: 6.25rem;
+    width: 6.25rem;
+  }
 }
 
 .onestep-splash-title {
