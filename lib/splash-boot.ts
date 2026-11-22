@@ -6,6 +6,12 @@ export function finishSplashBoot() {
   document.documentElement.classList.remove('onestep-splash-active')
   document.documentElement.classList.add('onestep-app-ready')
 
+  try {
+    sessionStorage.setItem(SPLASH_SESSION_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+
   const node = document.getElementById('onestep-app-splash')
   if (node) node.remove()
 
@@ -14,12 +20,17 @@ export function finishSplashBoot() {
 
 export const SPLASH_SESSION_KEY = 'onestep-splash-seen'
 
-/** 오류 복구 중 — 인위적 스플래시/고정 오버레이 비활성 */
-export const SPLASH_BOOT_SCRIPT = `(function(){try{window.__onestepSplashSkip=true;document.documentElement.classList.add("onestep-app-ready");}catch(e){}})();`
+/**
+ * PC·모바일 공통 첫 화면.
+ * 같은 탭에서는 한 번만 보여 준다. (자동 reload 없음)
+ */
+export const SPLASH_BOOT_SCRIPT = `(function(){try{var k=${JSON.stringify(
+  SPLASH_SESSION_KEY,
+)};if(sessionStorage.getItem(k)==="1"){window.__onestepSplashSkip=true;document.documentElement.classList.add("onestep-app-ready");}else{document.documentElement.classList.add("onestep-splash-active");window.__onestepSplashStart=Date.now();}}catch(e){document.documentElement.classList.add("onestep-splash-active");window.__onestepSplashStart=Date.now();}})();`
 
-export const SPLASH_MIN_VISIBLE_MS = 0
-export const SPLASH_FADE_MS = 180
-export const SPLASH_MAX_WAIT_MS = 0
+export const SPLASH_MIN_VISIBLE_MS = 480
+export const SPLASH_FADE_MS = 220
+export const SPLASH_MAX_WAIT_MS = 1400
 
 export function shouldSkipSplashBoot(): boolean {
   if (typeof window === 'undefined') return false

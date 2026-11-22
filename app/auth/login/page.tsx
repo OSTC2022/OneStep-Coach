@@ -277,9 +277,9 @@ function LoginPageInner() {
         <CardHeader className="space-y-4 text-center">
           <BrandPulseAppIcon className="mx-auto h-20 w-20 translate-y-2" />
           <div>
-            <CardTitle className="text-2xl font-bold">OneStep Coach</CardTitle>
+            <CardTitle className="text-2xl font-bold tracking-tight">원스텝</CardTitle>
             <CardDescription className="text-muted-foreground">
-              스포츠 트레이닝 센터 관리 시스템
+              One-Step Training Center
             </CardDescription>
           </div>
         </CardHeader>

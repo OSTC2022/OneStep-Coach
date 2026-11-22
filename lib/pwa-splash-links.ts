@@ -1,6 +1,6 @@
 /** iOS PWA — 픽셀 크기·media 쿼리가 정확해야 기본 스플래시 대신 커스텀 이미지 사용 */
 /** 홈화면 설치 앱 스플래시/아이콘 캐시 갱신용 — 올릴 때마다 재설치 유도 */
-export const PWA_ASSET_VERSION = 18
+export const PWA_ASSET_VERSION = 19
 
 export const IOS_PWA_SPLASH_SCREENS = [
   {
