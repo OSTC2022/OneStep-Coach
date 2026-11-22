@@ -1,7 +1,8 @@
 /** 수업 종료 — 남은횟차/서명 창 각각 위치·크기 (기기 localStorage) */
 
+/** v3 — 신체정보 위 / 서명 아래(전체 너비). 태블릿 가로에서 좁은 좌우 분할 제거 */
 export const SIGNATURE_COMPLETION_SHELL_STORAGE_KEY =
-  'onestep:signature-completion-shell:v2'
+  'onestep:signature-completion-shell:v4'
 
 export type FloatingPanelRect = {
   /** 뷰포트 대비 left 비율 (0–1) */
@@ -29,8 +30,9 @@ type LegacyShellPrefsV1 = {
 }
 
 const VIEWPORT_MARGIN_PX = 8
-const MIN_INSIGHT = { width: 280, height: 260 }
-const MIN_SIGNATURE = { width: 280, height: 420 }
+const MIN_INSIGHT = { width: 280, height: 220 }
+/** 서명 패널은 전체 너비·높이 1/3 기본 — 최소 높이를 너무 크게 두면 겹침 */
+const MIN_SIGNATURE = { width: 280, height: 240 }
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
@@ -53,46 +55,28 @@ function defaultRectsForViewport(): Pick<
 > {
   const { vw, vh } = getViewportShellBounds()
   const gap = 10
-  const sideBySide = vw >= 720
-
-  if (sideBySide) {
-    const usableW = vw - VIEWPORT_MARGIN_PX * 2 - gap
-    const insightW = Math.round(usableW * 0.58)
-    const sigW = usableW - insightW
-    const h = Math.min(Math.round(vh * 0.88), vh - VIEWPORT_MARGIN_PX * 2)
-    const top = Math.max(VIEWPORT_MARGIN_PX, Math.round((vh - h) / 2))
-    return {
-      insight: {
-        leftRatio: VIEWPORT_MARGIN_PX / vw,
-        topRatio: top / vh,
-        widthRatio: insightW / Math.max(1, vw - VIEWPORT_MARGIN_PX * 2),
-        heightRatio: h / Math.max(1, vh - VIEWPORT_MARGIN_PX * 2),
-      },
-      signature: {
-        leftRatio: (VIEWPORT_MARGIN_PX + insightW + gap) / vw,
-        topRatio: top / vh,
-        widthRatio: sigW / Math.max(1, vw - VIEWPORT_MARGIN_PX * 2),
-        heightRatio: h / Math.max(1, vh - VIEWPORT_MARGIN_PX * 2),
-      },
-    }
-  }
-
-  const usableH = vh - VIEWPORT_MARGIN_PX * 2 - gap
-  // 서명창을 더 크게 — 신체정보 패널은 간결하게
-  const insightH = Math.round(usableH * 0.38)
+  // 항상 위·아래 스택 — 태블릿 가로에서도 서명 폭을 최대로
+  const topChrome = 44 // 잠금/초기화 바 여유
+  const usableH = Math.max(
+    MIN_INSIGHT.height + MIN_SIGNATURE.height,
+    vh - VIEWPORT_MARGIN_PX * 2 - gap - topChrome,
+  )
+  // 신체정보 2/3 · 서명 1/3
+  const insightH = Math.round((usableH * 2) / 3)
   const sigH = usableH - insightH
-  const w = Math.min(Math.round(vw * 0.94), vw - VIEWPORT_MARGIN_PX * 2)
+  const w = Math.min(Math.round(vw * 0.96), vw - VIEWPORT_MARGIN_PX * 2)
   const left = Math.max(VIEWPORT_MARGIN_PX, Math.round((vw - w) / 2))
+  const insightTop = VIEWPORT_MARGIN_PX + topChrome
   return {
     insight: {
       leftRatio: left / vw,
-      topRatio: VIEWPORT_MARGIN_PX / vh,
+      topRatio: insightTop / vh,
       widthRatio: w / Math.max(1, vw - VIEWPORT_MARGIN_PX * 2),
       heightRatio: insightH / Math.max(1, vh - VIEWPORT_MARGIN_PX * 2),
     },
     signature: {
       leftRatio: left / vw,
-      topRatio: (VIEWPORT_MARGIN_PX + insightH + gap) / vh,
+      topRatio: (insightTop + insightH + gap) / vh,
       widthRatio: w / Math.max(1, vw - VIEWPORT_MARGIN_PX * 2),
       heightRatio: sigH / Math.max(1, vh - VIEWPORT_MARGIN_PX * 2),
     },
@@ -161,19 +145,24 @@ export function readSignatureCompletionShellPrefs(): SignatureCompletionShellPre
     return DEFAULT_SIGNATURE_COMPLETION_SHELL_PREFS
   }
   try {
-    const v2 = window.localStorage.getItem(SIGNATURE_COMPLETION_SHELL_STORAGE_KEY)
-    if (v2) {
-      return clampShellPrefs(JSON.parse(v2) as SignatureCompletionShellPrefs)
+    const v3 = window.localStorage.getItem(SIGNATURE_COMPLETION_SHELL_STORAGE_KEY)
+    if (v3) {
+      return clampShellPrefs(JSON.parse(v3) as SignatureCompletionShellPrefs)
     }
-    const v1 = window.localStorage.getItem(
-      'onestep:signature-completion-shell:v1',
-    )
-    if (v1) {
-      const migrated = migrateFromV1(JSON.parse(v1) as LegacyShellPrefsV1)
-      writeSignatureCompletionShellPrefs(migrated)
-      return migrated
+    // 이전 버전(좌우 분할·다른 비율)은 버리고 위·아래 2/3·1/3 기본으로 교체
+    try {
+      window.localStorage.removeItem('onestep:signature-completion-shell:v3')
+      window.localStorage.removeItem('onestep:signature-completion-shell:v2')
+      window.localStorage.removeItem('onestep:signature-completion-shell:v1')
+    } catch {
+      /* ignore */
     }
-    return clampShellPrefs(defaultRectsForViewport())
+    const next = clampShellPrefs({
+      locked: false,
+      ...defaultRectsForViewport(),
+    })
+    writeSignatureCompletionShellPrefs(next)
+    return next
   } catch {
     return clampShellPrefs(defaultRectsForViewport())
   }

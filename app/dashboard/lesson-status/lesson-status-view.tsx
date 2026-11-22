@@ -755,9 +755,10 @@ const AthleteTile = memo(function AthleteTile({
           ) : null}
           {completed ? (
             <>
-            {completionRemainingLabel ||
-            (lesson.member?.remaining_sessions != null &&
-              lesson.member.remaining_sessions >= 0) ? (
+            {!signatureOpen &&
+            (completionRemainingLabel ||
+              (lesson.member?.remaining_sessions != null &&
+                lesson.member.remaining_sessions >= 0)) ? (
               <div className="mt-1 rounded border border-primary/25 bg-primary/5 px-1 py-1.5 text-center">
                 <p className="text-[9px] font-semibold text-primary">감사합니다</p>
                 <p className="text-[9px] tabular-nums text-muted-foreground">
@@ -949,7 +950,7 @@ const AthleteTile = memo(function AthleteTile({
           if (!open && !isCompleting) setSignatureOpen(false)
         }}
         title="수업 종료"
-        description="보호자(부모님)께 직접 서명을 받아주세요."
+        description=""
         memberLabel={label}
         confirmLabel="종료 확인"
         isSubmitting={isCompleting}

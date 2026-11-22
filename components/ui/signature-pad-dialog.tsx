@@ -77,8 +77,8 @@ interface SignaturePadDialogProps {
   /** 서명 확정 직전 — false면 중단 (별도 회원정보 패널 저장 등) */
   onBeforeConfirm?: () => Promise<boolean>
   /**
-   * 상단 동반 패널(회원 신체정보 등).
-   * 있으면 남은횟차·서명 창을 각각 드래그해 배치합니다.
+   * 동반 패널(회원 신체정보 등).
+   * 기본 배치는 신체정보 위 · 서명 아래(전체 너비). 각각 드래그·리사이즈 가능.
    */
   companion?: ReactNode
   onConfirm: (
@@ -210,13 +210,19 @@ export function SignaturePadDialog({
     if (!canvas || !container) return
 
     const width = Math.max(1, container.clientWidth)
+    // 태블릿 가로: 폭이 넓을 때 세로 비율을 너무 낮추지 않아 서명 면적을 확보
+    const fallbackRatio = touchFriendly
+      ? width >= 700
+        ? 0.32
+        : 0.42
+      : width >= 700
+        ? 0.3
+        : 0.4
     const height = Math.max(
-      120,
+      140,
       container.clientHeight > 0
         ? container.clientHeight
-        : touchFriendly
-          ? Math.round(width * 0.42)
-          : Math.round(width * 0.4),
+        : Math.round(width * fallbackRatio),
     )
     const dpr = window.devicePixelRatio || 1
 
@@ -481,47 +487,98 @@ export function SignaturePadDialog({
     onOpenChange(false)
   }
 
+  const pastLessonControl =
+    showPastLessonFinder && !successSummary ? (
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-7 w-7 shrink-0"
+        disabled={isSubmitting}
+        title="지난 수업 찾기"
+        aria-label="지난 수업 찾기"
+        data-no-drag
+        onClick={() => setPastLessonOpen(true)}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <History className="h-3.5 w-3.5" />
+      </Button>
+    ) : null
+
+  function renderEndTimeControl(compact: boolean) {
+    if (!showEndTime || successSummary) return null
+    return (
+      <div
+        className={cn('flex items-center gap-1.5', !compact && 'w-full')}
+        data-no-drag
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <Label
+          htmlFor="lesson-end-time"
+          className={cn(
+            'shrink-0 font-medium',
+            compact ? 'text-[11px] text-muted-foreground' : 'text-sm',
+          )}
+        >
+          종료 시간
+        </Label>
+        {canEditEndTime ? (
+          <div className={cn(compact ? 'w-[7rem] sm:w-[7.75rem]' : 'min-w-0 flex-1')}>
+            <TimeInput24
+              id="lesson-end-time"
+              value={endTime}
+              onChange={setEndTime}
+              compact={compact}
+            />
+          </div>
+        ) : (
+          <div
+            id="lesson-end-time"
+            className={cn(
+              'flex items-center gap-1.5 rounded-md border border-border font-medium tabular-nums',
+              compact
+                ? 'h-7 min-w-[6.5rem] bg-background/80 px-2 text-xs sm:min-w-[7.25rem]'
+                : 'min-w-0 flex-1 gap-2 bg-muted/30 px-3 py-2.5 text-base',
+            )}
+          >
+            <Clock
+              className={cn(
+                'shrink-0 opacity-60',
+                compact ? 'h-3 w-3' : 'h-4 w-4',
+              )}
+            />
+            {endTime || '—'}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const signatureTitleActions = !successSummary ? (
+    <div className="flex shrink-0 items-center gap-1.5">
+      {renderEndTimeControl(true)}
+      {pastLessonControl}
+    </div>
+  ) : null
+
   const signatureBody = successSummary ? (
-    <div className="flex flex-col items-center gap-3 py-10 text-center sm:py-12">
-      <CheckCircle2 className="h-12 w-12 text-primary" aria-hidden />
-      <p className="text-2xl font-semibold tracking-tight text-foreground">감사합니다</p>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-2 py-6 text-center sm:gap-3 sm:py-8">
+      <CheckCircle2 className="h-11 w-11 text-primary sm:h-12 sm:w-12" aria-hidden />
+      <p className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+        감사합니다
+      </p>
       {successSummary.remainingLabel ? (
         <p className="text-base font-medium text-primary tabular-nums">
           {successSummary.remainingLabel}
         </p>
       ) : null}
-      <p className="max-w-xs text-sm text-muted-foreground">수업이 종료되었습니다.</p>
+      <p className="text-sm text-muted-foreground">수업이 종료되었습니다.</p>
     </div>
   ) : (
     <>
-      {showEndTime ? (
-        <div className="flex shrink-0 items-center gap-2">
-          <Label htmlFor="lesson-end-time" className="shrink-0 text-sm font-medium">
-            종료 시간
-          </Label>
-          {canEditEndTime ? (
-            <div className="min-w-0 flex-1">
-              <TimeInput24
-                id="lesson-end-time"
-                value={endTime}
-                onChange={setEndTime}
-              />
-            </div>
-          ) : (
-            <div
-              id="lesson-end-time"
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-base font-medium tabular-nums"
-            >
-              <Clock className="h-4 w-4 shrink-0 opacity-60" />
-              {endTime || '—'}
-            </div>
-          )}
-        </div>
-      ) : null}
-
       <div
         ref={containerRef}
-        className="relative min-h-[14rem] flex-[1.6] overflow-hidden rounded-lg border border-border sm:min-h-[18rem]"
+        className="relative min-h-[10rem] flex-1 overflow-hidden rounded-lg border border-border sm:min-h-[12rem]"
       >
         <canvas
           ref={canvasRef}
@@ -555,14 +612,7 @@ export function SignaturePadDialog({
   )
 
   const footer = (
-    <DialogFooter
-      className={cn(
-        'shrink-0 border-t border-border px-4 py-3 sm:px-6',
-        showPastLessonFinder && !successSummary
-          ? 'gap-2 sm:justify-between'
-          : 'gap-2 sm:justify-end',
-      )}
-    >
+    <DialogFooter className="shrink-0 gap-2 border-t border-border px-4 py-3 sm:justify-end sm:px-6">
       {successSummary ? (
         <Button
           type="button"
@@ -575,36 +625,23 @@ export function SignaturePadDialog({
           확인
         </Button>
       ) : (
-        <>
-          {showPastLessonFinder ? (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isSubmitting}
-              onClick={() => setPastLessonOpen(true)}
-            >
-              <History className="mr-2 h-4 w-4" />
-              지난 수업 찾기
-            </Button>
-          ) : null}
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
-            >
-              취소
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void handleConfirm()}
-              disabled={isSubmitting || !signatureData || (showEndTime && !endTime.trim())}
-            >
-              {isSubmitting ? '저장 중...' : confirmLabel}
-            </Button>
-          </div>
-        </>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSubmitting}
+          >
+            취소
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void handleConfirm()}
+            disabled={isSubmitting || !signatureData || (showEndTime && !endTime.trim())}
+          >
+            {isSubmitting ? '저장 중...' : confirmLabel}
+          </Button>
+        </div>
       )}
     </DialogFooter>
   )
@@ -614,6 +651,7 @@ export function SignaturePadDialog({
     titleText: string,
     body: ReactNode,
     dragHint: string,
+    titleActions?: ReactNode,
   ) {
     const rect = panelRects[panel]
     const z = activePanel === panel ? 40 : 30
@@ -634,7 +672,8 @@ export function SignaturePadDialog({
       >
         <div
           className={cn(
-            'flex h-9 shrink-0 items-center gap-1.5 border-b border-border/70 px-2',
+            'flex shrink-0 items-center gap-1.5 border-b border-border/70 px-2',
+            titleActions ? 'min-h-9 py-1' : 'h-9',
             shellLocked
               ? 'cursor-default'
               : 'cursor-grab touch-none active:cursor-grabbing',
@@ -649,6 +688,7 @@ export function SignaturePadDialog({
           <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
             {titleText}
           </p>
+          {titleActions}
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
@@ -755,7 +795,7 @@ export function SignaturePadDialog({
                 </div>
               </div>
 
-              {!successSummary && companion
+              {companion
                 ? renderFloatingWindow(
                     'insight',
                     '남은 횟차 · 신체정보',
@@ -770,9 +810,11 @@ export function SignaturePadDialog({
                 'signature',
                 memberLabel ? `${memberLabel} · ${title}` : title,
                 <>
-                  <p className="shrink-0 border-b border-primary/10 bg-primary/[0.03] px-4 py-1.5 text-xs text-muted-foreground sm:px-5">
-                    {description}
-                  </p>
+                  {description ? (
+                    <p className="shrink-0 border-b border-primary/10 bg-primary/[0.03] px-4 py-1.5 text-xs text-muted-foreground sm:px-5">
+                      {description}
+                    </p>
+                  ) : null}
 
                   <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden px-4 py-2.5 sm:px-5">
                     {signatureBody}
@@ -780,15 +822,23 @@ export function SignaturePadDialog({
                   {footer}
                 </>,
                 shellLocked ? '잠금됨' : '상단을 드래그해 이동',
+                signatureTitleActions,
               )}
             </div>
           ) : (
             <>
               <DialogHeader className="shrink-0 space-y-1 border-b border-primary/10 bg-primary/[0.03] px-4 pt-4 pb-3 text-left sm:px-6 sm:pt-5">
-                <DialogTitle>
-                  {memberLabel ? `${memberLabel} · ${title}` : title}
-                </DialogTitle>
-                <DialogDescription>{description}</DialogDescription>
+                <div className="flex flex-wrap items-center gap-2">
+                  <DialogTitle className="min-w-0 flex-1">
+                    {memberLabel ? `${memberLabel} · ${title}` : title}
+                  </DialogTitle>
+                  {signatureTitleActions}
+                </div>
+                {description ? (
+                  <DialogDescription>{description}</DialogDescription>
+                ) : (
+                  <DialogDescription className="sr-only">서명</DialogDescription>
+                )}
               </DialogHeader>
 
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-2 pb-2 sm:px-6">

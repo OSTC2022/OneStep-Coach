@@ -529,7 +529,7 @@ export function PastLessonSignatureDialog({
             if (!nextOpen && !isSaving) setSignatureOpen(false)
           }}
           title="서명"
-          description="보호자(부모님)께 직접 서명을 받아주세요."
+          description=""
           memberLabel={selectedLesson.memberLabel}
           confirmLabel="서명 저장"
           isSubmitting={isSaving}

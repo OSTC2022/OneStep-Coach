@@ -6,6 +6,7 @@ import {
   useImperativeHandle,
   useMemo,
   useState,
+  type ReactNode,
 } from 'react'
 import { format, parseISO } from 'date-fns'
 import { Loader2 } from 'lucide-react'
@@ -45,6 +46,8 @@ type LessonCompletionMemberInsightProps = {
   memberId: string
   lessonDate: string
   remainingSessions: number | null
+  /** 횟차 멘트 우측 (종료 시간 등) */
+  headerTrailing?: ReactNode
   className?: string
   onBodySaved?: (payload: {
     weightKg: number
@@ -76,7 +79,7 @@ export const LessonCompletionMemberInsight = forwardRef<
   LessonCompletionMemberInsightHandle,
   LessonCompletionMemberInsightProps
 >(function LessonCompletionMemberInsight(
-  { memberId, lessonDate, remainingSessions, className, onBodySaved },
+  { memberId, lessonDate, remainingSessions, headerTrailing, className, onBodySaved },
   ref,
 ) {
   const [loading, setLoading] = useState(true)
@@ -266,14 +269,85 @@ export const LessonCompletionMemberInsight = forwardRef<
   return (
     <div
       className={cn(
-        'flex h-full min-h-0 flex-col gap-2 rounded-xl bg-primary/[0.04] p-2 sm:gap-3 sm:p-3',
+        'flex h-full min-h-0 flex-col gap-1.5 rounded-xl bg-primary/[0.04] p-1.5 sm:gap-2 sm:p-2',
         className,
       )}
     >
-      <div className="shrink-0 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2.5">
-        <p className="text-lg font-semibold tabular-nums leading-snug text-foreground sm:text-xl">
+      <div className="flex shrink-0 items-center gap-2 rounded-lg border border-primary/25 bg-primary/10 px-2.5 py-1.5">
+        <p className="min-w-0 flex-1 truncate text-base font-semibold tabular-nums leading-none text-foreground sm:text-lg">
           {formatRemainingPreview(resolvedRemaining)}
         </p>
+        {headerTrailing ? (
+          <div className="flex shrink-0 items-center">{headerTrailing}</div>
+        ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <div className="flex items-center gap-1">
+            <Label
+              htmlFor="completion-weight"
+              className="shrink-0 text-[10px] text-muted-foreground"
+            >
+              체중
+            </Label>
+            <Input
+              id="completion-weight"
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              placeholder="kg"
+              value={weightDraft}
+              disabled={saving || loading}
+              className="h-7 w-[3.75rem] px-1.5 text-xs tabular-nums sm:w-[4.25rem]"
+              onChange={(e) => {
+                setWeightDraft(e.target.value)
+                setDirty(true)
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Label
+              htmlFor="completion-height"
+              className="shrink-0 text-[10px] text-muted-foreground"
+            >
+              키
+            </Label>
+            <Input
+              id="completion-height"
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              placeholder="cm"
+              value={heightDraft}
+              disabled={saving || loading}
+              className="h-7 w-[3.75rem] px-1.5 text-xs tabular-nums sm:w-[4.25rem]"
+              onChange={(e) => {
+                setHeightDraft(e.target.value)
+                setDirty(true)
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Label
+              htmlFor="completion-speed"
+              className="shrink-0 text-[10px] text-muted-foreground"
+            >
+              시속
+            </Label>
+            <Input
+              id="completion-speed"
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              placeholder="km/h"
+              value={speedDraft}
+              disabled={saving || loading}
+              className="h-7 w-[3.75rem] px-1.5 text-xs tabular-nums sm:w-[4.25rem]"
+              onChange={(e) => {
+                setSpeedDraft(e.target.value)
+                setDirty(true)
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {loading ? (
@@ -281,129 +355,56 @@ export const LessonCompletionMemberInsight = forwardRef<
           <Loader2 className="h-5 w-5 animate-spin" />
         </div>
       ) : (
-        <>
-          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-2">
-            <MiniMetric
-              title="체중"
-              latest={
-                latest
-                  ? `${formatBodyMetric(latest.weightKg)}kg`
-                  : '-'
-              }
-              delta={formatWeightDeltaInParens(weightDelta)}
-              deltaClassName={weightDeltaTextClass(weightDelta)}
-              points={weightPoints}
-              metricKey="weight"
-              metricLabel="체중"
-              unit="kg"
-              formatValue={(v) => `${formatBodyMetric(v)}kg`}
-            />
-            <MiniMetric
-              title="키"
-              latest={
-                latest?.heightCm != null
-                  ? `${formatBodyMetric(latest.heightCm)}cm`
-                  : '-'
-              }
-              delta={formatHeightDeltaInParens(heightDelta)}
-              deltaClassName={heightDeltaTextClass(heightDelta)}
-              points={heightPoints}
-              metricKey="height"
-              metricLabel="키"
-              unit="cm"
-              formatValue={(v) => `${formatBodyMetric(v)}cm`}
-            />
-            <MiniMetric
-              title="BMI"
-              latest={latest?.bmi != null ? latest.bmi.toFixed(1) : '-'}
-              points={bmiPoints}
-              metricKey="bmi"
-              metricLabel="BMI"
-              formatValue={(v) => v.toFixed(1)}
-            />
-            <MiniMetric
-              title="최대시속"
-              latest={
-                latest?.maxSpeedKmh != null ? `${latest.maxSpeedKmh}` : '-'
-              }
-              points={speedPoints}
-              metricKey="maxSpeed"
-              metricLabel="시속"
-              unit=""
-              formatValue={(v) => String(v)}
-              staffOnly
-            />
-          </div>
-
-          <div className="shrink-0 space-y-2 border-t border-border/60 pt-2">
-            <p className="text-[11px] font-medium text-muted-foreground">
-              오늘 기록 (종료 전 입력)
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-1">
-                <Label htmlFor="completion-weight" className="text-[11px]">
-                  체중
-                </Label>
-                <Input
-                  id="completion-weight"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="kg"
-                  value={weightDraft}
-                  disabled={saving}
-                  className="h-9 tabular-nums"
-                  onChange={(e) => {
-                    setWeightDraft(e.target.value)
-                    setDirty(true)
-                  }}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="completion-height" className="text-[11px]">
-                  키
-                </Label>
-                <Input
-                  id="completion-height"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="cm"
-                  value={heightDraft}
-                  disabled={saving}
-                  className="h-9 tabular-nums"
-                  onChange={(e) => {
-                    setHeightDraft(e.target.value)
-                    setDirty(true)
-                  }}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="completion-speed" className="text-[11px]">
-                  최대시속
-                </Label>
-                <Input
-                  id="completion-speed"
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="km/h"
-                  value={speedDraft}
-                  disabled={saving}
-                  className="h-9 tabular-nums"
-                  onChange={(e) => {
-                    setSpeedDraft(e.target.value)
-                    setDirty(true)
-                  }}
-                />
-              </div>
-            </div>
-            <p className="text-[10px] leading-relaxed text-muted-foreground">
-              최대시속은 강사·관리자 화면에서만 보이며, 회원·보호자 포털에는 표시되지
-              않습니다.
-            </p>
-          </div>
-        </>
+        <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-2">
+          <MiniMetric
+            title="체중"
+            latest={
+              latest ? `${formatBodyMetric(latest.weightKg)}kg` : '-'
+            }
+            delta={formatWeightDeltaInParens(weightDelta)}
+            deltaClassName={weightDeltaTextClass(weightDelta)}
+            points={weightPoints}
+            metricKey="weight"
+            metricLabel="체중"
+            unit="kg"
+            formatValue={(v) => `${formatBodyMetric(v)}kg`}
+          />
+          <MiniMetric
+            title="키"
+            latest={
+              latest?.heightCm != null
+                ? `${formatBodyMetric(latest.heightCm)}cm`
+                : '-'
+            }
+            delta={formatHeightDeltaInParens(heightDelta)}
+            deltaClassName={heightDeltaTextClass(heightDelta)}
+            points={heightPoints}
+            metricKey="height"
+            metricLabel="키"
+            unit="cm"
+            formatValue={(v) => `${formatBodyMetric(v)}cm`}
+          />
+          <MiniMetric
+            title="BMI"
+            latest={latest?.bmi != null ? latest.bmi.toFixed(1) : '-'}
+            points={bmiPoints}
+            metricKey="bmi"
+            metricLabel="BMI"
+            formatValue={(v) => v.toFixed(1)}
+          />
+          <MiniMetric
+            title="최대시속"
+            latest={
+              latest?.maxSpeedKmh != null ? `${latest.maxSpeedKmh}` : '-'
+            }
+            points={speedPoints}
+            metricKey="maxSpeed"
+            metricLabel="시속"
+            unit=""
+            formatValue={(v) => String(v)}
+            staffOnly
+          />
+        </div>
       )}
     </div>
   )
