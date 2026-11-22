@@ -161,13 +161,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/icons/icon-32.png?v=18', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon.ico?v=18', sizes: '48x48' },
-      { url: '/icons/icon-192.png?v=18', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png?v=18', sizes: '512x512', type: 'image/png' },
+      { url: '/icons/icon-32.png?v=21', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=21', sizes: '48x48' },
+      { url: '/icons/icon-192.png?v=21', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png?v=21', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/icons/apple-icon.png?v=18', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/apple-icon.png?v=21', sizes: '180x180', type: 'image/png' },
     ],
   },
 }
@@ -189,8 +189,9 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
+      translate="no"
       suppressHydrationWarning
-      className={`dark bg-[#070d18] ${portalFontVariables}`}
+      className={`dark notranslate bg-[#070d18] ${portalFontVariables}`}
     >
       <head>
         <PwaSplashHeadLinks />
@@ -212,15 +213,18 @@ export default function RootLayout({
       <body
         className={`${geistSans.className} antialiased bg-[#070d18] text-foreground min-h-screen`}
       >
-        <SplashInlineBoot />
-        <OnestepSplashLayer />
-        <PwaBootstrap />
-        <PwaInstallAffordance />
-        <StandaloneHardNav />
-        <div id="app-root" className="onestep-app-root">
-          {children}
-          <Toaster richColors position="top-center" />
-          {process.env.NODE_ENV === 'production' && <Analytics />}
+        {/* body 직속 형제를 하나로 — 라우트 전환 시 insertBefore/removeChild 깨짐 방지 */}
+        <div id="app-shell" className="min-h-screen">
+          <SplashInlineBoot />
+          <OnestepSplashLayer />
+          <PwaBootstrap />
+          <PwaInstallAffordance />
+          <StandaloneHardNav />
+          <div id="app-root" className="onestep-app-root">
+            {children}
+            <Toaster richColors position="top-center" theme="dark" />
+            {process.env.NODE_ENV === 'production' && <Analytics />}
+          </div>
         </div>
       </body>
     </html>

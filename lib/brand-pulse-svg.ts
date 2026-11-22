@@ -11,8 +11,8 @@ export const BRAND_PULSE_APP_BG_OUTER = '#101310' as const
 export const BRAND_PULSE_APP_SYMBOL_SCALE = 0.52
 
 /** Top & bottom arcs — pulse line completes the horizontal diameter */
-export const BRAND_PULSE_ARC_TOP = 'M3 12A9 9 0 011 21 12' as const
-export const BRAND_PULSE_ARC_BOTTOM = 'M3 12A9 9 0 001 21 12' as const
+export const BRAND_PULSE_ARC_TOP = 'M3 12A9 9 0 0 1 21 12' as const
+export const BRAND_PULSE_ARC_BOTTOM = 'M3 12A9 9 0 0 0 21 12' as const
 
 /** Reference app-icon silhouette — edge-to-edge at 9↔3 o'clock */
 export const BRAND_PULSE_LINE =

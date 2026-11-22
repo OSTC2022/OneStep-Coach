@@ -1,36 +1,41 @@
-﻿import sharp from 'sharp'
+﻿/**
+ * 홈/PWA 아이콘 생성.
+ * 원본은 public/brand-pulse-icon.png (하트비트 원스텝 심볼) 고정.
+ * SVG density 재렌더는 쓰지 않는다 — 심볼이 뭉개지거나 바뀌는 원인.
+ */
+import sharp from 'sharp'
 import { copyFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(__dirname, '..')
+const source = path.join(root, 'public/brand-pulse-icon.png')
 const iconsDir = path.join(root, 'public/icons')
 const appDir = path.join(root, 'app')
-const brandUiPath = path.join(root, 'public/brand-pulse-icon.png')
-const svgPath = path.join(root, 'public/brand-pulse.svg')
 const APP_BG = '#070d18'
 
-// 1) UI 아이콘 — SVG 고밀도 렌더 (글로우 포함 OK)
-await sharp(svgPath, { density: 512 })
-  .resize(1024, 1024, { fit: 'contain', kernel: sharp.kernel.lanczos3 })
-  .png({ compressionLevel: 9 })
-  .toFile(brandUiPath)
-console.log('Wrote brand-pulse-icon.png')
+const symbolBuffer = await sharp(source).png().toBuffer()
 
-const master = await sharp(brandUiPath).png().toBuffer()
-
-async function renderHomeIcon(size, scale) {
-  const logoSize = Math.round(size * scale)
-  const logo = await sharp(master)
+async function renderHomeIcon(size, logoScale) {
+  const logoSize = Math.round(size * logoScale)
+  const logo = await sharp(symbolBuffer)
     .resize(logoSize, logoSize, { kernel: sharp.kernel.lanczos3 })
     .png()
     .toBuffer()
+
   const left = Math.round((size - logoSize) / 2)
+  const top = left
+
   return sharp({
-    create: { width: size, height: size, channels: 3, background: APP_BG },
+    create: {
+      width: size,
+      height: size,
+      channels: 3,
+      background: APP_BG,
+    },
   })
-    .composite([{ input: logo, left, top: left }])
+    .composite([{ input: logo, left, top }])
     .png({ compressionLevel: 9 })
     .toBuffer()
 }
@@ -52,4 +57,4 @@ await copyFile(path.join(iconsDir, 'icon-512.png'), path.join(appDir, 'icon.png'
 await copyFile(path.join(iconsDir, 'apple-icon.png'), path.join(appDir, 'apple-icon.png'))
 await sharp(await renderHomeIcon(32, 0.9)).toFile(path.join(root, 'public/favicon.ico'))
 
-console.log('Generated crisp icons from high-res master')
+console.log('Generated PWA icons from brand-pulse-icon.png (heartbeat symbol preserved)')
