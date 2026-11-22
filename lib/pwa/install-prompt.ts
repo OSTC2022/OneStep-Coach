@@ -63,12 +63,12 @@ export function waitForInstallPrompt(timeoutMs = 5000): Promise<BeforeInstallPro
 }
 
 /**
- * 앱을 열 때마다(세션당 1회) 남아 있는 서비스 워커를 제거하고,
- * 컨트롤러가 있으면 새로고침해 "이 페이지를 읽을 수 없습니다" 를 막는다.
+ * 서비스 워커가 남아 있으면 제거 후 새로고침.
+ * 이전에는 "정리됨" 플래그를 너무 일찍 올려서, 워커가 남은 채로는 다시 안 지워졌다.
  */
-export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var sk="onestep-sw-cleared-v6";if(sessionStorage.getItem(sk)==="1")return;navigator.serviceWorker.getRegistrations().then(function(regs){var list=regs||[];var hasController=!!navigator.serviceWorker.controller;if(!list.length&&!hasController){try{sessionStorage.setItem(sk,"1")}catch(e){}return}var jobs=list.map(function(reg){return reg.unregister()});if("caches"in window){jobs.push(caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}))}))}Promise.all(jobs).then(function(){try{sessionStorage.setItem(sk,"1")}catch(e){}if(hasController||list.length){location.reload()}}).catch(function(){try{sessionStorage.setItem(sk,"1")}catch(e){}})})}catch(e){}})();`
+export const SW_RECOVERY_SCRIPT = `(function(){try{window.addEventListener("beforeinstallprompt",function(event){event.preventDefault();window.__onestepInstallPrompt=event;window.dispatchEvent(new Event("onestep-install-available"));});}catch(e){}try{if(!("serviceWorker"in navigator))return;var attemptKey="onestep-sw-clean-attempts-v7";var attempts=Number(sessionStorage.getItem(attemptKey)||"0");if(attempts>=3)return;navigator.serviceWorker.getRegistrations().then(function(regs){var list=regs||[];var hasController=!!navigator.serviceWorker.controller;if(!list.length&&!hasController){try{sessionStorage.removeItem(attemptKey)}catch(e){}return}try{sessionStorage.setItem(attemptKey,String(attempts+1))}catch(e){}var jobs=list.map(function(reg){return reg.unregister()});if("caches"in window){jobs.push(caches.keys().then(function(keys){return Promise.all(keys.map(function(k){return caches.delete(k)}))}))}Promise.all(jobs).finally(function(){location.reload()})}).catch(function(){})}catch(e){}})();`
 
-/** 서비스 워커를 등록하지 않고, 남아 있으면 계속 제거한다. */
+/** 서비스 워커를 등록하지 않고, 남아 있으면 제거한다. */
 export async function registerPwaServiceWorker(): Promise<void> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
@@ -79,6 +79,18 @@ export async function registerPwaServiceWorker(): Promise<void> {
     if ('caches' in window) {
       const keys = await caches.keys()
       await Promise.all(keys.map((key) => caches.delete(key)))
+    }
+
+    // 컨트롤러가 아직 남아 있으면 한 번 더 전체 새로고침
+    if (navigator.serviceWorker.controller) {
+      const key = 'onestep-sw-controller-reload-v7'
+      try {
+        if (sessionStorage.getItem(key) === '1') return
+        sessionStorage.setItem(key, '1')
+      } catch {
+        return
+      }
+      window.location.reload()
     }
   } catch {
     /* ignore */

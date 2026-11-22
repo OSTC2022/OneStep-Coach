@@ -20,6 +20,7 @@ import { PwaSplashHeadLinks } from '@/components/brand/pwa-splash-head-links'
 import { SplashInlineBoot } from '@/components/brand/splash-inline-boot'
 import { PwaBootstrap } from '@/components/pwa/pwa-bootstrap'
 import { PwaInstallAffordance } from '@/components/pwa/pwa-install-affordance'
+import { StandaloneHardNav } from '@/components/pwa/standalone-hard-nav'
 import { SW_RECOVERY_SCRIPT } from '@/lib/pwa/install-prompt'
 import { SPLASH_BOOT_SCRIPT } from '@/lib/splash-boot'
 import './globals.css'
@@ -215,6 +216,7 @@ export default function RootLayout({
         <OnestepSplashLayer />
         <PwaBootstrap />
         <PwaInstallAffordance />
+        <StandaloneHardNav />
         <div id="app-root" className="onestep-app-root">
           {children}
           <Toaster richColors position="top-center" />
